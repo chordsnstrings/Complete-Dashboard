@@ -1,0 +1,303 @@
+/* MOTION — the Arkiv skin's motion layer, desktop build.
+   ─────────────────────────────────────────────────────────────────────────
+   The operator, 2026-10-27: "can we spruce up and give microanimation to
+   arkiv ? … within the arkiv skin little micro animations, highlights,
+   sticking to the theme, but sprinkling in", and "sometimes loading the page
+   takes longer … ensuring page load is also engaging". That reverses, for the
+   desktop build and on the operator's word, the line in arkiv.css §14 that
+   took "the hover lifts and the entrance choreography" out of the skin.
+
+   A FILE OF ITS OWN, for two reasons. arkiv.css is held to carrying no
+   @keyframes at all (test/arkiv_skin.test.mjs §1), and that rule is right
+   for the sheet that defines how the skin LOOKS; and turning the motion off
+   has to be one switch that leaves the page exactly as it was, not a hunt
+   through a 1600-line sheet. With this file absent the page is byte for byte
+   the still Arkiv page.
+
+   LOADED only where it applies: index.html writes it in for the Arkiv skin
+   on the desktop build when the pre-paint script stamped data-motion="on" —
+   which it does for every reader EXCEPT under automation (navigator.webdriver),
+   so screenshots, the render audit and every existing browser test see the
+   still page they always have. ?motion=off|on|auto overrides and is
+   remembered (fleet.motion). It is written BEFORE arkiv.css, which must stay
+   the last stylesheet in the document; every selector here carries
+   [data-motion="on"] as well as the skin, so it outranks the skin's own
+   `transition:none` and `animation:none` lines whatever the order.
+
+   FOUR GESTURES, all of them ones the skin already makes standing still:
+   a RULE drawn in ink (the panel and section rules, the masthead's), PAPER
+   settling (4px, never more), a WASH on a figure (--w-ink, the skin's own
+   highlight) and the HAIRLINE a ledger is ruled on (waiting). Nothing
+   bounces, nothing loops except the things that really are waiting, and
+   nothing here moves a figure. The tiles' count-up is app.js's (countUp,
+   620ms, both skins, off under reduced motion) and is left exactly as it
+   was; this layer adds no number of its own that the page did not measure.
+
+   REDUCED MOTION. Everything that moves sits under
+   @media (prefers-reduced-motion: no-preference). A reader who asked their
+   system for less motion keeps the boot sheet's words and the hover colours,
+   which are not motion, and nothing else. motion.js checks the same query
+   before it adds a class.
+
+   WHAT MOVES WHEN is motion.js's: a page arriving (not the same page redrawn
+   by a background refresh), content arriving after a wait the reader
+   actually watched, and a headline figure that changed between two drawings
+   of the same page. This sheet only says how each one looks. */
+
+/* The pen's reach along a rule, registered so a gradient stop can be
+   animated: an unregistered custom property flips at the halfway point
+   instead of moving. */
+@property --fx-pen{syntax:'<percentage>';inherits:false;initial-value:100%}
+
+/* ── 1 · the boot sheet ─────────────────────────────────────────────────────
+   Between the first paint and the shell, the Arkiv page is BLANK: arkiv.css
+   keeps #app invisible until shell.js has built the masthead (a rail torn
+   down in front of the reader would be worse). Measured through
+   bin/prod-mirror.mjs on 2026-10-27 that blank lasted 3.0–5.9 s on a cold
+   open: the code for most of the pages arrives before the first one draws
+   (app.js imports them up front; account, access, fleet names, approvals
+   and the map are the exceptions, loaded when opened).
+
+   So the blank becomes the masthead it is about to be. The wordmark stands
+   EXACTLY where shell.js will put it — the same face, size, gutter and top
+   (12px under focus, 37px without: measured at 1440, 1100 and 820), so on
+   the frame the shell lands nothing under it moves. Under it, the rule the
+   section row will sit on is drawn by a pen, over and over — the one honest
+   way to say "working" without a percentage this page cannot know — and the
+   label the section links will replace says what is happening.
+
+   All of it is pseudo-elements on body and #app, keyed on
+   #app:not(.ak-shell): no element is added, nothing has to remember to take
+   it down, and it is gone on the very frame shell.js adds .ak-shell. #app is
+   visibility:hidden until then; its own pseudo-elements say visible. */
+:root[data-skin="arkiv"][data-motion="on"] body:has(> #app:not(.ak-shell))::before{
+  content:"FleetMirror";position:fixed;z-index:1;top:37px;left:var(--shell-x);
+  padding:.0265em 0 0 calc(28em / 26.4 + .26em);
+  font-family:var(--disp);font-size:var(--d4);font-weight:600;line-height:1;
+  letter-spacing:-.014em;color:var(--ink);
+  background:var(--logo) 0 0 / auto 1em no-repeat}
+/* The .0265em: in the masthead the mark is an inline-block lowered .14em,
+   and it sets the top of the line, so the type sits .7px (at 26.4px) lower
+   than the top of its own box. Here the mark is a background and the line
+   is the type's alone, so the type is padded down by that much under a mark
+   that stays put. Measured by ink centroid against the real masthead: the
+   type within .05px, the mark within .4px. */
+:root[data-skin="arkiv"][data-motion="on"][data-focus="on"] body:has(> #app:not(.ak-shell))::before{top:12px}
+
+/* The rule, as a hairline the pen writes over — edge to edge, as the
+   section row's own rule is — and the label under it in the section links'
+   own type, on the gutter. Both wait a beat before they appear: a warm
+   open builds the shell in a few hundred milliseconds, and a label that
+   flashes for two frames is noise. */
+:root[data-skin="arkiv"][data-motion="on"] #app:not(.ak-shell)::before{
+  content:"Opening the dashboard";visibility:visible;position:fixed;z-index:1;
+  top:76px;left:0;right:0;padding:11px var(--shell-x) 0;
+  border-top:1px solid var(--hair);
+  font-family:var(--mono);font-size:var(--t3);font-weight:600;line-height:1.3;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--grey);
+  opacity:0;animation:ak-show 1ms linear .35s forwards}
+:root[data-skin="arkiv"][data-motion="on"][data-focus="on"] #app:not(.ak-shell)::before{top:47px}
+
+/* After four seconds, a sentence: the wait is real, and here is its true
+   reason. Not a guess at the reader's network — the reason this page takes
+   seconds on any network is that it loads most of its pages first. */
+:root[data-skin="arkiv"][data-motion="on"] #app:not(.ak-shell)::after{
+  content:"Still opening \2014  the dashboard loads most of its pages before it shows the first one.";
+  visibility:visible;position:fixed;z-index:1;top:132px;left:var(--shell-x);right:var(--shell-x);
+  font-family:var(--sans);font-size:var(--t5);line-height:1.5;color:var(--grey);
+  opacity:0;animation:ak-show 1ms linear 4s forwards}
+:root[data-skin="arkiv"][data-motion="on"][data-focus="on"] #app:not(.ak-shell)::after{top:103px}
+
+/* And when the opening STOPPED — a module that failed to load or threw
+   before the shell was built (index.html's pre-paint script listens). Today
+   that is a blank page for ever; "still opening" would be a lie told in its
+   place. The pen stops, and the sentence says what happened. */
+:root[data-skin="arkiv"][data-motion="on"][data-boot="failed"] #app:not(.ak-shell)::before{
+  content:"The dashboard stopped opening";color:var(--ink);opacity:1;animation:none}
+:root[data-skin="arkiv"][data-motion="on"][data-boot="failed"] #app:not(.ak-shell)::after{
+  content:"Something on this page failed to load. Reload the page to try again.";opacity:1;animation:none}
+
+/* The pen itself: an ink stroke along the hairline, drawn left to right and
+   then lifted from the left. Transform only, so it is drawn by the
+   compositor and keeps moving while the main thread is busy compiling the
+   very code it is waiting for (a background-size stroke stalled there). */
+:root[data-skin="arkiv"][data-motion="on"] body:has(> #app:not(.ak-shell))::after{
+  content:"";position:fixed;z-index:2;top:76px;left:0;right:0;
+  height:1px;background:var(--ink);transform-origin:0 0;transform:scaleX(0);pointer-events:none}
+:root[data-skin="arkiv"][data-motion="on"][data-focus="on"] body:has(> #app:not(.ak-shell))::after{top:47px}
+
+/* ── 2 · the shell arriving ─────────────────────────────────────────────────
+   On the frame .ak-shell lands, the wordmark is already in place; the rest
+   of the chrome comes up under it, top to bottom, in under half a second.
+   It runs once: the shell is built once (shell.js `built`). */
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell .mast-org,
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell .mast-r,
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell #secRow > *{--fx-d:0ms}
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell #sectabs{--fx-d:60ms}
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell #filters{--fx-d:100ms}
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell #todayNow{--fx-d:140ms}
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell .topbar{--fx-d:180ms}
+
+/* ── 3 · a page arriving ────────────────────────────────────────────────────
+   motion.js puts .fx-enter on a fresh #view when the ADDRESS changed, for
+   long enough to cover the stagger, and never on a redraw of the same page.
+   Each block of the page settles 4px into place in reading order, 45ms
+   apart and no later than the ninth; every panel and section rule is drawn
+   by the pen as its block lands, so the page is ruled in front of the
+   reader the way the skin's paper looks ruled at rest. */
+:root[data-skin="arkiv"][data-motion="on"] #view.fx-enter > :nth-child(2){--fx-d:45ms}
+:root[data-skin="arkiv"][data-motion="on"] #view.fx-enter > :nth-child(3){--fx-d:90ms}
+:root[data-skin="arkiv"][data-motion="on"] #view.fx-enter > :nth-child(4){--fx-d:135ms}
+:root[data-skin="arkiv"][data-motion="on"] #view.fx-enter > :nth-child(5){--fx-d:180ms}
+:root[data-skin="arkiv"][data-motion="on"] #view.fx-enter > :nth-child(6){--fx-d:225ms}
+:root[data-skin="arkiv"][data-motion="on"] #view.fx-enter > :nth-child(7){--fx-d:270ms}
+:root[data-skin="arkiv"][data-motion="on"] #view.fx-enter > :nth-child(8){--fx-d:315ms}
+:root[data-skin="arkiv"][data-motion="on"] #view.fx-enter > :nth-child(n+9){--fx-d:360ms}
+/* The rule is a border-image over the border it replaces, so the stroke is
+   exactly the border's width at any pixel ratio (1.5px rounds differently at
+   1x, 1.25x and 2x) and, at 100%, exactly the border: when the class goes,
+   nothing changes. */
+:root[data-skin="arkiv"][data-motion="on"] #view.fx-enter .panel,
+:root[data-skin="arkiv"][data-motion="on"] #view.fx-enter .sechd{
+  border-image:linear-gradient(90deg,var(--ink) var(--fx-pen),transparent var(--fx-pen)) 1}
+
+/* ── 6 · waiting ────────────────────────────────────────────────────────────
+   THE SKELETON as a ledger line. app.css's bar is 13px of grey shimmer whose
+   word "Loading…" has never been visible, on purpose: most waits are under a
+   second and a label would be noise (app.css "The skeleton that admits it
+   will be a while"). Kept: the plain skeleton is still wordless and the same
+   13px. It becomes the hairline a row is about to be written on, with the
+   pen moving along it. The slow variant (.says) keeps its sentence and its
+   room (test/slow_skeleton.test.mjs holds 30px), over the same line. */
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell .skel{
+  position:relative;overflow:hidden;border-radius:0;animation:none;color:transparent;
+  background:linear-gradient(var(--hair),var(--hair)) 0 100% / 100% 1px no-repeat}
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell .skel.says{color:var(--grey);padding:0}
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell .skel::after{
+  content:"";position:absolute;left:0;bottom:0;width:28%;height:1px;background:var(--ink);
+  transform:translateX(-100%)}
+
+/* THE BUSY HAIRLINE: while any of the page's requests is out (data.js sets
+   data-busy on <html>; the today strip's own polling is not counted), a
+   1.5px pen stroke runs along the very top of the window. Shown after a
+   beat, so an answer from the browser's own copy never flashes it. */
+:root[data-skin="arkiv"][data-motion="on"] #akBusy{
+  position:fixed;top:0;left:0;right:0;height:1.5px;z-index:90;overflow:hidden;pointer-events:none;
+  opacity:0;transition:opacity .25s var(--ease)}
+:root[data-skin="arkiv"][data-motion="on"][data-busy] #akBusy{opacity:1;transition-delay:.2s}
+:root[data-skin="arkiv"][data-motion="on"] #akBusy::before{
+  content:"";position:absolute;top:0;bottom:0;left:0;width:24%;background:var(--ink);
+  transform:translateX(-100%)}
+
+/* ── 7 · under the hand ─────────────────────────────────────────────────────
+   Hover and press: the same colours the skin already changes to, arriving
+   rather than snapping, plus two small additions that keep to its marks —
+   a hairline under a section link before it is the current one, and a 1px
+   press (below, with everything else that moves). A colour arriving over
+   .2s is not motion; these stay on under reduced motion. */
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell #nav a,
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell #settingsLink{
+  transition:color .18s var(--ease),border-bottom-color .22s var(--ease)}
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell #nav a:not(.on):hover,
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell #settingsLink:not(.on):hover{border-bottom-color:var(--grey-2)}
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell .tabs a{transition:color .18s var(--ease)}
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell .tscroll table tbody td{transition:background-color .16s var(--ease)}
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell a.kpi{transition:background-color .18s var(--ease)}
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell .kpi-who,
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell .lnk{
+  transition:color .18s var(--ease),text-decoration-color .18s var(--ease),border-bottom-color .18s var(--ease)}
+:root[data-skin="arkiv"][data-motion="on"] .ak-shell .foldbtn{transition:border-top-color .18s var(--ease)}
+
+/* ── everything that MOVES ──────────────────────────────────────────────── */
+@media (prefers-reduced-motion:no-preference){
+  /* §1 the pen on the boot sheet, and the label easing in rather than
+     appearing. */
+  :root[data-skin="arkiv"][data-motion="on"] body:has(> #app:not(.ak-shell))::after{
+    opacity:0;animation:ak-show .3s var(--ease) .35s forwards,ak-boot-pen 1.9s var(--ease) .35s infinite}
+  :root[data-skin="arkiv"][data-motion="on"] #app:not(.ak-shell)::before{animation:ak-show .3s var(--ease) .35s forwards}
+  :root[data-skin="arkiv"][data-motion="on"] #app:not(.ak-shell)::after{animation:ak-show .5s var(--ease) 4s forwards}
+  :root[data-skin="arkiv"][data-motion="on"][data-boot="failed"] body:has(> #app:not(.ak-shell))::after{animation:none;opacity:0}
+
+  /* §2 the chrome under the wordmark. */
+  :root[data-skin="arkiv"][data-motion="on"] .ak-shell .mast-org,
+  :root[data-skin="arkiv"][data-motion="on"] .ak-shell .mast-r,
+  :root[data-skin="arkiv"][data-motion="on"] .ak-shell #secRow > *,
+  :root[data-skin="arkiv"][data-motion="on"] .ak-shell #sectabs,
+  :root[data-skin="arkiv"][data-motion="on"] .ak-shell #filters,
+  :root[data-skin="arkiv"][data-motion="on"] .ak-shell #todayNow,
+  :root[data-skin="arkiv"][data-motion="on"] .ak-shell .topbar{
+    animation:ak-in .42s var(--ease-out) var(--fx-d,0ms) backwards}
+
+  /* §3 the page: blocks settle, rules are drawn. */
+  :root[data-skin="arkiv"][data-motion="on"] #view.fx-enter > *{
+    animation:ak-in .46s var(--ease-out) var(--fx-d,0ms) backwards}
+  :root[data-skin="arkiv"][data-motion="on"] #view.fx-enter > .panel,
+  :root[data-skin="arkiv"][data-motion="on"] #view.fx-enter > .sechd{
+    animation:ak-in .46s var(--ease-out) var(--fx-d,0ms) backwards,
+      ak-pen .72s var(--ease-out) calc(var(--fx-d,0ms) + 60ms) backwards}
+  :root[data-skin="arkiv"][data-motion="on"] #view.fx-enter > * .panel,
+  :root[data-skin="arkiv"][data-motion="on"] #view.fx-enter > * .sechd{
+    animation:ak-pen .72s var(--ease-out) calc(var(--fx-d,0ms) + 60ms) backwards}
+  /* A chart with no entrance of its own (charts.js draws lines and grows
+     bars; the hour chart and the bands do neither) is uncovered left to
+     right as its block lands, the way the pen moves. Asked of the data-*
+     marks charts.js draws with, not of the classes app.js animateView()
+     turns them into: those land only once the WHOLE page has answered, and
+     a chart that had already been wiped would then be drawn a second time. */
+  :root[data-skin="arkiv"][data-motion="on"] #view.fx-enter svg[role="img"]:not(:has([data-draw],[data-rise],[data-fade])){
+    animation:ak-wipe .8s var(--ease-out) calc(var(--fx-d,0ms) + 120ms) backwards}
+
+  /* §4 content that arrived after a wait the reader watched: it comes up,
+     it does not jump in. Opacity only — a table that slid would move every
+     row under the pointer. */
+  :root[data-skin="arkiv"][data-motion="on"] .fx-arrive{animation:ak-fade .34s var(--ease-out) backwards}
+
+  /* §5 a figure that moved between two drawings of the same page: boxed in
+     ink and washed, the way a proof-reader marks a changed figure, then
+     lifted. The box is an outline — no layout moves — so it shows on the one
+     figure the page already highlights (.hl, whose own wash is this wash). */
+  :root[data-skin="arkiv"][data-motion="on"] .fx-tick{outline:1px solid transparent;outline-offset:3px;
+    animation:ak-tick 2.4s var(--ease) both}
+  /* A tile's figure is a block as wide as the tile: the wash is the
+     number's, so for the length of it the box is the number's too. */
+  :root[data-skin="arkiv"][data-motion="on"] .kpi .n.fx-tick{width:fit-content}
+
+  /* §6 the pen along a skeleton's line and along the top of the window. */
+  :root[data-skin="arkiv"][data-motion="on"] .ak-shell .skel::after{animation:ak-scan 1.5s var(--ease) infinite}
+  :root[data-skin="arkiv"][data-motion="on"][data-busy] #akBusy::before{animation:ak-busy 1.3s var(--ease) infinite}
+
+  /* §7 the current tab's underline drawn in from the left when a page in
+     the section opens; folded notes coming up when the reader opens them;
+     a modal laid down rather than appearing. */
+  :root[data-skin="arkiv"][data-motion="on"] .ak-shell .tabs a.on::after{
+    transform-origin:0 50%;animation:ak-grow .36s var(--ease-out) backwards}
+  :root[data-skin="arkiv"][data-motion="on"] .fx-unfold.fx-open [data-fx="fold"]{
+    animation:ak-in .3s var(--ease-out) backwards}
+  :root[data-skin="arkiv"][data-motion="on"] .modal-back{animation:ak-fade .18s var(--ease) backwards}
+  :root[data-skin="arkiv"][data-motion="on"] .modal{animation:ak-in .24s var(--ease-out) backwards}
+  /* A button gives 1px under the press. `translate`, not transform, so a
+     control that is already transformed keeps its transform. */
+  :root[data-skin="arkiv"][data-motion="on"] .ak-shell button:not(:disabled):active{translate:0 1px}
+}
+
+@keyframes ak-show{to{opacity:1}}
+@keyframes ak-fade{from{opacity:0}}
+@keyframes ak-in{from{opacity:0;transform:translateY(4px)}}
+@keyframes ak-pen{from{--fx-pen:0%}to{--fx-pen:100%}}
+@keyframes ak-wipe{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+@keyframes ak-grow{from{transform:scaleX(0)}}
+/* Drawn, then lifted from the left: visible from p to the end as p runs 0→1,
+   which is translateX(p) scaleX(1−p) from a left origin — linear in both. */
+@keyframes ak-boot-pen{
+  0%{transform:translateX(0) scaleX(0)}
+  50%{transform:translateX(0) scaleX(1)}
+  100%{transform:translateX(100%) scaleX(0)}}
+/* 28% wide, so 100/28 of its own width carries it past the far end. */
+@keyframes ak-scan{from{transform:translateX(-100%)}to{transform:translateX(358%)}}
+@keyframes ak-busy{from{transform:translateX(-100%)}to{transform:translateX(417%)}}
+/* No background at either end: it comes from, and goes back to, whatever
+   the figure wears at rest — nothing, or the highlighter's own wash. */
+@keyframes ak-tick{
+  0%{outline-color:transparent}
+  8%,40%{background-color:var(--w-ink);outline-color:var(--ink)}
+  100%{outline-color:transparent}}

@@ -1133,7 +1133,10 @@
 
 /* ── 14 · motion ────────────────────────────────────────────────────────────
    The hover lifts and the entrance choreography go: a ruled sheet does not
-   slide in. Marks that grow to their length (the charts) are STEP 2's. */
+   slide in. Marks that grow to their length (the charts) are STEP 2's.
+   On the desktop build a restrained set comes back, on the operator's ruling
+   of 2026-10-27 — rules drawn, paper settling, a wash on a moved figure, the
+   boot sheet — in motion.css, not here: this sheet carries no @keyframes. */
 :root[data-skin="arkiv"] .stagger>*,:root[data-skin="arkiv"] .settle{animation:none}
 
 /* ── 15 · narrow windows ────────────────────────────────────────────────────

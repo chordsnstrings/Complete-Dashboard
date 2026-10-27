@@ -5385,3 +5385,58 @@ hour kept its own (15:00: 59 drivers, AED 86.67 each against a usual 80.68). Thr
 `bin/prod-mirror.mjs` at 1440×900, light and dark: the chart's two rows, the table's two
 columns and "15 drivers (10 fares not in yet, so nothing each yet)" in the summary; no overflow,
 no script error.
+
+
+## MOTION — the Arkiv skin moves, and the wait to open says so (2026-10-27)
+
+The operator: "can we spruce up and give microanimation to arkiv ? little microanimations that
+will show people that it's engaging", then "within the arkiv skin little micro animations,
+highlights, sticking to the theme, but sprinkling in — so find out about the current status then
+think what we can do to make things more engaging", and "sometimes loading the page takes longer
+so perhps lazy loading, or slower loading but ensuring page load is also engaging".
+
+That reverses, for the desktop build, arkiv.css §14's "the hover lifts and the entrance
+choreography go" — on the operator's word, in a file of its own: arkiv.css stays free of
+@keyframes (`arkiv_skin` §1) and switching the layer off leaves the page byte for byte as it was.
+
+**What was there (measured 2026-10-27, live-ui and prod-mirror, 1440×900).** A cold Arkiv open
+was a BLANK page for 3.0–5.9 s (arkiv.css hides #app until shell.js builds the masthead), then
+skeleton bars for up to 6.8 s on #target, then content landing with no transition. Arkiv kept
+Classic's chart draw-ins, the 620 ms count-up on tiles and the grey shimmer, and nothing else: no
+hover or press response, no sign a request was out, and a background refresh that found new
+figures redrew the page silently — while replaying every count-up from zero and every line from
+nothing, so the one figure that moved could not be told from the rest.
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| MOTION1 | `api/public/motion.css` §1, THE BOOT SHEET: pseudo-elements on body and #app while `#app:not(.ak-shell)` — the wordmark where shell.js will put it (type within .05 px, mark within .4 px of the real masthead by ink centroid, focus on and off, light and dark), the section row's rule drawn by a pen on a loop (transform only, so it keeps moving while the main thread compiles), "Opening the dashboard" after .35 s, after 4 s "Still opening — the dashboard loads most of its pages before it shows the first one.", and "The dashboard stopped opening" when a module fails (MOTION2). Gone on the frame `.ak-shell` lands; no element is added | yes | **no** — demo only, waits on the operator | `arkiv_motion` §4 |
+| MOTION2 | `api/public/index.html`: `data-motion="on"` stamped before the first paint for the Arkiv skin on the desktop build — off under automation (`navigator.webdriver`) unless asked, `?motion=on\|off` remembered in `fleet.motion`, `?motion=auto` forgets; never on Classic or the phone. `motion.css` written in BEFORE arkiv.css (the skin stays the last stylesheet). A capture listener marks `data-boot="failed"` on a script error or an unhandled rejection before the shell is built | yes | **no** | `arkiv_motion` §2–4 |
+| MOTION3 | `api/public/motion.js`: the entrance (`fx-enter`, 1.6 s) only when the ADDRESS changed, never on a redraw of the same page; `fx-arrive` on content that replaced a skeleton that stood ≥120 ms (an answer from this browser's copy just appears), and on the today strip and the credential banner when they fill in after the page; `fx-tick` — an ink box and a wash, on the highlighter when the figure wears one — on a headline figure (`.kpi .n`, `.tg-v`, `.tn-f b`, `.hp-lede > b`) whose text changed between two drawings of the same page, read after the count-up lands on an arrival and at once on a redraw; folded notes come up when opened; the `#akBusy` element | yes | **no** | `arkiv_motion` §5–7 |
+| MOTION4 | `api/public/data.js`: `data-busy` on `<html>` while any of the page's own requests is out (not the quiet ones: the today strip's), only when `data-motion` is on; `motion.css` draws a 1.5 px pen stroke along the top of the window, shown after .2 s | yes | **no** | `arkiv_motion` §5 |
+| MOTION5 | `api/public/app.js`: `startMotion()` and `motionView(root)` in render(); under the layer a REDRAW skips `animateView` (no count-up from zero, no line drawn again), so a refresh that moved one figure moves only that one. `motionView` returns undefined with the layer off, and then everything is exactly as before | yes | **no** | `arkiv_motion` §2, §5, §6 |
+| MOTION6 | `motion.css` §2–7: the chrome under the wordmark settles in once; each block of a page settles 4 px in reading order (45 ms apart, capped at the ninth) while every panel and section rule is drawn by the pen (a border-image over the border it replaces, exact at any pixel ratio); charts with no entrance of their own are uncovered left to right; the skeleton is a hairline with the pen running along it (still wordless; `.says` keeps its sentence and 38 px); hover colours arrive over .16–.22 s, a hairline under a section link before it is current, the current tab's rule draws in, a modal is laid down, a button gives 1 px. Everything that moves is under `prefers-reduced-motion: no-preference`; tokens only | yes | **no** | `arkiv_motion` §1, §7, §8 |
+
+**What it deliberately does not do.** No count-up of its own and no number that rolls (app.js's
+`countUp` is left as it was, on arrivals); nothing slides more than 4 px; nothing loops but the
+two things that are really waiting (the boot pen and a skeleton's) and the busy line while a
+request is out; no table row or cell ever animates (`arkiv_motion` §8: peak 27 movements at once on
+#drivers, none on a cell).
+
+**Revert proof** (`test/arkiv_motion.test.mjs`, 53 checks; each file restored and its md5 checked):
+without the address check in `motionView` (a redraw treated as an arrival) 48/5 — the redraw
+replays the entrance and counts up again, and the moved figure is no longer marked; without the
+settle wait (`SETTLE_MS` 0) 52/1 — an arrival's count-up is marked as a change; without the
+reduced-motion check 52/1 — the entrance goes on for a reader who asked for less motion; without
+the redraw gate on `animateView` 48/5 — every tile counts up from zero on a refresh and every one
+of them is marked as moved ("AED 0.00", "0 of 2,043", …).
+
+**Existing suites, run with the change (motion off under automation, as designed):**
+`arkiv_shell` 77/0, `arkiv_skin` 119/0, `arkiv_today` 103/0, `boot_order` 5/0, `slow_skeleton`
+9/0, `focus_layout` 54/0, `page_contract` 95/0, `swr` 29/0, `today_band` 38/0, `phone` 155/0,
+`phone_arkiv` 271/0, `tokens` 150/0, `kpi_one_tile` 20/0. `arkiv_classic_frozen` 147/6: the six
+known Leaflet routes (HANDOFF §8), the same six hashes on HEAD without this change.
+
+**Demo** (live-ui, production data, 2026-10-27): a cold open at 900 KB/s side by side with and
+without the layer, and a tour — section links, opening a page, a tab, rows under the pointer, and
+a refresh in which seven more trips arrive (simulated by rewriting one `/api/kpis` answer in the
+browser; the redraw path itself is the real one).

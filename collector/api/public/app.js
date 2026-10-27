@@ -26,6 +26,9 @@ import { rangePanel } from './daterange.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
 import { shellContract, buildShell, shellFrame, whenStyled } from './shell.js';
 import { startFocus } from './focus.js';
+/* MOTION (motion.js): the Arkiv skin's movement — inert unless index.html
+   stamped data-motion="on" (Arkiv, desktop, not under automation). */
+import { startMotion, motionView } from './motion.js';
 /* Sign-in and access (collector/docs/ULM-DESIGN.md). The server decides; these
    only draw what it decided — which pages open, and the true reason where
    something is not shown. */
@@ -9446,7 +9449,11 @@ async function render() {
   /* FOCUS (focus.js): once, after the first shell build so its button lands
      in the control bar beside the theme; its observer then marks every page. */
   startFocus({ section: () => sectionOf(state.view, state.param) });
+  startMotion();
   const root = freshView();
+  /* A new address is a page arriving; the same one is a redraw (motion.js).
+     true or false only while the Arkiv motion layer is on; undefined otherwise. */
+  const arriving = motionView(root);
   /* The shell footer's basis and colophon belong to the page that wrote them
      (ui.js pageFoot); the principle line is the shell's and stays. */
   clearPageFoot();
@@ -9489,7 +9496,14 @@ async function render() {
        see markTall in ui.js for why the sticky rule never fired without one. */
     markTallTables(root);
     fitKpis(root);
-    animateView(root);
+    /* Under the Arkiv motion layer a REDRAW of the page already on screen —
+       a background refresh that found the data moved — keeps still: the
+       entrance below replayed every count-up from zero and every line from
+       nothing, so a refresh that moved one figure moved all of them, and the
+       one that changed could not be told from the rest. motion.js marks the
+       ones that changed instead. Everywhere else (the Classic skin, a reader
+       with the layer off, automation) this is exactly as it was. */
+    if (arriving !== false) animateView(root);
   } catch (e) {
     if (!alive(gen)) return;                // superseded: not this reader's error
     root.innerHTML = '';

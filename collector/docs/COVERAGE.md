@@ -899,6 +899,18 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A browser test never sees the Arkiv motion layer unless it asks for it.**
+  index.html stamps `data-motion` only where `navigator.webdriver` is false,
+  and Playwright sets it — so every existing test, screenshot and render
+  audit sees the still page, and a test OF the motion passes `?motion=on`
+  (remembered as `fleet.motion`; `test/arkiv_motion.test.mjs`). Two more from
+  the same work (FIX-STATUS MOTION): a test that holds `/app.js` back must
+  navigate with `waitUntil: 'commit'` — DOMContentLoaded waits for the
+  deferred module and never fires; and a KPI tile's text is NOT its value
+  for 620 ms after a page arrives (app.js `countUp`, both skins: 0, 18,714,
+  39,779… on the way to 280,622), so read figures after it lands. Under the
+  motion layer a redraw of the same page no longer counts up.
+
 * **The banner's run age is the last run that DELIVERED, per fleet — and
   until 2026-10-20 it was not.** A fleet whose freshest run failed fell back
   to the source's fleet-less runs, and Bolt still has those from before its
