@@ -24,16 +24,10 @@ import { qAll, href, parseHash, currentGen, alive, windowLabel } from './data.js
 import { membersOf } from './cohorts.js';
 import { dubaiDay } from './tz.js';
 import { makeMap, fitTo, renderJourney } from './map.js';
+/* The tabs live in pagemeta.js: the header names the tab before this module
+   has loaded (app.js PAGE_OF). */
+import { VEHICLE_TABS } from './pagemeta.js';
 
-export const VEHICLE_TABS = [
-  { id: 'overview', label: 'Overview', ic: '◱' },
-  { id: 'drivers', label: 'Drivers', ic: '◧' },
-  { id: 'movement', label: 'Movement', ic: '◍' },
-  { id: 'earnings', label: 'Earnings', ic: '◈' },
-  { id: 'safety', label: 'Safety', ic: '△' },
-  { id: 'compliance', label: 'Compliance', ic: '❑' },
-  { id: 'trips', label: 'Trips', ic: '▤' },
-];
 
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const docTone = (d) => (d == null ? null : d < 0 ? 'bad' : d < 30 ? 'warn' : 'ok');

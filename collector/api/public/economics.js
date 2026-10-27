@@ -43,16 +43,13 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, entity,
   alertRateFigure, contract, glance, secHead, absenceBand, pageFoot, highlight } from './ui.js';
 import { q, href, state, currentGen, alive, windowLabel } from './data.js';
 import { makeMap, fitTo } from './map.js';
+/* In pagemeta.js: the header names the tab before this module has loaded. */
+import { UNIT_TABS } from './pagemeta.js';
 
 /* A row's band is read from money (what the car or person earned); a role
    that is not shown that money gets the band withheld too, and the cell says
    so rather than throwing on a band it was never sent. */
 const WITHHELD_CELL = '<span class="dim" title="Not shown to your role">—</span>';
-export const UNIT_TABS = [
-  { id: 'overview', label: 'Money in', ic: '◆' },
-  { id: 'assets', label: 'Every vehicle', ic: '▤' },
-  { id: 'drivers', label: 'Every driver', ic: '◧' },
-];
 
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));

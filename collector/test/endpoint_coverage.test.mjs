@@ -55,8 +55,8 @@ const EXEMPT = {
      stops an expiry condition from quietly becoming permanent. */
   /* /api/driver/unauthorized WAS here, and its exemption said in so many words
      to delete this entry when the driver tab landed. It has landed: the
-     Unexplained trips tab (api/public/driver.js DRIVER_TABS, id
-     'unauthorized') calls it, and so does the Trips tab beside it, which
+     Unexplained trips tab (DRIVER_TABS, id 'unauthorized' — in
+     api/public/pagemeta.js since 2026-10-27; drawn by driver.js) calls it, and so does the Trips tab beside it, which
      interleaves the attributed journeys with the bookings. Left in place the
      entry would now fail the last check in this file — "no endpoint is
      exempted while also being used" — which is the check that stops an

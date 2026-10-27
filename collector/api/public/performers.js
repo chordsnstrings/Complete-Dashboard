@@ -41,6 +41,9 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
 import { CHANNEL_ORDER } from './tokens.js';
 import { TZ } from './tz.js';
 import { q, href, state } from './data.js';
+/* In pagemeta.js, with why only a Monday is a week: the header checks it
+   before this module has loaded. */
+import { isWeek } from './pagemeta.js';
 
 /* Enough of a week to rank on. Two thirds of a working week: below it a
    per-day rate is one or two shifts wearing a week's clothing. */
@@ -49,14 +52,6 @@ const MIN_BOOKINGS = 15;
 
 const eligible = (r) => (r.days_worked || 0) >= MIN_DAYS && (r.bookings || 0) >= MIN_BOOKINGS;
 
-/* The week rides in the address — `#top-performers/<monday>` and
-   `#performer/<id>/<monday>` — so a ranking of March can be linked, opened in
-   a tab, and drilled into without snapping back to the current week. Only a
-   MONDAY is honoured: the server treats whatever it is given as a week start,
-   so a hand-typed Wednesday would rank a seven-day window aligned to nothing
-   while every caption on the page still said "Monday to Sunday". */
-const isWeek = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '')
-  && new Date(`${v}T12:00:00Z`).getUTCDay() === 1;
 
 /* THE MEASURE HAS TO EXIST IN THE WEEK.
    ─────────────────────────────────────────────────────────────────────────

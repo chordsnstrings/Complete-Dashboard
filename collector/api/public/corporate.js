@@ -23,6 +23,8 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, entity,
   dayStr, dateStr, dtStr, money, pct, tripTime, sourceLabel, countOf, plural, noneChosen, verdict,
   contract, glance, secHead, absenceBand, pageFoot, notRepeated, andList } from './ui.js';
 import { q, qAll, href, state, currentGen, alive, windowLabel } from './data.js';
+/* In pagemeta.js: the header names the tab before this module has loaded. */
+import { PROPERTY_TABS } from './pagemeta.js';
 
 /* Why a whole column is empty, in the words the page prints under it. Shared
    so that the four tables carrying a Cost or a Room say the same thing — four
@@ -757,11 +759,6 @@ const propertyTiles = (pr) => [
   { label: 'Vehicles', value: fmt(pr.vehicles) },
   { label: 'First booking', value: dayStr(pr.first_at) },
   { label: 'Last booking', value: dayStr(pr.last_at) },
-];
-export const PROPERTY_TABS = [
-  { id: 'overview', label: 'Overview', ic: '◱' },
-  { id: 'guests', label: 'Passengers', ic: '◧' },
-  { id: 'drivers', label: 'Drivers', ic: '◨' },
 ];
 
 export async function renderProperty(root, id, tab = 'overview', onDetail) {

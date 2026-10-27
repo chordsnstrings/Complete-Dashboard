@@ -187,8 +187,22 @@ for (const focus of ['on', 'off']) {
   const early = await pseudo('#app', '::after');
   await page.waitForTimeout(3600);
   const late = await pseudo('#app', '::after');
-  check(`focus ${focus}: the sentence waits four seconds, then says why`, +early.opacity === 0 && +late.opacity > 0.95
-    && /loads most of its pages before it shows the first one/.test(late.content), `${early.opacity} → ${late.opacity}`);
+  check(`focus ${focus}: the sentence waits four seconds, then says what it waits for — the code`, +early.opacity === 0 && +late.opacity > 0.95
+    && /the dashboard’s code is still arriving/.test(late.content), `${early.opacity} → ${late.opacity} ${late.content}`);
+  await ctx.close();
+}
+{
+  /* The second wait: the code is in and running, and the server has not said
+     who is signed in. app.js turns data-boot from "code" to "who". */
+  const ctx = await fresh();
+  const page = await ctx.newPage();
+  await page.route('**/api/auth/me*', () => { /* held */ });
+  await page.goto(`${base}/?ui=desktop&motion=on#overview`, { waitUntil: 'commit' });
+  await page.waitForFunction(() => document.documentElement.dataset.boot === 'who', null, { timeout: 15000 }).catch(() => {});
+  const w = await page.evaluate(() => ({ boot: document.documentElement.dataset.boot,
+    line: getComputedStyle(document.querySelector('#app'), '::after').content }));
+  check('…and once the code is in, says the wait is the server’s answer', w.boot === 'who'
+    && /waiting for the server to answer/.test(w.line), JSON.stringify(w));
   await ctx.close();
 }
 {

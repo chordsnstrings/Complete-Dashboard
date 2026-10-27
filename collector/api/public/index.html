@@ -124,6 +124,9 @@
     } catch (e) { /* private mode: the choice just does not stick */ }
     if (mo === 'on' || (mo !== 'off' && !navigator.webdriver)) {
       r.dataset.motion = 'on';
+      /* Which wait the boot sheet is in: the code first; app.js says "who"
+         once its own code runs (motion.css §1). */
+      r.dataset.boot = 'code';
       /* An opening that STOPPED: a module that failed to load or threw before
          the shell was built. The boot sheet would otherwise go on saying
          "still opening" over a page that never will (motion.css §1). A script

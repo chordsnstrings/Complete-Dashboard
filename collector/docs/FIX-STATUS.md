@@ -5456,3 +5456,69 @@ known Leaflet routes (HANDOFF §8), the same six hashes on HEAD without this cha
 without the layer, and a tour — section links, opening a page, a tab, rows under the pointer, and
 a refresh in which seven more trips arrive (simulated by rewriting one `/api/kpis` answer in the
 browser; the redraw path itself is the real one).
+
+
+## LAZY — pages load when they are opened (2026-10-27)
+
+The operator: "sometimes loading the page takes longer so perhps lazy loading", then, with the
+motion layer live, "start the lazy loading whenever done".
+
+**What it was.** app.js imported every page's module at the top, so the first screen of any page
+waited for all of them: 76 modules, 3.5 MB of code, **1,185,372 bytes on the wire** from production,
+every one `max-age=0, must-revalidate`. V8 coverage on #overview: **24%** of those bytes ran. Five
+pages (account, access, fleet names, approvals, the map) already loaded on demand.
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| LAZY1 | `api/public/app.js`: `PAGE_OF` names the module of each of 56 pages (49 modules); each handler asks `page('x')` for its own the first time it opens — a one-line `(await page('x')).renderX(…)`, or one destructuring line at the top of a longer handler, so every use below it (closures included) reads the loaded names. The first screen is now **19 modules, 1.21 MB of code (≈397 KB gzipped, from 1,148)**. Chosen with a parser: every reference to a moved name is inside a page handler, each handler uses one module, and none of the 58 modules that left the first screen does anything at load (no top-level call but two constants) | yes | **no** — waits on the operator | `lazy_pages` §1–4 |
+| LAZY2 | `api/public/pagemeta.js` (new): what the header must know before a page has loaded — `DRIVER_TABS`, `VEHICLE_TABS`, `PROPERTY_TABS`, `UNIT_TABS`, `isWeek`, `isMonth`/`workbookUrl` — moved verbatim with their reasons; driver.js, vehicle.js, corporate.js, economics.js, performers.js and targetmonth.js import them back (one copy). They were all that kept those six modules, driver.js's 300 KB among them, in every first screen | yes | **no** | `lazy_pages` §1; `routes` 65/0 (its tab checks read pagemeta.js now) |
+| LAZY3 | The addressed page's module is fetched while the shell still waits for `/api/auth/me`, not after it | yes | **no** | `lazy_pages` §5 |
+| LAZY4 | A module that will not run says why IN WORDS in render's failure box (not the browser's "Failed to fetch dynamically imported module …"), and reloads only where a reload helps: a failed fetch is retried once under a fresh address (the browser remembers a failure for the life of the page, so "Try again" alone could never work); a link error, or a second failure while the server still answers, is a deploy and reloads — once a minute at most per module, only for the page the reader is still on, never offline or with the server silent (a reload there is the browser's error page), and only once the mark that stops the next reload is written | yes | **no** | `lazy_pages` §6 |
+| LAZY5 | While a module is on its way the view shows the ordinary skeleton (`loading()`'s markup), taken down before the page draws: without it a first visit on a slow line showed an empty view, and `test/smoke_views.mjs`, which waits for "no skeleton", passed on the empty view and then reported pages "still loading" (46 more than the old code against production data). motion.js does not fade the whole view when that placeholder goes | yes | **no** | `lazy_pages` §7 |
+| LAZY7 | **Never two deploys in one tab** (server.js "THE MODULE GRAPH MUST NOT RUN MIXED VERSIONS", the 2026-09-06 failure). The server stamps every piece of code with `X-FM-Build` (the service worker's fingerprint); `page()` reads it for the module it is loading and for this tab's own app.js — a HEAD beside the module's fetch, so no time is added — and reloads rather than run a later deploy's page on this tab's code. Before LAZY1 every module came at boot, from one deploy; after it, a tab opened before a deploy could open a page after it | yes | **no** | `lazy_pages` §6 (two deploys: one reload, no data asked for; one deploy: runs) |
+| LAZY8 | A page left before its module arrived is dropped when it arrives (`alive(gen)`, taken before the fetch): it read the NEXT render's generation after the await and believed itself current — #target's 60 s and #month-target's 5 min polling ran on into a detached view for as long as the tab stayed open, and every stale page fired its full set of requests | yes | **no** | `lazy_pages` §8 |
+| LAZY9 | A module already in hand is returned at once — no placeholder, no task in between — so a redraw (data:refreshed) stays one task as it was. Re-importing a loaded module is not that: in Chromium 141 it resolved after an already-queued timer, and a frame painted in between 18 times in 300 (the "Loading…" placeholder, in an emptied view, scrolled to the top) | yes | **no** | `lazy_pages` §7 |
+| LAZY6 | The motion boot sheet's sentence names the wait it is in: index.html stamps `data-boot="code"`, app.js turns it to `"who"` once its own code runs ("waiting for the server to answer"). Its old sentence, "the dashboard loads most of its pages before it shows the first one", stopped being true with LAZY1 | yes | **no** | `arkiv_motion` §4 (56/0) |
+
+**Revert proof** (`test/lazy_pages.test.mjs`; each file restored and its md5 checked): a page
+module put back as a static import of app.js → 11/6 (the first screen 20 modules, 1,313 KB, and
+#overview fetching payouts.js); a `PAGE_OF` entry dropped → 12/5 ("Failed to resolve module
+specifier 'undefined'"); a page module doing something at load → 16/1; the early fetch removed →
+16/1 (the module asked for after `/api/auth/me` answered); the reload guard without its minute →
+15/2 (28 loads in four seconds — the loop it exists to prevent).
+
+**Full suite** on `083a622`: 390 files, 14,501 assertions, 2 files failing — `access_pages` (no
+Postgres) and `arkiv_classic_frozen` (the six known Leaflet routes, the same six hashes: the
+Classic skin renders every other page byte for byte as before).
+
+**An independent review** (one agent, given the diff and no conclusions, 2026-10-27) found
+LAZY7–9 and the faults in LAZY4's first form: no supersession check, re-imports painting the
+placeholder, a reload while the reader was elsewhere, retries that could never succeed, the
+browser's wording in the failure box, a reload loop when storage takes reads but not writes, and
+mixed deploys. Each is fixed and pinned. Revert proof for each (`lazy_pages`, 27 checks): without
+the supersession check 26/1 (/api/finance/payouts asked for by a page already left); without the
+in-hand shortcut 26/1 (the placeholder on a cached page); without the fresh-address retry 26/1
+(a reload for a dropped line); without the deploy comparison 26/1 (a later deploy's payouts page
+run, its data asked for); without the silent-server exception 26/1 (a reload into the browser's
+error page); with the mark written after the reload 26/1 — **30 loads**, the loop.
+
+**Every route against production data** (`test/smoke_views.mjs` through `bin/live-ui.mjs`, old
+code from a worktree on :8101, new on :8100, 2026-10-27): old 127/133, new **128/133**. The new
+code's five misses are all among the old code's six — "still loading after 20s" on the slow
+data (`#map/replay`, `#online-hours` twice, `#sources`, the first cold `#unit`) — and no route
+renders worse. (The first new run, before LAZY5, reported 52: the harness waits for "no
+skeleton", and the view was empty while a module loaded.)
+
+**Cold opens, old against new** (live-ui, which serves the code uncompressed; Chromium throttled;
+median of three; "drawn" = the page's last skeleton gone):
+
+| line | page | shell up | page drawn | JavaScript fetched |
+|---|---|---|---|---|
+| 900 KB/s, 90 ms | #overview | 5.48 → **2.97 s** | 5.71 → **2.99 s** (−48%) | 76 files, 2,982 KB → 19 files, 1,185 KB |
+| 900 KB/s, 90 ms | #drivers | 5.47 → **2.94 s** | 6.43 → **4.37 s** (−32%) | 76 files, 3,234 KB → 26 files, 1,650 KB |
+| 4 MB/s, 40 ms | #overview | 1.98 → **0.91 s** | 2.04 → **1.48 s** (−27%) | 76 → 19 files |
+| 4 MB/s, 40 ms | #drivers | 2.12 → **0.90 s** | 2.40 → **1.73 s** (−28%) | 76 → 26 files |
+
+Production serves the code brotli-compressed (1,185,372 bytes for the old first screen), so its
+absolute times are lower than these; the share saved is the same order — the first screen's
+code is a third of what it was.
