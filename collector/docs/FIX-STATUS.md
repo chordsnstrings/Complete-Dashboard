@@ -5487,6 +5487,10 @@ specifier 'undefined'"); a page module doing something at load → 16/1; the ear
 16/1 (the module asked for after `/api/auth/me` answered); the reload guard without its minute →
 15/2 (28 loads in four seconds — the loop it exists to prevent).
 
+**Full suite** on `083a622`: 390 files, 14,501 assertions, 2 files failing — `access_pages` (no
+Postgres) and `arkiv_classic_frozen` (the six known Leaflet routes, the same six hashes: the
+Classic skin renders every other page byte for byte as before).
+
 **An independent review** (one agent, given the diff and no conclusions, 2026-10-27) found
 LAZY7–9 and the faults in LAZY4's first form: no supersession check, re-imports painting the
 placeholder, a reload while the reader was elsewhere, retries that could never succeed, the
