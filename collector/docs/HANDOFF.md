@@ -27,6 +27,7 @@ stale document.
 | 0.2 | ~~LPG not deployed~~ **Done 2026-10-20:** LPG1–11 are on production and proven (FIX-STATUS LPG, deployment `9cf3fe85`). | — | ~~The page's speed~~ **Done 2026-10-20 (FIX-STATUS LPS):** `/api/lowperf` is cached under a key that carries the target; the default view answers in 0.3–0.6 s (was 6.2–7.7 s), and the page opens in 4.96 s on desktop and 1.82 s on the phone (was 12.4 / 12.2 s). |
 | 0.3 | **Deploying needs a DigitalOcean token, and none is stored.** The operator pasted one into the 2026-10-20 session; it lived only in that session's scratchpad. | Checked through the API: the `fleet-dashboard` app builds two components, the `api` service and the `collector` worker (both `basic-xxs`), from `claude/ecosine-egari-tracking-apis-rf9ong`. **`deploy_on_push` is off on both, so nothing deploys on a merge.** | Get a token from the operator for each deploying session, kept outside the repo; suggest they revoke tokens pasted into chat. Then `POST /v2/apps/$APP_ID/deployments` with `{"force_build":true}`, poll that deployment id to `ACTIVE`, and compare `services[].source_commit_hash` and the `sw.js` fingerprint (§9) with the branch. |
 | 0.4 | Production is at `d8935c3e` (deployment `b9ee52b3`, 2026-10-22 14:41Z; `sw.js` `fleet-3a104a464833`): PRs #4–#22 merged and force-built — FOCUS, GREY and #target's drivers per hour with its missing-fares rule (FIX-STATUS DRVH1–5) are live. `NTFY_TOPIC` is an app secret on the api service (set through the DO API; the value is held outside the repo). | — | Merge work into the production branch through a PR, then force-build (§0.3). |
+| 0.11 | **MOTION — the Arkiv skin's motion layer and boot sheet are WRITTEN, not deployed** (FIX-STATUS MOTION, 2026-10-27): `motion.css` + `motion.js`, desktop Arkiv only, off under automation. A demo (cold open side by side, and a tour) went to the operator. | Deploy only on the operator's go-ahead. Lazy loading of the page modules was measured and proposed, not built (§4.1 "What still costs a desktop page its first seconds"). | operator |
 | 0.9 | **FOCUS — the explanations fold under ⓘ** (FIX-STATUS FOCUS, docs/AUDIT.md "Verbosity"), live 2026-10-22 (`79d853af`). The generic half of the operator's "it's a manuscript" ask: `api/public/focus.js` + arkiv.css, desktop Arkiv skin only. | The per-page half is NOT built: an answer line and an Act-on strip per page, computed from live data. A demo of both (106 pages, production snapshot) was reviewed by the operator. Also open: tile values that are sentences, cards that should be tables, the phone build (`/m/`). | Build the per-page answer and Act-on, top pages first; then the phone. |
 | 0.10 | **GREY — the dark paper is `#1E1F22`** (FIX-STATUS GREY, docs/ARKIV-DARK.md §H), live 2026-10-22 (`79d853af`), at the operator's "dark gray not black". | Its cost is two ratchets in the validator's legal band (pair 6.73, collision 6.70). A lighter grey is not reachable without breaking the 3:1 / 4.5:1 window of the ink-labelled channels. | — |
 | 0.8 | **Month by month on #payouts** (FIX-STATUS MON), on production since 2026-10-21 (`be419230`). Open: the totals line under the wire table still sums February 2026's first weeks (+AED 362,986). | The 16 Feb 2026 week has rows on every day and holds about 20% of its wire. The cause is not found. | Find why that week's per-driver figure is low (the rows' periods, around the 2026-02-06 start), then decide whether the totals line should count full-coverage weeks only. |
@@ -47,7 +48,7 @@ stale document.
 | Access control (ULM) | Built and deployed (`a1429529`, 2026-09-28) but in **open** mode. `/api/auth/me` → `mode: "open"`. Anonymous readers get every page (§6.1). |
 | Identity register | 461 entries over 237 people, PENDING 0, REFUSED 3. `test/identity_register_counts.test.mjs` passes 16/16, and `node bin/gen-schema-v53.mjs --check` matches. CLAUDE.md's counts are right. |
 | Migrations | 109 files (`schema.sql` + `schema_v2`…`v110`; v60 never existed). v110 = `alert_state`, the ntfy watcher's memory. All registered in `src/schema_files.js`, in order, none missing (checked mechanically). |
-| Tests | **388** `.test.mjs` files plus 15 helpers (2026-10-22, with `payout_monthly` and `focus_layout`). CLAUDE.md carries the same count. |
+| Tests | **389** `.test.mjs` files plus 15 helpers (2026-10-27, with `arkiv_motion`). CLAUDE.md carries the same count. |
 
 ---
 
@@ -121,8 +122,9 @@ export (`/api/export/lowperf.xlsx`) now cover the same ground.
   and proven on production the same day (FIX-STATUS LPS).
 - **What still costs a desktop page its first seconds** (measured
   2026-10-20 opening #low-performers through `bin/prod-mirror.mjs`): about
-  2.7 s loading ~90 ES modules (the mirror fetches each from production, so
-  a real browser with its service worker is faster), then `/api/auth/me`,
+  2.7 s loading ~90 ES modules (the mirror fetches each from production —
+  but a real desktop browser is NOT faster for a service worker: only the
+  phone build registers one, `m/app.js`; corrected 2026-10-27), then `/api/auth/me`,
   0.5–3.1 s from outside against 0.3–0.4 s for `/api/health`, which every
   desktop page waits on before it routes. For an anonymous reader it is one
   read of `fleet`, cached 60 s (`api/access/service.js allFleets`), so the
@@ -132,6 +134,19 @@ export (`/api/export/lowperf.xlsx`) now cover the same ground.
   `/api/health` (0.46–0.74 s)**, so it is not a problem of its own. The
   desktop then drew #low-performers in 6.1 s and the phone in 2.3 s. The list
   answered in 0.2–0.3 s; the rest was module loading through the mirror.
+  **Measured again 2026-10-27 (FIX-STATUS MOTION):** app.js's static graph is
+  75 modules, 3.6 MB of code, **1,185,372 bytes on the wire** from production
+  (br; app.js alone 210,502), every one `max-age=0, must-revalidate`, so even a
+  warm desktop open revalidates all 75 before the first page draws. V8
+  coverage on #overview: **24% of those bytes run**; 21 modules (1.15 MB) run
+  under 12% — driver.js (295 KB, 12%), vehicle.js (134 KB, 8%), segments,
+  payouts, corporate, economics, driverday, revenue, forecast, trip,
+  settlement, coverage, cohort… The cure is the pattern app.js already uses
+  for account, access, fleet names, approvals and the map
+  (`V.x = async (root) => (await import('/x.js'))…`); proposed to the
+  operator, not built. A desktop service worker (the phone's, registered on
+  the desktop too) would take repeat opens off the network entirely; also
+  proposed, not built. Until then motion.css's boot sheet fills the wait.
 - **One `stale` read of `/api/lowperf` took 5.1 s at rest** (1 of 5;
   the others 0.34–0.71 s). A stale serve computes nothing, so the wait was
   before it. Every request waits for the target salt query, and the version

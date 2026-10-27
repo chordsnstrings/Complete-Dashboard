@@ -186,10 +186,27 @@ async function failure(r) {
   return `${r.status} ${text.slice(0, 160)}`;
 }
 
+/* IN FLIGHT. How many of the page's own requests are still out, said on
+   <html> as data-busy so the Arkiv motion layer can run its hairline along
+   the top of the window while they are (motion.css §6). Counted here because
+   this is the one door every page request goes through, and only when that
+   layer is on (index.html stamps data-motion): with it off, nothing about
+   the document changes. The quiet requests — the shell's today strip — are
+   the shell's, not the page's, and are not counted. */
+let inFlight = 0;
+const busy = (d) => {
+  inFlight += d;
+  if (typeof document !== 'undefined' && document.documentElement.dataset.motion === 'on') {
+    document.documentElement.toggleAttribute('data-busy', inFlight > 0);
+  }
+};
+
 export const api = async (path, opts) => {
   const method = (opts?.method || 'GET').toUpperCase();
   const held = method === 'GET' && !opts ? swr.get(path) : null;
 
+  const counted = !opts?.quiet;
+  if (counted) busy(1);
   const live = (async () => {
     const r = await fetchWithRetry(path, opts);
     /* What the server left out of this answer for this reader's role —
@@ -225,6 +242,9 @@ export const api = async (path, opts) => {
     }
     return body;
   })();
+  /* Settled either way. A second handler, so the rejection still reaches
+     whoever awaits `live`, and is not left unhandled by this one. */
+  if (counted) live.then(() => busy(-1), () => busy(-1));
 
   if (held) {
     /* The request is still running; it must not become an unhandled rejection

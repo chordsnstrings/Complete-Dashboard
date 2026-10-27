@@ -105,6 +105,39 @@
     try { r.dataset.focus = localStorage.getItem('fleet.focus') === 'off' ? 'off' : 'on'; }
     catch (e) { r.dataset.focus = 'on'; }
   }
+  /* MOTION (motion.css, motion.js): the Arkiv skin's movement, on the desktop
+     build — the operator's ruling of 2026-10-27. ON for every reader, OFF under
+     automation (navigator.webdriver): a screenshot, the render audit and every
+     browser test want the still page, and a frame caught mid-movement is a
+     flaky one. ?motion=on|off is remembered (fleet.motion), ?motion=auto
+     forgets it — which is how a test, or a reader who would rather not, sets
+     it. The URL's own word wins where storage is refused, as for the skin.
+     A system asking for reduced motion is honoured inside the stylesheet, not
+     here, so the boot sheet's words still show for that reader.
+     Stamped here, before the stylesheet the second script writes in for it. */
+  if (r.dataset.skin === 'arkiv' && !phone) {
+    var mo = new URLSearchParams(location.search).get('motion');
+    try {
+      if (mo === 'on' || mo === 'off') localStorage.setItem('fleet.motion', mo);
+      else if (mo === 'auto') localStorage.removeItem('fleet.motion');
+      if (mo !== 'on' && mo !== 'off') mo = localStorage.getItem('fleet.motion');
+    } catch (e) { /* private mode: the choice just does not stick */ }
+    if (mo === 'on' || (mo !== 'off' && !navigator.webdriver)) {
+      r.dataset.motion = 'on';
+      /* An opening that STOPPED: a module that failed to load or threw before
+         the shell was built. The boot sheet would otherwise go on saying
+         "still opening" over a page that never will (motion.css §1). A script
+         element's error does not bubble, hence the capture; a broken image is
+         not a broken opening, hence the tag. */
+      var stop = function (e) {
+        if (document.querySelector('#app.ak-shell')) return;
+        if (e.type === 'error' && e.target && e.target !== window && e.target.tagName !== 'SCRIPT') return;
+        r.dataset.boot = 'failed';
+      };
+      addEventListener('error', stop, true);
+      addEventListener('unhandledrejection', stop);
+    }
+  }
   if (phone) {
     var css = document.createElement('link');
     css.rel = 'stylesheet'; css.href = '/m/m.css';
@@ -150,8 +183,17 @@
      docs/UI-REDESIGN-PLAN.md "Phone PWA — redesign") and the --pg-phone:1
      that switches the phone's modules to it. Written by the parser, so the
      deferred module does not run before it is in and reads the token right
-     the first time. -->
+     the first time.
+
+     The MOTION layer goes in just BEFORE the skin, for the same reason as the
+     skin (the boot sheet is the first paint) and never after it: arkiv.css
+     wins every tie by being the last stylesheet in the document
+     (test/arkiv_skin.test.mjs), and motion.css needs no tie — each of its
+     selectors carries [data-motion="on"] as well. Desktop only; the
+     pre-paint script stamps it only there. -->
 <script>
+if (document.documentElement.dataset.motion === 'on')
+  document.write('<link rel="stylesheet" href="/motion.css">');
 if (document.documentElement.dataset.skin === 'arkiv')
   document.write('<link rel="stylesheet" href="/arkiv.css">');
 if (document.documentElement.dataset.skin === 'arkiv' && document.documentElement.dataset.ui === 'phone')
