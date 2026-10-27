@@ -47,24 +47,35 @@ const SEEN_MS = 120;
 const ENTER_MS = 1600;     // covers motion.css §3: 360ms of stagger + the pen
 const ARRIVE_MS = 450;
 const TICK_MS = 2500;
-/* A tile drawn on a page's ARRIVAL is read only once it has stood this
-   long: app.js countUp() runs it up from zero over 620ms, and for that long
-   it holds numbers that are not its value. Read inside that window, every
-   tile looked as if it had moved (it had: through 0, 18,714, 39,779… on its
-   way to 280,622; measured on #overview, 2026-10-27). A REDRAW runs no
-   count-up under this layer (app.js, `arriving`), so its figures are final
-   the moment they are drawn and are compared at once — the mark lands on
-   the same frame as the new number. */
+/* A tile drawn on a page's ARRIVAL is read only once its count-up has
+   landed: app.js countUp() runs it up from zero over 620ms, and for that
+   long it holds numbers that are not its value. Read inside that window,
+   every tile looked as if it had moved (it had: through 0, 18,714, 39,779…
+   on its way to 280,622; measured on #overview, 2026-10-27).
+
+   Timed from when the count-up STARTS — app.js calls motionEntered() as it
+   runs animateView(), at the very end of a page's render — and not from when
+   the tile appeared. On production the tiles come in first and the rest of
+   the page seconds later, so a window timed from the tile had closed before
+   the count-up began, and its way up was marked as five figures moving
+   (281,567 km on the way to 281,573 km; found on production the day the
+   layer went live). A tile on a page whose entrance never ran (a render that
+   failed) is not read at all.
+
+   A REDRAW runs no count-up under this layer (app.js, `arriving`), so its
+   figures are final the moment they are drawn and are compared at once —
+   the mark lands on the same frame as the new number. */
 const SETTLE_MS = 800;
 const STRIPS = new Set(['todayNow', 'authBanner']);
 
 let started = false;
 let route = null;               // the address #view's figures were read on
 let calm = false;               // this render is a redraw: nothing counts up
+let counted = null;             // the #view whose entrance (and count-up) has run…
+let countedAt = 0;              // …and when it started
 const page = new Map();         // slot → text on this page; forgotten when the address changes
 const strip = new Map();        // slot → text in the today strip; never forgotten
 const raised = new WeakMap();   // skeleton → when it went up
-const firstRead = new WeakMap(); // figure → when it was first seen
 let pending = 0;
 let settling = 0;
 
@@ -102,6 +113,11 @@ export function startMotion() {
     while the layer is off, so app.js goes on exactly as before. */
 export function motionView(root) {
   if (!started || !root) return undefined;
+  /* app.js freshView() CLONES the last #view, attributes and all, so a class
+     put on it comes along: a redraw within the entrance's 1.6 s inherited
+     fx-enter, and no timer would ever take it off the new element. Found on
+     production, 2026-10-27. */
+  root.classList.remove('fx-enter');
   const here = location.hash;
   calm = here === route;
   if (calm) return false;
@@ -109,6 +125,15 @@ export function motionView(root) {
   page.clear();
   if (!still()) flash(root, 'fx-enter', ENTER_MS);
   return true;
+}
+
+/** Called by app.js the moment a page's entrance runs (animateView), which is
+    when its tiles start counting up. Their figures are read once that lands. */
+export function motionEntered(root) {
+  if (!started || !root) return;
+  counted = root;
+  countedAt = performance.now();
+  setTimeout(readFigures, SETTLE_MS + 30);
 }
 
 function watch(records) {
@@ -172,10 +197,10 @@ function compare(host, memory, now) {
     const n = (seen.get(key) || 0) + 1;
     seen.set(key, n);
     if (n > 1) key += `#${n}`;
-    const t0 = firstRead.get(el);
-    if (t0 == null) firstRead.set(el, now);
-    const counted = !calm && el.matches('.kpi .n');
-    if (counted && (t0 == null || now - t0 < SETTLE_MS)) { early = true; continue; }
+    if (!calm && el.matches('.kpi .n') && !(counted === host && now - countedAt >= SETTLE_MS)) {
+      early = true;
+      continue;
+    }
     const text = el.textContent.replace(/\s+/g, ' ').trim();
     const before = memory.get(key);
     memory.set(key, text);

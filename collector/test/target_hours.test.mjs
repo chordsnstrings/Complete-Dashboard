@@ -280,19 +280,23 @@ check('the month in figures: what every day left must bring, the average day, wh
   && /<th scope="row">Ecosine<\/th><td><b>AED 3,500\.00<\/b>/.test(mf) && /<th scope="row">Egari<\/th>/.test(mf), mf.slice(0, 300));
 /* The revenue panel's drivers and gross per driver (2026-10-22): two columns
    today beside the usual day, two rows under the chart, this hour in the
-   summary — and none of it on the trips panel. */
+   summary — and none of it on the trips panel. The figure each is money, so
+   it is printed to the fils like every other (money(), and fils() under the
+   chart's "AED each"): these checks held "AED 150" until the full suite's
+   money_precise caught the hand-rounded string on 2026-10-27 (FIX-STATUS
+   DRVH6). */
 const rr = Object.fromEntries(rowsOf(rh).map((r) => [r.h, r]));
-check('revenue: Drivers and Per driver columns, today beside the usual — 10 usually 10, ≈ AED 150 usually AED 150',
+check('revenue: Drivers and Per driver columns, today beside the usual — 10 usually 10, ≈ AED 150.00 usually AED 150.00',
   /<th scope="col">Drivers<\/th><th scope="col">Per driver<\/th>/.test(rh)
-  && /<td>10 <span class="hp-dim">usually 10<\/span><\/td><td>≈ AED 150 <span class="hp-dim">usually AED 150<\/span><\/td><td class="hp-st">/.test(rr['08:00'].html), rr['08:00'].html);
+  && /<td>10 <span class="hp-dim">usually 10<\/span><\/td><td>≈ AED 150\.00 <span class="hp-dim">usually AED 150\.00<\/span><\/td><td class="hp-st">/.test(rr['08:00'].html), rr['08:00'].html);
 check('…an hour to come has only the usual, and an hour nobody works is a dash, not AED 0',
-  /<td><span class="hp-dim">usually 10<\/span><\/td><td><span class="hp-dim">usually AED 100<\/span><\/td>/.test(rr['22:00'].html)
+  /<td><span class="hp-dim">usually 10<\/span><\/td><td><span class="hp-dim">usually AED 100\.00<\/span><\/td>/.test(rr['22:00'].html)
   && /<td><span class="hp-dim">—<\/span><\/td><td><span class="hp-dim">—<\/span><\/td>/.test(rr['12:00'].html), rr['22:00'].html + ' | ' + rr['12:00'].html);
-check('the chart names its two rows and prints the usual under each hour worked (10 drivers, 250 each at 18:00)',
+check('the chart names its two rows and prints the usual under each hour worked (10 drivers, 250.00 each at 18:00)',
   /class="hc hc-ppl"/.test(rh) && />drivers<\/text>/.test(rh) && />AED each<\/text>/.test(rh)
-  && /<text class="hc-p" x="[\d.]+" y="[\d.]+" text-anchor="middle">250<\/text>/.test(rh), (rh.match(/<text class="hc-p"[^>]*>[^<]*<\/text>/g) || []).slice(0, 4).join(''));
+  && /<text class="hc-p" x="[\d.]+" y="[\d.]+" text-anchor="middle">250\.00<\/text>/.test(rh), (rh.match(/<text class="hc-p"[^>]*>[^<]*<\/text>/g) || []).slice(0, 4).join(''));
 check('the summary says who is at work this hour, and that a usual day has nobody in it',
-  /At work in it so far: 1 driver, ≈ AED 50 each; a usual day has nobody at work in it\./.test(rh), rh.slice(0, 700));
+  /At work in it so far: 1 driver, ≈ AED 50\.00 each; a usual day has nobody at work in it\./.test(rh), rh.slice(0, 700));
 check('the trips panel carries none of it', !/Per driver|hc-ppl|At work in it/.test(ph));
 check('nothing undefined, NaN or null anywhere on the page', ![ph, rh, th, mf].some((x) => /undefined|NaN|\bnull\b|\[object Object\]/.test(x)));
 check('read by the clock, the basis says why', /fewer than the 7 needed, so the day is read by the clock/.test(ph), ph.slice(-500));
@@ -429,7 +433,7 @@ check('an hour with a fare not in yet: its drivers, no figure each, and how many
   j([at(op, 18).drivers, at(op, 18).per_driver, at(op, 18).fares_pending, at(op, 8).per_driver, at(op, 20).fares_pending]));
 const oh = Object.fromEntries(rowsOf(hoursHtml(op, openH, { isMoney: true })).map((r) => [r.h, r]));
 check('…and the page says "1 fare not in yet" in its place, beside the usual',
-  /<td><span class="hp-dim">1 fare not in yet<\/span> <span class="hp-dim">usually AED 250<\/span><\/td>/.test(oh['18:00'].html), oh['18:00'].html);
+  /<td><span class="hp-dim">1 fare not in yet<\/span> <span class="hp-dim">usually AED 250\.00<\/span><\/td>/.test(oh['18:00'].html), oh['18:00'].html);
 await q(`DELETE FROM trip WHERE external_id = 'p4'`);
 
 console.log(`\n${pass} passed, ${fail} failed`);

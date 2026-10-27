@@ -39,7 +39,7 @@
    figure carries ▲ or ▼ and a word. Revenue today is an estimate until Uber
    publishes the day's fares (hours behind the ride; fetched hourly), and is marked ≈. */
 import { api, alive, currentGen, href } from './data.js';
-import { el, esc, money, countOf, sourceLabel, panel, secHead, loading, contract } from './ui.js';
+import { el, esc, money, fils, countOf, sourceLabel, panel, secHead, loading, contract } from './ui.js';
 import { fmt } from './charts.js';
 import { targetLive, targetView, targetHtml } from './target.js';
 import { todayLive } from './today.js';
@@ -58,10 +58,13 @@ const trips = (v) => { if (v == null) return '—'; const n = Math.round(v) || 0
 const aed = (v) => (v == null ? '—' : money(v));
 /* The revenue hours' people and gross per person (api/target_hours.js
    withPeople). Today's count is whole; the usual is an average over days, to
-   one place. A person's gross in whole dirhams: fils on a per-head figure
-   are noise beside the hour's own total. */
+   one place. A person's gross is MONEY, and printed as every other money
+   figure is, to the fils through money(): it was whole dirhams by hand
+   (`AED ${fmt(Math.round(v))}`), which test/money_precise.test.mjs holds
+   against — found by the full suite on 2026-10-27, five days after it went
+   live (FIX-STATUS DRVH6). */
 const drivers = (v) => (v == null ? '—' : `${fmt(v, 1)} ${v === 1 ? 'driver' : 'drivers'}`);
-const each = (v) => (v == null ? '—' : `AED ${fmt(Math.round(v))}`);
+const each = (v) => (v == null ? '—' : money(v));
 const hasPeople = (x) => !!x?.hours?.some((r) => r.usual_drivers != null);
 /* Today's gross per driver, or why there is none: an hour whose completed
    trips are not all priced (and not estimated) has a headcount and only part
@@ -209,7 +212,7 @@ export function hourChart(x, { isMoney, W = 1300, every = 3 }) {
     if (ppl && r.usual_drivers > 0) {
       const cx = (bx + bw / 2).toFixed(1);
       parts.push(`<text class="hc-p" x="${cx}" y="${pt + ih + 34}" text-anchor="middle">${fmt(Math.round(r.usual_drivers))}</text>`
-        + (r.usual_per_driver != null ? `<text class="hc-p" x="${cx}" y="${pt + ih + 51}" text-anchor="middle">${fmt(Math.round(r.usual_per_driver))}</text>` : ''));
+        + (r.usual_per_driver != null ? `<text class="hc-p" x="${cx}" y="${pt + ih + 51}" text-anchor="middle">${fils(r.usual_per_driver)}</text>` : ''));
     }
   });
   if (ppl) {

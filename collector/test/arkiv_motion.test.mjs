@@ -93,10 +93,10 @@ check('motion.css is written in before arkiv.css, only when data-motion is on', 
 check('the stamp is Arkiv and desktop only, and off under automation unless asked',
   /r\.dataset\.skin === 'arkiv' && !phone/.test(html) && /mo === 'on' \|\| \(mo !== 'off' && !navigator\.webdriver\)/.test(html));
 check('app.js starts the layer and hands it each fresh #view',
-  /import \{ startMotion, motionView \} from '\.\/motion\.js'/.test(read('app.js'))
+  /import \{ startMotion, motionView, motionEntered \} from '\.\/motion\.js'/.test(read('app.js'))
   && /startMotion\(\);\s*\n\s*const root = freshView\(\);[\s\S]{0,260}const arriving = motionView\(root\);/.test(read('app.js')));
 check('…and replays its entrance (count-ups, lines) only when the page arrives',
-  /if \(arriving !== false\) animateView\(root\);/.test(read('app.js')));
+  /if \(arriving !== false\) \{ animateView\(root\); motionEntered\(root\); \}/.test(read('app.js')));
 
 /* ══ the browser half ═════════════════════════════════════════════════════ */
 const srv = mock.listen(0);
@@ -317,6 +317,50 @@ console.log('\n6 · a figure that moved');
   const dist = await tile('distance');
   check('a figure that did not move took none', dist && !ticks.some((e) => e.text === dist), JSON.stringify(ticks.map((e) => e.text)));
   check('no entrance on that redraw', !fx.some((e) => e.k === 'fx-enter'));
+  await ctx.close();
+}
+
+console.log('\n6b · found on production, 2026-10-27');
+{
+  /* A SLOW PAGE. On production the tiles come in first and the rest of the
+     page seconds later, and app.js starts the count-up only once the WHOLE
+     page has answered (animateView at the end of render). A settle window
+     timed from the tile's own arrival had closed by then, and the count-up's
+     way up was marked as five figures moving (281,567 km on the way to
+     281,573 km). Here: /api/kpis at once, everything else 1.8 s late. */
+  const ctx = await fresh();
+  await ctx.addInitScript(LOG);
+  const page = await ctx.newPage();
+  await page.route('**/api/**', async (r) => {
+    if (!/\/api\/kpis/.test(r.request().url())) await new Promise((ok) => setTimeout(ok, 1800));
+    r.continue();
+  });
+  await page.goto(`${base}/?ui=desktop&motion=on#overview`, { waitUntil: 'domcontentloaded' });
+  await settle(page);
+  await page.waitForTimeout(1200);
+  const fx = await page.evaluate(() => window.__fx.splice(0));
+  const counted = await page.evaluate(() => document.querySelector('#view').classList.contains('stagger'));
+  check('a slow page counts up late — and still no figure is marked as moved on arrival',
+    counted && !fx.some((e) => e.k === 'fx-tick'), JSON.stringify(fx.filter((e) => e.k === 'fx-tick').map((e) => e.text)));
+  await ctx.close();
+}
+{
+  /* A REDRAW RIGHT AFTER AN ARRIVAL. app.js freshView() clones #view with its
+     attributes, so the entrance class came along onto the redraw's #view,
+     where no timer would ever take it off. */
+  const ctx = await fresh();
+  const page = await ctx.newPage();
+  await page.goto(`${base}/?ui=desktop&motion=on#overview`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#app.ak-shell');
+  await page.waitForFunction(() => document.querySelector('#view').classList.contains('fx-enter'));
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('data:refreshed', { detail: { path: '/api/kpis' } })));
+  await page.waitForTimeout(400);
+  const during = await page.evaluate(() => document.querySelector('#view').classList.contains('fx-enter'));
+  await settle(page);
+  const after = await page.evaluate(() => ({ enter: document.querySelector('#view').classList.contains('fx-enter'),
+    ins: document.getAnimations().filter((a) => a.animationName === 'ak-in').length }));
+  check('a redraw inside the entrance does not inherit it (freshView clones the class)', !during && !after.enter && after.ins === 0,
+    JSON.stringify({ during, ...after }));
   await ctx.close();
 }
 

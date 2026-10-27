@@ -28,7 +28,7 @@ import { shellContract, buildShell, shellFrame, whenStyled } from './shell.js';
 import { startFocus } from './focus.js';
 /* MOTION (motion.js): the Arkiv skin's movement — inert unless index.html
    stamped data-motion="on" (Arkiv, desktop, not under automation). */
-import { startMotion, motionView } from './motion.js';
+import { startMotion, motionView, motionEntered } from './motion.js';
 /* Sign-in and access (collector/docs/ULM-DESIGN.md). The server decides; these
    only draw what it decided — which pages open, and the true reason where
    something is not shown. */
@@ -9503,7 +9503,7 @@ async function render() {
        one that changed could not be told from the rest. motion.js marks the
        ones that changed instead. Everywhere else (the Classic skin, a reader
        with the layer off, automation) this is exactly as it was. */
-    if (arriving !== false) animateView(root);
+    if (arriving !== false) { animateView(root); motionEntered(root); }
   } catch (e) {
     if (!alive(gen)) return;                // superseded: not this reader's error
     root.innerHTML = '';
