@@ -23,10 +23,17 @@
        not load this view", and its module is fetched only then.
    5 · THE ADDRESSED PAGE IS FETCHED EARLY, while the shell still waits for
        /api/auth/me.
-   6 · A MODULE THAT WILL NOT LOAD reloads the app once, then says so — never
-       a loop.
+   6 · A MODULE THAT WILL NOT RUN says why in words, and reloads only where a
+       reload helps: a transient failure is retried under a fresh address
+       (the browser remembers a failed fetch), a link error or a deploy in
+       between reloads once, a silent server does not (a reload there is the
+       browser's error page) — and never a loop.
    7 · WHILE A MODULE IS ON ITS WAY the view shows a skeleton, not a blank
-       page, and it is gone when the page draws.
+       page, and it is gone when the page draws; a module already in hand
+       shows none.
+   8 · A PAGE LEFT BEFORE ITS MODULE ARRIVED is dropped when it does — it
+       must not draw into the next page, nor ask for its own data.
+   (The review of 2026-10-27 found 6–8; FIX-STATUS LAZY7–9.)
 
    Renders against mockapi.mjs — synthetic fixtures only. */
 import { readFileSync, existsSync, statSync } from 'node:fs';
@@ -77,6 +84,19 @@ check('every file it names exists', [...pageFiles].every((f) => existsSync(join(
 const handlers = [...app.matchAll(/^V(?:\.([\w]+)|\['([\w-]+)'\]) = /gm)].map((m) => m[1] || m[2]);
 check('every key in PAGE_OF is a page app.js answers', Object.keys(PAGE_OF).every((k) => handlers.includes(k)),
   Object.keys(PAGE_OF).filter((k) => !handlers.includes(k)).join(' '));
+/* Every name a handler takes from its module, exported by that module —
+   which imports_resolve.test.mjs cannot see, these not being imports. */
+const exportsOf = (f) => {
+  const src = strip(read(f));
+  const out = new Set([...src.matchAll(/^export\s+(?:async\s+)?(?:function\*?|const|let|class)\s+([\w$]+)/gm)].map((m) => m[1]));
+  for (const m of src.matchAll(/^export\s*\{([^}]*)\}/gm)) m[1].split(',').map((x) => x.trim().split(/\s+as\s+/).pop()).filter(Boolean).forEach((x) => out.add(x));
+  return out;
+};
+const taken = [];
+for (const m of app.matchAll(/\(await page\('([\w-]+)'\)\)\.([\w$]+)/g)) taken.push([m[1], m[2]]);
+for (const m of app.matchAll(/const \{ ([^}]+) \} = await page\('([\w-]+)'\)/g)) m[1].split(',').map((x) => x.trim().split(':')[0].trim()).forEach((n) => taken.push([m[2], n]));
+const missing = taken.filter(([v, n]) => PAGE_OF[v] && !exportsOf(PAGE_OF[v]).has(n)).map(([v, n]) => `${PAGE_OF[v]}:${n}`);
+check(`every name a handler takes from its module is exported by it (${taken.length})`, taken.length >= 60 && missing.length === 0, missing.join(' '));
 
 console.log('\n3 · nothing runs at load in a module that left the first screen');
 const behind = new Set();
@@ -147,20 +167,72 @@ console.log('\n5 · the addressed page is fetched while the shell still waits fo
   await ctx.close();
 }
 
-console.log('\n6 · a module that will not load: one reload, then the reason');
-{
+console.log('\n6 · a module that will not run: the reason in words, and a reload only where it helps');
+const visit = async (setup, wait = 4500) => {
   const ctx = await fresh();
   const page = await ctx.newPage();
-  let loads = 0;
+  let loads = 0, data = 0;
   page.on('load', () => { loads++; });
-  await page.route('**/payouts.js', (r) => r.abort());
+  page.on('request', (r) => { if (new URL(r.url()).pathname.startsWith('/api/finance/payouts')) data++; });
+  await setup(page);
   await page.goto(`${base}/?ui=desktop#payouts`, { waitUntil: 'load' });
-  await page.waitForTimeout(4000);
-  const s = await page.evaluate(() => ({ text: document.querySelector('#view')?.textContent || '',
-    mark: sessionStorage.getItem('fleet.reload:./payouts.js') }));
-  check('the app reloaded once, and only once', loads === 2, `${loads} loads`);
-  check('…then said it could not load the view', /Could not load this view/.test(s.text) && !!s.mark, s.text.slice(0, 120));
+  await page.waitForTimeout(wait);
+  const r = await page.evaluate(() => ({ text: document.querySelector('#view')?.textContent || '',
+    title: document.querySelector('#viewTitle')?.textContent.trim() }));
   await ctx.close();
+  return { loads, data, ...r };
+};
+{
+  /* The server silent for this module (the fetch and the HEAD both fail). */
+  const v = await visit((page) => page.route('**/payouts.js*', (r) => r.abort()));
+  check('a silent server: no reload — the reason says the server did not answer', v.loads === 1
+    && /Could not load this view/.test(v.text) && /the server did not answer/.test(v.text) && !/dynamically imported/.test(v.text),
+  `${v.loads} loads · ${v.text.slice(0, 160)}`);
+}
+{
+  /* A dropped line, once: the retry under a fresh address gets it. */
+  let n = 0;
+  const v = await visit((page) => page.route('**/payouts.js*', (r) => (r.request().method() === 'GET' && n++ === 0 ? r.abort() : r.continue())));
+  check('a transient failure is retried under a fresh address: the page draws, no reload',
+    v.loads === 1 && !/Could not load this view/.test(v.text) && n >= 2, `${v.loads} loads, ${n} GETs · ${v.text.slice(0, 120)}`);
+}
+{
+  /* A module that asks this tab's ui.js for a name it has not got — a
+     deploy since the tab opened. */
+  const v = await visit((page) => page.route('**/payouts.js*', (r) => (r.request().method() === 'GET'
+    ? r.fulfill({ status: 200, contentType: 'text/javascript', body: "import { notInThisDeploy } from './ui.js';\nexport const renderPayouts = () => notInThisDeploy;" })
+    : r.continue())));
+  check('a link error reloads once, then says the dashboard was updated', v.loads === 2
+    && /has been updated since this tab was opened/.test(v.text), `${v.loads} loads · ${v.text.slice(0, 160)}`);
+}
+{
+  /* A deploy between the boot and this page: the module links, and would run
+     on top of the old code. X-FM-Build says so. */
+  const v = await visit((page) => Promise.all([
+    page.route('**/app.js', async (r) => { const res = await r.fetch(); r.fulfill({ response: res, headers: { ...res.headers(), 'x-fm-build': 'deploy-a' } }); }),
+    page.route('**/payouts.js*', async (r) => { const res = await r.fetch(); r.fulfill({ response: res, headers: { ...res.headers(), 'x-fm-build': 'deploy-b' } }); }),
+  ]));
+  check('a module from a later deploy is never run on this tab’s code: one reload, then the reason', v.loads === 2
+    && /has been updated since this tab was opened/.test(v.text) && v.data === 0, `${v.loads} loads · ${v.data} data requests · ${v.text.slice(0, 120)}`);
+}
+{
+  const v = await visit((page) => Promise.all([
+    page.route('**/app.js', async (r) => { const res = await r.fetch(); r.fulfill({ response: res, headers: { ...res.headers(), 'x-fm-build': 'deploy-a' } }); }),
+    page.route('**/payouts.js*', async (r) => { const res = await r.fetch(); r.fulfill({ response: res, headers: { ...res.headers(), 'x-fm-build': 'deploy-a' } }); }),
+  ]));
+  check('…and one from the same deploy runs as ever', v.loads === 1 && !/Could not load this view/.test(v.text), `${v.loads} loads · ${v.text.slice(0, 120)}`);
+}
+{
+  /* A store that reads but will not write (full, or locked down): the mark
+     that stops a second reload cannot be kept, so there is no first one. */
+  const v = await visit((page) => Promise.all([
+    page.addInitScript(() => { const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, x) { if (String(k).startsWith('fleet.reload:')) throw new Error('quota'); return set.call(this, k, x); }; }),
+    page.route('**/payouts.js*', (r) => (r.request().method() === 'GET'
+      ? r.fulfill({ status: 200, contentType: 'text/javascript', body: "import { notInThisDeploy } from './ui.js';\nexport const renderPayouts = () => notInThisDeploy;" })
+      : r.continue())),
+  ]));
+  check('a store that will not keep the mark: no reload at all, never a loop', v.loads === 1
+    && /has been updated since this tab was opened/.test(v.text), `${v.loads} loads · ${v.text.slice(0, 120)}`);
 }
 
 console.log('\n7 · while a page’s module is on its way, a skeleton — not a blank view');
@@ -172,13 +244,46 @@ console.log('\n7 · while a page’s module is on its way, a skeleton — not a 
   await page.route('**/payouts.js', async (r) => { await new Promise((ok) => setTimeout(ok, 1500)); r.continue(); });
   await page.evaluate(() => { location.hash = '#payouts'; });
   await page.waitForTimeout(500);
-  const during = await page.evaluate(() => ({ skel: document.querySelectorAll('#view > .skel').length,
+  const during = await page.evaluate(() => ({ skel: document.querySelectorAll('#view > .skel[data-wait="module"]').length,
     kids: document.querySelector('#view').childElementCount }));
   await drawn(page);
-  const after = await page.evaluate(() => ({ placeholder: [...document.querySelectorAll('#view > .skel')].length,
+  const after = await page.evaluate(() => ({ placeholder: [...document.querySelectorAll('.skel[data-wait="module"]')].length,
     title: document.querySelector('#viewTitle')?.textContent.trim() }));
   check('the view shows the ordinary skeleton while payouts.js is held', during.skel === 1 && during.kids === 1, JSON.stringify(during));
   check('…and it is gone once the page has drawn', after.placeholder === 0, JSON.stringify(after));
+  /* Back to it, its module in hand: no placeholder at all, so a redraw stays
+     one task. */
+  await page.evaluate(() => { location.hash = '#overview'; });
+  await drawn(page);
+  await page.evaluate(() => {
+    window.__ph = 0;
+    new MutationObserver((l) => l.forEach((r) => r.addedNodes.forEach((n) => {
+      if (n.nodeType === 1 && n.dataset?.wait === 'module') window.__ph++;
+    }))).observe(document.querySelector('#app .main'), { childList: true, subtree: true });
+    location.hash = '#payouts';
+  });
+  await drawn(page);
+  check('a module already in hand shows no placeholder', await page.evaluate(() => window.__ph) === 0);
+  await ctx.close();
+}
+
+console.log('\n8 · a page left before its module arrived is dropped, not drawn');
+{
+  const ctx = await fresh();
+  const page = await ctx.newPage();
+  const asked = [];
+  page.on('request', (r) => { const u = new URL(r.url()); if (u.pathname.startsWith('/api/finance/payouts')) asked.push(u.pathname); });
+  await page.goto(`${base}/?ui=desktop#overview`, { waitUntil: 'domcontentloaded' });
+  await drawn(page);
+  await page.route('**/payouts.js*', async (r) => { await new Promise((ok) => setTimeout(ok, 1500)); r.continue(); });
+  await page.evaluate(() => { location.hash = '#payouts'; });
+  await page.waitForTimeout(300);
+  await page.evaluate(() => { location.hash = '#drivers'; });
+  await page.waitForTimeout(2600);
+  const v = await page.evaluate(() => ({ title: document.querySelector('#viewTitle')?.textContent.trim(),
+    text: (document.querySelector('#view')?.textContent || '').slice(0, 80) }));
+  check('the payouts page, left while its code loaded, asked for none of its data', asked.length === 0, asked.join(' '));
+  check('…and the page the reader went to is the one on screen', /Drivers/.test(v.title || '') && !/Could not load/.test(v.text), JSON.stringify(v));
   await ctx.close();
 }
 

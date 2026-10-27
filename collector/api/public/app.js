@@ -906,20 +906,39 @@ const V = {};
    parser, 2026-10-27). A page module that ever DOES something at load will
    now do it only when its page opens — keep them that way.
 
-   A module that will not load is told apart from a page that broke. The
-   likeliest cause is a deploy since this tab opened: the module asked for is
-   the new one, and it can import a name this tab's older ui.js does not
-   have. So the app reloads, once a minute at most — everything then comes
-   from one deploy — and a failure inside that minute is shown as what it is
-   (render's failure box). Never offline: a reload there is the browser's
-   error page instead of ours, and never in a loop.
+   NEVER TWO DEPLOYS IN ONE TAB (server.js "THE MODULE GRAPH MUST NOT RUN
+   MIXED VERSIONS"). A tab opened before a deploy that opens a page after it
+   would get the NEW module on top of the old ui.js and data.js it booted
+   with — two programs on one screen, the 2026-09-06 failure server.js
+   records. So page() reads the deploy (X-FM-Build) of the module it is
+   loading and of this tab's own app.js, and reloads rather than run the two
+   together. Read by a HEAD alongside the module's own fetch, so it costs no
+   time; a server that does not say (the local tools, the mock) is not
+   second-guessed.
 
-   While the module is on its way the view shows the ordinary skeleton
-   (ui.js loading()'s markup), so a first visit on a slow line is a page
-   loading, not a blank one: the old static imports had every page's code
-   in hand, and a handler put its own skeletons up at once. It is taken down
-   before the page draws; a module already loaded resolves in the same task,
-   so for it the placeholder is never painted. */
+   A module that will not load says why, in words, in render's failure box.
+   The browser remembers a failed fetch for the life of the page — the same
+   address fails again at once without asking — so one retry goes under a
+   fresh address; a link error (a module asking the old ui.js for a name it
+   has not got) is a deploy, and reloads, as does a second failure while the
+   server still answers (the module has gone or changed). Every reload is
+   once a minute at most per module, only for the page the reader is still
+   on, never offline or with the server silent (a reload there is the
+   browser's error page instead of ours), and only once the mark that stops
+   the next one is written — so never a loop.
+
+   A page left before its module arrived is dropped when it does, not drawn
+   into the view that has replaced it (where its timers would poll for ever).
+
+   While a module is on its way the view shows the ordinary skeleton (ui.js
+   loading()'s markup), so a first visit on a slow line is a page loading,
+   not a blank one: the old static imports had every page's code in hand, and
+   a handler put its own skeletons up at once. A module already in hand is
+   returned at once, with no placeholder and no task in between — a redraw of
+   the page (data:refreshed) stays one task, as it was before. A re-import of
+   a loaded module is NOT that: measured in Chromium 141, it resolves after
+   an already-queued timer, and a frame was painted in between 18 times in
+   300 (the review of 2026-10-27). */
 const PAGE_OF = {
   'hr-roster': './hrroster.js',
   'import-sheet': './importsheet.js',
@@ -978,21 +997,60 @@ const PAGE_OF = {
   vehicles: './vehicle.js',
   watchlist: './lowperf.js',
 };
-const page = (view) => {
-  const wait = document.createElement('div');
-  wait.className = 'skel'; wait.textContent = 'Loading…';
-  document.querySelector('#view')?.append(wait);
-  return import(PAGE_OF[view]).then((m) => { wait.remove(); return m; }, (e) => { wait.remove(); return stale(view, e); });
-};
-const stale = (view, e) => {
-  const k = `fleet.reload:${PAGE_OF[view]}`;
-  let last = Date.now();
-  try { last = Number(sessionStorage.getItem(k)) || 0; } catch { /* no storage: no reload, so no loop */ }
-  if (navigator.onLine !== false && Date.now() - last > 60000) {
-    try { sessionStorage.setItem(k, String(Date.now())); } catch { /* as above */ }
-    location.reload();
+const loaded = new Map();            // module address → the module, once in hand
+const fetchPage = (url) => import(url).then((m) => { loaded.set(url, m); return m; });
+/* Which deploy a piece of code is from (server.js X-FM-Build), and whether
+   the server answered at all — a fetch that failed where the server still
+   answers is a module that has gone or changed, not a dropped line. */
+const deployOf = (url) => fetch(url, { method: 'HEAD', cache: 'no-store' })
+  .then((r) => ({ reached: true, build: r.headers.get('x-fm-build') }), () => ({ reached: false, build: null }));
+const bootDeploy = deployOf('/app.js');
+const SUPERSEDED = 'superseded';
+const UPDATED = 'The dashboard has been updated since this tab was opened. Reload the page to open this one on the new version.';
+/* The reason a page's code did not run, in words (render's failure box). */
+const why = (e, reached) => {
+  if (navigator.onLine === false) return 'This page’s code did not arrive: this browser is offline. It opens once the connection is back.';
+  if (e === UPDATED || e instanceof SyntaxError) return UPDATED;
+  if (e instanceof TypeError) {
+    return reached ? 'This page’s code could not be loaded from the server. Reload the page.'
+      : 'This page’s code could not be fetched: the server did not answer. Try again in a moment.';
   }
-  throw e;
+  return `This page’s code failed to start: ${e?.message || e}`;
+};
+/* Reload once a minute at most for this module — the mark written first, so
+   a store that will not take it never reloads at all. */
+const reloadOnce = (url) => {
+  if (navigator.onLine === false) return;
+  try {
+    const k = `fleet.reload:${url}`;
+    if (Date.now() - (Number(sessionStorage.getItem(k)) || 0) <= 60000) return;
+    sessionStorage.setItem(k, String(Date.now()));
+    location.reload();
+  } catch { /* no storage: no reload */ }
+};
+const page = async (view) => {
+  const url = PAGE_OF[view];
+  if (loaded.has(url)) return loaded.get(url);
+  const gen = currentGen();
+  const wait = document.createElement('div');
+  wait.className = 'skel'; wait.textContent = 'Loading…'; wait.dataset.wait = 'module';
+  document.querySelector('#view')?.append(wait);
+  try {
+    const [got, now, boot] = await Promise.all([
+      fetchPage(url).catch((e) => {
+        if (!(e instanceof TypeError) || navigator.onLine === false) throw e;
+        return import(`${url}?r=${Date.now()}`).then((x) => { loaded.set(url, x); return x; });
+      }).then((m) => ({ m }), (e) => ({ e })),
+      deployOf(url), bootDeploy]);
+    if (!alive(gen)) throw new Error(SUPERSEDED);
+    let e = got.e;
+    if (!e && now.build && boot.build && now.build !== boot.build) { loaded.delete(url); e = UPDATED; }
+    if (!e) return got.m;
+    if (e === UPDATED || e instanceof SyntaxError || (e instanceof TypeError && now.reached)) reloadOnce(url);
+    throw Object.assign(new Error(why(e, now.reached)), { cause: e });
+  } finally {
+    wait.remove();
+  }
 };
 
 /* An address that names no destination.
@@ -10530,7 +10588,7 @@ window.addEventListener('hashchange', () => { applyRoute(); render(); });
 /* The page the address names, fetched now — while loadWho() below asks the
    server who is signed in — rather than after it (PAGE_OF). A failure here is
    its handler's to report. */
-if (PAGE_OF[state.view]) import(PAGE_OF[state.view]).catch(() => { /* page() says why */ });
+if (PAGE_OF[state.view]) fetchPage(PAGE_OF[state.view]).catch(() => { /* page() retries and says why */ });
 /* The Arkiv boot sheet says what the wait is (motion.css §1): the code is in
    and running, so from here it is the server's answer. */
 if (document.documentElement.dataset.boot === 'code') document.documentElement.dataset.boot = 'who';

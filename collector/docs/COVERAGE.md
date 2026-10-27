@@ -907,7 +907,13 @@ driver's 222 tracker fixes.
   page has loaded (tab names, a week, the month's workbook) goes in
   pagemeta.js, never in a page module: one constant imported from a page
   module at the top of app.js puts that whole page back in every first
-  screen (§1 fails on it).
+  screen (§1 fails on it). And a page's module can now arrive AFTER a deploy
+  in a tab opened before it: page() compares the server's `X-FM-Build` on
+  the module with the one on this tab's app.js and reloads rather than run
+  the two together (server.js "THE MODULE GRAPH MUST NOT RUN MIXED
+  VERSIONS"). A local server that does not send the header (live-ui, the
+  mock, prod-mirror) is not second-guessed, so that check is only proven on
+  production.
 
 * **A browser test never sees the Arkiv motion layer unless it asks for it.**
   index.html stamps `data-motion` only where `navigator.webdriver` is false,

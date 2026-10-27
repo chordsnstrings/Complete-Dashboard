@@ -7315,6 +7315,17 @@ app.use(express.static(join(__dir, 'public'), {
     res.setHeader('Cache-Control', path.endsWith('index.html') || code
       ? 'public, max-age=0, must-revalidate'
       : 'public, max-age=300, stale-while-revalidate=604800');
+    /* WHICH DEPLOY THIS CODE IS FROM, on every piece of it. Since pages load
+       when they are opened (app.js PAGE_OF, FIX-STATUS LAZY), a tab opened
+       before a deploy can ask for a page's module AFTER it — the new module,
+       on top of the old ui.js and data.js it booted with: the mixed versions
+       the paragraph above exists to prevent, and revalidation cannot, since
+       the module was never in this tab before. So app.js asks for this
+       header on its own app.js at boot and on the page's module as it loads
+       it, and reloads rather than run the two together. The value is the
+       service worker's fingerprint (shellHash): it changes exactly when the
+       code does. */
+    if (shellHash && (code || path.endsWith('.html'))) res.setHeader('X-FM-Build', shellHash);
   },
 }));
 /* The sign-in page: its own small document, so it loads with no data and
