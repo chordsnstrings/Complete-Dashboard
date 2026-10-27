@@ -43,6 +43,10 @@ import { el, esc, money, countOf, sourceLabel, panel, secHead, loading, contract
 import { fmt } from './charts.js';
 import { withheldSentence } from './access_model.js';
 import { downloadFile } from './target.js';
+/* In pagemeta.js: the shell's Excel button points at the month's workbook
+   before this module has loaded. Still exported from here, as it was. */
+import { isMonth, workbookUrl } from './pagemeta.js';
+export { workbookUrl };
 
 /* The operator's number, and the server's (api/target_month.js SHOW_BEHIND). */
 export const SHOW_BEHIND = 30;
@@ -50,8 +54,6 @@ export const SHOW_BEHIND = 30;
    like the Target page's hours. */
 export const REFRESH_MS = 5 * 60000;
 
-const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
-const isMonth = (m) => MONTH_RE.test(String(m || ''));
 
 /** /api/target/month for `month` (null: this Dubai month), live — a target
     saved on the Access page shows at once; the server never caches it. */
@@ -60,8 +62,6 @@ export async function monthTargetLive(month = null) {
   return api(`/api/target/month?${isMonth(month) ? `month=${month}&` : ''}t=${minute}`, { cache: 'no-store' });
 }
 
-/** The workbook of the month on screen. */
-export const workbookUrl = (month = null) => `/api/export/target-month.xlsx${isMonth(month) ? `?month=${month}` : ''}`;
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September',
   'October', 'November', 'December'];

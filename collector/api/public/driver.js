@@ -57,41 +57,10 @@ import { dubaiDay } from './tz.js';
 import { unlessWithheld } from './access.js';
 import { ridesOf, rideWords, coverageWords, readable, truncationWords, clockOf } from './unbooked.js';
 import { makeMap, fitTo } from './map.js';
+/* The tabs live in pagemeta.js: the header names the tab before this module
+   has loaded (pages load when opened, app.js PAGE_OF). */
+import { DRIVER_TABS } from './pagemeta.js';
 
-/* `day` is deliberately NOT in this list. It is a destination reached by
-   clicking a bar on Activity, not a seventh tab somebody picks cold — a tab
-   labelled "Day" with no day chosen has nothing to show. */
-export const DRIVER_TABS = [
-  { id: 'overview', label: 'Overview', ic: '◱' },
-  { id: 'activity', label: 'Activity', ic: '◷' },
-  { id: 'territory', label: 'Territory', ic: '◍' },
-  { id: 'earnings', label: 'Earnings', ic: '◈' },
-  { id: 'quality', label: 'Quality', ic: '△' },
-  /* Between Quality and Trips deliberately. Record is a reading of the same
-     person over time rather than a new subject, so it sits after the panels
-     that describe them and before the raw rows that evidence them. */
-  { id: 'record', label: 'Record', ic: '◲' },
-  /* AFTER RECORD AND BEFORE TRIPS. Money is a reading of this person, like
-     Record, rather than a new subject — and it is read against what the tabs
-     before it say they earned. It sits ahead of Trips for the same reason
-     Record does: the raw rows evidence the readings, they are not one. */
-  { id: 'money', label: 'Money', ic: '⊛' },
-  { id: 'trips', label: 'Trips', ic: '▤' },
-  /* LAST, and after Trips deliberately. Every tab before this one is built
-     from records that NAME this person — a booking carries a driver id and the
-     row is a fact. This one is built from journeys no booking explains, so
-     every name on it is an inference drawn from the time and the custody
-     record. It sits at the end because it is read after the record, against
-     the record.
-
-     Labelled "Unexplained trips" and not "Unauthorized": api/public/app.js
-     setHeader() prints `${tab.label} — every platform this person works on,
-     combined` as the page subtitle, and a label of "Unauthorized" makes that
-     sentence read as a verdict on the PERSON rather than on the journeys. The
-     journeys are unexplained; nobody on this page has been found to have done
-     anything. */
-  { id: 'unauthorized', label: 'Unexplained trips', ic: '◌' },
-];
 
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 

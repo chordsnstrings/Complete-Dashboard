@@ -15,9 +15,6 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   SEG_SOURCES, SEG_SOURCE_LABEL, bySourceLine } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
-import { targetPage } from './targetpage.js';
-import { monthTargetPage, workbookUrl as monthWorkbookUrl } from './targetmonth.js';
-import { lowPerformersPage, watchListPage } from './lowperf.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
   applyWindow, MONTH_SHORT, dayLabel } from './data.js';
@@ -36,61 +33,17 @@ import { mountAssistant } from './agentchat.js';
 import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
   WithheldError, toSignIn, signOut, roleNames, post as accessPost, installFetchGuard, inChosenLook,
   unlessWithheld, closingClass, VIEW_CAP, VIEW_CAP_WHY, fleetLabel, fleetList, fleetNames, allFleetsLabel } from './access.js';
-import { renderDriver, renderDriverDirectory, DRIVER_TABS, driversConcentration, driversAbsence } from './driver.js';
-import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS, vdirTail } from './vehicle.js';
-import { renderCohort } from './cohort.js';
 import { COHORTS, membersOf } from './cohorts.js';
-import { renderCauses } from './causes.js';
-import { renderTrips } from './trips.js';
-import { renderOnlineTime } from './onlinetime.js';
-import { renderOnlineHours } from './onlinehours.js';
-import { renderCancellations } from './cancellations.js';
 import { peopleCards, peopleResolved, namesLine } from './people.js';
-import { renderProvenance } from './provenance.js';
-import { renderReceipts } from './receipts.js';
 /* The payout register. Separate from #receipts, which lists every figure a
    provider FILED: this one lists only the money that actually moved, on the
    date it moved, which is a strictly smaller and differently-sourced set. */
-import { renderPayouts } from './payouts.js';
-import { renderIdentity } from './identity.js';
-import { renderCorporate, renderProperty, CORP_TABS, PROPERTY_TABS } from './corporate.js';
-import { renderTrip } from './trip.js';
-import { renderSettlement, SETTLE_TABS } from './settlement.js';
-import { renderCoverage } from './coverage.js';
-import { renderCorridors } from './corridors.js';
-import { renderAnalyst, ANALYST_TABS } from './analyst.js';
-import { renderProviders, renderProviderField } from './providers.js';
-import { renderRoster, ROSTER_TABS } from './roster.js';
-import { renderDay } from './day.js';
-import { renderSegments, renderSegment, segmentTable, withAttribution } from './segments.js';
-import { renderSlot } from './slot.js';
-import { renderPlaybook } from './playbook.js';
-import { renderForecast } from './forecast.js';
-import { renderRetention } from './retention.js';
-import { renderCapacity } from './capacity.js';
-import { renderRevenue } from './revenue.js';
-import { renderReconcile } from './reconcile.js';
-import { renderEconomics, UNIT_TABS } from './economics.js';
-import { renderPerformers, renderPerformer, isWeek } from './performers.js';
 /* Every active driver for one period on both bases, and — the part the two
    ranking pages cannot show — who is doing something different from what they
    themselves usually do. */
-import { renderPerformance } from './performance.js';
 /* The pairs no rule can settle, and a person's verdict on them. */
-import { renderSamePerson } from './sameperson.js';
-import { renderHrRoster } from './hrroster.js';
-import { renderDeposits } from './deposits.js';
-import { renderAdvances } from './advances.js';
-import { renderSalary } from './salary.js';
-import { renderOpening } from './opening.js';
-import { renderImport } from './importsheet.js';
-import { renderPolicy } from './policy.js';
-import { renderCharging } from './charging.js';
-import { renderCompare } from './compare.js';
-import { renderSupply } from './supply.js';
-import { renderOptimise } from './optimise.js';
-import { renderFeeds } from './feeds.js';
-import { renderMessages } from './messages.js';
+/* What the header needs before a page has loaded (pages load when opened: PAGE_OF below). */
+import { DRIVER_TABS, VEHICLE_TABS, PROPERTY_TABS, UNIT_TABS, isWeek, workbookUrl as monthWorkbookUrl } from './pagemeta.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -936,6 +889,112 @@ function setHeader(detail) {
 /* ─────────── views ─────────── */
 const V = {};
 
+/* PAGES LOAD WHEN THEY ARE OPENED (2026-10-27, docs/FIX-STATUS.md LAZY).
+   ─────────────────────────────────────────────────────────────────────────
+   Every page's module used to be imported at the top of this file, so the
+   first screen waited for all of them: 76 modules and 1,185,372 bytes on the
+   wire from production, of which #overview ran 24% (V8 coverage, measured
+   2026-10-27). Each handler below now asks page() for its own module the
+   first time its page opens; the page the address names is fetched early,
+   while the shell is still asking who is signed in (the bottom of this
+   file). What the header must know before then — tab names, whether a week
+   is a Monday, the month's workbook — is in pagemeta.js. The shell, the strip
+   and the pages written in this file load as before.
+
+   Safe because none of the 61 modules that left the first screen does
+   anything at load: no top-level call but two constants (checked with a
+   parser, 2026-10-27). A page module that ever DOES something at load will
+   now do it only when its page opens — keep them that way.
+
+   A module that will not load is told apart from a page that broke. The
+   likeliest cause is a deploy since this tab opened: the module asked for is
+   the new one, and it can import a name this tab's older ui.js does not
+   have. So the app reloads, once a minute at most — everything then comes
+   from one deploy — and a failure inside that minute is shown as what it is
+   (render's failure box). Never offline: a reload there is the browser's
+   error page instead of ours, and never in a loop.
+
+   While the module is on its way the view shows the ordinary skeleton
+   (ui.js loading()'s markup), so a first visit on a slow line is a page
+   loading, not a blank one: the old static imports had every page's code
+   in hand, and a handler put its own skeletons up at once. It is taken down
+   before the page draws; a module already loaded resolves in the same task,
+   so for it the placeholder is never painted. */
+const PAGE_OF = {
+  'hr-roster': './hrroster.js',
+  'import-sheet': './importsheet.js',
+  'low-performers': './lowperf.js',
+  'month-target': './targetmonth.js',
+  'online-hours': './onlinehours.js',
+  'online-time': './onlinetime.js',
+  'same-person': './sameperson.js',
+  'top-performers': './performers.js',
+  advances: './advances.js',
+  analyst: './analyst.js',
+  cancellations: './cancellations.js',
+  capacity: './capacity.js',
+  causes: './causes.js',
+  charging: './charging.js',
+  cohort: './cohort.js',
+  compare: './compare.js',
+  corporate: './corporate.js',
+  corridors: './corridors.js',
+  coverage: './coverage.js',
+  day: './day.js',
+  deposits: './deposits.js',
+  driver: './driver.js',
+  drivers: './driver.js',
+  feeds: './feeds.js',
+  forecast: './forecast.js',
+  identity: './identity.js',
+  messages: './messages.js',
+  opening: './opening.js',
+  optimise: './optimise.js',
+  payouts: './payouts.js',
+  performance: './performance.js',
+  performer: './performers.js',
+  playbook: './playbook.js',
+  policy: './policy.js',
+  property: './corporate.js',
+  provenance: './provenance.js',
+  providers: './providers.js',
+  receipts: './receipts.js',
+  reconcile: './reconcile.js',
+  retention: './retention.js',
+  revenue: './revenue.js',
+  roster: './roster.js',
+  salary: './salary.js',
+  segment: './segments.js',
+  segments: './segments.js',
+  settlement: './settlement.js',
+  slot: './slot.js',
+  supply: './supply.js',
+  target: './targetpage.js',
+  trip: './trip.js',
+  trips: './trips.js',
+  unauthorized: './segments.js',
+  unit: './economics.js',
+  vehicle: './vehicle.js',
+  vehicles: './vehicle.js',
+  watchlist: './lowperf.js',
+};
+const page = (view) => {
+  const wait = document.createElement('div');
+  wait.className = 'skel'; wait.textContent = 'Loading…';
+  document.querySelector('#view')?.append(wait);
+  return import(PAGE_OF[view]).then((m) => { wait.remove(); return m; }, (e) => { wait.remove(); return stale(view, e); });
+};
+const stale = (view, e) => {
+  const k = `fleet.reload:${PAGE_OF[view]}`;
+  let last = Date.now();
+  try { last = Number(sessionStorage.getItem(k)) || 0; } catch { /* no storage: no reload, so no loop */ }
+  if (navigator.onLine !== false && Date.now() - last > 60000) {
+    try { sessionStorage.setItem(k, String(Date.now())); } catch { /* as above */ }
+    location.reload();
+  }
+  throw e;
+};
+
 /* An address that names no destination.
    ─────────────────────────────────────────────────────────────────────────
    applyRoute() used to send every unrecognised hash to `unit`, so #hotels and
@@ -946,8 +1005,8 @@ const V = {};
    had not asked for. This one renders instead: no data, the address quoted
    back, and the nearest real destinations. */
 /* The first page: the month, today, and today hour by hour (./targetpage.js). */
-V.target = async (root) => { await targetPage(root); };
-V['month-target'] = async (root) => { await monthTargetPage(root, state.param); };
+V.target = async (root) => { await (await page('target')).targetPage(root); };
+V['month-target'] = async (root) => { await (await page('month-target')).monthTargetPage(root, state.param); };
 
 V.notfound = async (root) => {
   const addr = String(state.missing || '');
@@ -981,7 +1040,7 @@ V.notfound = async (root) => {
 
 /* The set behind a number. Reached from a tile or a verdict, never from the
    nav: it is a drill-down, and it only means anything with a key. */
-V.cohort = (root) => renderCohort(root, state.param);
+V.cohort = async (root) => (await page('cohort')).renderCohort(root, state.param);
 
 /* Two orders of one page, until the operator flips the default skin.
    ─────────────────────────────────────────────────────────────────────────
@@ -1658,7 +1717,7 @@ function topDrivers(host, drivers, { swatches = false } = {}) {
       : '')));
 }
 
-V.supply = async (root) => renderSupply(root);
+V.supply = async (root) => (await page('supply')).renderSupply(root);
 
 /* ── A DAY THAT HAS NOT FINISHED IS NOT AN OBSERVATION ─────────────────────
    ────────────────────────────────────────────────────────────────────────────
@@ -2408,14 +2467,15 @@ async function demandContract(root) {
 
 /* Subscripted, because the id carries a hyphen and V.online-time is not a
    property access. bin/page-audit.mjs matches both forms. */
-V['online-time'] = async (root) => renderOnlineTime(root);
+V['online-time'] = async (root) => (await page('online-time')).renderOnlineTime(root);
 /* Uber drivers online by hour (2026-10-14): the day is in the address,
    #online-hours/2026-10-01, so a day can be sent to somebody. */
-V['online-hours'] = async (root) => renderOnlineHours(root, state.param);
-V.cancellations = async (root) => renderCancellations(root);
+V['online-hours'] = async (root) => (await page('online-hours')).renderOnlineHours(root, state.param);
+V.cancellations = async (root) => (await page('cancellations')).renderCancellations(root);
 
 V.drivers = async (root) => {
   const gen = currentGen();
+  const { renderDriverDirectory, driversConcentration, driversAbsence } = await page('drivers');
   /* The directory's rows are REUSED rather than re-fetched.
      /api/drivers/directory is the slowest request on this page — 7.5s cold at
      365 days — and it was issued twice per load, once by the directory and
@@ -2594,24 +2654,31 @@ V.drivers = async (root) => {
 
 // The per-driver pages themselves. `state.param` is the platform driver id and
 // `state.sub` is the tab — both come straight from the URL.
-V.driver = async (root) => renderDriver(root, state.param, state.sub || 'overview');
+V.driver = async (root) => (await page('driver')).renderDriver(root, state.param, state.sub || 'overview');
 
 // Why the numbers moved: breaks decomposed into supply vs demand, coverage
 // gaps drawn as gaps, and the outside events that overlap them.
-V.causes = async (root) => renderCauses(root);
+V.causes = async (root) => (await page('causes')).renderCauses(root);
 
 /* The commercial pages. Each is a tabbed multipage view whose tab is part of
    the address, so "the eleven bookings we gave away last month" is a link. */
-V.corporate = async (root) => renderCorporate(root, CORP_TABS.some((t) => t.id === state.param) ? state.param : 'overview');
+V.corporate = async (root) => {
+  const { renderCorporate, CORP_TABS } = await page('corporate');
+  return renderCorporate(root, CORP_TABS.some((t) => t.id === state.param) ? state.param : 'overview');
+};
 V.property = async (root) => {
+  const { renderProperty } = await page('property');
   let detail = null;
   await renderProperty(root, state.param, PROPERTY_TABS.some((t) => t.id === state.sub) ? state.sub : 'overview',
     (d) => { detail = d; });
   return detail;
 };
-V.settlement = async (root) => renderSettlement(root, SETTLE_TABS.some((t) => t.id === state.param) ? state.param : 'mix');
-V.coverage = async (root) => renderCoverage(root);
-V.corridors = async (root) => renderCorridors(root);
+V.settlement = async (root) => {
+  const { renderSettlement, SETTLE_TABS } = await page('settlement');
+  return renderSettlement(root, SETTLE_TABS.some((t) => t.id === state.param) ? state.param : 'mix');
+};
+V.coverage = async (root) => (await page('coverage')).renderCoverage(root);
+V.corridors = async (root) => (await page('corridors')).renderCorridors(root);
 
 /* One finding, as an address. It was a modal, so the evidence trail for a
    specific problem could not be sent to the person who has to fix it — and the
@@ -2921,51 +2988,52 @@ async function actionContract(root) {
    verdict|plate|day|driver, and `#segment/<plate>/<started_at>` for one
    interval. These replaced four separate modals that opened the same body. */
 V.segments = async (root) => {
+  const { renderSegments } = await page('segments');
   const KINDS = ['verdict', 'plate', 'day', 'driver'];
   const kind = KINDS.includes(state.param) ? state.param : null;
   await renderSegments(root, kind, kind ? state.sub : null);
 };
-V.segment = async (root) => renderSegment(root, state.param, state.sub);
+V.segment = async (root) => (await page('segment')).renderSegment(root, state.param, state.sub);
 /* A booking as an address: #trip/<channel>/<the provider's own id>. Every
    trip table in the product opens into this, and the id is the provider's
    so a link survives a re-collection. */
-V.trip = async (root) => renderTrip(root, state.param, state.sub);
+V.trip = async (root) => (await page('trip')).renderTrip(root, state.param, state.sub);
 
 /* The two pages an operations lead opens on the first of the month: what is
    coming, and what to do about it. */
-V.playbook = async (root) => renderPlaybook(root);
-V.forecast = async (root) => renderForecast(root);
-V.retention = async (root) => renderRetention(root);
-V.optimise = async (root) => renderOptimise(root);
-V.capacity = async (root) => renderCapacity(root);
-V.trips = async (root) => renderTrips(root);
-V.receipts = async (root) => renderReceipts(root);
-V.feeds = async (root) => renderFeeds(root);
-V.messages = async (root) => renderMessages(root, state.param, state.sub);
-V.payouts = async (root) => renderPayouts(root);
-V.identity = async (root) => renderIdentity(root);
-V.provenance = async (root) => renderProvenance(root);
+V.playbook = async (root) => (await page('playbook')).renderPlaybook(root);
+V.forecast = async (root) => (await page('forecast')).renderForecast(root);
+V.retention = async (root) => (await page('retention')).renderRetention(root);
+V.optimise = async (root) => (await page('optimise')).renderOptimise(root);
+V.capacity = async (root) => (await page('capacity')).renderCapacity(root);
+V.trips = async (root) => (await page('trips')).renderTrips(root);
+V.receipts = async (root) => (await page('receipts')).renderReceipts(root);
+V.feeds = async (root) => (await page('feeds')).renderFeeds(root);
+V.messages = async (root) => (await page('messages')).renderMessages(root, state.param, state.sub);
+V.payouts = async (root) => (await page('payouts')).renderPayouts(root);
+V.identity = async (root) => (await page('identity')).renderIdentity(root);
+V.provenance = async (root) => (await page('provenance')).renderProvenance(root);
 /* The first screen: the fleet as a ledger rather than as a trip count. */
-V.unit = async (root) => renderEconomics(root);
-V['top-performers'] = async (root) => renderPerformers(root, 'top');
+V.unit = async (root) => (await page('unit')).renderEconomics(root);
+V['top-performers'] = async (root) => (await page('top-performers')).renderPerformers(root, 'top');
 /* The Low performers page (./lowperf.js, 2026-10-19): everyone below their
    target over a period — the Month target page's targets — day by day, and
    whether they are improving; #watchlist/<id> follows a list saved from it. */
-V['low-performers'] = async (root) => lowPerformersPage(root, state.param, state.sub);
-V.watchlist = async (root) => watchListPage(root, state.param, state.sub);
+V['low-performers'] = async (root) => (await page('low-performers')).lowPerformersPage(root, state.param, state.sub);
+V.watchlist = async (root) => (await page('watchlist')).watchListPage(root, state.param, state.sub);
 /* `#performance` is the latest complete period; `#performance/<YYYY-MM-DD>` is
    the period starting that day, so a reader can send somebody the exact week
    they are looking at rather than "the one that was showing". */
-V.performance = async (root) => renderPerformance(root, state.param);
-V['same-person'] = async (root) => renderSamePerson(root);
-V['hr-roster'] = async (root) => renderHrRoster(root);
-V.deposits = async (root) => renderDeposits(root);
-V.advances = async (root) => renderAdvances(root);
-V.salary = async (root) => renderSalary(root);
-V.opening = async (root) => renderOpening(root);
-V['import-sheet'] = async (root) => renderImport(root);
-V.policy = async (root) => renderPolicy(root);
-V.charging = async (root) => renderCharging(root);
+V.performance = async (root) => (await page('performance')).renderPerformance(root, state.param);
+V['same-person'] = async (root) => (await page('same-person')).renderSamePerson(root);
+V['hr-roster'] = async (root) => (await page('hr-roster')).renderHrRoster(root);
+V.deposits = async (root) => (await page('deposits')).renderDeposits(root);
+V.advances = async (root) => (await page('advances')).renderAdvances(root);
+V.salary = async (root) => (await page('salary')).renderSalary(root);
+V.opening = async (root) => (await page('opening')).renderOpening(root);
+V['import-sheet'] = async (root) => (await page('import-sheet')).renderImport(root);
+V.policy = async (root) => (await page('policy')).renderPolicy(root);
+V.charging = async (root) => (await page('charging')).renderCharging(root);
 /* Sign-in and access (collector/docs/ULM-DESIGN.md): my account, Set up →
    Access, and the fleets as the platforms name them. Loaded on demand — most
    readers never open them, and none of their code belongs on the path to a
@@ -2976,13 +3044,14 @@ V['fleet-names'] = async (root) => (await import('/fleetsadmin.js')).fleetsPage(
 V.approvals = async (root) => (await import('/approvals.js')).approvalsPage(root);
 /* `#performer/<id>/<monday>` — the week the reader was ranking when they
    clicked, so the drill-down shows the week they came from. */
-V.performer = async (root) => renderPerformer(root, state.param, state.sub);
-V.revenue = async (root) => renderRevenue(root);
+V.performer = async (root) => (await page('performer')).renderPerformer(root, state.param, state.sub);
+V.revenue = async (root) => (await page('revenue')).renderRevenue(root);
 // `#reconcile` is every month; `#reconcile/<YYYY-MM>` is that month's days.
-V.reconcile = async (root) => renderReconcile(root, state.param);
+V.reconcile = async (root) => (await page('reconcile')).renderReconcile(root, state.param);
 
 /* One weekday-hour cell of the demand heatmap: `#slot/<dow>/<hour>`. */
 V.slot = async (root) => {
+  const { renderSlot } = await page('slot');
   const dow = Number(state.param), hour = Number(state.sub);
   if (!Number.isInteger(dow) || dow < 0 || dow > 6 || !Number.isInteger(hour) || hour < 0 || hour > 23) {
     return empty(root, 'A slot address is #slot/<weekday 0-6>/<hour 0-23>.');
@@ -2993,10 +3062,12 @@ V.slot = async (root) => {
 /* Two days beside each other. `#compare/<a>/<b>`, both optional: with neither
    it is today against yesterday, which is the question this page exists for. */
 V.compare = async (root) => {
+  const { renderCompare } = await page('compare');
   await renderCompare(root, state.param, state.sub);
 };
 
 V.day = async (root) => {
+  const { renderDay } = await page('day');
   let detail = null;
   await renderDay(root, state.param, (d) => { detail = d; });
   return detail;
@@ -3006,6 +3077,7 @@ V.day = async (root) => {
    name — which can contain a slash in "Trip distance (miles)" style keys — is
    taken from the tail of the address rather than from `state.sub`. */
 V.providers = async (root) => {
+  const { renderProviderField, renderProviders } = await page('providers');
   const provider = state.param;
   const rest = state.sub;
   if (provider && rest) {
@@ -3016,11 +3088,12 @@ V.providers = async (root) => {
   }
   return renderProviders(root);
 };
-V.roster = async (root) => renderRoster(root);
-V.analyst = async (root) => renderAnalyst(root);
+V.roster = async (root) => (await page('roster')).renderRoster(root);
+V.analyst = async (root) => (await page('analyst')).renderAnalyst(root);
 
 V.vehicles = async (root) => {
   const gen = currentGen();
+  const { renderVehicleDirectory, vdirTail } = await page('vehicles');
   /* /api/vehicles is not fetched at all any more.
      ───────────────────────────────────────────────────────────────────────
      It cost 12.2s cold at a 365-day window — of a 43.7s page — and everything
@@ -3115,7 +3188,7 @@ V.vehicles = async (root) => {
 };
 
 // The per-vehicle pages. `state.param` is the plate, `state.sub` is the tab.
-V.vehicle = async (root) => renderVehicle(root, state.param, state.sub || 'overview');
+V.vehicle = async (root) => (await page('vehicle')).renderVehicle(root, state.param, state.sub || 'overview');
 
 /* Platforms — three pages, because "which channel" and "which product on that
    channel" and "how much demand we turned away" are three different questions
@@ -5037,6 +5110,7 @@ function safetyAbsence(host, { unattributed, byDrv, KM }) {
 }
 
 V.unauthorized = async (root) => {
+  const { segmentTable, withAttribution } = await page('unauthorized');
   /* Under the page contract (plan §4 #unauthorized): the verdict as the 00
      statement with the tiles — the one printing its figure folded into it by
      name (ruling 7), untoned, a mean a day over the last seven days against
@@ -10453,6 +10527,13 @@ function applyRoute() {
 }
 applyRoute();
 window.addEventListener('hashchange', () => { applyRoute(); render(); });
+/* The page the address names, fetched now — while loadWho() below asks the
+   server who is signed in — rather than after it (PAGE_OF). A failure here is
+   its handler's to report. */
+if (PAGE_OF[state.view]) import(PAGE_OF[state.view]).catch(() => { /* page() says why */ });
+/* The Arkiv boot sheet says what the wait is (motion.css §1): the code is in
+   and running, so from here it is the server's answer. */
+if (document.documentElement.dataset.boot === 'code') document.documentElement.dataset.boot = 'who';
 /* The first render waits for the stylesheets, because the shell and the page
    contract are both TOKENS in them (shell.js whenStyled: a script-inserted
    module can run before a parser-inserted <link> has loaded). When every

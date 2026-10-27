@@ -163,7 +163,9 @@ function watch(records) {
       for (const n of added) flash(n, 'fx-arrive', ARRIVE_MS);
       continue;
     }
-    if (!waited || still()) continue;
+    /* The view's own placeholder while a page's module loads (app.js
+       page()) is followed by the page itself, with its own entrance. */
+    if (!waited || still() || (!added.length && r.target.id === 'view')) continue;
     /* What replaced the skeleton comes up. A node with an entrance of its
        own (a chart's growing bar, a block already settling) keeps it. If
        only text came, the host itself does. */

@@ -98,15 +98,23 @@
   opacity:0;animation:ak-show 1ms linear .35s forwards}
 :root[data-skin="arkiv"][data-motion="on"][data-focus="on"] #app:not(.ak-shell)::before{top:47px}
 
-/* After four seconds, a sentence: the wait is real, and here is its true
-   reason. Not a guess at the reader's network — the reason this page takes
-   seconds on any network is that it loads most of its pages first. */
+/* After four seconds, a sentence: the wait is real, and here is what it is
+   waiting FOR — never a guess at the reader's network. The page knows which
+   of its two waits it is in (data-boot): index.html stamps "code" before the
+   first paint, and app.js turns it to "who" as soon as its own code is in and
+   running, when what is left is the server's answer to who is signed in.
+   Until 2026-10-27's lazy loading the sentence was "the dashboard loads most
+   of its pages before it shows the first one", true until that change. */
 :root[data-skin="arkiv"][data-motion="on"] #app:not(.ak-shell)::after{
-  content:"Still opening \2014  the dashboard loads most of its pages before it shows the first one.";
+  content:"Still opening.";
   visibility:visible;position:fixed;z-index:1;top:132px;left:var(--shell-x);right:var(--shell-x);
   font-family:var(--sans);font-size:var(--t5);line-height:1.5;color:var(--grey);
   opacity:0;animation:ak-show 1ms linear 4s forwards}
 :root[data-skin="arkiv"][data-motion="on"][data-focus="on"] #app:not(.ak-shell)::after{top:103px}
+:root[data-skin="arkiv"][data-motion="on"][data-boot="code"] #app:not(.ak-shell)::after{
+  content:"Still opening \2014  the dashboard\2019s code is still arriving."}
+:root[data-skin="arkiv"][data-motion="on"][data-boot="who"] #app:not(.ak-shell)::after{
+  content:"Still opening \2014  waiting for the server to answer."}
 
 /* And when the opening STOPPED — a module that failed to load or threw
    before the shell was built (index.html's pre-paint script listens). Today

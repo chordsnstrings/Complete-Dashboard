@@ -5456,3 +5456,33 @@ known Leaflet routes (HANDOFF §8), the same six hashes on HEAD without this cha
 without the layer, and a tour — section links, opening a page, a tab, rows under the pointer, and
 a refresh in which seven more trips arrive (simulated by rewriting one `/api/kpis` answer in the
 browser; the redraw path itself is the real one).
+
+
+## LAZY — pages load when they are opened (2026-10-27)
+
+The operator: "sometimes loading the page takes longer so perhps lazy loading", then, with the
+motion layer live, "start the lazy loading whenever done".
+
+**What it was.** app.js imported every page's module at the top, so the first screen of any page
+waited for all of them: 76 modules, 3.5 MB of code, **1,185,372 bytes on the wire** from production,
+every one `max-age=0, must-revalidate`. V8 coverage on #overview: **24%** of those bytes ran. Five
+pages (account, access, fleet names, approvals, the map) already loaded on demand.
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| LAZY1 | `api/public/app.js`: `PAGE_OF` names the module of each of 56 pages (49 modules); each handler asks `page('x')` for its own the first time it opens — a one-line `(await page('x')).renderX(…)`, or one destructuring line at the top of a longer handler, so every use below it (closures included) reads the loaded names. The first screen is now **19 modules, 1.21 MB of code (≈397 KB gzipped, from 1,148)**. Chosen with a parser: every reference to a moved name is inside a page handler, each handler uses one module, and none of the 58 modules that left the first screen does anything at load (no top-level call but two constants) | yes | **no** — waits on the operator | `lazy_pages` §1–4 |
+| LAZY2 | `api/public/pagemeta.js` (new): what the header must know before a page has loaded — `DRIVER_TABS`, `VEHICLE_TABS`, `PROPERTY_TABS`, `UNIT_TABS`, `isWeek`, `isMonth`/`workbookUrl` — moved verbatim with their reasons; driver.js, vehicle.js, corporate.js, economics.js, performers.js and targetmonth.js import them back (one copy). They were all that kept those six modules, driver.js's 300 KB among them, in every first screen | yes | **no** | `lazy_pages` §1; `routes` 65/0 (its tab checks read pagemeta.js now) |
+| LAZY3 | The addressed page's module is fetched while the shell still waits for `/api/auth/me`, not after it | yes | **no** | `lazy_pages` §5 |
+| LAZY4 | A module that will not load — likeliest after a deploy, when the new module can import a name this tab's older ui.js lacks — reloads the app at most once a minute (per module, sessionStorage), never offline, then shows render's failure box | yes | **no** | `lazy_pages` §6 |
+| LAZY5 | While a module is on its way the view shows the ordinary skeleton (`loading()`'s markup), taken down before the page draws: without it a first visit on a slow line showed an empty view, and `test/smoke_views.mjs`, which waits for "no skeleton", passed on the empty view and then reported pages "still loading" (46 more than the old code against production data). motion.js does not fade the whole view when that placeholder goes | yes | **no** | `lazy_pages` §7 |
+| LAZY6 | The motion boot sheet's sentence names the wait it is in: index.html stamps `data-boot="code"`, app.js turns it to `"who"` once its own code runs ("waiting for the server to answer"). Its old sentence, "the dashboard loads most of its pages before it shows the first one", stopped being true with LAZY1 | yes | **no** | `arkiv_motion` §4 (56/0) |
+
+**Revert proof** (`test/lazy_pages.test.mjs`; each file restored and its md5 checked): a page
+module put back as a static import of app.js → 11/6 (the first screen 20 modules, 1,313 KB, and
+#overview fetching payouts.js); a `PAGE_OF` entry dropped → 12/5 ("Failed to resolve module
+specifier 'undefined'"); a page module doing something at load → 16/1; the early fetch removed →
+16/1 (the module asked for after `/api/auth/me` answered); the reload guard without its minute →
+15/2 (28 loads in four seconds — the loop it exists to prevent).
+
+**Still to record** (the next commit): `test/smoke_views.mjs` over all 133 routes against production
+data, old against new, and cold-open timings through a throttled line.

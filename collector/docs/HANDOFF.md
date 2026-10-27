@@ -48,7 +48,7 @@ stale document.
 | Access control (ULM) | Built and deployed (`a1429529`, 2026-09-28) but in **open** mode. `/api/auth/me` → `mode: "open"`. Anonymous readers get every page (§6.1). |
 | Identity register | 461 entries over 237 people, PENDING 0, REFUSED 3. `test/identity_register_counts.test.mjs` passes 16/16, and `node bin/gen-schema-v53.mjs --check` matches. CLAUDE.md's counts are right. |
 | Migrations | 109 files (`schema.sql` + `schema_v2`…`v110`; v60 never existed). v110 = `alert_state`, the ntfy watcher's memory. All registered in `src/schema_files.js`, in order, none missing (checked mechanically). |
-| Tests | **389** `.test.mjs` files plus 15 helpers (2026-10-27, with `arkiv_motion`). CLAUDE.md carries the same count. |
+| Tests | **390** `.test.mjs` files plus 15 helpers (2026-10-27, with `arkiv_motion` and `lazy_pages`). CLAUDE.md carries the same count. |
 
 ---
 

@@ -899,6 +899,16 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A page's module now loads when the page opens (app.js `PAGE_OF`, FIX-STATUS
+  LAZY), so a page module must not DO anything at load** — a listener, a
+  global, a timer at the top of driver.js would now run only once someone
+  opens a driver. `test/lazy_pages.test.mjs` §3 fails on a top-level
+  statement that is not a declaration. And what the header reads before a
+  page has loaded (tab names, a week, the month's workbook) goes in
+  pagemeta.js, never in a page module: one constant imported from a page
+  module at the top of app.js puts that whole page back in every first
+  screen (§1 fails on it).
+
 * **A browser test never sees the Arkiv motion layer unless it asks for it.**
   index.html stamps `data-motion` only where `navigator.webdriver` is false,
   and Playwright sets it — so every existing test, screenshot and render

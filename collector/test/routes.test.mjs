@@ -156,15 +156,21 @@ check('every driver tab is a real route',
   /href\('driver', \w+, t === 'overview' \? null : t\)/.test(driverJs));
 check('\u2026and the tab bar links by the page\u2019s canonical address, not the account id',
   /tabBar\(DRIVER_TABS, tab, \(t\) => href\('driver', canon,/.test(driverJs));
+/* The tab lists moved to pagemeta.js on 2026-10-27 (pages load when opened,
+   and the header names a tab before driver.js or vehicle.js has loaded);
+   driver.js and vehicle.js import them from there. Read where they live. */
+const pagemetaJs = readFileSync('api/public/pagemeta.js', 'utf8');
 check('all six driver tabs registered', ['overview', 'activity', 'territory', 'earnings', 'quality', 'trips']
-  .every((t) => new RegExp(`id: '${t}'`).test(driverJs)), 'DRIVER_TABS');
+  .every((t) => new RegExp(`id: '${t}'`).test(pagemetaJs.slice(pagemetaJs.indexOf('DRIVER_TABS'), pagemetaJs.indexOf('VEHICLE_TABS'))))
+  && /import \{ DRIVER_TABS \} from '\.\/pagemeta\.js'/.test(driverJs), 'DRIVER_TABS');
 // Detail pages must ignore the platform/fleet filter: showing "everything about
 // this person" while a platform filter silently hides half their work is a lie.
 check('detail pages fetch unfiltered', !/[^A]\bq\('\/api\/driver\//.test(driverJs) && /qAll\('\/api\/driver\//.test(driverJs));
 
 const vehicleJs = readFileSync('api/public/vehicle.js', 'utf8');
 check('all six vehicle tabs registered', ['overview', 'drivers', 'movement', 'safety', 'compliance', 'trips']
-  .every((t) => new RegExp(`id: '${t}'`).test(vehicleJs)), 'VEHICLE_TABS');
+  .every((t) => new RegExp(`id: '${t}'`).test(pagemetaJs.slice(pagemetaJs.indexOf('VEHICLE_TABS'), pagemetaJs.indexOf('PROPERTY_TABS'))))
+  && /import \{ VEHICLE_TABS \} from '\.\/pagemeta\.js'/.test(vehicleJs), 'VEHICLE_TABS');
 check('every vehicle tab is a real route', /href\('vehicle', plate, t === 'overview' \? null : t\)/.test(vehicleJs));
 check('vehicle pages fetch unfiltered', !/[^A]\bq\('\/api\/vehicle\//.test(vehicleJs) && /qAll\('\/api\/vehicle\//.test(vehicleJs));
 
