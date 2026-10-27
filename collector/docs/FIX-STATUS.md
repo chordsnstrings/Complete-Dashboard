@@ -5484,5 +5484,23 @@ specifier 'undefined'"); a page module doing something at load → 16/1; the ear
 16/1 (the module asked for after `/api/auth/me` answered); the reload guard without its minute →
 15/2 (28 loads in four seconds — the loop it exists to prevent).
 
-**Still to record** (the next commit): `test/smoke_views.mjs` over all 133 routes against production
-data, old against new, and cold-open timings through a throttled line.
+**Every route against production data** (`test/smoke_views.mjs` through `bin/live-ui.mjs`, old
+code from a worktree on :8101, new on :8100, 2026-10-27): old 127/133, new **128/133**. The new
+code's five misses are all among the old code's six — "still loading after 20s" on the slow
+data (`#map/replay`, `#online-hours` twice, `#sources`, the first cold `#unit`) — and no route
+renders worse. (The first new run, before LAZY5, reported 52: the harness waits for "no
+skeleton", and the view was empty while a module loaded.)
+
+**Cold opens, old against new** (live-ui, which serves the code uncompressed; Chromium throttled;
+median of three; "drawn" = the page's last skeleton gone):
+
+| line | page | shell up | page drawn | JavaScript fetched |
+|---|---|---|---|---|
+| 900 KB/s, 90 ms | #overview | 5.48 → **2.97 s** | 5.71 → **2.99 s** (−48%) | 76 files, 2,982 KB → 19 files, 1,185 KB |
+| 900 KB/s, 90 ms | #drivers | 5.47 → **2.94 s** | 6.43 → **4.37 s** (−32%) | 76 files, 3,234 KB → 26 files, 1,650 KB |
+| 4 MB/s, 40 ms | #overview | 1.98 → **0.91 s** | 2.04 → **1.48 s** (−27%) | 76 → 19 files |
+| 4 MB/s, 40 ms | #drivers | 2.12 → **0.90 s** | 2.40 → **1.73 s** (−28%) | 76 → 26 files |
+
+Production serves the code brotli-compressed (1,185,372 bytes for the old first screen), so its
+absolute times are lower than these; the share saved is the same order — the first screen's
+code is a third of what it was.
