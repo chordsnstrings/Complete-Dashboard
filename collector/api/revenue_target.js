@@ -951,7 +951,12 @@ export async function saveTarget(q, { month, gross, now = new Date(), by = null,
   /* A class save made before today plans every day of this month after it
      (and, the month's first save, the days before it): those days are gone
      at their plan, exactly as under an earlier month save. */
-  const [classes, classOf] = await Promise.all([classRows(q, addDays(today, -1)), loadClasses(q)]);
+  /* …shared by the month's own frozen weights, as every reader of the month
+     shares them (computeMonth `shaped`): without them the days gone were
+     planned here at the class save's own weights — 10,000 where the page
+     read 10,300 — and the month read 300 over what was typed, "cars have
+     joined" with none joined (independent review, 2026-10-29). */
+  const [classes, classOf, mwSave] = await Promise.all([classRows(q, addDays(today, -1)), loadClasses(q), monthWeights(q, month, { now })]);
   let rate; let pastPlan = 0;
   if (!earlier.length && !(classes.length && today > first)) {
     /* The days before the first save are planned at its cars, so the whole
@@ -959,7 +964,7 @@ export async function saveTarget(q, { month, gross, now = new Date(), by = null,
     rate = g / (cars * wSum(first, last));
     pastPlan = today > first ? rate * cars * wSum(first, addDays(today, -1)) : 0;
   } else {
-    const was = computeMonth({ month, today, rows: earlier, facts, classes, classOf });
+    const was = computeMonth({ month, today, rows: earlier, facts, classes, classOf, mw: mwSave });
     pastPlan = was.plannedRaw;
     rate = (g - pastPlan) / (cars * wSum(restFrom, last));
     if (!(rate > 0)) {
@@ -991,7 +996,11 @@ export const USUAL_DAYS = 28;
     {error, status, detail}. */
 export async function saveClassTarget(q, { rates = [], other, now = new Date(), by = null, byLabel = '' }) {
   const today = dubaiDay(now);
-  const num = (v) => (v === '' || v == null ? null : Number(v));
+  /* Rounded to the fils BEFORE it is checked: 0.004 passed a check made on
+     the raw figure and was stored as 0 — a class asked nothing, and an
+     every-other-car figure that broke the table's CHECK into a 500
+     (independent review, 2026-10-29). */
+  const num = (v) => (v === '' || v == null ? null : r2(Number(v)));
   const fine = (v) => Number.isFinite(v) && v > 0 && v <= MAX_CLASS_RATE;
   const o = num(other);
   if (!fine(o)) return { error: 'bad_other', status: 400, detail: 'Enter the AED a day for every other car, above zero.' };
@@ -1009,7 +1018,7 @@ export async function saveClassTarget(q, { rates = [], other, now = new Date(), 
     if (seen.has(key)) return { error: 'duplicate_class', status: 400, detail: `${c.label} is listed twice.` };
     if (!fine(r)) return { error: 'bad_rate', status: 400, detail: `Enter the AED a day for ${c.label}, above zero.` };
     seen.add(key);
-    clean.push({ make: c.make, model: c.model, year: c.year, rate: r2(r) });
+    clean.push({ make: c.make, model: c.model, year: c.year, rate: r });
   }
   /* The cars each class counts at the save, for the history. */
   const facts = await loadFacts(q, addDays(today, -(CAR_DAYS + 1)), today);
@@ -1029,7 +1038,7 @@ export async function saveClassTarget(q, { rates = [], other, now = new Date(), 
      VALUES ($1::date, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb)
      RETURNING id, to_char(set_day, 'YYYY-MM-DD') AS set_day, set_at, set_by, set_by_label, rates, other_rate, cars,
                weights, weights_basis`,
-    [today, now.toISOString(), by, String(byLabel || '').slice(0, 200), JSON.stringify(clean), r2(o), JSON.stringify(cars),
+    [today, now.toISOString(), by, String(byLabel || '').slice(0, 200), JSON.stringify(clean), o, JSON.stringify(cars),
       lw.ok ? JSON.stringify(lw.fares) : null, JSON.stringify(lw.basis)]);
   return { row: normClassRow(row) };
 }
@@ -1165,6 +1174,15 @@ export async function applyWeightCutover(db, { now = new Date(), log = () => {} 
     const saves = rows.map(normRow).sort(bySave);
     const latest = saves[saves.length - 1];
     if (!latest || latest.weights) continue;
+    /* A class save after it governs the month from its day with weights of
+       its own (the month's), so there is nothing to re-shape — and a system
+       save inserted now would override the Owner's class figures from today
+       (independent review, 2026-10-29). */
+    const classes = (await classRows(q, monthSpan(m, today).last)).map(normClassRow);
+    if (classes.some((c) => c.set_at > latest.set_at)) {
+      out.push({ month: m, done: false, why: 'governed by daily targets by vehicle class' });
+      continue;
+    }
     const lw = await learnWeights(q, today);
     if (!lw.ok) {
       log(`target ${m} stays shared equally: ${lw.basis.why}`);
@@ -1173,7 +1191,11 @@ export async function applyWeightCutover(db, { now = new Date(), log = () => {} 
     }
     const { first, last, from, to } = monthSpan(m, today);
     const facts = await loadFacts(q, from, to);
-    const was = computeMonth({ month: m, today, rows, facts });
+    /* An earlier class save may still plan the days before the month save
+       (carried in, or the month's anchor): read the month as its page does.
+       With none, exactly as before. */
+    const [classOf, mwNow] = classes.length ? await Promise.all([loadClasses(q), monthWeights(q, m, { now })]) : [new Map(), null];
+    const was = computeMonth({ month: m, today, rows, facts, classes, classOf, mw: mwNow });
     const cars = carsAsOf(facts, today).size;
     const restFrom = today > first ? today : first;
     let wsum = 0;

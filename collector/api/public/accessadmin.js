@@ -1387,7 +1387,9 @@ function settingsTab(host, ctx) {
    what a car of it usually earns (the last 4 weeks' settled days), and what
    the box asks of today. Each box starts at the figure in force — under one
    rate for every car, that rate — so a save that touches nothing asks the
-   days left what they were asked. Every save is kept (who, when, every
+   days left what they were asked, give or take the weekday shape (class
+   rates share by the month's frozen weights; a month save made after the
+   1st by its own). Every save is kept (who, when, every
    figure); a later one changes only the days from it on. Exported for
    test/class_target_panel.test.mjs, which draws it on its own. */
 export function targetPanel(host, ctx) {

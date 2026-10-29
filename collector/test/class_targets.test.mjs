@@ -296,5 +296,83 @@ const carNoRev = shapeBody(JSON.parse(j(car)), carE, { VEH: 'F', SYS: 'F' }).bod
 check('/api/target/car is declared, and a role without revenue gets no figure from it',
   !!carE && carNoRev.rate == null && carNoRev.days.every((d) => d.plan == null && d.earned == null) && carNoRev.totals.plan == null, j(carNoRev).slice(0, 200));
 
+/* ── 8. what the independent review found (2026-10-29) ────────────────── */
+console.log('\n8. the review’s findings, each held');
+{
+  /* The withheld figures: the sheet's intro, the month before's summary, the
+     table's total. */
+  const intro = book(wbH).sheets.find((s) => s.name === 'Classes').rows.flat().filter((c) => typeof c === 'string').join(' ');
+  check('the Classes sheet’s intro names no figure a role without revenue does not hold',
+    /figure for every other car\./.test(intro) && !/AED 80/.test(intro), intro.slice(0, 240));
+  /* REVERSION (run 2026-10-29): the intro printing `AED ${s.other_rate}`
+     raw -> this check fails ("…every other car (AED 80)."). */
+  const ym = JSON.parse(j({ ...sep, yesterday_month: { month: '2026-09', target: sep.target, summary: sep.summary } }));
+  const ymS = shapeBody(ym, lookupEntry('GET', '/api/target'), { VEH: 'F', SYS: 'F', BK: 'F' }).body.yesterday_month.summary;
+  check('on the 1st, the month before’s summary is withheld as the month’s is',
+    ymS.other_rate == null && ymS.rate == null && ymS.planned == null && ymS.today_needs == null, j(ymS).slice(0, 200));
+  const totalRow = (h) => (h.match(/<tr class="tp-cls-sum">(.*?)<\/tr>/) || [])[1] || '';
+  /* REVERSION (run 2026-10-29): the total summing nulls -> this check
+     fails ("All cars … <td>0</td>"). */
+  check('a total of figures every row withholds is absent, never 0',
+    /<td><span class="hp-dim">—<\/span><\/td>/.test(totalRow(classesHtml(noVeh))) && !/<td>0<\/td>/.test(totalRow(classesHtml(noVeh)))
+    && !/AED 0\.00/.test(totalRow(classesHtml(noRev))), totalRow(classesHtml(noVeh)).slice(0, 200));
+}
+{
+  /* The flat save after a class save carried in, the month's frozen
+     weights, the figures rounded before they are checked, the weekday
+     re-shape, the save count. */
+  const db2 = new PGlite();
+  await applySchema(db2);
+  const q2 = (t, p = []) => db2.query(t, p).then((r) => r.rows);
+  await q2(`INSERT INTO fleet (id, name) VALUES ('ecosine','Ecosine') ON CONFLICT DO NOTHING`);
+  await q2(`INSERT INTO vehicle (plate, make, model, year) VALUES ('C1','BYD','Han EV',2025),('C2','BYD','Han EV',2025),('C3','Tesla','Model Y',2023)`);
+  let k2 = 0;
+  for (const d of span('2026-08-25', '2026-10-28')) {
+    for (const p of ['C1', 'C2', 'C3']) {
+      await q2(`INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, plate, requested_at, ended_at, status, payment_type, price, currency, raw)
+        VALUES ('uber', $1, 'ecosine', $2, $3, $2, $4::timestamptz, $4::timestamptz + interval '20 minutes', 'completed', 'card', 300, 'AED', '{}'::jsonb)`,
+      [`r${++k2}`, p, `Test Driver ${p}`, `${d}T08:00:00Z`]);
+    }
+  }
+  await q2(`INSERT INTO collection_run (source, fleet_id, mode, window_start, window_end, started_at, finished_at, status)
+    VALUES ('uber', 'ecosine', 'incremental', '2026-08-01', '2026-10-29', now(), now(), 'ok')`);
+  const W2 = [0.8, 0.9, 1, 1, 1.2, 1.1, 1];
+  await q2(`INSERT INTO target_weights (month, from_day, trips, fares, basis) VALUES ('2026-10-01', '2026-10-01', $1::jsonb, $1::jsonb, '{}'::jsonb)`, [j(W2)]);
+  const okC = await saveClassTarget(q2, { rates: [{ make: 'BYD', model: 'Han EV', year: 2025, rate: 350 }], other: 200, now: at('2026-09-20') });
+  check('the fixture: a September class save', !!okC.row, j(okC));
+  const ms = await rt.saveTarget(q2, { month: '2026-10', gross: 40000, now: at('2026-10-11') });
+  const after = await monthTarget(q2, { month: '2026-10', today: '2026-10-11' });
+  check('a month save after a class save carried in keeps the days gone at the plan the page reads: the month is what was typed',
+    Math.abs(ms.row.past_plan - after.summary.planned) < 0.005 && after.summary.month_target === 40000 && after.summary.since_set === 0,
+    j([ms.row?.past_plan, after.summary.planned, after.summary.month_target, after.summary.since_set]));
+  /* REVERSION (run 2026-10-29): `mw` left out of saveTarget's re-plan ->
+     this check fails (the days gone planned at the class save's own weights,
+     the month over what was typed). */
+  const tiny = await saveClassTarget(q2, { rates: [], other: 0.004, now: at('2026-10-11') });
+  const tinyR = await saveClassTarget(q2, { rates: [{ make: 'BYD', model: 'Han EV', year: 2025, rate: 0.004 }], other: 200, now: at('2026-10-11') });
+  /* REVERSION (run 2026-10-29): checked before it is rounded -> the save
+     throws on the table's CHECK (other_rate > 0) and the run stops here —
+     the route's 500. */
+  check('a figure that rounds to nothing is refused as one (400), never stored as 0 or a 500',
+    tiny.error === 'bad_other' && tiny.status === 400 && tinyR.error === 'bad_rate', j([tiny, tinyR]));
+  const { buildTodayWorkbook: btw } = await import('../api/today_workbook.js');
+  const { sheetNamed: sn } = await import('../src/salary/xlsx.js');
+  const tw2 = readWorkbook((await btw({ q: q2, now: at('2026-10-12', '09:00') })).wb.toBuffer());
+  const setRow = (sn(tw2, 'Target')?.rows || []).find((r) => r[0] === 'Target as set (AED)');
+  check('the Today workbook counts this month’s saves, not one carried in', setRow && !/saves this month/.test(String(setRow[2])), j(setRow));
+  /* The weekday re-shape: a month save with no weights, then a class save. */
+  await q2(`INSERT INTO revenue_target (month, gross_target, cars, rate, past_plan, set_day, set_at, set_by_label)
+    VALUES ('2026-11-01', 30000, 3, 333.33, 0, '2026-10-20', '2026-10-20T06:00:00Z', 'owner@example.test')`);
+  await saveClassTarget(q2, { rates: [{ make: 'BYD', model: 'Han EV', year: 2025, rate: 360 }], other: 210, now: at('2026-10-21') });
+  const cut = await rt.applyWeightCutover(db2, { now: at('2026-10-22') });
+  const nov = cut.find((x) => x.month === '2026-11');
+  const reweights = await q2(`SELECT count(*)::int AS n FROM revenue_target WHERE set_by_label = 'system:reweight'`);
+  check('the weekday re-shape leaves a month the class figures govern alone — no system save over the Owner’s',
+    nov && nov.done === false && /vehicle class/.test(nov.why) && reweights[0].n === 0, j([nov, reweights]));
+  /* REVERSION (run 2026-10-29): the class-save skip removed from
+     applyWeightCutover -> this check fails (a system:reweight row for
+     November, over the class figures saved after it). */
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

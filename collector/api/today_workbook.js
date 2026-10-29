@@ -61,7 +61,8 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
          figure, and the Classes sheet lists the figures. */
       sm.kind === 'class'
         ? ['Targets set (by vehicle class)', sm.rates_set_day, 'text', `Each car is asked its class’s AED on an average day (the Classes sheet); a class with no figure of its own, and a car with no make or model on file, the figure for every other car${hide.has('REV') ? '' : `, AED ${sm.other_rate}`}.`]
-        : ['Target as set (AED)', money(sm.gross_set), 'money', `Saved on ${t.target.set_day}${t.saves.length > 1 ? `; ${t.saves.length} saves this month` : ''}.`],
+        : ['Target as set (AED)', money(sm.gross_set), 'money', `Saved on ${t.target.set_day}${t.saves.filter((x) => !x.carried).length > 1
+          ? `; ${t.saves.filter((x) => !x.carried).length} saves this month` : ''}.`],
       sm.kind === 'class'
         ? ['AED a car on an average day, on average', money(sm.rate), 'money', 'Today’s cars at their classes’ figures, averaged: what a car is asked on an average day across the fleet as it stands.']
         : sm.weighted

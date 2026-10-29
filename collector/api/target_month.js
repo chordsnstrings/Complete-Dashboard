@@ -423,9 +423,13 @@ export function monthWorkbookOf(v, { now = new Date(), hide = new Set() } = {}) 
 export function classSheet(wb, v, hid) {
   const sh = wb.sheet('Classes', { widths: [14, 16, 7, 9, 14, 12, 13, 13, 13, 15, 15, 9, 14, 40] });
   const s = v.summary;
+  /* The intro's figures go through `hid` like every cell: printed raw, a
+     role without revenue read the every-other-car figure off the sentence
+     (independent review, 2026-10-29). */
+  const aed = (x) => (hid('REV', x) === x ? ` (AED ${x}${s?.kind === 'class' ? '' : ` a car${s?.weighted ? ' on an average day' : ' a day'}`})` : '');
   sh.text(!s ? (v.why || 'No target is set.') : s.kind === 'class'
-    ? `Daily targets by vehicle class, set on ${s.rates_set_day}: each car is asked its class’s AED on an average day × the day’s weekday weight. A class with no figure of its own, and a car with no make or model on file, is asked the figure for every other car (AED ${s.other_rate}).`
-    : `One figure for every car (AED ${s.rate} a car${s.weighted ? ' on an average day' : ' a day'}), so these are each class’s shares of it. Daily targets by vehicle class are set in Set up › Access.`, 'wrap');
+    ? `Daily targets by vehicle class, set on ${s.rates_set_day}: each car is asked its class’s AED on an average day × the day’s weekday weight. A class with no figure of its own, and a car with no make or model on file, is asked the figure for every other car${aed(s.other_rate)}.`
+    : `One figure for every car${aed(s.rate)}, so these are each class’s shares of it. Daily targets by vehicle class are set in Set up › Access.`, 'wrap');
   sh.header(['Make', 'Model', 'Year', 'Cars now', 'AED a car, average day', 'Other-car figure?', 'Today’s plan (AED)',
     'Yesterday plan (AED)', 'Yesterday earned (AED)', 'Month so far, plan (AED)', 'Month so far, earned (AED)', '% of plan',
     'Month plan (AED)', 'Cars counted with no make or model'],

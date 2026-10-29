@@ -100,12 +100,17 @@ export function classesHtml(t) {
       + `<td class="${tone(c)}">${of(c.earned, c.planned)}${c.pct != null ? ` <span class="hp-dim">${esc(`${fmt(c.pct, 1)}%`)}</span>` : ''}</td>`
       + `<td>${c.month_plan == null ? dash : esc(money(c.month_plan))}</td></tr>`;
   }).join('');
-  const sum = (k) => rows.reduce((n, c) => n + (c[k] || 0), 0);
-  const total = `<tr class="tp-cls-sum"><th scope="row">All cars</th><td>${esc(fmt(sum('cars_now')))}</td>`
-    + `<td>${esc(money(s.rate))} <span class="hp-dim">on average</span></td><td>${esc(money(sum('plan_today')))}</td>`
-    + (hasY ? `<td>${esc(money(sum('yday_earned') + (loose?.yday_earned || 0)))} <span class="hp-dim">${esc(`of ${money(sum('yday_plan'))}`)}</span></td>` : '')
-    + `<td>${esc(money(s.earned))} <span class="hp-dim">${esc(`of ${money(s.planned)}`)}</span></td>`
-    + `<td>${esc(money(s.month_target))}</td></tr>`;
+  /* A total of figures every row withheld (a role without cars or revenue:
+     the access layer nulls them) is absent, never a sum of nothing printed
+     as 0 (independent review, 2026-10-29). */
+  const sum = (k) => (rows.every((c) => c[k] == null) ? null : rows.reduce((n, c) => n + (c[k] || 0), 0));
+  const cash = (v) => (v == null ? dash : esc(money(v)));
+  const ye = sum('yday_earned');
+  const total = `<tr class="tp-cls-sum"><th scope="row">All cars</th><td>${sum('cars_now') == null ? dash : esc(fmt(sum('cars_now')))}</td>`
+    + `<td>${s.rate == null ? dash : `${esc(money(s.rate))} <span class="hp-dim">on average</span>`}</td><td>${cash(sum('plan_today'))}</td>`
+    + (hasY ? `<td>${ye == null ? dash : `${esc(money(ye + (loose?.yday_earned || 0)))} <span class="hp-dim">${esc(`of ${money(sum('yday_plan') ?? 0)}`)}</span>`}</td>` : '')
+    + `<td>${s.earned == null ? dash : `${esc(money(s.earned))} <span class="hp-dim">${esc(`of ${money(s.planned)}`)}</span>`}</td>`
+    + `<td>${cash(s.month_target)}</td></tr>`;
   const looseRow = loose ? `<tr class="hp-quiet"><th scope="row">${esc(loose.label)}</th><td>${dash}</td><td>${dash}</td><td>${dash}</td>`
     + (hasY ? `<td>${esc(money(loose.yday_earned || 0))}</td>` : '') + `<td>${esc(money(loose.earned))}</td><td>${dash}</td></tr>` : '';
   const how = s.kind === 'class'

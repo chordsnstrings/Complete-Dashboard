@@ -7932,7 +7932,21 @@
      "saves[].rates[].rate",
      "saves[].other_rate",
      "yesterday_month.target.rates[].rate",
-     "yesterday_month.target.other_rate"
+     "yesterday_month.target.other_rate",
+     "yesterday_month.summary.gross_set",
+     "yesterday_month.summary.rate",
+     "yesterday_month.summary.since_set",
+     "yesterday_month.summary.planned",
+     "yesterday_month.summary.to_go",
+     "yesterday_month.summary.today_needs",
+     "yesterday_month.summary.today_per_car",
+     "yesterday_month.summary.per_day_left",
+     "yesterday_month.summary.avg_day",
+     "yesterday_month.summary.month_end_pace",
+     "yesterday_month.summary.pace_pct",
+     "yesterday_month.summary.best.earned",
+     "yesterday_month.summary.worst.earned",
+     "yesterday_month.summary.other_rate"
     ]
    },
    {
@@ -7981,7 +7995,13 @@
      "fleets[].cars_week",
      "classes[].cars_now",
      "classes[].plates",
-     "saves[].cars_at_set[].cars"
+     "saves[].cars_at_set[].cars",
+     "summary.rate_cars",
+     "yesterday_month.summary.rate_cars",
+     "yesterday_month.summary.cars_at_set",
+     "yesterday_month.summary.cars_now",
+     "yesterday_month.summary.today_cars",
+     "yesterday_month.target.cars"
     ]
    },
    {
@@ -8203,7 +8223,8 @@
      "summary.today_cars",
      "target.cars",
      "classes[].cars_now",
-     "classes[].plates"
+     "classes[].plates",
+     "summary.rate_cars"
     ]
    },
    {

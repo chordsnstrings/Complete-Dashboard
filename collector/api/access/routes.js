@@ -1083,8 +1083,12 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
        What the class panel prints and pre-fills: every class on the
        register with the cars it counts today and what it usually earns a
        car a day, and the figures in force today — a class save's own, or
-       under one rate for every car that rate in every box, so a save made
-       without touching a box asks the days left what they were asked. The
+       under one rate for every car that rate in every box. A save made
+       without touching a box asks the days left what they were asked when
+       the month save in force shares by the month's frozen weekday weights
+       (October's re-shape of 11 Oct does); a month save made after the 1st
+       carries weights learned on its own day, and the class save shares by
+       the month's, so a weekday can move by a few percent. The
        weekday weights class rates share each month by are the month's own,
        frozen on its 1st (computeMonth); next month's are learned from the
        weeks before it until its 1st freezes them. */
