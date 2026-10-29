@@ -18,7 +18,8 @@ import { shape, windowOf, driverRecord, fleetRecord } from './api/performance_ro
 /* The revenue target and the trips minimum are the real arithmetic over a
    made-up month, for the same reason: a fixture typed by hand would certify
    a shape the server stopped returning. */
-import { computeMonth, addDays as tgAddDays, monthOf as tgMonthOf, daysIn as tgDaysIn, monthName as tgMonthName } from './api/revenue_target.js';
+import { computeMonth, addDays as tgAddDays, monthOf as tgMonthOf, daysIn as tgDaysIn, monthName as tgMonthName,
+  classKey as tgClassKey, classLabel as tgClassLabel } from './api/revenue_target.js';
 import { hoursOf, withPeople } from './api/target_hours.js';
 import { monthViewOf, monthWorkbookOf } from './api/target_month.js';
 import { lowperfOf, watchOf, periodOf, spansOf, HOTEL_MODES as LP_HOTEL } from './api/lowperf.js';
@@ -4907,22 +4908,51 @@ app.get('/api/settings/jobs', (_, r) => r.json({
    one channel that has delivered every finished day, and a target saved on
    the 1st at AED 525 a car a day. Yesterday, the 1st of a month included,
    is chosen exactly as GET /api/target chooses it. */
+/* The fleet's makes, models and years (api/revenue_target.js loadClasses):
+   the eight vehicle-page cars as vehSpec describes them, then 16 BYD Han EV
+   2025s, 10 Model Y 2023s, three Polestar 4s, a Highlander, an ES 300h, and
+   one car with no make or model on file — so the class table has every kind
+   of row. Each plate's fares (plateFares) are the day's, less a sliver that
+   came with no plate, shared by how much its class earns; each driver drives
+   one car (personCar). */
+const tgCars = [...plates, ...Array.from({ length: 32 }, (_, i) => `M${40108 + i}`)];
+const tgCls = (make, model, year) => ({ make, model, year, key: tgClassKey(make, model, year), label: tgClassLabel({ make, model, year }) });
+const tgClassOf = new Map(tgCars.map((p, i) => [p, i < 8 ? tgCls(...vehSpec[i].slice(0, 3))
+  : i < 24 ? tgCls('BYD', 'Han EV', 2025) : i < 34 ? tgCls('Tesla', 'Model Y', 2023) : i < 37 ? tgCls('Polestar', '4', 2025)
+    : i === 37 ? tgCls('Toyota', 'Highlander', 2023) : i === 38 ? tgCls('Lexus', 'ES 300h', 2023) : null]).filter(([, c]) => c));
+const tgEarns = (p) => ({ 'BYD|Han EV': 1.15, 'Polestar|4': 1.05, 'Toyota|Highlander': 1.3, 'Lexus|ES 300h': 0.8, 'Tesla|Model 3': 0.85 })[
+  `${tgClassOf.get(p)?.make}|${tgClassOf.get(p)?.model}`] || 1;
 const tgFacts = (from, to, today) => {
-  const days = new Map(), carDays = new Map(), personDays = new Map();
-  const cars = Array.from({ length: 40 }, (_, i) => `M${40100 + i}`);
+  const days = new Map(), carDays = new Map(), personDays = new Map(), plateFares = new Map(), personCar = new Map();
+  const cars = tgCars;
   for (let d = from, i = 0; d <= to; d = tgAddDays(d, 1), i += 1) {
     const n = Number(d.slice(8));
     /* Today is a morning's worth: 14 drivers out, two to four trips each. */
     const part = d === today;
-    days.set(d, { day: d, fares: part ? 5200 : 19000 + ((n * 2371) % 4600), priced: part ? 90 : 600, chargeable: part ? 160 : 600,
+    const fares = part ? 5200 : 19000 + ((n * 2371) % 4600);
+    days.set(d, { day: d, fares, priced: part ? 90 : 600, chargeable: part ? 160 : 600,
       completed: part ? 150 : 560, bookings: part ? 170 : 620 });
-    carDays.set(d, new Set(cars.slice(0, part ? 14 : 37 + (n % 4))));
-    personDays.set(d, new Map(Array.from({ length: part ? 14 : 40 + (n % 3) }, (_, k) => [`p${(k + n) % 46}`, part ? 2 + (k % 3) : 8 + ((k * 5 + n) % 7)])));
+    const on = cars.slice(0, part ? 14 : 37 + (n % 4));
+    carDays.set(d, new Set(on));
+    const wsum = on.reduce((t, p) => t + tgEarns(p), 0);
+    plateFares.set(d, new Map(on.map((p) => [p, Math.round(fares * 0.97 * tgEarns(p) / wsum * 100) / 100])));
+    const ppl = Array.from({ length: part ? 14 : 40 + (n % 3) }, (_, k) => [`p${(k + n) % 46}`, part ? 2 + (k % 3) : 8 + ((k * 5 + n) % 7)]);
+    personDays.set(d, new Map(ppl));
+    personCar.set(d, new Map(ppl.map(([pk]) => [pk, cars[Number(pk.slice(1)) % 40]])));
   }
   const fin = Date.parse(`${to}T00:30:00+04:00`);
-  return { from, to, days, carDays, personDays,
+  return { from, to, days, carDays, personDays, plateFares, personCar,
     runs: [{ source: 'uber', fleet: 'ecosine', ws: tgAddDays(from, -1), we: to, fin }] };
 };
+/* Daily targets by vehicle class (sql/schema_v111.sql), saved three days
+   ago — only with MOCK_CLASS_TARGETS=1, so every other test reads the month
+   save it always read. The Camry has no figure of its own. */
+const tgClassRows = (today) => (process.env.MOCK_CLASS_TARGETS === '1' ? [{ id: 9, set_day: tgAddDays(today, -3),
+  set_at: `${tgAddDays(today, -3)}T07:00:00Z`, set_by: null, set_by_label: 'owner@example.test',
+  rates: [['BYD', 'Han EV', 2025, 610], ['BYD', 'Han EV', 2024, 560], ['Tesla', 'Model Y', 2023, 470], ['Tesla', 'Model Y', 2024, 500],
+    ['Tesla', 'Model 3', 2022, 420], ['Polestar', '4', 2025, 540], ['Toyota', 'Highlander', 2023, 650], ['Lexus', 'ES 300h', 2023, 400]]
+    .map(([make, model, year, rate]) => ({ make, model, year, rate })),
+  other_rate: 480, cars: [], weights: null, weights_basis: null }] : []);
 const tgRows = (month) => [{ id: 1, gross_target: 525 * 40 * tgDaysIn(month), cars: 40, rate: 525, past_plan: 0,
   set_day: `${month}-01`, set_at: `${month}-01T06:00:00Z`, set_by: null, set_by_label: 'owner@example.test' }];
 const tgSpan = (month, today) => {
@@ -4930,7 +4960,8 @@ const tgSpan = (month, today) => {
   const last = tgAddDays(first, tgDaysIn(month) - 1);
   return tgFacts(tgAddDays(first, -9), today > last ? last : today, today);
 };
-const tgMonth = (month, today) => computeMonth({ month, today, rows: tgRows(month), facts: tgSpan(month, today), min: 12 });
+const tgMonth = (month, today) => computeMonth({ month, today, rows: tgRows(month), facts: tgSpan(month, today), min: 12,
+  classes: tgClassRows(today), classOf: tgClassOf });
 /* /api/target/month (api/target_month.js): monthViewOf itself over the same
    fleet, so the days are tgMonth's to the fils. Each of the 46 made-up
    drivers ("Driver 07") earns AED 36 to 44 a completed trip — less than the
@@ -4945,8 +4976,41 @@ const tgMonthView = (month, today) => {
   }
   const who = new Map(Array.from({ length: 46 }, (_, k) => [`p${k}`, { pk: `p${k}`, name: `Driver ${String(k + 1).padStart(2, '0')}`,
     driver_ext_id: `drv-${k + 1}`, fleet: k % 2 ? 'egari' : 'ecosine', platforms: k % 3 ? ['uber'] : ['bolt', 'uber'] }]));
-  return monthViewOf({ month, today, rows: tgRows(month), facts, dd: { byDay, who }, min: 12 });
+  return monthViewOf({ month, today, rows: tgRows(month), facts, dd: { byDay, who }, min: 12, classes: tgClassRows(today), classOf: tgClassOf });
 };
+/* /api/target/car (api/revenue_target.js carTarget): one car's last 7 days
+   from tgMonth's own arithmetic, read through carPlanOn. */
+app.get('/api/target/car', (req, r) => {
+  const plate = String(req.query.plate || '').toUpperCase().replace(/[\s-]+/g, '');
+  const today = dubaiDay(new Date());
+  const from = tgAddDays(today, -7), to = tgAddDays(today, -1);
+  const out = [];
+  let t = null;
+  for (const m of [...new Set([tgMonthOf(from), tgMonthOf(today)])]) {
+    t = tgMonth(m, today);
+    const f = tgSpan(m, today);
+    for (const d of t.days) {
+      if (d.day < from || d.day > to) continue;
+      const plan = t.carPlanOn(d.day, plate);
+      const earned = f.plateFares.get(d.day)?.get(plate) || 0;
+      out.push({ day: d.day, label: d.label, weight: d.weight, counted: !!f.carDays.get(d.day)?.has(plate), plan, earned,
+        diff: plan ? Math.round((earned - plan) * 100) / 100 : null, pct: plan ? Math.round((1000 * earned) / plan) / 10 : null,
+        verdict: !plan ? null : earned >= plan ? 'over' : 'under', settled: true, why: null });
+    }
+  }
+  const save = t.saveOn.get(today);
+  const c = tgClassOf.get(plate) || null;
+  const rate = !save ? null : save.kind === 'class' ? (c && save.rateBy.has(c.key) ? save.rateBy.get(c.key) : save.other) : save.rate;
+  const judged = out.filter((d) => d.plan);
+  const sum = (k) => Math.round(judged.reduce((n, d) => n + d[k], 0) * 100) / 100;
+  r.set('cache-control', 'private, no-store').json({ plate, today, from, to,
+    class: c ? { make: c.make, model: c.model, year: c.year, label: c.label } : null, kind: save?.kind || null, rate,
+    uses_other: !!save && save.kind === 'class' && !(c && save.rateBy.has(c.key)), counted_today: true,
+    today_weight: 1, today_rate: rate, days: out,
+    totals: judged.length ? { days: judged.length, plan: sum('plan'), earned: sum('earned'), pct: Math.round((1000 * sum('earned')) / sum('plan')) / 10,
+      over: judged.filter((d) => d.verdict === 'over').length } : null,
+    why: save ? null : 'No target is in force today. The Owner sets the daily targets in Set up › Access.' });
+});
 app.get('/api/target/month', (req, r) => {
   const today = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.asof || '')) ? String(req.query.asof) : dubaiDay(new Date());
   const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.query.month || '')) ? String(req.query.month) : tgMonthOf(today);

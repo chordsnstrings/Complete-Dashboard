@@ -1079,11 +1079,54 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     const wsum = (a, b) => { let n = 0; for (let d = a; d <= b; d = rt.addDays(d, 1)) n += lw.ok ? lw.fares[tw.dowOf(d)] : 1; return n; };
     const nextFirst = `${next}-01`;
     const weights = { ok: lw.ok, fares: lw.fares, line: tw.weightsLine(lw.fares), basis: lw.basis };
+    /* ── the class rates (sql/schema_v111.sql) ──────────────────────────
+       What the class panel prints and pre-fills: every class on the
+       register with the cars it counts today and what it usually earns a
+       car a day, and the figures in force today — a class save's own, or
+       under one rate for every car that rate in every box, so a save made
+       without touching a box asks the days left what they were asked. The
+       weekday weights class rates share each month by are the month's own,
+       frozen on its 1st (computeMonth); next month's are learned from the
+       weeks before it until its 1st freezes them. */
+    const ed = await rt.classEditor(tq, { today: cur.today });
+    const [mwNow, mwNext] = await Promise.all([tw.monthWeights(tq, cur.month), tw.monthWeights(tq, next)]);
+    const fw = (mw) => (Array.isArray(mw?.fares) && mw.fares.length === 7 ? mw.fares.map(Number) : (lw.ok ? lw.fares : null));
+    const wNow = fw(mwNow);
+    const wNext = fw(mwNext);
+    const wsumBy = (w, a, b) => { let n = 0; for (let d = a; d <= b; d = rt.addDays(d, 1)) n += w ? w[tw.dowOf(d)] : 1; return n; };
+    const t = cur.target;
+    const classSaves = (await rt.classRows(tq, cur.today)).map(rt.normClassRow);
+    const classes = {
+      ...ed,
+      in_force: t ? { kind: t.kind, other_rate: t.kind === 'class' ? t.other_rate : t.rate,
+        rates: t.kind === 'class' ? t.rates : null, flat_rate: t.kind === 'class' ? null : t.rate } : null,
+      preview: {
+        today: cur.today,
+        /* What today's weekday asks of an average day, and the weights of
+           the days from today to the month's end and of next month. */
+        today_weight: wNow ? wNow[tw.dowOf(cur.today)] : 1,
+        weight_sum_left: Math.round(wsumBy(wNow, cur.today, cur.last) * 1e4) / 1e4,
+        weight_sum_gone: Math.round(wsumBy(wNow, cur.first, rt.addDays(cur.today, -1)) * 1e4) / 1e4,
+        weight_sum_next: Math.round(wsumBy(wNext, nextFirst, rt.addDays(nextFirst, rt.daysIn(next) - 1)) * 1e4) / 1e4,
+        weights: wNow, weights_line: tw.weightsLine(wNow),
+        /* What the days already gone were planned at — they keep it — or
+           null when no save from an EARLIER day covers them: today's saves
+           are replaced by a new one (the same-day rule), anchor and all, so
+           a first save today plans the days gone too. The month box's own
+           rule (earlierToday above), with a class save carried in from an
+           earlier month counting as an earlier day's. */
+        past_plan: earlierToday && cur.summary && cur.summary.days_gone ? cur.summary.planned : null,
+        days_gone: cur.summary ? cur.summary.days_gone : cur.days.filter((d) => d.state === 'past').length,
+      },
+      saves: classSaves.slice().reverse().slice(0, 30).map((x) => ({ set_day: x.set_day, set_at: x.set_at, by: x.set_by_label || null,
+        rates: x.rates.map(({ label, rate }) => ({ label, rate })), other_rate: x.other, cars: x.cars_at_set })),
+    };
     return res.json({
+      classes,
       today: cur.today, trips_min: cur.trips_min, context: cur.context,
       current: { month: cur.month, month_name: cur.month_name, days_in_month: cur.days_in_month,
         target: cur.target, summary: cur.summary, why: cur.why,
-        saves: cur.saves.map((x) => ({ gross: x.gross, cars: x.cars, rate: x.rate, set_day: x.set_day,
+        saves: cur.saves.filter((x) => x.kind !== 'class').map((x) => ({ gross: x.gross, cars: x.cars, rate: x.rate, set_day: x.set_day,
           set_at: x.set_at, by: x.set_by_label || null, weighted: !!x.weights })),
         preview: { cars: cur.context.cars_7_days,
           days_left: cur.summary ? cur.summary.days_left : cur.days.filter((d) => d.state !== 'past').length,
@@ -1108,6 +1151,28 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     const now = await rt.monthTarget(tq, { month: r.month });
     return res.json({ ok: true, saved: { ...r.row, set_by_label: undefined },
       month: r.month, month_name: now.month_name, summary: now.summary });
+  }));
+
+  /* The class rates: AED a car on an average day for each make + model +
+     year, and for every other car (api/revenue_target.js saveClassTarget).
+     The Owner's, re-confirmed, exactly as the month target: a new row and an
+     audit entry, never an edit. */
+  app.post('/api/access/target/classes', wrap(async (req, res) => {
+    const fm = manager(req, res, { write: true, stepup: true });
+    if (!fm) return undefined;
+    if (!isOwner(fm)) return fail(res, 403, 'not_allowed', 'Only the Owner sets the revenue target.');
+    const rt = await import('../revenue_target.js');
+    const r = await rt.saveClassTarget(tq, { rates: req.body?.rates, other: req.body?.other,
+      by: fm.user.id, byLabel: fm.user.email || '' });
+    if (r.error) return fail(res, r.status || 400, r.error, r.detail);
+    await audit(req, 'target.class_set', 'class_target', r.row.id,
+      { set_day: r.row.set_day, rates: r.row.rates.map(({ label, rate }) => ({ label, rate })), other_rate: r.row.other,
+        cars: r.row.cars_at_set });
+    const now = await rt.monthTarget(tq, {});
+    return res.json({ ok: true, saved: { set_day: r.row.set_day, set_at: r.row.set_at,
+      rates: r.row.rates.map(({ make, model, year, label, rate }) => ({ make, model, year, label, rate })),
+      other_rate: r.row.other, cars: r.row.cars_at_set },
+    month: now.month, month_name: now.month_name, summary: now.summary });
   }));
 
   /* Reviews: once a quarter each team's lead keeps or removes each grant. */

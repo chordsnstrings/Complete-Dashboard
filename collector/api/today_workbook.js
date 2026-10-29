@@ -26,6 +26,7 @@
    Action list an identity list as a whole, so without ID it is withheld whole. */
 import { Workbook } from '../src/xlsx_write.js';
 import { monthTarget, addDays, carsAsOf, loadFacts, shortDay, monthName, DRIVER_DAYS } from './revenue_target.js';
+import { classSheet } from './target_month.js';
 import { personKeyStored } from './custody_sql.js';
 import { insightListSql } from './insights_sql.js';
 import { buildDay } from './day_routes.js';
@@ -55,10 +56,17 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
   } else {
     const pairs = [
       ['Month target now (AED)', money(sm.month_target), 'money', 'The sum of every day’s plan: the target as set, moved by every car that has joined or dropped out since.'],
-      ['Target as set (AED)', money(sm.gross_set), 'money', `Saved on ${t.target.set_day}${t.saves.length > 1 ? `; ${t.saves.length} saves this month` : ''}.`],
-      sm.weighted
-        ? ['AED a car on an average day', money(sm.rate), 'money', 'Fixed at the save: what it spreads ÷ (cars that earned in the 7 days before it × the weekday weights of the days it spreads over).']
-        : ['AED a car a day', money(sm.rate), 'money', 'Fixed at the save: the target ÷ (days in the month × cars that earned in the 7 days before it).'],
+      /* Under daily targets by vehicle class (2026-10-29) nothing is typed for
+         the month: it is the sum of every car's plan, each at its class's
+         figure, and the Classes sheet lists the figures. */
+      sm.kind === 'class'
+        ? ['Targets set (by vehicle class)', sm.rates_set_day, 'text', `Each car is asked its class’s AED on an average day (the Classes sheet); a class with no figure of its own, and a car with no make or model on file, the figure for every other car${hide.has('REV') ? '' : `, AED ${sm.other_rate}`}.`]
+        : ['Target as set (AED)', money(sm.gross_set), 'money', `Saved on ${t.target.set_day}${t.saves.length > 1 ? `; ${t.saves.length} saves this month` : ''}.`],
+      sm.kind === 'class'
+        ? ['AED a car on an average day, on average', money(sm.rate), 'money', 'Today’s cars at their classes’ figures, averaged: what a car is asked on an average day across the fleet as it stands.']
+        : sm.weighted
+          ? ['AED a car on an average day', money(sm.rate), 'money', 'Fixed at the save: what it spreads ÷ (cars that earned in the 7 days before it × the weekday weights of the days it spreads over).']
+          : ['AED a car a day', money(sm.rate), 'money', 'Fixed at the save: the target ÷ (days in the month × cars that earned in the 7 days before it).'],
       ['Shared by weekday', sm.weighted ? weightsLine(sm.weights) : 'the same every day', 'text', sm.weighted
         ? `Of an average day, from the ${sm.weights_basis?.used} whole weeks ${sm.weights_basis?.from} to ${sm.weights_basis?.to} (the operator, 2026-10-11: a Sunday cannot be asked what a Thursday is). A day under is caught up over the days left in the same proportions.`
         : (sm.weights_basis?.why || 'This month’s target was set before targets were shared by weekday.')],
@@ -116,6 +124,9 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
       d.coverage, hid('BK', d.trips), d.active_drivers, hid('BK', d.trips_target), hid('BK', d.trips_per_active),
       hid('BK', d.reached), d.drove, hid('BK', d.trips_diff), tv, d.weight == null ? null : d.weight.toFixed(2), d.trips_min]);
   }
+
+  /* ── Classes: the month by make, model and year ───────────────────── */
+  classSheet(wb, t, hid);
 
   /* ── Cars yesterday ─────────────────────────────────────────────────── */
   const facts = await loadFacts(q, addDays(yday, -(DRIVER_DAYS + 1)), today);

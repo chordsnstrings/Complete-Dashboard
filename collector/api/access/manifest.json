@@ -7915,7 +7915,24 @@
      "summary.best.earned",
      "summary.worst.earned",
      "fleets[].earned",
-     "fleets[].earned_yday"
+     "fleets[].earned_yday",
+     "classes[].rate",
+     "classes[].today_rate",
+     "classes[].plan_today",
+     "classes[].yday_plan",
+     "classes[].yday_earned",
+     "classes[].month_plan",
+     "classes[].planned",
+     "classes[].earned",
+     "classes[].ahead",
+     "classes[].pct",
+     "summary.other_rate",
+     "target.rates[].rate",
+     "target.other_rate",
+     "saves[].rates[].rate",
+     "saves[].other_rate",
+     "yesterday_month.target.rates[].rate",
+     "yesterday_month.target.other_rate"
     ]
    },
    {
@@ -7961,7 +7978,10 @@
      "context.cars_7_days",
      "context.cars_yesterday",
      "context.last_month.cars",
-     "fleets[].cars_week"
+     "fleets[].cars_week",
+     "classes[].cars_now",
+     "classes[].plates",
+     "saves[].cars_at_set[].cars"
     ]
    },
    {
@@ -7979,7 +7999,7 @@
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "api/target_routes.js + api/revenue_target.js (2026-10-02). The monthly revenue target for BOTH fleets: the month day by day (cars, AED a car a day, plan, what each day needed, fares earned, over or under once settled), yesterday's verdict, the summary the Today page leads with, and the figures the Owner's panel prints beside the target box. Gross = fares before any platform commission. Combines every fleet, so a reader limited to one is refused with that reason ('mixed'). Who saved a target is not in it (GET /api/access/target). Never cached (api/cache.js NEVER): a save moves it. The trips chart (same day): every day's completed trips against its active drivers × the trips minimum, and trips_summary over the month — trip counts and everything derived from them are BK."
+  "notes": "api/target_routes.js + api/revenue_target.js (2026-10-02). The monthly revenue target for BOTH fleets: the month day by day (cars, AED a car a day, plan, what each day needed, fares earned, over or under once settled), yesterday's verdict, the summary the Today page leads with, and the figures the Owner's panel prints beside the target box. Gross = fares before any platform commission. Combines every fleet, so a reader limited to one is refused with that reason ('mixed'). Who saved a target is not in it (GET /api/access/target). Never cached (api/cache.js NEVER): a save moves it. The trips chart (same day): every day's completed trips against its active drivers × the trips minimum, and trips_summary over the month — trip counts and everything derived from them are BK. Since 2026-10-29 the plan can come from daily targets by vehicle class (sql/schema_v111.sql): target.kind 'class' carries the rates (REV), and classes[] is each make + model + year's part of the month under either kind — its cars and the plates with no class on file (VEH), its rate, plan and fares (REV)."
  },
  {
   "method": "GET",
@@ -8115,7 +8135,20 @@
      "drivers.totals.plan",
      "drivers.totals.targets",
      "drivers.totals.fleet_gross",
-     "drivers.totals.unattributed"
+     "drivers.totals.unattributed",
+     "classes[].rate",
+     "classes[].today_rate",
+     "classes[].plan_today",
+     "classes[].yday_plan",
+     "classes[].yday_earned",
+     "classes[].month_plan",
+     "classes[].planned",
+     "classes[].earned",
+     "classes[].ahead",
+     "classes[].pct",
+     "summary.other_rate",
+     "target.rates[].rate",
+     "target.other_rate"
     ]
    },
    {
@@ -8168,7 +8201,9 @@
      "summary.cars_at_set",
      "summary.cars_now",
      "summary.today_cars",
-     "target.cars"
+     "target.cars",
+     "classes[].cars_now",
+     "classes[].plates"
     ]
    },
    {
@@ -8189,7 +8224,52 @@
   ],
   "fleetKey": "fleet",
   "cap": null,
-  "notes": "api/target_routes.js + api/target_month.js (2026-10-08). The Month target page: every day of the month against its target (computeMonth's own days — the Target page's), where the month lands at the average day so far and at the last 7 settled days' pace, and every active driver against their share: each counted (settled) day's plan divided among that day's active drivers (a completed trip in the 8 days to it), and the trips minimum for every such day. The month totals cover both fleets (mixed); the driver rows are each one fleet's and are dropped for a reader who does not see that fleet. Names are ID, a driver's gross and target are EARN, trips BK."
+  "notes": "api/target_routes.js + api/target_month.js (2026-10-08). The Month target page: every day of the month against its target (computeMonth's own days — the Target page's), where the month lands at the average day so far and at the last 7 settled days' pace, and every active driver against their share: each counted (settled) day's plan divided among that day's active drivers (a completed trip in the 8 days to it) — in proportion to the class rate of the car each drove since the class targets of 2026-10-29, equally under one rate for every car — and the trips minimum for every such day. classes[] is each make + model + year's part of the month (cars, rate, plan, fares), both fleets. The month totals cover both fleets (mixed); the driver rows are each one fleet's and are dropped for a reader who does not see that fleet. Names are ID, a driver's gross and target are EARN, trips BK."
+ },
+ {
+  "method": "GET",
+  "path": "/api/target/car",
+  "subject": "REV",
+  "carries": [
+   "REV",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "rate",
+     "today_rate",
+     "days[].plan",
+     "days[].earned",
+     "days[].diff",
+     "days[].pct",
+     "totals.plan",
+     "totals.earned",
+     "totals.pct"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "plate"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "days[].why"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/target_routes.js + api/revenue_target.js carTarget (2026-10-29). One car against its class's daily target, for its vehicle page: its make, model and year, the AED a car on an average day its class is asked (or the figure for every other car, uses_other), today's weekday share of it, and the last 7 days: what the car was asked (0 on a day it was not counted — it had not earned in the 7 days before), its fares, and the verdict once the day settled. The arithmetic is computeMonth's own (carPlanOn), so the car and its class's row on /api/target agree. Never cached (api/cache.js NEVER: the /api/target prefix). Rates and fares REV, the plate VEH."
  },
  {
   "method": "GET",

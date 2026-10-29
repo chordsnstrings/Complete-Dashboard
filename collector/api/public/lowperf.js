@@ -405,7 +405,7 @@ export function gridHtml(v, { saved = null, metric = 'fares' } = {}) {
     + days.map((d) => `<td class="${col(d)}">${esc(refText(refOf(d, who)))}</td>`).join('') + `${endCols(who)}</tr>`;
   const asks = metric === 'fares' || metric === 'pct' || metric === 'trips';
   const head = '<thead><tr><th scope="col" class="l lp-who">Driver</th>'
-    + days.map((d) => `<th scope="col" class="${col(d)}" title="${esc(d.counted ? `${d.label}: each active driver was asked ${money(d.share)}` : `${d.label}: not counted — ${d.why || ''}`)}">`
+    + days.map((d) => `<th scope="col" class="${col(d)}" title="${esc(d.counted ? `${d.label}: an active driver was asked ${money(d.share)} on average — each by the class of car they drove, under daily targets by vehicle class` : `${d.label}: not counted — ${d.why || ''}`)}">`
       + `${esc(d.label.split(' ')[0].slice(0, 2))}<br>${esc(d.label.split(' ')[1])}</th>`).join('') + `${avgHead}</tr>`
     + (asks ? `<tr class="lp-share"><th scope="row" class="l lp-who">${esc(`Asked of each, ${unit}`)}</th>`
       + days.map((d) => `<td class="${col(d)}">${esc(refText(refOf(d, 'ask')))}</td>`).join('') + `${endCols('ask')}</tr>` : '')

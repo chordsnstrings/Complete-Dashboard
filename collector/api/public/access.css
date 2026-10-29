@@ -119,6 +119,17 @@ a.m-btn{display:flex;align-items:center;justify-content:center;text-decoration:n
 .acx-inrow { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-top: 10px; }
 .acx-inrow > .acx-field { flex: 1 1 220px; max-width: 420px; }
 .acx-inrow > .acx-in { flex: 1 1 200px; max-width: 360px; }
+/* The revenue target's boxes, one a vehicle class (accessadmin.js
+   targetPanel). Scrolls inside its own box at 390px; a class's name wraps. */
+.acx-tablewrap { max-width: 100%; overflow-x: auto; margin: 6px 0 8px; }
+.acx-cls { border-collapse: collapse; font-size: var(--t6); font-variant-numeric: tabular-nums; min-width: 560px; }
+.acx-cls th, .acx-cls td { padding: 6px 14px 6px 0; text-align: left; vertical-align: middle; border-top: 1px solid var(--rule); }
+.acx-cls thead th { border-top: 0; font-size: var(--t5); font-weight: 600; color: var(--grey-strong); }
+.acx-cls tbody th { font-weight: 600; color: var(--ink); max-width: 30ch; overflow-wrap: anywhere; }
+.acx-cls tbody th .acx-dim { font-weight: 400; }
+.acx-cls td .acx-num { min-height: 36px; max-width: 13ch; }
+.acx-cls tr.acx-cls-other th, .acx-cls tr.acx-cls-other td { border-top: 2px solid var(--rule); }
+.acx-cls .acx-dim { color: var(--grey-strong); }
 .acx-fleets { border: 0; padding: 0; margin: 0; display: grid; gap: 7px; min-width: 0; }
 .acx-fleets legend { padding: 0; margin-bottom: 6px; }
 .acx-check { display: flex; gap: 8px; align-items: center; font-size: var(--t7); cursor: pointer; min-width: 0; overflow-wrap: anywhere; }

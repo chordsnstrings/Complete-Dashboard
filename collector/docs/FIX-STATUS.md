@@ -5535,3 +5535,34 @@ median of three; "drawn" = the page's last skeleton gone):
 Production serves the code brotli-compressed (1,185,372 bytes for the old first screen), so its
 absolute times are lower than these; the share saved is the same order — the first screen's
 code is a third of what it was.
+
+## CLS — daily targets by vehicle class (2026-10-29)
+
+The operator: "Let me set targets vehicle wise. Make model year - per day target, which will
+reflect everywhere. Audit, plan, report, execute."
+
+**What it was.** One gross figure a month, spread as one rate over every car: AED 559.09 a car
+on an average day in October, asked alike of a Toyota Highlander and a Lexus ES. On 29 October
+the target counted 104 cars in eight classes — BYD Han EV 2025 ×42, Tesla Model Y 2023 ×36,
+Polestar 4 2025 ×10, Model Y 2025 ×5, Model Y 2024 ×4, Model 3 2024 ×4, Highlander 2023 ×2,
+ES 300h 2023 ×1 — every one with its make, model and year on file (133 of the register's 273
+plates have none; none of them earned that week).
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| CLS1 | `sql/schema_v111.sql` `class_target`: one row a save, never edited — each class's AED a car on an AVERAGE day, one figure for every other car (a class given none, a plate with no make or model), the cars each class counted at the save, the weekday weights learned then | yes | no | `class_targets` §6 (against PGlite) |
+| CLS2 | `api/revenue_target.js` computeMonth: a day's plan is the sum over its counted cars of each car's class figure × the weekday weight. A class save governs from its Dubai day and **carries into every later month** (shared by that month's own frozen weights); a later save of either kind wins from its day; the days before it keep their plan. Under one figure for every car it is the month save to the fils | yes | no | `class_targets` §1–3 (revert: plan from `save.rate` → 10 fail; `carried` dropped → 3 fail) |
+| CLS3 | `classes[]` on `/api/target` and `/api/target/month`: each make + model + year's cars, figure (and whether it is the every-other-car figure), today's plan, yesterday and the month so far against plan, the month's plan; the plates with no class named; fares with no plate their own row. The classes add up to the month | yes | no | `class_targets` §4 |
+| CLS4 | A driver's share of a day (Month target page, Low performers) is the plan in proportion to the class figure of the car they drove — on a day off, the car they last drove in the 8-day window (`loadFacts` now reads each person-day's car). Equal under one figure for every car, so every day before the first class save keeps its figures | yes | no | `class_targets` §5 (revert: equal shares → 2 fail); `lowperf` 107/0, `target_month` 60/0 unchanged |
+| CLS5 | Access › Settings: the month box is replaced by one box a class (cars now, what a car of it usually earns over the last 4 weeks' settled days, the figure), one for every other car, a live preview (today, this month, next month), every save in the history. `POST /api/access/target/classes`, the Owner's only, re-confirmed, audited `target.class_set`. The month box's route stays for the record. The preview promises the days gone keep their plan only when a save from an EARLIER day covers them (a same-day save is replaced, anchor and all), and says "about" otherwise. The message line now sits beside the button (in the panel's column its 220px flex basis was its height) | yes | no | `access_core` (5 new checks; revert: no `isOwner` → 2 fail); `class_target_panel` 22/0 in Chromium against the real routes (revert: days gone always kept → 2 fail in the same-day case) |
+| CLS6 | Everywhere it shows: the Target page's "By vehicle class" panel, the Month target page's, the Today strip and Overview tile words, the vehicle page's line under the card (`/api/target/car`, under the never-cached `/api/target` prefix), a Classes sheet in both workbooks, the chat assistant's `class_targets` tool. The low-performer cache key now includes `class_target` | yes | no | `class_targets` §7; `cache` (revert: `k` out of the salt → 1 fail); `endpoint_coverage` 4/0 |
+| CLS7 | Access manifest: every new money figure REV, every car count and plate VEH, `/api/target/car` declared | yes | no | `class_targets` §7 (shaped per role) |
+
+**Not changed, and why.** The trips minimum, the 13:00/18:00 goal texts and the 08:00 email
+count trips, not money. The hour-by-hour target spreads today's need, which now comes from the
+classes.
+
+**Waits on the operator:** the go-ahead to deploy, then the first save on Access › Settings. Until
+a class save is made, October runs on its month save exactly as before (each box starts at
+AED 559.09, so a save that touches nothing asks the days left what they were asked, give or take
+the rounding of the rate to the fils).

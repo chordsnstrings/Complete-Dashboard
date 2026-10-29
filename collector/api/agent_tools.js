@@ -86,6 +86,8 @@ export const TOOL_SPECS = [
   fn('month_target', 'The monthly revenue target: target, earned so far, planned, ahead/behind, still to earn, days left, pace, month-end projection, trips needed, and every driver against their own target.',
     { month: { type: 'string', description: 'YYYY-MM; omit for the current month' } }),
   fn('yesterday_target', 'Yesterday against its target: earned, plan, needed, difference, trips, trips target, active drivers, cars.', {}),
+  fn('class_targets', 'The daily revenue target by vehicle class (make, model, year): each class\'s AED a car on an average day, its cars now, today\'s plan, yesterday and the month so far earned against plan, and the figure for every other car.',
+    { month: { type: 'string', description: 'YYYY-MM; omit for the current month' } }),
   fn('unregistered_trips', 'Trips the seat sensors saw with a passenger that no platform recorded, for a period: counts by verdict, km, estimated fares forgone, sensor coverage.',
     { ...DATES, fleet: FLEET }, ['from', 'to']),
   /* ── hours, live, money, places (2026-10-13) ─────────────────────────── */
@@ -152,6 +154,7 @@ export const STATUS = {
   cash_trips: () => 'Fetching cash trips…',
   month_target: () => 'Fetching the month target…',
   yesterday_target: () => 'Fetching yesterday against target…',
+  class_targets: () => 'Fetching the targets by vehicle class…',
   unregistered_trips: () => 'Fetching unregistered trips…',
   driver_hours: () => 'Fetching the hours…',
   driver_shift: () => 'Fetching the day’s log-ins and breaks…',
@@ -507,6 +510,41 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           completed_trips: 'int', trips_target: 'int', active_drivers: 'int', drivers_who_drove: 'int', cars: 'int',
           trips_per_active_driver: 'num', verdict: 'text' },
         note: y.settled === false ? 'yesterday is not settled yet — figures may still rise' : undefined };
+    },
+
+    /* The operator, 2026-10-29: "Let me set targets vehicle wise. Make model
+       year - per day target, which will reflect everywhere." The Target
+       page's table by class (api/revenue_target.js computeMonth classes). */
+    async class_targets(a) {
+      const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(a.month || '')) ? a.month : null;
+      const g = await get(`/api/target${month ? `?month=${month}` : ''}`);
+      const definition = `Targets by vehicle class · ${month || 'this month'}`;
+      if (g.withheld || g.error) return { kind: 'table', definition, ...g };
+      const b = g.body; const s = b.summary;
+      if (!s) return { kind: 'value', definition, error: b.why || 'no target is set for this month' };
+      const rows = (b.classes || []).filter((c) => !c.no_plate).map((c) => ({
+        vehicle_class: c.label, cars_now: num(c.cars_now), aed_a_car_average_day: num(c.rate),
+        uses_other_car_figure: c.uses_other ? 'yes' : 'no', today_plan_aed: num(c.plan_today),
+        yesterday_plan_aed: num(c.yday_plan), yesterday_earned_aed: num(c.yday_earned),
+        month_planned_to_date_aed: num(c.planned), month_earned_to_date_aed: num(c.earned), pct_of_plan: num(c.pct),
+        month_plan_aed: num(c.month_plan), plates_without_class: (c.plates || []).join(', ') || null,
+      }));
+      return { kind: 'table', definition: `Targets by vehicle class · ${b.month_name || month}`, source: '/api/target',
+        values: { kind: s.kind === 'class' ? 'daily targets by vehicle class' : 'one figure for every car',
+          set_on: s.kind === 'class' ? s.rates_set_day : (b.target?.set_day || null),
+          other_car_aed_average_day: num(s.other_rate), average_aed_a_car: num(s.rate), month_target_aed: num(s.month_target) },
+        kinds: { kind: 'text', set_on: 'text', other_car_aed_average_day: 'aed', average_aed_a_car: 'aed', month_target_aed: 'aed' },
+        columns: [col('vehicle_class', 'Make, model, year', 'text'), col('cars_now', 'Cars now', 'int'),
+          col('aed_a_car_average_day', 'AED a car, average day', 'aed'), col('today_plan_aed', 'Today\'s plan', 'aed'),
+          col('yesterday_earned_aed', 'Yesterday earned', 'aed'), col('yesterday_plan_aed', 'Yesterday plan', 'aed'),
+          col('month_earned_to_date_aed', 'Month earned', 'aed'), col('month_planned_to_date_aed', 'Month planned', 'aed'),
+          col('pct_of_plan', '% of plan', 'pct'), col('month_plan_aed', 'Month plan', 'aed'),
+          col('uses_other_car_figure', 'Other-car figure?', 'text'), col('plates_without_class', 'Plates with no class', 'text')],
+        rows,
+        note: 'a class\'s figure is AED a car on an AVERAGE day; each day asks it × the weekday\'s weight (a Sunday less than a Thursday). '
+          + (s.kind === 'class' ? 'A class with no figure of its own, and a car with no make or model on file, is asked the figure for every other car. '
+            : 'This month still runs on one figure for every car, so each row is the class\'s share of it. ')
+          + 'Figures are gross fares before commission; month figures are counted to yesterday.' };
     },
 
     async unregistered_trips(a) {

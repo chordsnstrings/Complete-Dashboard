@@ -174,7 +174,9 @@ const neverToday = (req, path) => (path === '/api/driver/day'
    page and on the phone alike.
 
    Rather than leave it uncached, the key says what the answer was computed
-   AGAINST. Three counts and three latest-write times over three small tables
+   AGAINST. (The class rates, sql/schema_v111.sql, are a fourth table since
+   2026-10-29: a class save moves every share on the page exactly as a month
+   save does.) Three counts and three latest-write times over three small tables
    — every write to them is an INSERT or an upsert that stamps its time, so
    any save changes one of the six — and the Dubai day, because the default
    period ("the month so far, to yesterday") and which days count both turn
@@ -194,6 +196,7 @@ const neverToday = (req, path) => (path === '/api/driver/day'
    test/cache.test.mjs "the low performers". */
 export const TARGET_SALT_SQL = `SELECT
   (SELECT count(*)::text || '/' || coalesce(max(set_at)::text, '-') FROM revenue_target) AS t,
+  (SELECT count(*)::text || '/' || coalesce(max(set_at)::text, '-') FROM class_target) AS k,
   (SELECT count(*)::text || '/' || coalesce(max(created_at)::text, '-') FROM target_weights) AS w,
   (SELECT count(*)::text || '/' || coalesce(max(updated_at)::text, '-') FROM access_config) AS c`;
 const SALTED = new Map([['/api/lowperf', TARGET_SALT_SQL]]);
@@ -314,7 +317,7 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port, refre
       let salt;
       try {
         const { rows } = await pool.query(SALTED.get(path));
-        salt = createHash('sha1').update(`${dayOf()}|${rows[0]?.t}|${rows[0]?.w}|${rows[0]?.c}`).digest('hex').slice(0, 16);
+        salt = createHash('sha1').update(`${dayOf()}|${rows[0]?.t}|${rows[0]?.k}|${rows[0]?.w}|${rows[0]?.c}`).digest('hex').slice(0, 16);
       } catch { stats.skip++; return next(); }
       key = `${key}#t=${salt}`;
     }

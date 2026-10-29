@@ -85,7 +85,38 @@
    carry a fare (src/monthly_report.js READY_COVERAGE). Uber publishes a
    day's fares hours after the rides (fetched hourly), so TODAY is never judged. An unsettled day that has ALREADY
    beaten what it needed is over whatever arrives later, and says "at least";
-   one still short says what it is waiting for. */
+   one still short says what it is waiting for.
+
+   BY VEHICLE CLASS, FROM 2026-10-29 (sql/schema_v111.sql class_target). The
+   operator: "Let me set targets vehicle wise. Make model year - per day
+   target, which will reflect everywhere." One rate for every car asked a
+   Highlander and a Lexus ES the same, and a fleet that is 42 BYD Han EVs and
+   36 Model Ys (the 104 cars counted that morning, eight classes, every one
+   with its make, model and year on file) does not earn that way. So:
+     · The Owner sets AED A CAR ON AN AVERAGE DAY for each make + model +
+       year, and one figure for EVERY OTHER CAR — a class given no figure, or
+       a plate with no make or model on file (133 of the 273 on the register
+       that day, none of them earning). The weekday weights still apply, as
+       the operator ruled on 2026-10-11: the figure is an average day's.
+     · A day's PLAN is the sum, over the cars counted on it, of each car's
+       class rate × the day's weekday weight. Under one rate for every car
+       that is rate × cars × weight — the rule above, to the fils — so the
+       days saved before the classes keep every figure they were judged on.
+     · A class save is a SAVE like any other: a new row, never edited,
+       governing from the Dubai day it was made. It does not end with its
+       month: it governs every later month until the next save (the rates are
+       a car's, not a month's), and a month it carries into shares its days
+       by that month's own weekday weights, frozen on its 1st
+       (api/target_weights.js monthWeights), not by the weeks before a save
+       made months ago. A later save of either kind wins from its own day.
+     · There is no typed month figure under it: the MONTH TARGET is the sum
+       of the plans, and it floats with the cars exactly as before.
+     · A DRIVER'S SHARE of a day (api/target_month.js, api/lowperf.js) is the
+       day's plan shared in proportion to the class rate of the car each
+       active driver drove that day — on a day off, the car they last drove
+       in the 8-day window that makes them active. The shares still add up
+       to the day's plan; under one rate for every car they are equal, as
+       they always were. */
 import { personKeyStored } from './custody_sql.js';
 import { dubaiDay } from './window.js';
 import { getConfig, setConfig } from './access/service.js';
@@ -156,13 +187,23 @@ export async function loadFacts(q, from, to) {
          FROM trip_norm n
         WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
         GROUP BY 1`, [from, to]),
-    q(`SELECT DISTINCT to_char(n.local_day, 'YYYY-MM-DD') AS day, btrim(n.plate) AS plate
+    /* Each plate's fares on each day, and whether it EARNED (a fare above
+       zero) — the same rows the DISTINCT read gave, plus their sum, so a
+       vehicle class's earnings come from the read that already counts its
+       cars. */
+    q(`SELECT to_char(n.local_day, 'YYYY-MM-DD') AS day, btrim(n.plate) AS plate,
+              coalesce(round(sum(n.price)::numeric, 2), 0)::float AS fares,
+              bool_or(n.price > 0) AS earned
          FROM trip_norm n
         WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
-          AND n.has_fare AND n.price > 0 AND coalesce(btrim(n.plate), '') <> ''`, [from, to]),
+          AND n.has_fare AND coalesce(btrim(n.plate), '') <> ''
+        GROUP BY 1, 2`, [from, to]),
     /* One person, one row — the stored fold of api/custody_sql.js, the same
        answer the 08:00 email's personKey() gives and a hundred times cheaper. */
-    q(`SELECT to_char(n.local_day, 'YYYY-MM-DD') AS day, ${personKeyStored('t')} AS pk, count(*)::int AS trips
+    /* …and the car each person drove most that day, which a class rate asks
+       their share of the day by (driverShares). */
+    q(`SELECT to_char(n.local_day, 'YYYY-MM-DD') AS day, ${personKeyStored('t')} AS pk, count(*)::int AS trips,
+              mode() WITHIN GROUP (ORDER BY nullif(btrim(n.plate), '')) AS plate
          FROM trip_norm n JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id
         WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
           AND n.outcome = 'completed' AND n.driver_name IS NOT NULL
@@ -177,17 +218,26 @@ export async function loadFacts(q, from, to) {
   ]);
   const byDay = new Map(days.map((r) => [r.day, r]));
   const carDays = new Map();
+  const plateFares = new Map();
   for (const r of cars) {
+    if (!plateFares.has(r.day)) plateFares.set(r.day, new Map());
+    plateFares.get(r.day).set(r.plate, Number(r.fares) || 0);
+    if (!r.earned) continue;
     if (!carDays.has(r.day)) carDays.set(r.day, new Set());
     carDays.get(r.day).add(r.plate);
   }
   const personDays = new Map();
+  const personCar = new Map();
   for (const r of people) {
     if (!personDays.has(r.day)) personDays.set(r.day, new Map());
     personDays.get(r.day).set(r.pk, r.trips);
+    if (r.plate) {
+      if (!personCar.has(r.day)) personCar.set(r.day, new Map());
+      personCar.get(r.day).set(r.pk, r.plate);
+    }
   }
   return {
-    from, to, days: byDay, carDays, personDays,
+    from, to, days: byDay, carDays, personDays, plateFares, personCar,
     runs: runs.map((r) => ({ source: r.source, fleet: r.fleet, ws: r.ws, we: r.we, fin: new Date(r.fin).getTime() })),
   };
 }
@@ -259,17 +309,153 @@ const normRow = (r) => {
 };
 const bySave = (a, b) => (a.set_at < b.set_at ? -1 : a.set_at > b.set_at ? 1 : a.id - b.id);
 
+/* ── vehicle classes (sql/schema_v111.sql) ───────────────────────────────── */
+/* A car's class is its make + model + year as the vehicle register spells
+   them — coalesce(vehicle, vehicle_plate), the pair every vehicle page reads
+   (api/vehicle_routes.js /api/vehicle/profile). Keyed case- and
+   space-insensitively, so "Model Y" from one channel and "MODEL Y" from
+   another are one class; shown as the register spells it. A plate with no
+   make or model has no class. One with no year is its own class, named so:
+   a year the register does not hold is not invented. */
+const norm = (v) => String(v ?? '').trim().replace(/\s+/g, ' ');
+export const classKey = (make, model, year) => `${norm(make).toLowerCase()}|${norm(model).toLowerCase()}|${year == null || year === '' ? '' : Number(year)}`;
+export const classLabel = (c) => `${norm(c.make)} ${norm(c.model)}${c.year == null || c.year === '' ? ' (year not on file)' : ` ${c.year}`}`;
+/* A day rate above this is a typo, not a plan: the best class earned under
+   AED 500 a car on an average day when this was written. */
+export const MAX_CLASS_RATE = 100000;
+
+/** plate → {key, make, model, year, label} for every plate the register
+    gives a make and model. */
+export async function loadClasses(q) {
+  const rows = await q(
+    `SELECT p.plate, coalesce(v.make, vp.make) AS make, coalesce(v.model, vp.model) AS model,
+            coalesce(v.year, vp.year) AS year
+       FROM (SELECT plate FROM vehicle UNION SELECT plate FROM vehicle_plate) p
+       LEFT JOIN vehicle v ON v.plate = p.plate
+       LEFT JOIN vehicle_plate vp ON vp.plate = p.plate`);
+  const out = new Map();
+  for (const r of rows) {
+    if (!norm(r.make) || !norm(r.model)) continue;
+    const c = { make: norm(r.make), model: norm(r.model), year: r.year == null ? null : Number(r.year) };
+    out.set(String(r.plate).trim(), { ...c, key: classKey(c.make, c.model, c.year), label: classLabel(c) });
+  }
+  return out;
+}
+
+/* The two rows of a month's class breakdown that are not a class. */
+const NO_CLASS = '\u0000none';
+const NO_PLATE = '\u0000plate';
+/** AED a car on an average day `save` asks of a class (null key: a car with
+    no make or model on file). */
+const classRateOf = (save, key) => (!save ? null : save.kind !== 'class' ? save.rate
+  : key != null && save.rateBy.has(key) ? save.rateBy.get(key) : save.other);
+/** A save as a page may show it: a class save's rates as a list (its Map is
+    the arithmetic's), a month save as it always was. */
+const publicSave = (x, first) => (x.kind === 'class' ? {
+  kind: 'class', id: x.id, set_day: x.set_day, set_at: x.set_at, set_by: x.set_by, set_by_label: x.set_by_label,
+  rates: x.rates.map(({ make, model, year, label, rate }) => ({ make, model, year, label, rate })),
+  other_rate: x.other, cars_at_set: x.cars_at_set, weights: x.weights, weights_basis: publicBasis(x.weights_basis),
+  carried: x.set_day < first, weights_month: x.weights_month || null,
+} : { ...x, weights_basis: publicBasis(x.weights_basis) });
+/** The cars a class save counted at the moment it was made. */
+const carsAtSave = (x) => (x.cars_at_set || []).reduce((n, c) => n + (Number(c.cars) || 0), 0);
+
+/** Every class save made on or before `upTo`, oldest first. */
+export async function classRows(q, upTo) {
+  return q(`SELECT id, to_char(set_day, 'YYYY-MM-DD') AS set_day, set_at, set_by, set_by_label,
+                   rates, other_rate, cars, weights, weights_basis
+              FROM class_target WHERE set_day <= $1::date ORDER BY set_at, id`, [upTo]);
+}
+export const normClassRow = (r) => {
+  const w = jsonOf(r.weights);
+  const rates = (jsonOf(r.rates) || []).map((x) => ({ make: norm(x.make), model: norm(x.model),
+    year: x.year == null || x.year === '' ? null : Number(x.year), rate: Number(x.rate) }))
+    .map((x) => ({ ...x, key: classKey(x.make, x.model, x.year), label: classLabel(x) }));
+  return {
+    kind: 'class',
+    id: Number(r.id),
+    set_day: typeof r.set_day === 'string' ? r.set_day.slice(0, 10) : dubaiDay(new Date(r.set_day)),
+    set_at: new Date(r.set_at).toISOString(),
+    set_by: r.set_by == null ? null : Number(r.set_by),
+    set_by_label: r.set_by_label || '',
+    rates,
+    rateBy: new Map(rates.map((x) => [x.key, x.rate])),
+    other: Number(r.other_rate),
+    cars_at_set: jsonOf(r.cars) || [],
+    weights: Array.isArray(w) && w.length === 7 ? w.map(Number) : null,
+    weights_basis: jsonOf(r.weights_basis),
+  };
+};
+/** AED a car on an average day that `save` asks of `plate`: one figure for
+    every car under a month save; under a class save, the car's class's
+    figure, or the figure for every other car. */
+export const rateOf = (save, plate, classOf) => {
+  if (!save) return null;
+  if (save.kind !== 'class') return save.rate;
+  const c = plate ? classOf?.get(plate) : null;
+  const r = c ? save.rateBy.get(c.key) : undefined;
+  return r ?? save.other;
+};
+/** The car a person is asked their share by on `day`: the one they drove
+    most that day; on a day they did not drive, the one they last drove in
+    the window that makes them active (driversActiveOn). */
+export function carOf(facts, pk, day) {
+  for (let i = 0; i < DRIVER_DAYS; i++) {
+    const p = facts.personCar?.get(addDays(day, -i))?.get(pk);
+    if (p) return p;
+  }
+  return null;
+}
+/** Pure. Each active driver's share of a day's plan: equal under one rate
+    for every car — plan ÷ drivers, exactly as before the classes — and
+    under a class save in proportion to the class rate of the car each one
+    drove (carOf), so the shares still add up to the plan. A driver whose
+    car cannot be named is asked by the figure for every other car. */
+export function driverShares(t, facts, day, plan, active) {
+  const out = new Map();
+  if (plan == null || !active || !active.size) return out;
+  const save = t?.saveOn?.get(day) || null;
+  if (!save || save.kind !== 'class') {
+    for (const pk of active) out.set(pk, plan / active.size);
+    return out;
+  }
+  const r = new Map();
+  let sum = 0;
+  for (const pk of active) {
+    const x = rateOf(save, carOf(facts, pk, day), t.classOf);
+    r.set(pk, x);
+    sum += x;
+  }
+  for (const pk of active) out.set(pk, sum > 0 ? (plan * r.get(pk)) / sum : plan / active.size);
+  return out;
+}
+
 /* ── the month, day by day ───────────────────────────────────────────────── */
 /** Pure: the month's plan, needs and verdicts from the saves and the facts.
     `today` is the Dubai day the page is speaking on; `min` the trips an
     active driver is asked for on an average day; `mw` the month's weekday
-    weights for that minimum (api/target_weights.js monthWeights), or null. */
-export function computeMonth({ month, today, rows = [], facts, min = 10, mw = null }) {
+    weights for that minimum (api/target_weights.js monthWeights), or null;
+    `classes` the class saves (classRows), `classOf` each plate's class
+    (loadClasses). */
+export function computeMonth({ month, today, rows = [], facts, min = 10, mw = null, classes = [], classOf = new Map() }) {
   const D = daysIn(month);
   const first = `${month}-01`;
   const last = addDays(first, D - 1);
-  const saves = rows.map(normRow).sort(bySave);
-  const carsNow = carsAsOf(facts, today).size;
+  /* The class saves that reach this month: every one made in it, and the
+     last one made before it — the one in force on its 1st (any earlier one
+     is superseded from day one). Class rates share a month's days by the
+     month's own weekday weights, frozen on its 1st (api/target_weights.js
+     monthWeights) — so a rate saved in October does not ask March to run
+     the way August and September did — and by the weights learned at the
+     save only when the month has none. */
+  const cls = classes.map((r) => (r.kind === 'class' ? r : normClassRow(r))).filter((x) => x.set_day <= last).sort(bySave);
+  const carried = cls.filter((x) => x.set_day < first).pop() || null;
+  const monthW = Array.isArray(mw?.fares) && mw.fares.length === 7 ? mw.fares.map(Number) : null;
+  const shaped = (x) => (monthW ? { ...x, weights: monthW, weights_basis: mw.basis, weights_month: month } : x);
+  const saves = [...rows.map(normRow).map((x) => ({ ...x, kind: 'month' })),
+    ...(carried ? [shaped(carried)] : []), ...cls.filter((x) => x.set_day >= first).map(shaped)].sort(bySave);
+  const nowSet = carsAsOf(facts, today);
+  const carsNow = nowSet.size;
   const firstSave = saves.length ? saves[0].set_day : null;
   /* The last save made on the first day anything was saved: what the days
      before it are planned at. A typo corrected ten minutes later must not be
@@ -316,13 +502,70 @@ export function computeMonth({ month, today, rows = [], facts, min = 10, mw = nu
     const left = wLeftUnder(s)[from];
     return left > 0 ? weightOf(s, dayAt[i]) / left : 1 / (D - from);
   };
+  /* Each vehicle class's part of the month: its cars, its plan and what its
+     plates earned, day by day into one row a class (classBreakdown). */
+  const byClass = new Map();
+  const yday = addDays(today, -1);
+  const part = (plate) => {
+    const c = plate ? classOf.get(plate) : null;
+    const key = c ? c.key : NO_CLASS;
+    if (!byClass.has(key)) {
+      byClass.set(key, { key: c ? c.key : null, make: c?.make ?? null, model: c?.model ?? null, year: c?.year ?? null,
+        label: c ? c.label : 'No make or model on file', month_plan: 0, planned: 0, earned: 0, plan_today: 0,
+        yday_plan: null, yday_earned: null, cars_now: 0, plates: new Set() });
+    }
+    return byClass.get(key);
+  };
+  const saveOn = new Map();
+  const dayInfo = new Map();
   for (let i = 0; i < D; i++) {
     const day = addDays(first, i);
     const state = day < today ? 'past' : day === today ? 'today' : 'future';
     const save = saves.length ? inForce(day) : null;
-    const cars = save && day < firstSave ? save.cars
-      : state === 'future' ? carsNow : carsAsOf(facts, day).size;
-    const plan = save ? save.rate * cars * wOf[i] : null;
+    saveOn.set(day, save);
+    /* The cars the day counts: on a day before a MONTH save, the cars that
+       save was shared over (the anchor rule above); otherwise the day's own
+       — today's, for a day to come. */
+    const flatAnchor = !!save && save.kind !== 'class' && day < firstSave;
+    const set = state === 'future' ? nowSet : carsAsOf(facts, day);
+    const cars = flatAnchor ? save.cars : set.size;
+    let plan = null;
+    if (save && save.kind === 'class') {
+      let sum = 0;
+      for (const p of set) sum += rateOf(save, p, classOf);
+      plan = sum * wOf[i];
+    } else if (save) plan = save.rate * cars * wOf[i];
+    dayInfo.set(day, { save, flatAnchor, set, w: wOf[i], plan });
+    if (plan != null) {
+      /* Each car's part of the plan: its class rate × the weight; on an
+         anchored day, the plan over the day's own cars evenly — one rate for
+         every car is what that save asked. */
+      for (const p of set) {
+        const v = flatAnchor ? plan / set.size : rateOf(save, p, classOf) * wOf[i];
+        const a = part(p);
+        a.month_plan += v;
+        if (state === 'past') a.planned += v;
+        if (state === 'today') a.plan_today += v;
+        if (day === yday) a.yday_plan = (a.yday_plan || 0) + v;
+      }
+    }
+    if (state === 'past') {
+      let plated = 0;
+      for (const [p, fares] of facts.plateFares?.get(day) || []) {
+        const a = part(p);
+        a.earned += fares;
+        a.plates.add(p);
+        if (day === yday) a.yday_earned = (a.yday_earned || 0) + fares;
+        plated += fares;
+      }
+      const loose = Number(facts.days.get(day)?.fares || 0) - plated;
+      if (Math.abs(loose) >= 0.005) {
+        if (!byClass.has(NO_PLATE)) byClass.set(NO_PLATE, { key: null, label: 'Fares with no plate', earned: 0, yday_earned: null, no_plate: true });
+        const a = byClass.get(NO_PLATE);
+        a.earned += loose;
+        if (day === yday) a.yday_earned = (a.yday_earned || 0) + loose;
+      }
+    }
     const f = facts.days.get(day);
     const earned = state === 'future' ? null : (f ? Number(f.fares) : 0);
     const needed = save && state !== 'future' ? Math.max(0, plan + shortfall * shareOf(i, i)) : null;
@@ -332,8 +575,10 @@ export function computeMonth({ month, today, rows = [], facts, min = 10, mw = nu
     const row = {
       day, dow: dowOf(day), label: shortDay(day), state,
       /* `rate` is the AED a car THIS day is asked for — the save's rate on
-         an average day × this weekday's weight; `weight` that weight. */
-      cars, rate: save ? save.rate * wOf[i] : null, weight: save ? Math.round(wOf[i] * 1e4) / 1e4 : null,
+         an average day × this weekday's weight; `weight` that weight. Under
+         class rates, the average over the day's cars. */
+      cars, rate: !save ? null : save.kind === 'class' ? (cars ? plan / cars : null) : save.rate * wOf[i],
+      weight: save ? Math.round(wOf[i] * 1e4) / 1e4 : null,
       plan: r2(plan), needed: r2(needed),
       earned: r2(earned), diff: null, pct: null, verdict: null, provisional: false,
       settled: null, why: null, coverage: null,
@@ -392,6 +637,38 @@ export function computeMonth({ month, today, rows = [], facts, min = 10, mw = nu
 
   const past = days.filter((x) => x.state === 'past');
   const latest = saves.length ? saves[saves.length - 1] : null;
+  const classed = latest?.kind === 'class';
+  /* Under class rates "AED a car on an average day" is the average over
+     today's cars: what the classes ask, car for car. */
+  let rateNow = latest ? latest.rate : null;
+  if (classed) {
+    let sum = 0;
+    for (const p of nowSet) sum += rateOf(latest, p, classOf);
+    rateNow = carsNow ? sum / carsNow : latest.other;
+  }
+  for (const p of nowSet) part(p).cars_now += 1;
+  const tw = t ? t.weight : null;
+  const classesOut = [...byClass.values()]
+    .filter((a) => a.no_plate || a.cars_now || a.month_plan || Math.abs(a.earned) >= 0.005)
+    .map((a) => (a.no_plate ? { key: null, label: a.label, no_plate: true, earned: r2(a.earned), yday_earned: r2(a.yday_earned) } : {
+      key: a.key, make: a.make, model: a.model, year: a.year, label: a.label,
+      rate: latest ? r2(classRateOf(latest, a.key)) : null,
+      uses_other: classed && (a.key == null || !latest.rateBy.has(a.key)),
+      today_rate: latest && tw != null ? r2(classRateOf(latest, a.key) * tw) : null,
+      cars_now: a.cars_now,
+      plan_today: latest && t ? r2(a.plan_today) : null,
+      yday_plan: r2(a.yday_plan), yday_earned: r2(a.yday_earned),
+      month_plan: latest ? r2(a.month_plan) : null,
+      planned: latest ? r2(a.planned) : null,
+      earned: r2(a.earned),
+      ahead: latest ? r2(a.earned - a.planned) : null,
+      pct: latest && a.planned > 0 ? r1((100 * a.earned) / a.planned) : null,
+      /* The plates counted with no make or model on file, so the page can
+         name them and say why they are asked the figure for every other car. */
+      plates: a.key == null ? [...nowSet].filter((p) => !classOf.has(p)).sort().slice(0, 50) : undefined,
+    }))
+    .sort((x, y) => (x.no_plate ? 1 : 0) - (y.no_plate ? 1 : 0) || (x.key == null ? 1 : 0) - (y.key == null ? 1 : 0)
+      || (y.cars_now || 0) - (x.cars_now || 0) || (y.month_plan || 0) - (x.month_plan || 0) || x.label.localeCompare(y.label));
   /* The figure the OWNER typed, and the cars it was typed over: the last save
      that is not the weekday re-shape (applyWeightCutover). The re-shape's own
      row carries what it spreads and the cars it spreads over, so its rate
@@ -406,15 +683,21 @@ export function computeMonth({ month, today, rows = [], facts, min = 10, mw = nu
     : saves[saves.length - 1].weights && plannedToDate > 0
       ? earnedToDate + (earnedToDate / plannedToDate) * Math.max(0, monthTargetNow - plannedToDate)
       : (earnedToDate / past.length) * D;
+  const typedClass = typed?.kind === 'class';
   const summary = saves.length ? {
     month_target: r2(monthTargetNow),
-    gross_set: typed.gross,
-    rate: latest.rate,
+    /* Under class rates there is no typed month figure: the month is the sum
+       of the plans, and "set at" names the day the rates were saved. */
+    gross_set: typedClass ? null : typed.gross,
+    rate: classed ? r2(rateNow) : latest.rate,
     /* the cars the rate in force was taken over */
-    rate_cars: latest.cars,
-    cars_at_set: typed.cars,
+    rate_cars: classed ? carsNow : latest.cars,
+    cars_at_set: typedClass ? carsAtSave(typed) : typed.cars,
     cars_now: carsNow,
-    since_set: r2(monthTargetNow - typed.gross),
+    since_set: typedClass ? null : r2(monthTargetNow - typed.gross),
+    kind: latest.kind,
+    other_rate: classed ? latest.other : null,
+    rates_set_day: classed ? latest.set_day : null,
     earned: r2(earnedToDate),
     planned: r2(plannedToDate),
     ahead: r2(earnedToDate - plannedToDate),
@@ -487,12 +770,20 @@ export function computeMonth({ month, today, rows = [], facts, min = 10, mw = nu
     avg_trips_day: tdays.length ? r1(tsum('trips') / tdays.length) : null,
     avg_active: tdays.length ? r1(driverDays / tdays.length) : null,
   };
-  return {
+  const result = {
     month, month_name: monthName(month), today, first, last, days_in_month: D,
     target: latest ? {
-      gross: typed.gross, rate: latest.rate, cars: typed.cars, set_day: typed.set_day,
+      gross: typedClass ? null : typed.gross, rate: classed ? r2(rateNow) : latest.rate,
+      cars: typedClass ? carsAtSave(typed) : typed.cars, set_day: typed.set_day,
       set_at: typed.set_at, saves: saves.length, weighted: !!latest.weights,
+      kind: latest.kind,
+      rates: classed ? latest.rates.map(({ make, model, year, label, rate }) => ({ make, model, year, label, rate })) : null,
+      other_rate: classed ? latest.other : null,
     } : null,
+    /* Each vehicle class's part of the month — its cars, rate, plan and
+       earnings — under either kind of save: under one rate for every car it
+       is still each class's share of the month. */
+    classes: classesOut,
     why: latest ? null : `No target is set for ${monthName(month)}. The Owner sets it in Set up › Access.`,
     trips_min: min,
     trips_summary: tripsSummary,
@@ -500,10 +791,23 @@ export function computeMonth({ month, today, rows = [], facts, min = 10, mw = nu
     /* weights_basis made public: the re-shape's carries cars and money
        (cars_now, month_target_kept, rate_before) that the access manifest
        does not shape, and a reader without them must not get them here. */
-    saves: saves.map((x) => ({ ...x, weights_basis: publicBasis(x.weights_basis) })),
+    saves: saves.map((x) => publicSave(x, first)),
     plannedRaw: plannedToDate,
     monthRaw: monthTargetNow,
   };
+  /* For the drivers' shares (driverShares): the save in force on each day
+     and the plates' classes; for a car's own page (carTarget), its part of a
+     day's plan — the rule the class breakdown above sums, so a car's page
+     and its class's row cannot disagree: null with no target, 0 on a day it
+     was not counted. Not enumerable, so never in an answer. */
+  const carPlanOn = (day, plate) => {
+    const x = dayInfo.get(day);
+    if (!x || x.plan == null) return null;
+    if (!x.set.has(plate)) return 0;
+    return x.flatAnchor ? x.plan / x.set.size : rateOf(x.save, plate, classOf) * x.w;
+  };
+  Object.defineProperties(result, { saveOn: { value: saveOn }, classOf: { value: classOf }, carPlanOn: { value: carPlanOn } });
+  return result;
 }
 
 /* ── reading it ──────────────────────────────────────────────────────────── */
@@ -535,8 +839,9 @@ export async function monthTarget(q, { month = null, today = null, now = new Dat
   const m = month || monthOf(day);
   const { from, to } = monthSpan(m, day);
   const trips = min ?? await tripsMin(q);
-  const [rows, facts, mw] = await Promise.all([targetRows(q, m), loadFacts(q, from, to), monthWeights(q, m, { now })]);
-  const out = computeMonth({ month: m, today: day, rows, facts, min: trips, mw });
+  const [rows, facts, mw, classes, classOf] = await Promise.all([targetRows(q, m), loadFacts(q, from, to),
+    monthWeights(q, m, { now }), classRows(q, monthSpan(m, day).last), loadClasses(q)]);
+  const out = computeMonth({ month: m, today: day, rows, facts, min: trips, mw, classes, classOf });
 
   /* Yesterday's verdict is the headline. On the 1st it belongs to the month
      before, which has its own target (or none, said so). */
@@ -546,7 +851,7 @@ export async function monthTarget(q, { month = null, today = null, now = new Dat
     const pm = monthOf(yday);
     const prev = computeMonth({ month: pm, today: day, rows: await targetRows(q, pm),
       facts: await loadFacts(q, addDays(`${pm}-01`, -(DRIVER_DAYS + 1)), yday), min: trips,
-      mw: await monthWeights(q, pm, { now }) });
+      mw: await monthWeights(q, pm, { now }), classes, classOf });
     out.yesterday = prev.days.find((x) => x.day === yday) || null;
     out.yesterday_month = { month: pm, month_name: prev.month_name, target: prev.target, why: prev.why,
       summary: prev.summary };
@@ -640,14 +945,18 @@ export async function saveTarget(q, { month, gross, now = new Date(), by = null,
   const weights = lw.ok ? lw.fares : null;
   const wSum = (a, b) => { let s = 0; for (let d = a; d <= b; d = addDays(d, 1)) s += weights ? weights[dowOf(d)] : 1; return s; };
   const restFrom = today > first ? today : first;
+  /* A class save made before today plans every day of this month after it
+     (and, the month's first save, the days before it): those days are gone
+     at their plan, exactly as under an earlier month save. */
+  const [classes, classOf] = await Promise.all([classRows(q, addDays(today, -1)), loadClasses(q)]);
   let rate; let pastPlan = 0;
-  if (!earlier.length) {
+  if (!earlier.length && !(classes.length && today > first)) {
     /* The days before the first save are planned at its cars, so the whole
        month is shared at once. */
     rate = g / (cars * wSum(first, last));
     pastPlan = today > first ? rate * cars * wSum(first, addDays(today, -1)) : 0;
   } else {
-    const was = computeMonth({ month, today, rows: earlier, facts });
+    const was = computeMonth({ month, today, rows: earlier, facts, classes, classOf });
     pastPlan = was.plannedRaw;
     rate = (g - pastPlan) / (cars * wSum(restFrom, last));
     if (!(rate > 0)) {
@@ -664,6 +973,159 @@ export async function saveTarget(q, { month, gross, now = new Date(), by = null,
     [first, r2(g), cars, Math.round(rate * 1e6) / 1e6, r2(pastPlan), today, now.toISOString(), by, String(byLabel || '').slice(0, 200),
       weights ? JSON.stringify(weights) : null, JSON.stringify(lw.basis)]);
   return { row: normRow(row), month };
+}
+
+/* ── setting the class rates ─────────────────────────────────────────────── */
+/* What a class "usually" earns, beside its box: its plates' fares over the
+   settled days of the last USUAL_DAYS ÷ the car-days it counted on them —
+   the rate at which those days would have met a plan to the fils. Four
+   whole weeks, so every weekday is in it the same number of times. */
+export const USUAL_DAYS = 28;
+
+/** Save AED a car on an average day for each class and for every other car.
+    `rates` is [{make, model, year, rate}]; a class left out, or sent with no
+    figure, is asked the figure for every other car. Returns {row} or
+    {error, status, detail}. */
+export async function saveClassTarget(q, { rates = [], other, now = new Date(), by = null, byLabel = '' }) {
+  const today = dubaiDay(now);
+  const num = (v) => (v === '' || v == null ? null : Number(v));
+  const fine = (v) => Number.isFinite(v) && v > 0 && v <= MAX_CLASS_RATE;
+  const o = num(other);
+  if (!fine(o)) return { error: 'bad_other', status: 400, detail: 'Enter the AED a day for every other car, above zero.' };
+  if (!Array.isArray(rates)) return { error: 'bad_rates', status: 400, detail: 'Send the classes as a list.' };
+  const classOf = await loadClasses(q);
+  const known = new Map([...classOf.values()].map((c) => [c.key, c]));
+  const seen = new Set();
+  const clean = [];
+  for (const x of rates) {
+    const r = num(x?.rate);
+    if (r == null) continue;
+    const key = classKey(x?.make, x?.model, x?.year);
+    const c = known.get(key);
+    if (!c) return { error: 'unknown_class', status: 400, detail: `${classLabel(x || {})} is not a make, model and year on the vehicle register.` };
+    if (seen.has(key)) return { error: 'duplicate_class', status: 400, detail: `${c.label} is listed twice.` };
+    if (!fine(r)) return { error: 'bad_rate', status: 400, detail: `Enter the AED a day for ${c.label}, above zero.` };
+    seen.add(key);
+    clean.push({ make: c.make, model: c.model, year: c.year, rate: r2(r) });
+  }
+  /* The cars each class counts at the save, for the history. */
+  const facts = await loadFacts(q, addDays(today, -(CAR_DAYS + 1)), today);
+  const counts = new Map();
+  let otherCars = 0;
+  for (const p of carsAsOf(facts, today)) {
+    const c = classOf.get(p);
+    if (!c) { otherCars += 1; continue; }
+    if (!counts.has(c.key)) counts.set(c.key, { make: c.make, model: c.model, year: c.year, cars: 0 });
+    counts.get(c.key).cars += 1;
+  }
+  const cars = [...counts.values()].sort((a, b) => b.cars - a.cars);
+  if (otherCars) cars.push({ make: null, model: null, year: null, cars: otherCars });
+  const lw = await learnWeights(q, today);
+  const [row] = await q(
+    `INSERT INTO class_target (set_day, set_at, set_by, set_by_label, rates, other_rate, cars, weights, weights_basis)
+     VALUES ($1::date, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb)
+     RETURNING id, to_char(set_day, 'YYYY-MM-DD') AS set_day, set_at, set_by, set_by_label, rates, other_rate, cars,
+               weights, weights_basis`,
+    [today, now.toISOString(), by, String(byLabel || '').slice(0, 200), JSON.stringify(clean), r2(o), JSON.stringify(cars),
+      lw.ok ? JSON.stringify(lw.fares) : null, JSON.stringify(lw.basis)]);
+  return { row: normClassRow(row) };
+}
+
+/** What the Owner's class panel prints beside the boxes: every class on the
+    register, the cars each counts today, and what each usually earns a car
+    a day (USUAL_DAYS) — with the plates counted that have no class. */
+export async function classEditor(q, { today }) {
+  const from = addDays(today, -USUAL_DAYS);
+  const [classOf, facts] = await Promise.all([loadClasses(q), loadFacts(q, addDays(from, -(DRIVER_DAYS + 1)), addDays(today, -1))]);
+  const rows = new Map();
+  const get = (c) => {
+    const key = c ? c.key : NO_CLASS;
+    if (!rows.has(key)) rows.set(key, { key: c ? c.key : null, make: c?.make ?? null, model: c?.model ?? null, year: c?.year ?? null,
+      label: c ? c.label : 'No make or model on file', plates: 0, cars_now: 0, earned: 0, car_days: 0 });
+    return rows.get(key);
+  };
+  for (const c of classOf.values()) get(c).plates += 1;
+  const nowSet = carsAsOf(facts, today);
+  const bare = [];
+  for (const p of nowSet) {
+    const c = classOf.get(p) || null;
+    get(c).cars_now += 1;
+    if (!c) bare.push(p);
+  }
+  let days = 0, fleetFares = 0, fleetCarDays = 0;
+  for (let d = from; d < today; d = addDays(d, 1)) {
+    if (!settledness(facts, d).settled) continue;
+    days += 1;
+    for (const p of carsAsOf(facts, d)) { get(classOf.get(p) || null).car_days += 1; fleetCarDays += 1; }
+    for (const [p, f] of facts.plateFares?.get(d) || []) get(classOf.get(p) || null).earned += f;
+    fleetFares += Number(facts.days.get(d)?.fares || 0);
+  }
+  const list = [...rows.values()].map((r) => ({
+    key: r.key, make: r.make, model: r.model, year: r.year, label: r.label, plates: r.plates, cars_now: r.cars_now,
+    usual: r.car_days ? r2(r.earned / r.car_days) : null, car_days: r.car_days,
+  })).sort((a, b) => (a.key == null ? 1 : 0) - (b.key == null ? 1 : 0) || b.cars_now - a.cars_now || b.plates - a.plates
+    || a.label.localeCompare(b.label));
+  return {
+    usual_from: from, usual_to: addDays(today, -1), usual_days: days,
+    fleet_usual: fleetCarDays ? r2(fleetFares / fleetCarDays) : null,
+    cars_now: nowSet.size,
+    classes: list.filter((r) => r.key != null),
+    unclassed: { cars_now: bare.length, plates: bare.sort().slice(0, 50), usual: list.find((r) => r.key == null)?.usual ?? null },
+  };
+}
+
+/* ── one car against its class's rate ────────────────────────────────────── */
+/** A car's own target, for its vehicle page: its class, the AED a car on an
+    average day its class is asked (or the figure for every other car, and
+    why), today's weekday share of it, and the last `days` days — what it
+    was asked (0 on a day it was not counted: it had not earned in the 7
+    days before), what it earned, and the verdict once the day settled. The
+    days are computeMonth's own, read through carPlanOn, over just the span
+    they need. */
+export async function carTarget(q, plate, { now = new Date(), today = null, days = 7 } = {}) {
+  const day = today || dubaiDay(now);
+  const from = addDays(day, -days);
+  const to = addDays(day, -1);
+  const [classOf, facts, min] = await Promise.all([loadClasses(q), loadFacts(q, addDays(from, -(DRIVER_DAYS + 1)), day), tripsMin(q)]);
+  const cls = classOf.get(plate) || null;
+  const out = [];
+  let t = null;
+  for (const m of [...new Set([monthOf(from), monthOf(day)])]) {
+    const last = addDays(`${m}-01`, daysIn(m) - 1);
+    const [rows, mw, classes] = await Promise.all([targetRows(q, m), monthWeights(q, m, { now }), classRows(q, last)]);
+    t = computeMonth({ month: m, today: day, rows, facts, min, mw, classes, classOf });
+    for (const d of t.days) {
+      if (d.day < from || d.day > to) continue;
+      const plan = t.carPlanOn(d.day, plate);
+      const earned = facts.plateFares?.get(d.day)?.get(plate) || 0;
+      const counted = carsAsOf(facts, d.day).has(plate);
+      out.push({ day: d.day, label: d.label, weight: d.weight, counted, plan: r2(plan), earned: r2(earned),
+        diff: plan ? r2(earned - plan) : null, pct: plan ? r1((100 * earned) / plan) : null,
+        verdict: !plan ? null : earned >= plan - 0.005 ? 'over' : d.settled ? 'under' : 'unsettled',
+        settled: d.settled, why: d.settled ? null : d.why });
+    }
+  }
+  const save = t?.saveOn?.get(day) || null;
+  const rate = save ? rateOf(save, plate, classOf) : null;
+  const tw = t?.days.find((d) => d.day === day)?.weight ?? null;
+  const judged = out.filter((d) => d.plan && d.settled);
+  const sum = (k) => judged.reduce((n, d) => n + (d[k] || 0), 0);
+  return {
+    plate, today: day, from, to,
+    class: cls ? { make: cls.make, model: cls.model, year: cls.year, label: cls.label } : null,
+    kind: save ? save.kind : null,
+    rate: r2(rate),
+    /* Asked the figure for every other car: no class on file, or a class
+       the Owner gave no figure of its own. */
+    uses_other: !!save && save.kind === 'class' && !(cls && save.rateBy.has(cls.key)),
+    counted_today: carsAsOf(facts, day).has(plate),
+    today_weight: tw, today_rate: rate != null && tw != null ? r2(rate * tw) : null,
+    days: out,
+    totals: judged.length ? { days: judged.length, plan: r2(sum('plan')), earned: r2(sum('earned')),
+      pct: sum('plan') ? r1((100 * sum('earned')) / sum('plan')) : null,
+      over: judged.filter((d) => d.verdict === 'over').length } : null,
+    why: save ? null : 'No target is in force today. The Owner sets the daily targets in Set up › Access.',
+  };
 }
 
 /* ── the day the weekday rule arrived ────────────────────────────────────── */

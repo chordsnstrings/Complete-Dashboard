@@ -1411,11 +1411,48 @@ export async function renderVehicle(root, plate, tab = 'overview') {
   }
   head.innerHTML = '';
   head.append(identityCard(prof));
+  const tgt = el('p', 'cap veh-target');
+  head.append(tgt);
   head.append(tabBar(VEHICLE_TABS, tab, (t) => href('vehicle', plate, t === 'overview' ? null : t)));
+  targetLine(tgt, plate);
 
   const fn = TABS[tab] || tabOverview;
   await fn(body, plate, prof);
   return { name: prof.plate, spec: prof.spec };
+}
+
+/* ── the car against its class's daily target ──────────────────────────────
+   The operator, 2026-10-29: "Let me set targets vehicle wise. Make model year
+   - per day target, which will reflect everywhere." Under the card, on every
+   tab: what this car's class is asked on an average day, today's weekday
+   share of it, and the last 7 days against it (/api/target/car — the Target
+   page's own arithmetic, read for one plate). Drawn when it lands; the page
+   never waits for it. A car with no target says why. Its figures are marked
+   .num, so the fold layer (focus.js decide) keeps the line whole: it is the
+   car's figures, not an explanation — and it never says "no figure", which
+   the fold layer reads as an absence and cuts to one line. */
+async function targetLine(host, plate) {
+  const gen = currentGen();
+  let r;
+  try { r = await qAll('/api/target/car', { plate }); } catch { host.remove(); return; }
+  if (!alive(gen) || !host.isConnected) return;
+  if (r.why) { host.innerHTML = `<b>Daily target</b> ${esc(r.why)}`; return; }
+  const name = r.class ? r.class.label : 'No make or model on file';
+  const WD = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const wd = WD[new Date(`${r.today}T12:00:00Z`).getUTCDay()];
+  const parts = [`<b>Daily target</b> ${esc(name)}: <b class="num">${esc(money(r.rate))}</b> a car on an average day`
+    + (r.uses_other ? ` <span class="mf-dim">${esc(r.class ? '(the every-other-car figure: its class has none of its own)' : '(the every-other-car figure)')}</span>` : '')];
+  if (r.today_rate != null) {
+    parts.push(r.counted_today ? `${esc(wd)}s ask ${esc(money(r.today_rate))}`
+      : `${esc(`not counted today — it has not earned in the 7 days before, so today asks nothing of it`)}`);
+  }
+  const tt = r.totals;
+  if (tt) {
+    const ok = tt.earned >= tt.plan - 0.005;
+    parts.push(`last ${esc(countOf(tt.days, 'settled day'))}: <b class="num ${ok ? 'tg-over' : 'tg-under'}">${esc(money(tt.earned))}</b> of ${esc(money(tt.plan))}`
+      + `${tt.pct != null ? ` (${esc(fmt(tt.pct, 1))}%)` : ''}, at or over target on ${esc(countOf(tt.over, 'day'))}`);
+  } else parts.push(esc('no settled day in the last 7 asked anything of it yet'));
+  host.innerHTML = `${parts.join(' · ')} · <a class="lnk" href="${href('target')}">Target page</a>`;
 }
 
 /* ── the directory that links into the pages above ───────────────────────── */
