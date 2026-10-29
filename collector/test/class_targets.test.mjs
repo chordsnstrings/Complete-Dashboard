@@ -242,6 +242,23 @@ check('the panel: every class on the register with its cars now, and what a car 
   ed.classes.length === 2 && ed.classes[0].label === 'BYD Han EV 2025' && ed.classes[0].cars_now === 2 && ed.classes[0].usual === 300
   && ed.classes[1].usual === 200 && ed.unclassed.cars_now === 1 && j(ed.unclassed.plates) === j(['C4']) && ed.fleet_usual === 225, j(ed));
 check('every save kept', (await classRows(q, '2026-10-29')).length === 1);
+/* The Today workbook's "Cars yesterday": a car's share of what the day
+   needed follows its part of the plan — 350 of 1,000 for C1, 150 for C3 and
+   C4 — where it was a tenth each under one figure for every car.
+   REVERSION (run 2026-10-29): the share back to needed ÷ cars -> 46 passed,
+   1 FAILED: every car 418.75, the day's need of 1,675 ÷ 4. */
+const { buildTodayWorkbook } = await import('../api/today_workbook.js');
+const { sheetNamed } = await import('../src/salary/xlsx.js');
+const tb = readWorkbook((await buildTodayWorkbook({ q, now: at('2026-10-29', '09:00') })).wb.toBuffer());
+const cy = sheetNamed(tb, 'Cars yesterday')?.rows || [];
+const hi = cy.findIndex((r) => r[0] === 'Plate');
+const shareCol = cy[hi]?.indexOf('Share (AED)');
+const shareOfPlate = (p) => cy.slice(hi + 1).find((r) => r[0] === p)?.[shareCol];
+const needY = day(mt, '2026-10-28').needed;
+check('the Today workbook’s cars yesterday: each car’s share of the day’s need by its class’s figure',
+  Math.abs(shareOfPlate('C1') - (needY * 350) / 1000) < 0.006 && Math.abs(shareOfPlate('C3') - (needY * 150) / 1000) < 0.006
+  && Math.abs(shareOfPlate('C1') + shareOfPlate('C2') + shareOfPlate('C3') + shareOfPlate('C4') - needY) < 0.03,
+  JSON.stringify(['C1', 'C2', 'C3', 'C4'].map(shareOfPlate).concat([needY])));
 
 /* ── 7. the words, the files, the access layer ───────────────────────── */
 console.log('\n7. the words, the workbooks and the access layer');

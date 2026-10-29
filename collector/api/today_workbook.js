@@ -132,7 +132,19 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
   const facts = await loadFacts(q, addDays(yday, -(DRIVER_DAYS + 1)), today);
   const counted = carsAsOf(facts, yday);
   const yrow = t.days.find((d) => d.day === yday) || t.yesterday || null;
-  const share = yrow && yrow.needed != null && yrow.cars ? Math.round((yrow.needed / yrow.cars) * 100) / 100 : null;
+  const even = yrow && yrow.needed != null && yrow.cars ? Math.round((yrow.needed / yrow.cars) * 100) / 100 : null;
+  /* A car's share of what yesterday needed: equal under one figure for every
+     car (as it always was); under daily targets by vehicle class, in
+     proportion to its part of the day's plan — its class's figure × the
+     weekday weight (computeMonth carPlanOn). */
+  const inMonth = t.days.some((d) => d.day === yday);
+  const ySave = (inMonth ? t.saveOn : t.yesterdaySaveOn)?.get(yday) || null;
+  const planOn = inMonth ? t.carPlanOn : t.yesterdayPlanOn;
+  const shareOf = (plate) => {
+    if (even == null || ySave?.kind !== 'class' || !planOn || !(yrow.plan > 0)) return even;
+    const part = planOn(yday, plate);
+    return part == null ? even : Math.round(((yrow.needed * part) / yrow.plan) * 100) / 100;
+  };
   const cars = await q(
     `SELECT btrim(n.plate) AS plate, mode() WITHIN GROUP (ORDER BY n.fleet_id) AS fleet,
             coalesce(round(sum(n.price) FILTER (WHERE n.has_fare AND n.local_day = $2::date)::numeric, 2), 0)::float AS earned,
@@ -144,13 +156,15 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
      HAVING max(n.local_day) FILTER (WHERE n.has_fare AND n.price > 0) IS NOT NULL
       ORDER BY 3, 1`, [addDays(yday, -7), yday]);
   const s3 = wb.sheet('Cars yesterday', { widths: [10, 10, 14, 10, 14, 14, 12, 40] });
-  s3.text(`${shortDay(yday)}: every car that earned in the 8 days to it. Its share is what the day needed ÷ the cars counted.`, 'dim');
+  s3.text(`${shortDay(yday)}: every car that earned in the 8 days to it. Its share is what the day needed${ySave?.kind === 'class'
+    ? ', shared over the cars counted by their classes’ daily targets' : ' ÷ the cars counted'}.`, 'dim');
   s3.header(['Plate', 'Fleet', 'Earned (AED)', 'Bookings', 'Share (AED)', 'Over (+) / under (−)', 'Last earned', 'Note'],
     ['text', 'text', 'money', 'int', 'money', 'money', 'date', 'wrap']);
   for (const c of cars) {
     const inPlan = counted.has(c.plate);
-    s3.row([hid('VEH', c.plate), c.fleet, money(c.earned), hid('BK', c.bookings), money(inPlan ? share : null),
-      money(inPlan && share != null ? Math.round((c.earned - share) * 100) / 100 : null), c.last_earned,
+    const share = inPlan ? shareOf(c.plate) : null;
+    s3.row([hid('VEH', c.plate), c.fleet, money(c.earned), hid('BK', c.bookings), money(share),
+      money(share != null ? Math.round((c.earned - share) * 100) / 100 : null), c.last_earned,
       inPlan ? null : 'Not counted in the day’s cars: it had not earned in the 7 days before.']);
   }
 

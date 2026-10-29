@@ -855,6 +855,9 @@ export async function monthTarget(q, { month = null, today = null, now = new Dat
     out.yesterday = prev.days.find((x) => x.day === yday) || null;
     out.yesterday_month = { month: pm, month_name: prev.month_name, target: prev.target, why: prev.why,
       summary: prev.summary };
+    /* Yesterday's arithmetic for one car, for the Today workbook's "Cars
+       yesterday" (not enumerable: never in an answer). */
+    Object.defineProperties(out, { yesterdaySaveOn: { value: prev.saveOn }, yesterdayPlanOn: { value: prev.carPlanOn } });
   }
   out.context = await context(q, day, facts);
   out.fleets = await byFleet(q, m, day);
