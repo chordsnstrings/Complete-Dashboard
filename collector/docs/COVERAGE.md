@@ -899,6 +899,29 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **"Cars that earned" is one figure in three places, and the per-car money
+  columns are three different figures (found 2026-10-29, CLS).** The target's
+  cars are plates on a booking with a fare above zero in the 7 days before
+  (`revenue_target.js loadFacts`): **104** on 29 Oct. `/api/economics/assets`
+  gives the same 104 only as `money > 0` (or `bookings > 0`); its `fares > 0`
+  says **71** and the Vehicles directory's `revenue > 0` says **68** for the
+  same week — neither is the target's grain. Measure the target's cars from
+  `money`, or from `/api/target`'s own `context.cars_7_days`. A car's CLASS is
+  `coalesce(vehicle, vehicle_plate)` make + model + year (the pair every
+  vehicle page reads); 133 of the register's 273 plates have no make or model
+  and are asked the figure for every other car — none of them earned that
+  week, but a new car can arrive without one.
+* **The fold layer cuts any prose line that says "no figure", "no data", "not
+  measured"… to one line (`focus.js` ABSENT), before it looks for figures.**
+  A line OF figures that happens to say so (the vehicle page's daily-target
+  line said "no figure of its own") is clamped to "a car on an…" at 390px.
+  Say it another way, or keep it out of prose.
+* **`.acx-msg` (the Access pages' message line) has `flex: 1 1 220px`**: in an
+  `.acx-actions` row that is its width, but placed straight in a panel body
+  (a column stack) it is 220px of HEIGHT — the month-target panel carried a
+  220px gap under its button for weeks. Put a message line in the row with
+  its button.
+
 * **A page's module now loads when the page opens (app.js `PAGE_OF`, FIX-STATUS
   LAZY), so a page module must not DO anything at load** — a listener, a
   global, a timer at the top of driver.js would now run only once someone

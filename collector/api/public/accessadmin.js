@@ -1375,71 +1375,70 @@ function settingsTab(host, ctx) {
 /* The 07:00 daily report email (src/daily_report.js): who gets it. The Owner
    and Access admins keep the list; each change is audited. Loaded on its own
    so a slow answer never holds the settings above it. */
-/* ── the monthly revenue target ─────────────────────────────────────────
+/* ── the revenue target: daily targets by vehicle class ──────────────────
    The operator, 2026-10-02: "Every month, the admin will set a specific
    revenue target … when setting it the admin panel will show yesterday's
-   active cars which earned money." The Owner types the month's gross; the
-   panel says, before Save, what it comes to — AED a car a day over the cars
-   that earned this week, the day's share, and whether the trips a day agree
-   with it at last month's fare. Every save is kept (who, when, at how many
-   cars); a later one re-spreads only the days left. */
-function targetPanel(host, ctx) {
+   active cars which earned money." And 2026-10-29: "Let me set targets
+   vehicle wise. Make model year - per day target, which will reflect
+   everywhere." So the Owner no longer types a month: they type what a car of
+   each make + model + year should earn on an AVERAGE day, and one figure for
+   every other car, and the month is the sum of every car's plan
+   (api/revenue_target.js). Beside each box: the cars the class counts today,
+   what a car of it usually earns (the last 4 weeks' settled days), and what
+   the box asks of today. Each box starts at the figure in force — under one
+   rate for every car, that rate — so a save that touches nothing asks the
+   days left what they were asked, give or take the weekday shape (class
+   rates share by the month's frozen weights; a month save made after the
+   1st by its own). Every save is kept (who, when, every
+   figure); a later one changes only the days from it on. Exported for
+   test/class_target_panel.test.mjs, which draws it on its own. */
+export function targetPanel(host, ctx) {
   const owner = ctx.owner;
-  const p = panel('Monthly revenue target', null, 'acx-target');
+  const p = panel('Revenue target — daily, by vehicle class', null, 'acx-target');
   const mm = msgLine();
   const state = h('div', { class: 'acx-target-now' });
   const facts = h('div', { class: 'acx-target-facts' });
+  const grid = h('div', { class: 'acx-target-grid' });
   const preview = h('p', { class: 'acx-p acx-dim', 'aria-live': 'polite' });
   const histHost = h('div', { class: 'acx-target-hist' });
-  const month = h('select', { class: 'depinput acx-in', 'data-acx': 'target-month' });
-  const gross = h('input', { type: 'number', min: '1', step: '1000', class: 'depinput acx-in acx-num',
-    placeholder: '1705000', 'data-acx': 'target-gross', inputmode: 'numeric' });
-  const save = h('button', { type: 'button', class: 'btn primary', disabled: !owner, 'data-acx': 'target-save' }, 'Save target');
-  month.disabled = !owner; gross.disabled = !owner;
+  const save = h('button', { type: 'button', class: 'btn primary', disabled: !owner, 'data-acx': 'target-save' }, 'Save daily targets');
   let d = null;
+  let boxes = [];        // [{c, input}] — one a class, in the table's order
+  let other = null;      // the box for every other car
   const two = (v) => Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const pick = () => (d && month.value === d.next.month ? d.next : d?.current);
+  const keyOf = (c) => `${String(c.make).toLowerCase()}|${String(c.model).toLowerCase()}|${c.year ?? ''}`;
+  const val = (input) => (input.value === '' ? null : Number(input.value));
   const say = () => {
-    const m = pick();
-    const g = Number(gross.value);
-    if (!m || !(g > 0)) { preview.textContent = 'Type the month’s gross target to see what it comes to.'; return; }
-    const pv = m.preview;
-    if (!pv.cars) { preview.textContent = 'No car earned in the last 7 days, so there is nothing to share a target over yet.'; return; }
-    /* The save's own rule (api/revenue_target.js saveTarget): a month's
-       first save is shared over EVERY day of it — the days already gone are
-       planned at it too, so the month reads what was typed — and a later one
-       re-spreads what is left over the days left. Dividing a first save by
-       the days left showed AED 10,333.33 a car a day for a save that stored
-       10,000.00 (test/access_pages.test.mjs). */
-    const keep = pv.past_plan != null ? pv.past_plan : 0;
-    /* Since 2026-10-11 a save shares by weekday (api/target_weights.js): the
-       rate is AED a car on an AVERAGE day, what is spread ÷ (cars × the sum
-       of the weights of the days it spreads over), which the server sends as
-       weight_sum — so this figure is the one Save stores. */
-    const span = pv.weight_sum > 0 ? pv.weight_sum : (pv.past_plan != null ? pv.days_left : m.days_in_month);
-    const rate = (g - keep) / (pv.cars * span);
-    if (!(rate > 0)) {
-      preview.textContent = `The days already gone were planned at AED ${two(keep)}; a month total at or below that leaves nothing for the days left.`;
-      return;
+    if (!d) return;
+    const C = d.classes;
+    const pv = C.preview;
+    const o = val(other);
+    if (!(o > 0)) { preview.textContent = 'Enter the AED a day for every other car — it covers any class left empty and any car with no make or model on file.'; return; }
+    /* What these figures ask: today's cars at their class's figure (an empty
+       box is the figure for every other car), × the weekday weights. The
+       days already gone keep what they were planned at. */
+    let perDay = o * C.unclassed.cars_now;
+    for (const { c, input } of boxes) {
+      const r = val(input);
+      perDay += (r > 0 ? r : o) * c.cars_now;
     }
-    const perDay = g / m.days_in_month;
-    const c = d.context;
-    const W = pv.weights;
-    const wk = W?.ok ? ` Shared by weekday — ${W.line} of an average day, from the ${W.basis.used} whole weeks `
-      + `${W.basis.from} to ${W.basis.to}: a Sunday asks AED ${two(rate * W.fares[0])} a car, a Thursday AED ${two(rate * W.fares[4])}.`
-      : (W ? ` Every day is asked the same: ${W.basis.why}` : '');
-    const tripsDay = c.active_drivers && c.last_month.avg_fare ? c.active_drivers * d.trips_min * c.last_month.avg_fare : null;
-    /* Shared by weekday, the rate is what a car is asked on an AVERAGE day;
-       with no weights learned every day is asked the same, and the sentence
-       is the one this panel always printed. */
-    const aCar = W?.ok ? 'a car on an average day' : 'a car a day';
-    preview.textContent = (pv.past_plan != null
-      ? `The ${pv.days_left} days left share AED ${two(g - keep)} over ${pv.cars} cars: AED ${two(rate)} ${aCar}. `
-        + `The days already gone keep the AED ${two(keep)} they were planned at.${wk}`
-      : `AED ${two(rate)} ${aCar} over the ${pv.cars} cars that earned in the last 7 days — AED ${two(perDay)} a day${W?.ok ? ' on average' : ''} over ${m.days_in_month} days.${wk}`)
-      + (tripsDay ? ` At ${d.trips_min} trips a day for each of the ${c.active_drivers} active drivers and ${c.last_month.month_name}’s `
-        + `AED ${two(c.last_month.avg_fare)} a trip, the trips target alone would bring about AED ${two(tripsDay)} a day — `
-        + `${tripsDay >= perDay ? `${Math.round((100 * (tripsDay - perDay)) / perDay)}% more than` : `${Math.round((100 * (perDay - tripsDay)) / perDay)}% less than`} this target.` : '');
+    const cur = d.current;
+    const keep = pv.past_plan;
+    const gone = keep != null ? keep : perDay * pv.weight_sum_gone;
+    const month = gone + perDay * pv.weight_sum_left;
+    const next = perDay * pv.weight_sum_next;
+    const today = perDay * pv.today_weight;
+    preview.textContent = `Over today’s ${C.cars_now} cars these figures ask AED ${two(perDay)} on an average day — today, a `
+      + `${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date(`${pv.today}T12:00:00Z`).getUTCDay()]}, AED ${two(today)}. `
+      /* With no earlier day's save the days gone are planned at these
+         figures over each day's own cars, which this preview takes as
+         today's: "about". */
+      + `${cur.month_name} would come to ${keep == null && pv.days_gone ? 'about ' : ''}AED ${two(month)}`
+      + (keep != null ? ` (the ${pv.days_gone} days already gone keep the AED ${two(keep)} they were planned at)` : (pv.days_gone ? ` (the ${pv.days_gone} days already gone planned at these figures too)` : ''))
+      + `, and ${d.next.month_name} to AED ${two(next)} at today’s cars. `
+      + (pv.weights ? `Shared by weekday — ${pv.weights_line} of an average day: a Sunday asks AED ${two(perDay * pv.weights[0])}, a Thursday AED ${two(perDay * pv.weights[4])}.`
+        : 'Every day is asked the same: too few whole weeks to learn the weekdays from.')
+      + (cur.target && cur.summary ? ` Now: ${cur.month_name} stands at AED ${two(cur.summary.month_target)}.` : '');
   };
   const draw = () => {
     const c = d.context;
@@ -1449,50 +1448,88 @@ function targetPanel(host, ctx) {
       c.last_month.fares != null ? h('li', null, h('b', null, c.last_month.month_name), `: ${money(c.last_month.fares)} gross over ${c.last_month.cars} cars`
         + (c.last_month.avg_fare ? `, AED ${two(c.last_month.avg_fare)} a trip.` : '.')) : null));
     const cur = d.current;
+    const f = d.classes.in_force;
     state.replaceChildren(cur.target
       ? h('p', { class: 'acx-p' }, h('b', null, `${cur.month_name}: ${money(cur.summary.month_target)}`),
-        ` — ${money(cur.target.rate)} a car ${cur.summary.weighted ? 'on an average day' : 'a day'} over ${cur.summary.cars_now} cars. Set at ${money(cur.target.gross)} over ${cur.target.cars} cars`
-        + (cur.summary.since_set ? `; ${cur.summary.since_set > 0 ? 'cars have joined' : 'cars have dropped out'} since, which moved it by ${money(Math.abs(cur.summary.since_set))}.` : '.'))
+        cur.summary.kind === 'class'
+          ? ` — daily targets by vehicle class, set ${cur.summary.rates_set_day}: ${money(cur.summary.rate)} a car on an average day on average over ${cur.summary.cars_now} cars.`
+          : ` — one figure for every car, ${money(cur.target.rate)} a car ${cur.summary.weighted ? 'on an average day' : 'a day'} over ${cur.summary.cars_now} cars (the month as typed on ${cur.target.set_day}). Each box below starts at it.`)
       : h('p', { class: 'acx-p' }, h('b', null, `${cur.month_name} has no target yet. `), 'The Today page says so until one is saved.'));
-    const opts = [[cur.month, `${cur.month_name} (this month)`], [d.next.month, `${d.next.month_name} (next month)`]];
-    const was = month.value;
-    month.replaceChildren(...opts.map(([v, l]) => h('option', { value: v }, l)));
-    month.value = opts.some(([v]) => v === was) ? was : cur.month;
-    const saves = [...cur.saves.map((x) => ({ ...x, m: cur.month_name })), ...d.next.saves.map((x) => ({ ...x, m: d.next.month_name }))];
-    histHost.replaceChildren(saves.length
-      ? h('ul', { class: 'acx-list' }, saves.slice().reverse().map((x) => h('li', null,
-        `${x.m}: ${money(x.gross)} — set ${dtStr(x.set_at)} by ${x.by === 'system:seed' ? 'the deploy, on the operator’s instruction'
-          : x.by === 'system:reweight' ? 'the weekday re-shape (the same month target, the days left shared by weekday)'
-            : (x.by || 'someone no longer named')}, `
-        + `over ${x.cars} cars, AED ${two(x.rate)} a car ${x.weighted ? 'on an average day, shared by weekday,' : 'a day'} from that day.`)))
+    /* The boxes: a class's figure in force, else the one rate for every car,
+       else empty with what the class usually earns as its hint. */
+    const inForce = new Map((f?.rates || []).map((x) => [keyOf(x), x.rate]));
+    const start = (cl) => {
+      if (!f) return '';
+      if (f.kind === 'class') return inForce.has(keyOf(cl)) ? String(inForce.get(keyOf(cl))) : '';
+      return f.flat_rate != null ? Number(f.flat_rate).toFixed(2) : '';
+    };
+    const C = d.classes;
+    const inp = (v, hint, label) => {
+      const x = h('input', { type: 'number', min: '1', step: '1', class: 'depinput acx-in acx-num', value: v,
+        placeholder: hint != null ? String(Math.round(hint)) : '', 'aria-label': label, inputmode: 'decimal' });
+      x.disabled = !owner;
+      x.addEventListener('input', say);
+      return x;
+    };
+    boxes = C.classes.map((cl) => ({ c: cl, input: inp(start(cl), cl.usual, `${cl.label}: AED a car on an average day`) }));
+    other = inp(f ? (f.kind === 'class' ? String(f.other_rate) : (f.flat_rate != null ? Number(f.flat_rate).toFixed(2) : '')) : '',
+      C.fleet_usual, 'Every other car: AED a car on an average day');
+    other.dataset.acx = 'target-other';
+    const usual = (v) => (v == null ? h('span', { class: 'acx-dim' }, '—') : `AED ${two(v)}`);
+    grid.replaceChildren(h('div', { class: 'acx-tablewrap' }, h('table', { class: 'acx-cls' },
+      h('thead', null, h('tr', null, h('th', { scope: 'col' }, 'Make, model, year'), h('th', { scope: 'col' }, 'Cars now'),
+        h('th', { scope: 'col' }, 'On file'), h('th', { scope: 'col' }, 'Usually earns a car a day'),
+        h('th', { scope: 'col' }, 'Target, AED a car on an average day'))),
+      h('tbody', null, ...boxes.map(({ c: cl, input }) => h('tr', { 'data-class': keyOf(cl) },
+        h('th', { scope: 'row' }, cl.label), h('td', null, String(cl.cars_now)), h('td', null, String(cl.plates)),
+        h('td', null, usual(cl.usual)), h('td', null, input))),
+      h('tr', { class: 'acx-cls-other' }, h('th', { scope: 'row' }, 'Every other car',
+        h('span', { class: 'acx-dim' }, C.unclassed.cars_now
+          ? ` — a class left empty, and ${plural(C.unclassed.cars_now, 'car', 'cars')} counted now with no make or model on file (${C.unclassed.plates.join(', ')})`
+          : ' — a class left empty, and any car with no make or model on file (none counted now)')),
+      h('td', null, String(C.unclassed.cars_now)), h('td', null, '—'), h('td', null, usual(C.fleet_usual)), h('td', null, other))))),
+    h('p', { class: 'acx-p acx-dim' }, `“Usually earns” is each class’s fares over the ${C.usual_days} settled days from ${C.usual_from} to ${C.usual_to} ÷ the days its cars were counted — the figure at which those days would have met their target exactly. “Every other car” beside it is the whole fleet’s.`));
+    const saves = [
+      ...(C.saves || []).map((x) => ({ at: x.set_at, text: `Daily targets by class from ${x.set_day} — `
+        + `${x.rates.length ? x.rates.map((r) => `${r.label} AED ${two(r.rate)}`).join('; ') : 'no class of its own'}; every other car AED ${two(x.other_rate)}`
+        + ` — set ${dtStr(x.set_at)} by ${x.by || 'someone no longer named'}.` })),
+      ...cur.saves.map((x) => ({ at: x.set_at, text: `${cur.month_name}: ${money(x.gross)} — set ${dtStr(x.set_at)} by ${x.by === 'system:seed' ? 'the deploy, on the operator’s instruction'
+        : x.by === 'system:reweight' ? 'the weekday re-shape (the same month target, the days left shared by weekday)'
+          : (x.by || 'someone no longer named')}, over ${x.cars} cars, AED ${two(x.rate)} a car ${x.weighted ? 'on an average day, shared by weekday,' : 'a day'} from that day.` })),
+    ].sort((a, b) => (a.at < b.at ? 1 : -1));
+    histHost.replaceChildren(saves.length ? h('ul', { class: 'acx-list' }, saves.map((x) => h('li', null, x.text)))
       : empty('No target has been saved yet.'));
     say();
   };
   const load = async () => {
     try { d = await getJson('/api/access/target'); draw(); } catch (e) { mm.set(explain(e), 'bad'); }
   };
-  month.addEventListener('change', say);
-  gross.addEventListener('input', say);
   save.addEventListener('click', async () => {
-    const g = Number(gross.value);
-    if (!(g > 0)) { mm.set('Enter the month’s gross target in AED, above zero.', 'bad'); return; }
-    const res = await act(save, mm, () => post('/api/access/target', { month: month.value, gross: g }));
+    const o = val(other);
+    if (!(o > 0)) { mm.set('Enter the AED a day for every other car, above zero.', 'bad'); return; }
+    const bad = boxes.find(({ input }) => input.value !== '' && !(Number(input.value) > 0));
+    if (bad) { mm.set(`Enter the AED a day for ${bad.c.label} above zero, or leave it empty for the figure for every other car.`, 'bad'); return; }
+    const rates = boxes.filter(({ input }) => input.value !== '')
+      .map(({ c: cl, input }) => ({ make: cl.make, model: cl.model, year: cl.year, rate: Number(input.value) }));
+    const res = await act(save, mm, () => post('/api/access/target/classes', { rates, other: o }));
     if (!res) return;
-    mm.set(`Saved: ${res.month_name} at ${money(res.saved.gross)} — ${money(res.saved.rate)} a car ${res.saved.weights ? 'on an average day' : 'a day'} over ${res.saved.cars} cars`
+    const nk = res.saved.rates.length;
+    mm.set(`Saved from ${res.saved.set_day}: ${nk === 1 ? 'one class with a figure of its own' : `${nk} classes with figures of their own`}, every other car AED ${two(res.saved.other_rate)}. `
+      + `${res.month_name} now comes to ${money(res.summary?.month_target)}`
       + (res.summary?.today_needs != null ? `; today needs ${money(res.summary.today_needs)}.` : '.'), 'ok');
-    gross.value = '';
     await load();
   });
   p.body.append(...[
-    h('p', { class: 'acx-p' }, 'One gross target for both fleets — fares, before any platform commission. It is shared over the cars '
-      + 'that earned in the last 7 days, and over the days BY WEEKDAY, the way the fleet’s own last 8 weeks ran — a Sunday is asked '
-      + 'for less than a Thursday. AED a car on an average day = the target ÷ (those cars × the weekday weights of the month’s days). '
-      + 'A car that joins adds its share of the days left to the month; a day under target is caught up over the days left in the '
-      + 'same weekday proportions, and a day over lowers them the same way. The Today page leads with what today needs and whether '
-      + 'yesterday was over (green) or under (red).'),
-    state, facts,
-    h('div', { class: 'acx-inrow' }, field('Month', month), field('Gross target, AED', gross), save),
-    preview, mm,
+    h('p', { class: 'acx-p' }, 'One target for both fleets — gross fares, before any platform commission — set as what a car of each make, model and year '
+      + 'should earn on an AVERAGE day. A day’s target is every car counted that day (it earned in the 7 days before) at its class’s figure × the '
+      + 'weekday’s weight, learned from the fleet’s own last 8 weeks: a Sunday asks less than a Thursday. A save applies from today and carries into every month '
+      + 'after it until the next save; the days already gone keep the target they were judged against. A class left empty is asked the figure for '
+      + 'every other car, which also covers any car with no make or model on file. A day under target is caught up over the days left; a driver’s share of a '
+      + 'day follows the class of the car they drive. The Today page leads with what today needs and whether yesterday was over (green) or under (red).'),
+    state, facts, grid, preview,
+    /* The message beside the button, in a row: on its own in the panel's
+       column, the message line's 220px flex basis became its height. */
+    h('div', { class: 'acx-actions' }, save, mm),
     owner ? null : h('p', { class: 'acx-p acx-dim' }, 'Only the Owner sets it.'),
     h('h4', { class: 'acx-h4' }, 'Saved'), histHost].filter(Boolean));
   host.append(p.panel);

@@ -22,10 +22,12 @@
    email's rule (driversActiveOn). A driver's targets follow the same two rules
    and nothing new:
 
-     money   each counted day's plan, shared equally among that day's active
-             drivers. A driver's target is the sum of their shares; their gross
-             is their fares on every platform, before any commission, on the
-             same days.
+     money   each counted day's plan, shared among that day's active
+             drivers — equally under one rate for every car; under daily
+             targets by vehicle class (2026-10-29) in proportion to the class
+             rate of the car each drove (revenue_target.js driverShares). A
+             driver's target is the sum of their shares; their gross is their
+             fares on every platform, before any commission, on the same days.
      trips   the minimum (12) for every counted day they were active.
 
    So the drivers' money targets ADD UP to the fleet's plan for those days —
@@ -53,6 +55,7 @@
    And what every day left must bring to land the target (per_day_left). */
 import {
   computeMonth, loadFacts, targetRows, monthSpan, tripsMin, driversActiveOn, monthOf, validMonth,
+  classRows, loadClasses, driverShares,
 } from './revenue_target.js';
 import { personKeyStored } from './custody_sql.js';
 import { dubaiDay } from './window.js';
@@ -125,7 +128,12 @@ export function driverTargets({ t, facts, dd, min }) {
   const shares = [];
   for (const d of counted) {
     const active = driversActiveOn(facts, d.day);
+    /* `share` is what an active driver was asked ON AVERAGE; each one's own
+       share is the plan in proportion to the class rate of the car they
+       drove (api/revenue_target.js driverShares) — equal under one rate
+       for every car, as it always was. */
     const share = hasTarget && d.plan != null && active.size ? d.plan / active.size : null;
+    const each = share != null ? driverShares(t, facts, d.day, d.plan, active) : null;
     if (share != null) planCounted += d.plan;
     shares.push({ day: d.day, label: d.label, plan: d.plan, active: active.size, share: r2(share) });
     for (const pk of active) {
@@ -135,7 +143,7 @@ export function driverTargets({ t, facts, dd, min }) {
          trips weight (api/target_weights.js) — a Sunday asks fewer trips of
          a driver than a Thursday, as it does of the fleet. */
       a.trips_target += d.trips_min ?? min;
-      if (share != null) a.gross_target += share;
+      if (each) a.gross_target += each.get(pk);
     }
     for (const [pk, x] of dd.byDay.get(d.day) || []) {
       const a = get(pk);
@@ -283,11 +291,11 @@ export function trajectory(t) {
 export async function monthView(q, { month = null, today = null, now = new Date(), min = null } = {}) {
   const day = today || dubaiDay(now);
   const m = validMonth(month) ? month : monthOf(day);
-  const { from, to } = monthSpan(m, day);
+  const { from, to, last } = monthSpan(m, day);
   const trips = min ?? await tripsMin(q);
-  const [rows, facts, dd, mw] = await Promise.all([targetRows(q, m), loadFacts(q, from, to), loadDriverDays(q, from, to),
-    monthWeights(q, m, { now })]);
-  return monthViewOf({ month: m, today: day, rows, facts, dd, min: trips, mw });
+  const [rows, facts, dd, mw, classes, classOf] = await Promise.all([targetRows(q, m), loadFacts(q, from, to),
+    loadDriverDays(q, from, to), monthWeights(q, m, { now }), classRows(q, last), loadClasses(q)]);
+  return monthViewOf({ month: m, today: day, rows, facts, dd, min: trips, mw, classes, classOf });
 }
 
 /* ── the file ────────────────────────────────────────────────────────────── */
@@ -355,7 +363,7 @@ export function monthWorkbookOf(v, { now = new Date(), hide = new Set() } = {}) 
       ['Active drivers', tt.drivers, 'int', 'A completed trip in the 8 Dubai days to a counted day (the 08:00 email’s rule).'],
       ['On target for money / behind', tt.money_on == null ? '—' : `${tt.money_on} / ${tt.money_behind}`, 'text', dr.money_why],
       [`On target for trips (${tripsWords(v)}) / behind`, `${tt.trips_on} / ${tt.trips_behind}`, 'text', null],
-      ['Drivers’ targets, added up (AED)', rev(tt.targets), 'money', 'Equals the fleet’s plan for the counted days: each day’s plan shared over its active drivers.'],
+      ['Drivers’ targets, added up (AED)', rev(tt.targets), 'money', 'Equals the fleet’s plan for the counted days: each day’s plan shared over its active drivers (by the class of car each drove, under daily targets by vehicle class).'],
       ['Drivers’ gross, added up (AED)', earn(tt.drivers_gross), 'money', null],
       ['Fares on no named driver (AED)', rev(tt.unattributed), 'money', 'Bookings that name no driver. In the fleet’s total, in nobody’s row.'],
     ];
@@ -363,7 +371,7 @@ export function monthWorkbookOf(v, { now = new Date(), hide = new Set() } = {}) 
   }
   s1.blank();
   s1.text('How a driver’s target is set', 'bold');
-  s1.text('Money: each counted day’s plan (the share of the month target that day was planned at) is divided equally among the drivers active that day; a driver’s target is the sum of their shares, and their gross is their fares on every platform, before commission, on the same days. '
+  s1.text('Money: each counted day’s plan (the share of the month target that day was planned at) is divided among the drivers active that day — equally on a day under one rate for every car, and under daily targets by vehicle class in proportion to the daily target of the class of car each drove that day (on a day off, the car they last drove); a driver’s target is the sum of their shares, and their gross is their fares on every platform, before commission, on the same days. '
     + `Trips: the day’s minimum for every counted day they were active — ${tripsWords(v)}. A counted day is a finished day that has settled — every channel delivered and 99% of its bookings priced.`, 'wrap');
 
   /* ── Days ── */
@@ -379,6 +387,8 @@ export function monthWorkbookOf(v, { now = new Date(), hide = new Set() } = {}) 
       d.settled == null ? null : (d.settled ? 'yes' : 'no'), d.why, hid('BK', d.trips), hid('BK', d.trips_target),
       hid('BK', d.trips_diff), tv, d.weight == null ? null : d.weight.toFixed(2), d.trips_min]);
   }
+
+  classSheet(wb, v, hid);
 
   /* ── the drivers ── */
   const head = ['Driver', 'Driver id', 'Fleet', 'Platforms', 'Days active', 'Days driven', 'Gross (AED)', 'Target (AED)',
@@ -407,14 +417,43 @@ export function monthWorkbookOf(v, { now = new Date(), hide = new Set() } = {}) 
   return { wb, name, month: v.month, drivers: dr.rows.length, days: v.days.length };
 }
 
+/** The month by vehicle class, as a sheet — the Target page's table
+    (computeMonth classes), in the Today and Month workbooks alike. `hid`
+    withholds a class of figure the reader's role does not hold in full. */
+export function classSheet(wb, v, hid) {
+  const sh = wb.sheet('Classes', { widths: [14, 16, 7, 9, 14, 12, 13, 13, 13, 15, 15, 9, 14, 40] });
+  const s = v.summary;
+  /* The intro's figures go through `hid` like every cell: printed raw, a
+     role without revenue read the every-other-car figure off the sentence
+     (independent review, 2026-10-29). */
+  const aed = (x) => (hid('REV', x) === x ? ` (AED ${x}${s?.kind === 'class' ? '' : ` a car${s?.weighted ? ' on an average day' : ' a day'}`})` : '');
+  sh.text(!s ? (v.why || 'No target is set.') : s.kind === 'class'
+    ? `Daily targets by vehicle class, set on ${s.rates_set_day}: each car is asked its class’s AED on an average day × the day’s weekday weight. A class with no figure of its own, and a car with no make or model on file, is asked the figure for every other car${aed(s.other_rate)}.`
+    : `One figure for every car${aed(s.rate)}, so these are each class’s shares of it. Daily targets by vehicle class are set in Set up › Access.`, 'wrap');
+  sh.header(['Make', 'Model', 'Year', 'Cars now', 'AED a car, average day', 'Other-car figure?', 'Today’s plan (AED)',
+    'Yesterday plan (AED)', 'Yesterday earned (AED)', 'Month so far, plan (AED)', 'Month so far, earned (AED)', '% of plan',
+    'Month plan (AED)', 'Cars counted with no make or model'],
+  ['text', 'text', 'int', 'int', 'money', 'text', 'money', 'money', 'money', 'money', 'money', 'num1', 'money', 'wrap']);
+  for (const c of v.classes || []) {
+    if (c.no_plate) {
+      sh.row([c.label, null, null, null, null, null, null, null, hid('REV', c.yday_earned), null, hid('REV', c.earned), null, null, null]);
+      continue;
+    }
+    sh.row([c.key == null ? c.label : c.make, c.model, c.year, hid('VEH', c.cars_now), hid('REV', c.rate),
+      c.uses_other ? 'yes' : (s && s.kind === 'class' ? 'no' : null), hid('REV', c.plan_today), hid('REV', c.yday_plan),
+      hid('REV', c.yday_earned), hid('REV', c.planned), hid('REV', c.earned), hid('REV', c.pct), hid('REV', c.month_plan),
+      c.plates ? hid('VEH', c.plates.join(', ')) : null]);
+  }
+}
+
 /** Pure: a month's view from facts already in hand — the route, the file,
     the mock and the tests all assemble it here. */
-export function monthViewOf({ month, today, rows, facts, dd, min, mw = null }) {
-  const t = computeMonth({ month, today, rows, facts, min, mw });
+export function monthViewOf({ month, today, rows, facts, dd, min, mw = null, classes = [], classOf = new Map() }) {
+  const t = computeMonth({ month, today, rows, facts, min, mw, classes, classOf });
   return {
     month: t.month, month_name: t.month_name, today: t.today, first: t.first, last: t.last,
     days_in_month: t.days_in_month, target: t.target, why: t.why, trips_min: t.trips_min,
-    summary: t.summary, trips_summary: t.trips_summary, days: t.days,
+    summary: t.summary, trips_summary: t.trips_summary, days: t.days, classes: t.classes,
     trajectory: trajectory(t),
     drivers: driverTargets({ t, facts, dd, min }),
   };

@@ -67,6 +67,62 @@ const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday
 const weekdayMinimums = (min, w) => [1, 2, 3, 4, 5, 6, 0]
   .map((i) => `${WEEKDAY[i].slice(0, 3)} ${Math.max(1, Math.round(min * Number(w[i])))}`).join(', ');
 
+const MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const dm = (d) => (d ? `${Number(d.slice(8, 10))} ${MON3[Number(d.slice(5, 7)) - 1]}` : '');
+
+/* ── 00 · the month, by vehicle class ──────────────────────────────────── */
+/* The operator, 2026-10-29: "Let me set targets vehicle wise. Make model year
+   - per day target, which will reflect everywhere." Each make + model + year:
+   the cars it counts today, what a car of it is asked on an average day,
+   today's plan, yesterday and the month so far against plan
+   (api/revenue_target.js computeMonth classes). Under one rate for every car
+   the same table is each class's share of that one target. A car with no
+   make or model on file is named, with the figure it is asked and why;
+   fares that came with no plate are counted in the month and belong to no
+   class, and are shown as that. */
+export function classesHtml(t) {
+  const fmt = (v, d = 0) => (v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }));
+  const s = t.summary;
+  const rows = (t.classes || []).filter((c) => !c.no_plate);
+  const loose = (t.classes || []).find((c) => c.no_plate) || null;
+  if (!s || !rows.length) return `<p class="tg-absent">${esc(s ? 'No car has earned in the last 7 days, so no class has a plan yet.' : (t.why || 'No target is set.'))}</p>`;
+  const dash = '<span class="hp-dim">—</span>';
+  const of = (a, b2) => (a == null && b2 == null ? dash : `${esc(money(a ?? 0))} <span class="hp-dim">${esc(`of ${money(b2 ?? 0)}`)}</span>`);
+  const tone = (c) => (c.ahead == null ? '' : c.ahead >= 0 ? 'tg-over' : s.unsettled ? '' : 'tg-under');
+  const hasY = rows.some((c) => c.yday_plan != null || c.yday_earned != null);
+  const body = rows.map((c) => {
+    const name = c.key == null
+      ? `${esc(c.label)}<br><span class="hp-dim">${esc(`${(c.plates || []).join(', ')} — asked the figure for every other car`)}</span>`
+      : `${esc(c.label)}${c.uses_other ? `<br><span class="hp-dim">${esc('no figure of its own — the figure for every other car')}</span>` : ''}`;
+    return `<tr><th scope="row">${name}</th><td>${esc(fmt(c.cars_now))}</td><td>${c.rate == null ? dash : esc(money(c.rate))}</td>`
+      + `<td>${c.plan_today == null ? dash : esc(money(c.plan_today))}</td>`
+      + (hasY ? `<td>${of(c.yday_earned, c.yday_plan)}</td>` : '')
+      + `<td class="${tone(c)}">${of(c.earned, c.planned)}${c.pct != null ? ` <span class="hp-dim">${esc(`${fmt(c.pct, 1)}%`)}</span>` : ''}</td>`
+      + `<td>${c.month_plan == null ? dash : esc(money(c.month_plan))}</td></tr>`;
+  }).join('');
+  /* A total of figures every row withheld (a role without cars or revenue:
+     the access layer nulls them) is absent, never a sum of nothing printed
+     as 0 (independent review, 2026-10-29). */
+  const sum = (k) => (rows.every((c) => c[k] == null) ? null : rows.reduce((n, c) => n + (c[k] || 0), 0));
+  const cash = (v) => (v == null ? dash : esc(money(v)));
+  const ye = sum('yday_earned');
+  const total = `<tr class="tp-cls-sum"><th scope="row">All cars</th><td>${sum('cars_now') == null ? dash : esc(fmt(sum('cars_now')))}</td>`
+    + `<td>${s.rate == null ? dash : `${esc(money(s.rate))} <span class="hp-dim">on average</span>`}</td><td>${cash(sum('plan_today'))}</td>`
+    + (hasY ? `<td>${ye == null ? dash : `${esc(money(ye + (loose?.yday_earned || 0)))} <span class="hp-dim">${esc(`of ${money(sum('yday_plan') ?? 0)}`)}</span>`}</td>` : '')
+    + `<td>${s.earned == null ? dash : `${esc(money(s.earned))} <span class="hp-dim">${esc(`of ${money(s.planned)}`)}</span>`}</td>`
+    + `<td>${cash(s.month_target)}</td></tr>`;
+  const looseRow = loose ? `<tr class="hp-quiet"><th scope="row">${esc(loose.label)}</th><td>${dash}</td><td>${dash}</td><td>${dash}</td>`
+    + (hasY ? `<td>${esc(money(loose.yday_earned || 0))}</td>` : '') + `<td>${esc(money(loose.earned))}</td><td>${dash}</td></tr>` : '';
+  const how = s.kind === 'class'
+    ? `Each car is asked its class’s figure for an average day × the day’s weekday weight; the Owner set the figures on ${dm(s.rates_set_day)} (Set up › Access). A class with no figure of its own, and a car with no make or model on file, is asked the figure for every other car, ${money(s.other_rate)}. The month target is the sum of every car’s plan, so it moves as cars join or drop out.`
+    : `This month’s target is one figure for every car — ${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'} — so this is each class’s share of it. Daily targets by vehicle class are set in Set up › Access.`;
+  return '<div class="tablewrap"><table class="hp tp-cls"><thead><tr><th scope="col">Make, model, year</th><th scope="col">Cars</th>'
+    + `<th scope="col">AED a car, average day</th><th scope="col">Today’s plan</th>${hasY ? '<th scope="col">Yesterday, earned of plan</th>' : ''}`
+    + '<th scope="col">Month so far, earned of plan</th><th scope="col">Month plan</th></tr></thead>'
+    + `<tbody>${body}${looseRow}${total}</tbody></table></div>`
+    + `<p class="cap hp-basis">${esc(`${how} Cars are the ones that earned in the 7 days before; a class’s earnings are its plates’ fares, before commission, on the days gone.${loose ? ' Fares that came with no plate count in the month and belong to no class.' : ''}`)}</p>`;
+}
+
 /** The words: { title, scope, meta, cells[{label, value, tone, subs[{text,tone}], bar}], strip[], absent }. */
 export function targetView(t, live = null) {
   if (!t || !Array.isArray(t.days)) return null;
@@ -74,7 +130,12 @@ export function targetView(t, live = null) {
   const vm = {
     title: `${monthWord(t.month)} target`,
     scope: 'Both fleets · gross fares, before platform commission',
-    meta: s ? `${plural(s.cars_now, 'car')} · ${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'}` : null,
+    /* Under daily targets by vehicle class (api/revenue_target.js, since
+       2026-10-29) each car is asked its own class's figure, so "a car" is
+       an average over today's cars, and says so. */
+    meta: !s ? null : s.kind === 'class'
+      ? `${plural(s.cars_now, 'car')} · targets by vehicle class, ${money(s.rate)} a car on an average day on average`
+      : `${plural(s.cars_now, 'car')} · ${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'}`,
     cells: [], strip: [], absent: null,
     trips: tripsView(t),
   };
@@ -102,7 +163,9 @@ export function targetView(t, live = null) {
   /* ── today ─────────────────────────────────────────────────────────────── */
   const td = t.days.find((d) => d.state === 'today') || null;
   if (td) {
-    const subs = [{ text: `${plural(s.today_cars, 'car')} × ${money(s.today_per_car)}` }];
+    const subs = [{ text: s.kind === 'class'
+      ? `${plural(s.today_cars, 'car')}, each at its class’s target — ${money(s.today_per_car)} a car on average`
+      : `${plural(s.today_cars, 'car')} × ${money(s.today_per_car)}` }];
     /* Shared by weekday since 2026-10-11 (api/target_weights.js): what share
        of an average day this weekday is asked for, and why. */
     if (s.weighted && s.today_weight != null) {

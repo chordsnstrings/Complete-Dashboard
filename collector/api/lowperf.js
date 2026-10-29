@@ -69,7 +69,7 @@
    them since, by any of the platform accounts they held when saved. */
 import {
   computeMonth, loadFacts, targetRows, monthSpan, tripsMin, driversActiveOn, monthOf, monthName,
-  addDays, shortDay, validDay, DRIVER_DAYS,
+  addDays, shortDay, validDay, DRIVER_DAYS, classRows, loadClasses, driverShares,
 } from './revenue_target.js';
 import { loadDriverDays } from './target_month.js';
 import { monthWeights } from './target_weights.js';
@@ -276,15 +276,18 @@ const NO_DETAIL = { byDay: new Map(), hours: new Map(), fleetHours: Array(24).fi
     Month target page reads it, and the people's days over [lo, to]. */
 async function loadDays(q, { lo, to, today, now, min }) {
   const months = [...new Set(daysOver(lo, to).map(monthOf))];
-  const [trips, mos, dd] = await Promise.all([
+  const [trips, mos, dd, classOf] = await Promise.all([
     min ?? tripsMin(q),
     Promise.all(months.map(async (m) => {
       const span = monthSpan(m, today);
-      const [rows, facts, mw] = await Promise.all([targetRows(q, m), loadFacts(q, span.from, span.to), monthWeights(q, m, { now })]);
-      return { month: m, rows, facts, mw };
+      const [rows, facts, mw, classes] = await Promise.all([targetRows(q, m), loadFacts(q, span.from, span.to),
+        monthWeights(q, m, { now }), classRows(q, span.last)]);
+      return { month: m, rows, facts, mw, classes };
     })),
     loadDriverDays(q, lo, to),
+    loadClasses(q),
   ]);
+  for (const mo of mos) mo.classOf = classOf;
   return { min: trips, months: mos, dd };
 }
 
@@ -310,7 +313,8 @@ export async function loadLowperf(q, { from, to, today, now = new Date(), min = 
 export function judgeDays({ lo, to, today, months, min }) {
   const byDay = new Map();
   for (const mo of months) {
-    const t = computeMonth({ month: mo.month, today, rows: mo.rows, facts: mo.facts, min, mw: mo.mw });
+    const t = computeMonth({ month: mo.month, today, rows: mo.rows, facts: mo.facts, min, mw: mo.mw,
+      classes: mo.classes, classOf: mo.classOf });
     for (const d of t.days) {
       if (d.day < lo || d.day > to) continue;
       let why = null;
@@ -325,7 +329,11 @@ export function judgeDays({ lo, to, today, months, min }) {
         day: d.day, label: d.label, dow: d.dow, month: mo.month, counted, why,
         plan: counted ? d.plan : null,
         active_n: active ? active.size : null,
+        /* What an active driver was asked on average; `shares` each one's
+           own — the plan in proportion to the class rate of the car they
+           drove (driverShares), equal under one rate for every car. */
         share: counted ? d.plan / active.size : null,
+        shares: counted ? driverShares(t, mo.facts, d.day, d.plan, active) : null,
         trips_min: d.trips_min ?? min,
         active,
       });
@@ -359,18 +367,19 @@ export function tally(pk, days, dd, detail = NO_DETAIL, hours = new Map()) {
     const trips = x ? x.trips : 0;
     const det = detail.byDay.get(d.day)?.get(pk) || null;
     const online = h?.byDay?.get(d.day) ?? null;
-    grid.push({ fares: r2(fares), trips, active: d.active ? d.active.has(pk) : null, share: on ? r2(d.share) : null,
+    const share = on ? (d.shares?.get(pk) ?? d.share) : null;
+    grid.push({ fares: r2(fares), trips, active: d.active ? d.active.has(pk) : null, share: on ? r2(share) : null,
       first: det?.first ?? null, last: det?.last ?? null, job_min: det?.job_min ?? null, online_min: online,
       km: det?.km ?? null, bookings: det?.bookings ?? 0, abandoned: det?.abandoned ?? 0, declined: det?.declined ?? 0,
       platforms: det?.platforms ?? [], plate: det?.plate ?? null });
     if (!on) continue;
     a.days_active += 1;
-    a.target += d.share;
+    a.target += share;
     a.trips_target += d.trips_min;
     a.gross += fares;
     a.trips += trips;
     const w = a.dow[d.dow];
-    w.gross += fares; w.target += d.share; w.days += 1;
+    w.gross += fares; w.target += share; w.days += 1;
     if (det) { a.bookings += det.bookings; a.abandoned += det.abandoned; a.declined += det.declined; }
     if (trips > 0) {
       a.days_driven += 1;

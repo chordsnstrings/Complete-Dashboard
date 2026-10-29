@@ -289,7 +289,7 @@ await q(`INSERT INTO insight (code, severity, category, entity_type, entity_id, 
 const { buildTodayWorkbook } = await import('../api/today_workbook.js');
 const built = await buildTodayWorkbook({ q, now: at10('2026-10-06', '09:00') });
 const book = readWorkbook(built.wb.toBuffer());
-check('the six sheets, in the page’s order', book.sheetNames.join('|') === 'Target|Days|Cars yesterday|Drivers yesterday|Action list|Today so far',
+check('the seven sheets, in the page’s order', book.sheetNames.join('|') === 'Target|Days|Classes|Cars yesterday|Drivers yesterday|Action list|Today so far',
   book.sheetNames.join('|'));
 const table = (name) => {
   const rows = sheetNamed(book, name)?.rows || [];

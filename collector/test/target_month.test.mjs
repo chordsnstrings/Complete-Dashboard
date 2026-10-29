@@ -219,7 +219,7 @@ check('GET /api/export/target-month.xlsx answers a workbook named for the month'
   && /spreadsheetml/.test(xr.headers.get('content-type') || '') && /attachment; filename="month-target-2026-10-as-of-/.test(xr.headers.get('content-disposition') || ''),
   `${xr.status} ${xr.headers.get('content-disposition')}`);
 const book = readWorkbook(buf);
-check('the five sheets, in the page’s order', book.sheetNames.join('|') === 'Month|Days|Behind on money (30)|Behind on trips (30)|All drivers', book.sheetNames.join('|'));
+check('the six sheets, in the page’s order', book.sheetNames.join('|') === 'Month|Days|Classes|Behind on money (30)|Behind on trips (30)|All drivers', book.sheetNames.join('|'));
 const flat = (bk, name) => (sheetNamed(bk, name)?.rows || []).flat().map(String).join('|');
 check('All drivers names every driver; the money list leads with the one furthest behind',
   ['Test Driver 1', 'Test Driver 2', 'Test Driver 3'].every((x) => flat(book, 'All drivers').includes(x)), flat(book, 'All drivers').slice(0, 300));

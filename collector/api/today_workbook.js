@@ -26,6 +26,7 @@
    Action list an identity list as a whole, so without ID it is withheld whole. */
 import { Workbook } from '../src/xlsx_write.js';
 import { monthTarget, addDays, carsAsOf, loadFacts, shortDay, monthName, DRIVER_DAYS } from './revenue_target.js';
+import { classSheet } from './target_month.js';
 import { personKeyStored } from './custody_sql.js';
 import { insightListSql } from './insights_sql.js';
 import { buildDay } from './day_routes.js';
@@ -55,10 +56,18 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
   } else {
     const pairs = [
       ['Month target now (AED)', money(sm.month_target), 'money', 'The sum of every day’s plan: the target as set, moved by every car that has joined or dropped out since.'],
-      ['Target as set (AED)', money(sm.gross_set), 'money', `Saved on ${t.target.set_day}${t.saves.length > 1 ? `; ${t.saves.length} saves this month` : ''}.`],
-      sm.weighted
-        ? ['AED a car on an average day', money(sm.rate), 'money', 'Fixed at the save: what it spreads ÷ (cars that earned in the 7 days before it × the weekday weights of the days it spreads over).']
-        : ['AED a car a day', money(sm.rate), 'money', 'Fixed at the save: the target ÷ (days in the month × cars that earned in the 7 days before it).'],
+      /* Under daily targets by vehicle class (2026-10-29) nothing is typed for
+         the month: it is the sum of every car's plan, each at its class's
+         figure, and the Classes sheet lists the figures. */
+      sm.kind === 'class'
+        ? ['Targets set (by vehicle class)', sm.rates_set_day, 'text', `Each car is asked its class’s AED on an average day (the Classes sheet); a class with no figure of its own, and a car with no make or model on file, the figure for every other car${hide.has('REV') ? '' : `, AED ${sm.other_rate}`}.`]
+        : ['Target as set (AED)', money(sm.gross_set), 'money', `Saved on ${t.target.set_day}${t.saves.filter((x) => !x.carried).length > 1
+          ? `; ${t.saves.filter((x) => !x.carried).length} saves this month` : ''}.`],
+      sm.kind === 'class'
+        ? ['AED a car on an average day, on average', money(sm.rate), 'money', 'Today’s cars at their classes’ figures, averaged: what a car is asked on an average day across the fleet as it stands.']
+        : sm.weighted
+          ? ['AED a car on an average day', money(sm.rate), 'money', 'Fixed at the save: what it spreads ÷ (cars that earned in the 7 days before it × the weekday weights of the days it spreads over).']
+          : ['AED a car a day', money(sm.rate), 'money', 'Fixed at the save: the target ÷ (days in the month × cars that earned in the 7 days before it).'],
       ['Shared by weekday', sm.weighted ? weightsLine(sm.weights) : 'the same every day', 'text', sm.weighted
         ? `Of an average day, from the ${sm.weights_basis?.used} whole weeks ${sm.weights_basis?.from} to ${sm.weights_basis?.to} (the operator, 2026-10-11: a Sunday cannot be asked what a Thursday is). A day under is caught up over the days left in the same proportions.`
         : (sm.weights_basis?.why || 'This month’s target was set before targets were shared by weekday.')],
@@ -117,11 +126,26 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
       hid('BK', d.reached), d.drove, hid('BK', d.trips_diff), tv, d.weight == null ? null : d.weight.toFixed(2), d.trips_min]);
   }
 
+  /* ── Classes: the month by make, model and year ───────────────────── */
+  classSheet(wb, t, hid);
+
   /* ── Cars yesterday ─────────────────────────────────────────────────── */
   const facts = await loadFacts(q, addDays(yday, -(DRIVER_DAYS + 1)), today);
   const counted = carsAsOf(facts, yday);
   const yrow = t.days.find((d) => d.day === yday) || t.yesterday || null;
-  const share = yrow && yrow.needed != null && yrow.cars ? Math.round((yrow.needed / yrow.cars) * 100) / 100 : null;
+  const even = yrow && yrow.needed != null && yrow.cars ? Math.round((yrow.needed / yrow.cars) * 100) / 100 : null;
+  /* A car's share of what yesterday needed: equal under one figure for every
+     car (as it always was); under daily targets by vehicle class, in
+     proportion to its part of the day's plan — its class's figure × the
+     weekday weight (computeMonth carPlanOn). */
+  const inMonth = t.days.some((d) => d.day === yday);
+  const ySave = (inMonth ? t.saveOn : t.yesterdaySaveOn)?.get(yday) || null;
+  const planOn = inMonth ? t.carPlanOn : t.yesterdayPlanOn;
+  const shareOf = (plate) => {
+    if (even == null || ySave?.kind !== 'class' || !planOn || !(yrow.plan > 0)) return even;
+    const part = planOn(yday, plate);
+    return part == null ? even : Math.round(((yrow.needed * part) / yrow.plan) * 100) / 100;
+  };
   const cars = await q(
     `SELECT btrim(n.plate) AS plate, mode() WITHIN GROUP (ORDER BY n.fleet_id) AS fleet,
             coalesce(round(sum(n.price) FILTER (WHERE n.has_fare AND n.local_day = $2::date)::numeric, 2), 0)::float AS earned,
@@ -133,13 +157,15 @@ export async function buildTodayWorkbook({ q, now = new Date(), hide = new Set()
      HAVING max(n.local_day) FILTER (WHERE n.has_fare AND n.price > 0) IS NOT NULL
       ORDER BY 3, 1`, [addDays(yday, -7), yday]);
   const s3 = wb.sheet('Cars yesterday', { widths: [10, 10, 14, 10, 14, 14, 12, 40] });
-  s3.text(`${shortDay(yday)}: every car that earned in the 8 days to it. Its share is what the day needed ÷ the cars counted.`, 'dim');
+  s3.text(`${shortDay(yday)}: every car that earned in the 8 days to it. Its share is what the day needed${ySave?.kind === 'class'
+    ? ', shared over the cars counted by their classes’ daily targets' : ' ÷ the cars counted'}.`, 'dim');
   s3.header(['Plate', 'Fleet', 'Earned (AED)', 'Bookings', 'Share (AED)', 'Over (+) / under (−)', 'Last earned', 'Note'],
     ['text', 'text', 'money', 'int', 'money', 'money', 'date', 'wrap']);
   for (const c of cars) {
     const inPlan = counted.has(c.plate);
-    s3.row([hid('VEH', c.plate), c.fleet, money(c.earned), hid('BK', c.bookings), money(inPlan ? share : null),
-      money(inPlan && share != null ? Math.round((c.earned - share) * 100) / 100 : null), c.last_earned,
+    const share = inPlan ? shareOf(c.plate) : null;
+    s3.row([hid('VEH', c.plate), c.fleet, money(c.earned), hid('BK', c.bookings), money(share),
+      money(share != null ? Math.round((c.earned - share) * 100) / 100 : null), c.last_earned,
       inPlan ? null : 'Not counted in the day’s cars: it had not earned in the 7 days before.']);
   }
 

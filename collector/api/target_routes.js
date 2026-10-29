@@ -24,7 +24,7 @@
    target or changes the trips a day, and the response cache's version only
    moves on a collection run or a rollup — so a save would be answered with
    the page from before it, the failure /api/same-person is listed there for. */
-import { monthTarget, validMonth, validDay } from './revenue_target.js';
+import { monthTarget, validMonth, validDay, carTarget } from './revenue_target.js';
 import { buildTodayWorkbook, TODAY_FILE_CLASSES } from './today_workbook.js';
 import { targetHours } from './target_hours.js';
 import { monthView, buildTargetMonthWorkbook, MONTH_FILE_CLASSES } from './target_month.js';
@@ -66,6 +66,20 @@ export function targetRoutes(app, { q, wrap, log = null }) {
     const month = validMonth(req.query.month) ? String(req.query.month) : null;
     const asof = validDay(req.query.asof) ? String(req.query.asof) : null;
     return res.json(await monthView(q, { month, today: asof }));
+  }));
+
+  /* One car against its class's daily target, for its vehicle page
+     (api/revenue_target.js carTarget). Under the /api/target prefix, so the
+     response cache never holds it: a class save shows on the next read. */
+  app.get('/api/target/car', wrap(async (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    const plate = String(req.query.plate || '').toUpperCase().replace(/[\s-]+/g, '');
+    if (!plate) return res.status(400).json({ error: 'plate required' });
+    const [seen] = await q(`SELECT 1 FROM (SELECT plate FROM trip WHERE plate = $1
+                              UNION ALL SELECT plate FROM vehicle WHERE plate = $1) s LIMIT 1`, [plate]);
+    if (!seen) return res.status(404).json({ error: 'vehicle not found' });
+    const asof = validDay(req.query.asof) ? String(req.query.asof) : null;
+    return res.json(await carTarget(q, plate, { today: asof }));
   }));
 
   app.get('/api/export/target-month.xlsx', wrap(async (req, res) => {

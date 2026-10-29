@@ -41,7 +41,7 @@
 import { api, alive, currentGen, href } from './data.js';
 import { el, esc, money, fils, countOf, sourceLabel, panel, secHead, loading, contract } from './ui.js';
 import { fmt } from './charts.js';
-import { targetLive, targetView, targetHtml } from './target.js';
+import { targetLive, targetView, targetHtml, classesHtml } from './target.js';
 import { todayLive } from './today.js';
 
 export const REFRESH_MS = 60000;
@@ -90,7 +90,9 @@ export function monthFiguresHtml(t) {
   const b = (v, t2 = null) => `<b${t2 ? ` class="tg-${t2}"` : ''}>${esc(v)}</b>`;
   const dim = (v) => `<span class="mf-dim">${esc(v)}</span>`;
   if (s) {
-    row('Target for the month', `${b(money(s.month_target))} ${dim(`${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'} over ${countOf(s.cars_now, 'car')}`)}`,
+    row('Target for the month', `${b(money(s.month_target))} ${dim(s.kind === 'class'
+      ? `daily targets by vehicle class, set ${dm(s.rates_set_day)} — ${money(s.rate)} a car on an average day on average over ${countOf(s.cars_now, 'car')}`
+      : `${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'} over ${countOf(s.cars_now, 'car')}`)}`,
       ts ? `${b(`${t.trips_min} ${ts.weighted ? 'on an average day' : 'a day'}`)} ${dim(`per active driver — ${countOf(ts.today_active, 'active driver')} today`)}` : '—');
     /* The operator, 2026-10-11: "A historically bad day on a Sunday can't be
        expected to perform the same way as weekday." What each weekday is
@@ -342,6 +344,8 @@ export async function targetPage(root) {
     p.body.append(month);
     root.append(p.panel);
   }
+  const cls = panel('By vehicle class', null, 'tp-classes');
+  root.append(cls.panel);
   const today = panel('Today', null, 'tp-today');
   todayBody = today.body;
   /* One above the other, each the page's width: seven columns of money do
@@ -349,7 +353,7 @@ export async function targetPage(root) {
   const rev = panel('Revenue, hour by hour', null, 'tp-rev');
   const tri = panel('Trips, hour by hour', null, 'tp-trips');
   root.append(today.panel, rev.panel, tri.panel);
-  [month, todayBody, rev.body, tri.body].forEach((b) => loading(b));
+  [month, cls.body, todayBody, rev.body, tri.body].forEach((b) => loading(b));
 
   const draw = async () => {
     const [t, live, h] = await Promise.all([
@@ -359,8 +363,11 @@ export async function targetPage(root) {
     ]);
     if (!alive(gen)) return false;
     const asked = new Date(Date.now() + 4 * 3600e3).toISOString().slice(11, 16);
-    if (t._err) month.innerHTML = `<p class="tg-absent">${esc(`The month could not be read: ${t._err.message || 'no answer'}`)}</p>`;
-    else {
+    if (t._err) {
+      month.innerHTML = `<p class="tg-absent">${esc(`The month could not be read: ${t._err.message || 'no answer'}`)}</p>`;
+      cls.body.innerHTML = '';
+    } else {
+      cls.body.innerHTML = classesHtml(t);
       const vm = targetView(t, live);
       month.innerHTML = (vm ? `<div class="targetnow tg-page">${targetHtml(vm, { link: (d) => href('day', d) })}</div>` : '')
         + monthFiguresHtml(t);

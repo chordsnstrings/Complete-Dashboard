@@ -42,7 +42,7 @@ import { api, alive, currentGen, href } from './data.js';
 import { el, esc, money, countOf, sourceLabel, panel, secHead, loading, contract } from './ui.js';
 import { fmt } from './charts.js';
 import { withheldSentence } from './access_model.js';
-import { downloadFile } from './target.js';
+import { downloadFile, classesHtml } from './target.js';
 /* In pagemeta.js: the shell's Excel button points at the month's workbook
    before this module has loaded. Still exported from here, as it was. */
 import { isMonth, workbookUrl } from './pagemeta.js';
@@ -125,8 +125,9 @@ export function monthHtml(v) {
      (the Target page's figure); a month that is over was set over the cars
      of its own save — today's fleet says nothing about August. */
   cells.push(cell('target', 'Month target', aed(s.month_target), [
-    over ? `${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'}, set over ${countOf(s.rate_cars ?? s.cars_at_set, 'car')}`
-      : `${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'} over ${countOf(s.cars_now, 'car')}`,
+    s.kind === 'class' ? `targets by vehicle class — ${money(s.rate)} a car on an average day on average over ${countOf(s.cars_now, 'car')}`
+      : over ? `${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'}, set over ${countOf(s.rate_cars ?? s.cars_at_set, 'car')}`
+        : `${money(s.rate)} a car ${s.weighted ? 'on an average day' : 'a day'} over ${countOf(s.cars_now, 'car')}`,
     `${countOf(v.days_in_month, 'day')} · gross fares, before commission`]));
   cells.push(cell('earned', lastPast ? `Earned to ${lastPast}` : 'Earned so far', past.length ? aed(s.earned) : '—', [
     past.length ? `of ${money(s.planned)} planned to then` : 'Nothing of the month has finished yet.',
@@ -329,7 +330,9 @@ export function daysHtml(v, { W = 1300 } = {}) {
   const lede = judged || s.unsettled
     ? `${countOf(s.over, 'day')} over target, ${countOf(s.under, 'day')} under${s.unsettled ? `, ${countOf(s.unsettled, 'day')} not settled yet` : ''}. `
       + (s.weighted
-        ? 'A day’s target is its share of the month — AED a car on an average day × the cars that earned in the week before it × its weekday’s weight, learned from the fleet’s last 8 weeks (a Sunday is asked for less than a Thursday) — plus the month’s shortfall so far caught up over the days left in the same proportions: the Target page’s figure.'
+        ? (v.summary?.kind === 'class'
+          ? 'A day’s target is its share of the month — each car that earned in the week before it, at its class’s AED a car on an average day, × the day’s weekday weight (a Sunday is asked for less than a Thursday) — plus the month’s shortfall so far caught up over the days left in the same proportions: the Target page’s figure.'
+          : 'A day’s target is its share of the month — AED a car on an average day × the cars that earned in the week before it × its weekday’s weight, learned from the fleet’s last 8 weeks (a Sunday is asked for less than a Thursday) — plus the month’s shortfall so far caught up over the days left in the same proportions: the Target page’s figure.')
         : 'A day’s target is its share of the month (AED a car a day × the cars that earned in the week before it), plus the month’s shortfall so far spread over the days left — the Target page’s figure.')
       + ' Gross is fares on every platform, before any commission.'
     : 'No day of the month has finished yet — a day is judged the morning after it.';
@@ -512,7 +515,7 @@ export function driversHtml(v, by = 'money') {
           + `<td>${r.trips_short ? `<span class="tg-under">▼ ${esc(n0(r.trips_short))}</span>` : (r.trips_on ? '<span class="tg-over">▲ on target</span>' : '—')}</td></tr>`;
       }).join('')
       + '</tbody></table></div>';
-  const rule = `<p class="cap mt-rule">${esc(`How a driver’s target is set. Money: each counted day’s plan — its share of the month’s target — is divided equally among the drivers active that day (a completed trip in the 8 days to it); a driver’s target is the sum of their shares, so every driver reaching theirs is the fleet reaching its plan. Gross is their fares on every platform, before commission, on the same days. Trips: ${tripsMinWord(v, dr.min, '')} for every counted day they were active.${v.trips_summary?.weighted ? ` Each weekday asks its share of ${dr.min} on an average day: ${weekdayMinimums(dr.min, v.trips_summary.weights)}.` : ''} A counted day is a finished day whose fares are all in — every channel delivered and 99% of its bookings priced.`)}</p>`;
+  const rule = `<p class="cap mt-rule">${esc(`How a driver’s target is set. Money: each counted day’s plan — its share of the month’s target — is divided among the drivers active that day (a completed trip in the 8 days to it)${v.summary?.kind === 'class' ? ', in proportion to the daily target of the class of car each drove that day (on a day off, the car they last drove) — a day under one rate for every car is divided equally' : ' equally'}; a driver’s target is the sum of their shares, so every driver reaching theirs is the fleet reaching its plan. Gross is their fares on every platform, before commission, on the same days. Trips: ${tripsMinWord(v, dr.min, '')} for every counted day they were active.${v.trips_summary?.weighted ? ` Each weekday asks its share of ${dr.min} on an average day: ${weekdayMinimums(dr.min, v.trips_summary.weights)}.` : ''} A counted day is a finished day whose fares are all in — every channel delivered and 99% of its bookings priced.`)}</p>`;
   return `<div class="targetnow tg-page"><div class="tg-cells">${cells.join('')}</div></div>`
     + `${pick}${head}${notes.map((x) => `<p class="mt-note">${esc(x)}</p>`).join('')}${table}${rule}`;
 }
@@ -550,11 +553,13 @@ export async function monthTargetPage(root, param = null) {
     p.body.append(head);
     root.append(p.panel);
   }
+  const cls = panel('By vehicle class', null, 'mt-classes');
+  root.append(cls.panel);
   const days = panel('Day by day: target, gross and the gap', null, 'mt-days');
   const path = panel('Where the month lands', null, 'mt-path');
   const drv = panel('Drivers behind target', null, 'mt-drivers');
   root.append(days.panel, path.panel, drv.panel);
-  [head, days.body, path.body, drv.body].forEach((b) => loading(b));
+  [head, cls.body, days.body, path.body, drv.body].forEach((b) => loading(b));
 
   let by = 'money';
   let last = null;
@@ -579,7 +584,7 @@ export async function monthTargetPage(root, param = null) {
     if (!alive(gen)) return false;
     if (v._err) {
       const msg = `<p class="tg-absent">${esc(`The month could not be read: ${v._err.message || 'no answer'}`)}</p>`;
-      head.innerHTML = msg; days.body.innerHTML = msg; path.body.innerHTML = msg; drv.body.innerHTML = msg;
+      head.innerHTML = msg; cls.body.innerHTML = msg; days.body.innerHTML = msg; path.body.innerHTML = msg; drv.body.innerHTML = msg;
       return true;
     }
     last = v;
@@ -588,6 +593,7 @@ export async function monthTargetPage(root, param = null) {
     const W = Math.max(320, Math.round(days.body.getBoundingClientRect().width) || 1300);
     note.innerHTML = noteHtml(v);
     head.innerHTML = monthHtml(v);
+    cls.body.innerHTML = classesHtml(v);
     days.body.innerHTML = daysHtml(v, { W });
     path.body.innerHTML = pathHtml(v, { W });
     paintDrivers();

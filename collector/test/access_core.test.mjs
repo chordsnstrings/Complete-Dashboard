@@ -720,6 +720,44 @@ console.log('\n10. sign-in required');
     && readTarget.json.context.cars_7_days === 4 && readTarget.json.trips_min === 7, JSON.stringify(readTarget.json?.current?.saves));
   const tgtAudit = await db.query(`SELECT count(*)::int n FROM access_audit WHERE action = 'target.set'`);
   check('…and the save is on the audit chain', tgtAudit.rows[0].n === 1);
+  /* Daily targets by vehicle class (api/revenue_target.js saveClassTarget),
+     the operator's of 2026-10-29: "Let me set targets vehicle wise. Make
+     model year - per day target". C1 and C2 are BYD Han EV 2025s, C3 a
+     Tesla Model Y 2023, C4 has no make or model on file. The Owner's alone,
+     like the month target; a class not on the register is refused; a save
+     made later the same day replaces the month save (the same-day rule), so
+     every day from today asks C1–C4 at their classes' figures and the month
+     is their sum over the days left (no weekday weights: no history here).
+     REVERSION (run 2026-10-29): drop the isOwner() test in POST
+     /api/access/target/classes -> "an Access admin cannot set the class
+     targets" fails and the Owner's save then reads as the second. */
+  await db.query(`INSERT INTO vehicle (plate, make, model, year) VALUES ('C1', 'BYD', 'Han EV', 2025), ('C2', 'BYD', 'Han EV', 2025),
+    ('C3', 'Tesla', 'Model Y', 2023) ON CONFLICT (plate) DO UPDATE SET make = EXCLUDED.make, model = EXCLUDED.model, year = EXCLUDED.year`);
+  const byd = { make: 'BYD', model: 'Han EV', year: 2025 };
+  const accCls = await people.ACC.b.post('/api/access/target/classes', { rates: [{ ...byd, rate: 600 }], other: 500 });
+  check('an Access admin cannot set the class targets — the Owner does', accCls.status === 403
+    && /Only the Owner sets the revenue target/.test(accCls.json?.detail || ''), JSON.stringify(accCls.json));
+  const noOther = await owner.post('/api/access/target/classes', { rates: [{ ...byd, rate: 600 }] });
+  const unknownCls = await owner.post('/api/access/target/classes', { rates: [{ make: 'Ford', model: 'T', year: 1908, rate: 600 }], other: 500 });
+  check('…a save with no figure for every other car, or a class not on the register, is refused',
+    noOther.status === 400 && noOther.json.error === 'bad_other' && unknownCls.status === 400 && unknownCls.json.error === 'unknown_class',
+    `${JSON.stringify(noOther.json)} ${JSON.stringify(unknownCls.json)}`);
+  const setCls = await owner.post('/api/access/target/classes',
+    { rates: [{ ...byd, rate: 600 }, { make: 'tesla', model: 'model y', year: 2023, rate: 450 }], other: 500 });
+  const today = dubaiDay(new Date());
+  const left = D - Number(today.slice(8)) + 1;
+  check('the Owner sets them: each class its figure, every other car its own, and the month is every car at its class over the days left',
+    setCls.status === 200 && setCls.json.saved.rates.length === 2 && setCls.json.saved.rates[1].label === 'Tesla Model Y 2023'
+    && setCls.json.summary.kind === 'class' && setCls.json.summary.month_target === (600 * 2 + 450 + 500) * left
+    && setCls.json.summary.rate === (600 * 2 + 450 + 500) / 4, JSON.stringify(setCls.json).slice(0, 400));
+  const readCls = await owner.get('/api/access/target');
+  const cc = readCls.json?.classes || {};
+  check('…the panel lists every class with its cars, the car with no class by plate, and the figures in force',
+    cc.classes?.length === 2 && cc.classes[0].label === 'BYD Han EV 2025' && cc.classes[0].cars_now === 2
+    && cc.unclassed?.cars_now === 1 && cc.unclassed.plates[0] === 'C4' && cc.in_force?.kind === 'class'
+    && cc.in_force.other_rate === 500 && cc.saves?.[0]?.by === 'owner@example.test', JSON.stringify(cc).slice(0, 400));
+  const clsAudit = await db.query(`SELECT count(*)::int n FROM access_audit WHERE action = 'target.class_set'`);
+  check('…and the class save is on the audit chain', clsAudit.rows[0].n === 1);
   const closed = await anon.get('/api/t/people');
   check('now a visitor is refused and told to sign in', closed.status === 401 && closed.json.error === 'signin');
   /* Express matches routes case-insensitively and ignores a trailing slash;

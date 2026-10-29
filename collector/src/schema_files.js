@@ -346,4 +346,8 @@ export const SCHEMA_FILES = [
   /* v110: what the ntfy watcher last told the operator about each banner row
      (api/alerts.js), so a restart re-announces nothing. */
   'schema_v110.sql',
+  /* v111: daily targets by vehicle class — AED a car on an average day for
+     each make + model + year, and one for every other car; a save governs
+     from its day into every later month (api/revenue_target.js). */
+  'schema_v111.sql',
 ];

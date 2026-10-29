@@ -436,6 +436,11 @@ console.log('\ncache: the low performers — keyed on the target as well as the 
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`],
     ['a month\u2019s learned weights', `INSERT INTO target_weights (month, from_day, basis)
       VALUES ('2026-11-01', '2026-11-01', '{}')`],
+    /* The class rates (sql/schema_v111.sql, 2026-10-29) move every share on
+       the page as a month save does. REVERSION (run 2026-10-29): rows[0].k
+       left out of the salt's hash — this check fails, answered 'hit' with
+       the body from before the save. */
+    ['the Owner\u2019s class rates', `INSERT INTO class_target (set_day, other_rate) VALUES ('2026-10-20', 500)`],
   ];
   for (const [what, sql] of saves) {
     const before = (await get3(L)).body.n;
