@@ -5667,6 +5667,14 @@ commit `a379be9`, probed it in PGlite and found these; all fixed on PR #29, each
 | YC26 | The LATERAL did not use the `(driver_ext_id, requested_at)` index — the planner flattened it and the time bounds became a join filter (0.9–1.4 s a batch at 585,600 trips) | `OFFSET 0` inside the LATERAL: both bounds reach the index condition (~0.17 s a batch, same results, per the reviewer's probe) | by reading; results unchanged in `yocharge` |
 | YC27 | `followPersonFold` deleted then inserted, so a failed insert lost the decision in the paths that commit per statement; two confirmations sent at once both landed; and smaller: "0 kWh, no amount stated" for nothing charged, "no energy" for a session that stated none, '00971' read as foreign, the API's fleet groups ignoring a saved empty value, a partial run worded as a failure, "2 wallets" counting one with no balance | a decision is MOVED by one UPDATE (decided_at/by kept); a partial unique index allows one confirmation per customer (`23505` → 409); the empty figures say "nothing charged", `energy_unknown` is counted apart; the country code's leading zeros stripped; the saved value used as saved; "incomplete" for a partial run; wallets counted only with a balance | `yocharge` (the index: a second confirmed row is refused with 23505) |
 
+**YC28 — the wallet on the driver page's overview** (the operator, 2026-11-03, over a screenshot
+of the overview: "the driver pages should also have charging wallet"). A "Charging wallet" tile in
+the overview's band beside Cash on hand and Bank deposit, in both skins: the balance (or the fleet
+limit left), when PowerDrive was read, opening the Money tab; a dash with the reason for no link,
+an unplaced account, no personal wallet or an unread PowerDrive — never AED 0. `charging_views`
+40/0 (revert: the tile left out → 8 fail); `arkiv_people` 241/0 (the classic row is twelve tiles
+now); classic fixture re-recorded for `driver/drv-0` only, the tile its sole change.
+
 **YC20 — our drivers' wallets every three hours** (the operator, 2026-11-03: "just our drivers
 every 3 hours?"). `collectWallets` (`walletsTick`, `YOCHARGE_WALLETS_CRON` `17 3-23/6 * * *`
 Dubai, job mode `charging-wallets`): one `GET /open/v1/users/?id=` per watched customer — measured

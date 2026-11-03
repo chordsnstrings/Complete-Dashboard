@@ -113,7 +113,9 @@ if (want('driver-overview')) {
     const { ctx, page } = await open('classic', 'driver/drv-0');
     const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
       row: document.querySelectorAll('#view .kpis:not(.glance) > .kpi').length }));
-    check('old skin: no 00 band, the eleven-tile row', !r.band && r.row === 11, JSON.stringify(r));
+    /* Twelve since 2026-11-03: the Charging wallet tile beside the cash
+       (the operator: "the driver pages should also have charging wallet"). */
+    check('old skin: no 00 band, the twelve-tile row', !r.band && r.row === 12, JSON.stringify(r));
     await ctx.close();
   }
   {

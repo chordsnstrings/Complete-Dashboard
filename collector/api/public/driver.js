@@ -975,6 +975,34 @@ function identityCard(p) {
 }
 
 /* ── tab: overview ───────────────────────────────────────────────────────── */
+/* THE CHARGING WALLET, beside the cash on the overview (the operator,
+   2026-11-03: "the driver pages should also have charging wallet"). A
+   POSITION like Cash on hand — what PowerDrive holds as of its last read,
+   whatever the window — read from the unwindowed /api/charging/driver; the
+   tile opens the Money tab, which has the detail and the last charges. No
+   link is a dash with its reason, never AED 0, in both skins. */
+function chargingWalletTile(c, prof, id) {
+  /* who: false — the tile opens this driver's Money tab, not a cohort of
+     people, so "Who exactly? →" would be the wrong invitation (ui.js). */
+  const base = { label: 'Charging wallet', to: href('driver', addressOf(prof, id), 'money'), who: false };
+  if (prof?.person_id == null) return { ...base, value: '—', sub: 'this account is not placed on a person, and a PowerDrive wallet is linked to a person' };
+  if (!c || c._err) return { ...base, value: '—', sub: `PowerDrive could not be read here${c?._err ? `: ${c._err.message}` : ''}` };
+  if (c.why) return { ...base, value: '—', sub: c.why.replace(/\.$/, '') };
+  const ws = c.wallets || [];
+  const fleet = ws.filter((w) => w.using_fleet_wallet);
+  const left = fleet.filter((w) => w.fleet_limit_available != null);
+  const own = ws.filter((w) => !w.using_fleet_wallet && w.balance != null);
+  const when = c.synced_at ? `read ${dtStr(c.synced_at)}` : 'as PowerDrive holds it';
+  if (fleet.length) {
+    return left.length
+      ? { ...base, value: money(left.reduce((a, w) => a + w.fleet_limit_available, 0)), sub: `fleet limit left — charges against the company, ${when}` }
+      : { ...base, value: '—', sub: 'on the company\u2019s fleet wallet, and PowerDrive states no limit left' };
+  }
+  if (!own.length) return { ...base, value: '—', sub: 'the linked PowerDrive account carries no personal wallet' };
+  const bal = own.reduce((a, w) => a + w.balance, 0);
+  return { ...base, value: money(bal), sub: bal < 0 ? `below zero: owing PowerDrive for charging done — ${when}` : `PowerDrive, ${when}` };
+}
+
 async function tabOverview(root, id, prof) {
   /* Under the page contract (plan §4 #driver/overview): a 00 band — Trips
      the hero with its gap to the fleet median from /api/driver/standing,
@@ -1005,10 +1033,13 @@ async function tabOverview(root, id, prof) {
   const vol = panel('Trips per day', 'Completed and cancelled, day by day'); root.append(vol.panel);
   [stand.body, veh.body, start.body, hm.body, vol.body].forEach(loading);
 
+  const pdP = prof?.person_id != null
+    ? qAll('/api/charging/driver', { person: prof.person_id }).catch((e) => ({ _err: e })) : Promise.resolve(null);
   const [k, st, daily, hmap] = await Promise.all([
     qAll('/api/driver/kpis', { id }), qAll('/api/driver/standing', { id }),
     qAll('/api/driver/daily', { id }), qAll('/api/driver/heatmap', { id }),
   ]);
+  const pd = await pdP;
 
   const OV_TILES = [
     { label: 'Typical start', value: hourStr(k.median_start_h), sub: k.start_consistency_h != null ? `±${(+k.start_consistency_h).toFixed(1)}h day to day` : null },
@@ -1068,6 +1099,7 @@ async function tabOverview(root, id, prof) {
        actually reports and what none of them does. */
     cashOnHandTile(k),
     bankDepositTile(k),
+    chargingWalletTile(pd, prof, id),
     faresTile(k),
     /* The same renderer as the Quality tab, so the two tiles cannot drift into
        showing one driver two different ratings. */

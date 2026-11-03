@@ -103,6 +103,33 @@ for (const skin of ['arkiv', 'classic']) {
   }
 }
 
+/* The overview's tile, beside the cash (the operator, 2026-11-03: "the
+   driver pages should also have charging wallet"). */
+const tileOf = (page) => page.evaluate(() => {
+  const t = [...document.querySelectorAll('#view .kpi')].find((x) => /^Charging wallet$/i.test(x.querySelector('.l')?.textContent.trim() || ''));
+  if (!t) return null;
+  const txt = (n) => (n ? n.textContent.replace(/\s+/g, ' ').trim() : '');
+  return { value: txt(t.querySelector('.n')), sub: txt(t.querySelector('.s')), na: txt(t.querySelector('.t-na')),
+    href: t.getAttribute('href') || t.querySelector('a')?.getAttribute('href') || '' };
+});
+for (const skin of ['arkiv', 'classic']) {
+  console.log(`\n#driver overview — ${skin}`);
+  for (const [addr, test] of [
+    ['drv-0', (t) => t?.value === 'AED 182.40' && /PowerDrive, read/.test(t.sub) && /#driver\/[^/]+\/money/.test(t.href)],
+    ['drv-1', (t) => t?.value === 'AED 912.30' && /fleet limit left/.test(t.sub)],
+    ['drv-5', (t) => t && !/AED/.test(t.value) && /No PowerDrive charging wallet is linked to this driver/.test(`${t.sub} ${t.na}`)],
+    ['U-TARIQ', (t) => t && !/AED/.test(t.value) && /not placed on a person/.test(`${t.sub} ${t.na}`)],
+  ]) {
+    const { ctx, page } = await open(skin, `driver/${addr}`);
+    const t = await tileOf(page);
+    check(`${addr}: the overview carries the charging wallet beside the cash — ${addr === 'drv-0' ? 'its balance, opening the Money tab'
+      : addr === 'drv-1' ? 'the fleet limit left' : addr === 'drv-5' ? 'no wallet: the reason, not AED 0' : 'not placed: says so'}`, test(t), JSON.stringify(t));
+    await ctx.close();
+  }
+}
+/* REVERSION (run 2026-11-03): chargingWalletTile left out of OV_TILES -> the
+   four overview checks fail in both skins (no tile at all). */
+
 for (const skin of ['arkiv', 'classic']) {
   console.log(`\n#vehicle — ${skin}`);
   {
