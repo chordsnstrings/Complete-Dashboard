@@ -5655,7 +5655,8 @@ branch, each with a check that fails when the fix is reverted (all reverts run 2
 | YC19 | Name/email candidates named one arbitrary person of several; a second confirmation could leave two people confirmed; the manual job read "done" over a skipped or failed run; a redirect would carry the tenant id; a window after today came out backwards; the API read a stale fleet-group setting; site names were not LOC; messages escaped twice | every person a name or email points at is offered with the count; a second confirmation answers 409; the job throws (→ `failed`); `redirect: 'error'`; `from` clamped; the fleet groups read from `app_setting`; `sites[].site` is LOC; `note()` given plain text | `yocharge` (revert the 409 → fails); the rest by reading |
 
 **The second review (2026-11-03), of the fixes themselves.** A second reader, given only the fix
-commit `a379be9`, probed it in PGlite and found these; all fixed on PR #29, each proven by revert:
+commit `a379be9`, probed it in PGlite and found these; all fixed on PR #29 (live since `f230eaca`),
+each proven by revert:
 
 | id | what the second review found | what was done | proven |
 |---|---|---|---|
@@ -5668,7 +5669,8 @@ commit `a379be9`, probed it in PGlite and found these; all fixed on PR #29, each
 | YC27 | `followPersonFold` deleted then inserted, so a failed insert lost the decision in the paths that commit per statement; two confirmations sent at once both landed; and smaller: "0 kWh, no amount stated" for nothing charged, "no energy" for a session that stated none, '00971' read as foreign, the API's fleet groups ignoring a saved empty value, a partial run worded as a failure, "2 wallets" counting one with no balance | a decision is MOVED by one UPDATE (decided_at/by kept); a partial unique index allows one confirmation per customer (`23505` → 409); the empty figures say "nothing charged", `energy_unknown` is counted apart; the country code's leading zeros stripped; the saved value used as saved; "incomplete" for a partial run; wallets counted only with a balance | `yocharge` (the index: a second confirmed row is refused with 23505) |
 
 **YC28 — the wallet on the driver page's overview** (the operator, 2026-11-03, over a screenshot
-of the overview: "the driver pages should also have charging wallet"). A "Charging wallet" tile in
+of the overview: "the driver pages should also have charging wallet"). **Live** since `f230eaca`,
+screenshotted on production. A "Charging wallet" tile in
 the overview's band beside Cash on hand and Bank deposit, in both skins: the balance (or the fleet
 limit left), when PowerDrive was read, opening the Money tab; a dash with the reason for no link,
 an unplaced account, no personal wallet or an unread PowerDrive — never AED 0. `charging_views`
@@ -5676,7 +5678,8 @@ an unplaced account, no personal wallet or an unread PowerDrive — never AED 0.
 now); classic fixture re-recorded for `driver/drv-0` only, the tile its sole change.
 
 **YC20 — our drivers' wallets every three hours** (the operator, 2026-11-03: "just our drivers
-every 3 hours?"). `collectWallets` (`walletsTick`, `YOCHARGE_WALLETS_CRON` `17 3-23/6 * * *`
+every 3 hours?"). **Live** since `f230eaca` (deployment `d7a9b6e3`); run once by hand on production
+(job 59: 4 minutes, 797 rows, ok). `collectWallets` (`walletsTick`, `YOCHARGE_WALLETS_CRON` `17 3-23/6 * * *`
 Dubai, job mode `charging-wallets`): one `GET /open/v1/users/?id=` per watched customer — measured
 to answer exactly that customer with their wallets in 1.2–1.8 s — then the day's sessions (no
 history) and attribution; linking stays with the six-hourly full read. Shares the full read's
