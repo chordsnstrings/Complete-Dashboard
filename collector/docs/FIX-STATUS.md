@@ -5589,3 +5589,27 @@ cars, unchanged by the deploy):
 a class save is made, October runs on its month save exactly as before (each box starts at
 AED 559.09, so a save that touches nothing asks the days left what they were asked, give or take
 the rounding of the rate to the fils).
+
+## EXP — a push 24 hours before a token expires (2026-11-03)
+
+The operator: "for the any token refresh lets have a notification about 24 hours before expiry".
+
+**What it was.** The ntfy watcher (NTFY) pushes when the banner's verdict changes — that is,
+once a source has already STOPPED. A credential with a hard, stated expiry is a stop that can be
+seen coming, and nothing said so: the Bolt portal refresh tokens (7-day life, no rotation) were
+found expired by somebody looking (20 Oct, HANDOFF 0.1).
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| EXP1 | `api/alerts.js` `expiryTick`, run in the same five-minute pass as the banner watcher (its own try, so one cannot cost the other): every stored secret that is a JWT AS A WHOLE with its own `exp` is watched, and ONE ntfy push (priority 4, linking to Settings) goes out when one enters its last 24 hours — when it runs out in Dubai time, how long that is, what to do (for Bolt: re-capture from the portal, one fleet at a time) and what stops if nobody does. Tokens due in the same pass are one message (the two Bolt tokens, minted 81 s apart, are one buzz) | yes | no | `ntfy_alerts` 74/0 (12 new) |
+| EXP2 | Once per token: `sql/schema_v112.sql` `expiry_notice` keys a warning on the setting AND its expiry, written only after ntfy accepted it — a restart repeats nothing, a refused push is retried next pass, a fresh paste (new expiry) is warned about again on its own last day. A token already past its expiry is not warned about (the banner's "Stopped" is that message) | yes | no | `ntfy_alerts` (revert: the lookup removed → 2 fail, a push every pass) |
+| EXP3 | Not watched, deliberately: a token living under 48 h from `iat` to `exp` (Tesla's 8-hour access token, minted by a keeper — always inside its last day); anything that is not a JWT as a whole — the Uber cookie jar, whose dated `sp-jwt-session` was measured NOT to be the session (api/auth_routes.js), and which the shared `jwtPayload` would otherwise have parsed (COVERAGE trap) | yes | no | `ntfy_alerts` (revert: the lifetime guard → 2 fail; the whole-JWT guard → 2 fail) |
+
+**Watched on production today:** `BOLT_REFRESH_TOKEN_ECOSINE` and `BOLT_REFRESH_TOKEN_EGARI`, both
+good until 7 Nov 2026 (18:06 and 18:07 Dubai) — read from `/api/settings` expiry fields only, no
+value. The legacy `BOLT_REFRESH_TOKEN` expired on 27 Aug and is never warned about. Uber's and
+Yango's session cookies and the hotel tokens state no expiry: they cannot be warned about ahead,
+and when one is refused the banner's "Stopped" push is the message.
+
+**Waits on the operator:** the go-ahead to deploy — before 6 Nov 18:06 Dubai, or the first warning
+(for the tokens expiring 7 Nov) is missed — and a phone subscribed to the ntfy topic (HANDOFF 0.6).

@@ -6,7 +6,8 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { noteCredential } from '../src/auth_state.js';
-import { alertTick, compose, firstMessage, reasonOf, alertKey, wordOf, ALERT_GAP_MS, CONFIRM_MS, HOLD_MAX_MS } from '../api/alerts.js';
+import { alertTick, compose, firstMessage, reasonOf, alertKey, wordOf, ALERT_GAP_MS, CONFIRM_MS, HOLD_MAX_MS,
+  expiryTick, expiringTokens, composeExpiry, EXPIRY_WARN_MS } from '../api/alerts.js';
 import { publish, clip } from '../src/ntfy.js';
 
 const db = new PGlite();
@@ -352,6 +353,83 @@ console.log('\nthe publisher');
   check('a refusal is reported, not thrown', !bad.ok && /429/.test(bad.error), JSON.stringify(bad));
   const boom = await publish({ title: 't', message: 'm' }, { topic: 't', fetchImpl: async () => { throw new Error('ECONNRESET'); } });
   check('a network error is reported, not thrown', !boom.ok && /ECONNRESET/.test(boom.error));
+}
+
+/* ── a token's last day (expiryTick; the operator, 2026-11-03: "for the any
+   token refresh lets have a notification about 24 hours before expiry") ──
+   Synthetic JWTs only: a header, a payload with iat/exp, no signature. */
+console.log('\na token\'s last day, pushed 24 hours ahead');
+{
+  const jwt = (o) => `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify(o)).toString('base64url')}.x`;
+  const T0 = Date.parse('2026-11-01T10:00:00Z');
+  const exp1 = Date.parse('2026-11-07T14:06:05Z');
+  const exp2 = Date.parse('2026-11-07T14:07:26Z');
+  const defs = [
+    { key: 'TOKEN_A', group: 'Bolt', label: 'Portal refresh token — Ecosine', secret: true },
+    { key: 'TOKEN_B', group: 'Bolt', label: 'Portal refresh token — Egari', secret: true },
+    { key: 'SHORT', group: 'Tesla', label: 'Access token', secret: true },
+    { key: 'JAR', group: 'Uber', label: 'Supplier web session cookie', secret: true },
+    { key: 'PLAIN', group: 'Misc', label: 'Not a secret', secret: false },
+    { key: 'EMPTY', group: 'Misc', label: 'Unset', secret: true },
+  ];
+  const vals = {
+    TOKEN_A: jwt({ iat: exp1 / 1000 - 7 * 86400, exp: exp1 / 1000 }),
+    TOKEN_B: jwt({ iat: exp2 / 1000 - 7 * 86400, exp: exp2 / 1000 }),
+    SHORT: jwt({ iat: exp1 / 1000 - 8 * 3600, exp: exp1 / 1000 }),
+    JAR: `sid=abc; sp-jwt-session=${jwt({ exp: exp1 / 1000 })}; csid=def`,
+    PLAIN: jwt({ exp: exp1 / 1000 }),
+  };
+  const list = expiringTokens({ defs, read: (k) => vals[k] || '' });
+  check('watched: every secret that is a JWT with its own exp and a life of days — not an 8-hour machine token, not a cookie jar with a dated token inside, not a plain setting',
+    list.map((t) => t.key).join(',') === 'TOKEN_A,TOKEN_B' && list[0].expires_at === exp1, JSON.stringify(list));
+  /* REVERSION (run 2026-11-03): the MIN_LIFETIME_MS guard removed -> this
+     check fails (SHORT, Tesla's 8-hour access token, is watched and would be
+     inside its last day every hour of its life); the WHOLE_JWT test removed
+     -> it fails on JAR (the first run of this file, before that test
+     existed, watched the cookie jar and warned about the Uber session). */
+  const xsent = [];
+  let xdown = false;
+  const xpub = async (m) => (xdown ? { ok: false, error: 'ntfy answered 502' } : (xsent.push(m), { ok: true }));
+  const xt = (now, tokens = list, o = {}) => expiryTick({ q, publish: xpub, now, config: config(), tokens, ...o });
+  check('no topic, no warning', (await expiryTick({ q, publish: xpub, now: T0, config: config(''), tokens: list })).sent === 0 && xsent.length === 0);
+  const far = await xt(exp1 - 30 * 3600e3);
+  check('30 hours out: nothing yet', far.sent === 0 && xsent.length === 0, JSON.stringify(far));
+  const one = [list[0]];
+  const due = await xt(exp1 - EXPIRY_WARN_MS + 60e3, one);
+  check('inside its last 24 hours: one push, saying when it runs out, what to do, and linking to Settings',
+    due.sent === 1 && xsent.length === 1 && /^Bolt: Portal refresh token — Ecosine expires in 24 h$/.test(xsent[0].title)
+    && /Good until Sat 7 Nov 18:06 Dubai \(in 23 h 59 min\)\./.test(xsent[0].message) && /Re-capture it from the Bolt fleet portal/.test(xsent[0].message)
+    && xsent[0].click === 'https://dash.example#settings' && xsent[0].priority === 4, JSON.stringify(xsent[0]));
+  const again = await xt(exp1 - EXPIRY_WARN_MS + 10 * 60e3, one);
+  check('…and once only: the next pass, and a restart (the table, not memory), say nothing more',
+    again.sent === 0 && xsent.length === 1 && (await q('SELECT count(*)::int n FROM expiry_notice'))[0].n === 1, JSON.stringify(again));
+  /* REVERSION (run 2026-11-03): the expiry_notice lookup removed -> this
+     check fails (a second push five minutes after the first, and one every
+     pass after it). */
+  xdown = true;
+  const failed = await xt(exp2 - 20 * 3600e3);
+  check('a push ntfy refuses records nothing', failed.sent === 0 && /502/.test(failed.error)
+    && (await q(`SELECT count(*)::int n FROM expiry_notice WHERE setting_key = 'TOKEN_B'`))[0].n === 0, JSON.stringify(failed));
+  xdown = false;
+  const retried = await xt(exp2 - 20 * 3600e3 + 5 * 60e3);
+  check('…and is sent on the next pass — the Egari token alone, Ecosine\'s already told',
+    retried.sent === 1 && retried.keys.join() === 'TOKEN_B' && /Egari/.test(xsent[1].title), JSON.stringify(retried));
+  check('a token already past its expiry is not warned about: it has happened, and the banner says so',
+    (await xt(exp1 + 60e3, [{ ...list[0], key: 'GONE', expires_at: exp1 }])).sent === 0);
+  /* A fresh paste: a new expiry a week on — quiet until its own last day. */
+  const fresh = { ...list[0], expires_at: exp1 + 7 * 86400e3 };
+  check('a fresh paste is quiet until its own last day…', (await xt(exp1 + 3600e3, [fresh])).sent === 0);
+  const fr = await xt(fresh.expires_at - 23 * 3600e3, [fresh]);
+  check('…and is warned about then', fr.sent === 1 && /Sat 14 Nov 18:06/.test(xsent[xsent.length - 1].message), JSON.stringify(fr));
+  /* Two tokens entering their last day in one pass: one buzz. */
+  const pair = [{ ...list[0], key: 'PAIR_A' }, { ...list[1], key: 'PAIR_B' }];
+  const before = xsent.length;
+  const both = await xt(exp1 - 23 * 3600e3, pair);
+  const m = xsent[before];
+  check('two tokens due together are one message with a line each, worded for both',
+    both.sent === 1 && xsent.length === before + 1 && m.title === '2 tokens expire within 24 h'
+    && m.message.split('\n').filter((l) => / — good until /.test(l)).length === 2 && /Re-capture each/.test(m.message), JSON.stringify(m));
+  check('the composer never prints undefined or NaN', !/undefined|NaN/.test(JSON.stringify(composeExpiry(pair, exp1 - 3600e3))));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

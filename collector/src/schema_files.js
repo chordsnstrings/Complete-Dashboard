@@ -350,4 +350,8 @@ export const SCHEMA_FILES = [
      each make + model + year, and one for every other car; a save governs
      from its day into every later month (api/revenue_target.js). */
   'schema_v111.sql',
+  /* v112: the token-expiry warnings the ntfy watcher has sent — one row per
+     token (its setting and its expiry), so a restart never repeats one and a
+     fresh paste is warned about again (api/alerts.js expiryTick). */
+  'schema_v112.sql',
 ];

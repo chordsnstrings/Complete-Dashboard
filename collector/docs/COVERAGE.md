@@ -329,7 +329,7 @@ See `test/platform_flags_truth.test.mjs`.
 | credential | shape | consequence |
 |---|---|---|
 | Uber driver photo URL | CloudFront pre-signed, **exactly 12 h** (43,200 s, two runs agreeing to 0.1 s) | never store the URL — store the bytes. `sql/schema_v63.sql` |
-| Bolt refresh token | JWT, **7-day** life (`iat`→`exp`), carries `fleet_owner_id` | a weekly human paste is a scheduled outage; check whether it rotates on use before storing one in an env var |
+| Bolt refresh token | JWT, **7-day** life (`iat`→`exp`), carries `fleet_owner_id` | a weekly human paste is a scheduled outage; check whether it rotates on use before storing one in an env var. Since 2026-11-03 a push goes out 24 h before its `exp` (api/alerts.js expiryTick) |
 | Yango | park id + API key on fleet-api.yango.tech (trips, roster, cars, ledger); park id + Yandex session cookie on the console (the weekly summary only) | read the console's answer, not its status: an HTML page is Yandex's edge refusing this server before the session is read (cookie **not checked**), JSON 401 is a signed-out session, JSON 403 is the park refused. "403 with the cookie, 401 without" was read as "the cookie is accepted" until 2026-09-29 — it is two different machines answering (trap 32) |
 | Uber timeline window | Uber refuses >31 days; the collector cuts at 30 | `MAX_WINDOW_DAYS` in `src/sources/uber_timeline.js` |
 
@@ -898,6 +898,16 @@ Measured on production 2026-09-07, the first build under the v67 rule:
 driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
+
+* **`jwtPayload` (src/util.js) reads the second dot-separated part of ANY
+  string** (found 2026-11-03, FIX-STATUS EXP). A cookie jar whose dated token
+  comes before every other dot — `sid=…; sp-jwt-session=eyJ….….…; csid=…` —
+  parses as a token with an expiry. The Settings page's `expiry` and the
+  expiry push both rest on it; the push now requires a JWT AS A WHOLE (three
+  base64url parts, nothing else), and production's Uber jar reads `expiry:
+  null` today only because another cookie's dot comes first. Before trusting
+  an expiry read off a credential, check the value is a token and not a jar —
+  and remember the Uber jar's dated token is not the session anyway.
 
 * **"Cars that earned" is one figure in three places, and the per-car money
   columns are three different figures (found 2026-10-29, CLS).** The target's
