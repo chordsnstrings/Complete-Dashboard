@@ -98,7 +98,7 @@ function drawWallets(host, w) {
     { label: 'Charges, 30 days', key: 'charges_30d', num: true, render: (r) => esc(fmt(r.charges_30d)) },
     { label: 'Linked', key: 'tier', render: (r) => esc(r.tier === 'confirmed' ? 'confirmed' : 'automatic') },
   ], { sortable: true, sortId: 'pdw', defaultSort: { key: 'balance', dir: 'asc' }, cards: true, cardLead: 'name' }));
-  host.append(el('p', 'cap', esc(`From PowerDrive, read every six hours — last read ${when(w.synced_at)} Dubai: `
+  host.append(el('p', 'cap', esc(`From PowerDrive: our drivers\u2019 wallets every three hours, every customer every six — last read ${when(w.synced_at)} Dubai: `
     + `${w.customers_read ? `${fmt(w.customers_read)} customers read, ` : ''}${fmt(w.customers)} kept — those in our fleet groups there `
     + 'or matching one of our drivers; nobody else\u2019s details are stored. A wallet is linked automatically only when its mobile belongs to exactly '
     + 'one of our drivers and one PowerDrive customer and the two names share a word; every other possible match waits below '

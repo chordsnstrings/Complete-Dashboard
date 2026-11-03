@@ -542,6 +542,64 @@ export async function attributeSessions(q, { days = ATTRIBUTE_DAYS, recheck = RE
   return n;
 }
 
+/* ── between the full reads: our drivers' wallets ───────────────────────── */
+/* The operator, 2026-11-03: "just our drivers every 3 hours?" — the full read
+   is ~84 pages of 40 every six hours (it is how a NEW customer is found and
+   judged), and between two of them our own drivers' balances were up to six
+   hours old. So at the hours between, only the customers who are ours — our
+   fleet groups at PowerDrive, and every customer linked to one of our people —
+   are asked for, one GET each: /open/v1/users/?id=<id> answers exactly that
+   customer with their wallets, 1.2–1.8 s each (measured 2026-11-03), so ~300
+   take a few minutes. The day's sessions are read with them (the same
+   incremental read the full run makes, no history backfill) and put on cars.
+   Linking is NOT redone here: who is whose changes only on a full read. */
+export async function refreshWallets({ q, ycGet, now = new Date(), ids, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), pause = 200 }) {
+  let refreshed = 0; let missing = 0;
+  for (const id of [...ids].sort()) {
+    const j = await ycGet('/open/v1/users/', { role: 'END_USER', id });
+    const u = (Array.isArray(j?.results) ? j.results : []).find((x) => String(x?.id) === String(id));
+    if (u) { refreshed += await upsert(q, 'charging_user', USER_COLS, 'yc_user_id', [userRow(u, now)]); } else missing += 1;
+    if (pause) await sleep(pause);
+  }
+  return { refreshed, missing };
+}
+
+export async function collectWallets({ db, now = new Date(), fetchImpl = fetch, sleep, log = defaultLog,
+  key = get('YOCHARGE_API_KEY', ''), clientId = get('YOCHARGE_CLIENT_ID', ''), host = get('YOCHARGE_HOST', 'https://api.mena.yocharge.com'),
+  fleetGroups = get('YOCHARGE_FLEET_GROUPS', DEFAULT_FLEET_GROUPS) } = {}) {
+  const q = (t, p) => db.query(t, p).then((r) => r.rows);
+  if (!key || !clientId) return { skipped: !key ? 'YOCHARGE_API_KEY is not set' : 'YOCHARGE_CLIENT_ID is not set' };
+  const ycGet = client({ host, key, clientId, fetchImpl, sleep });
+  const out = { wallets: null, sessions: null };
+  try {
+    const watched = await watchedUsers(q, fleetGroups);
+    /* Nothing is ours until a full read has run: say so, ask for nothing. */
+    if (!watched.size) return { skipped: 'no customer is ours yet — the six-hourly full read has not run' };
+    out.wallets = await refreshWallets({ q, ycGet, now, ids: watched, sleep });
+    await noteCredential(db, { provider: SOURCE, credential: 'YOCHARGE_API_KEY', state: 'ok', surface: 'wallets' });
+    out.sessions = await syncSessions({ q, ycGet, now, watched, budget: 0, sleep });
+    let attributionError = null;
+    try { out.attributed = await attributeSessions(q, { runAt: now }); } catch (e) {
+      attributionError = `charges not yet put on cars: ${String(e.message || e).slice(0, 200)}`;
+      log.warn('yocharge', 'attribution failed', { err: attributionError });
+    }
+    await logRun({ source: SOURCE, fleet_id: null, mode: 'wallets', status: attributionError ? 'partial' : 'ok',
+      rows_written: out.wallets.refreshed + out.sessions.recent, error: attributionError }, db);
+    if (attributionError) out.attribution_error = attributionError;
+    log.info('yocharge', 'wallets', out);
+  } catch (e) {
+    if (e.status === 401 || e.status === 403) {
+      await noteCredential(db, { provider: SOURCE, credential: 'YOCHARGE_API_KEY', state: 'invalid',
+        detail: `PowerDrive refused the key (${e.status}${e.detail ? `: ${String(e.detail).slice(0, 80)}` : ''})`, surface: 'wallets' });
+    }
+    await logRun({ source: SOURCE, fleet_id: null, mode: 'wallets', status: 'error',
+      rows_written: out.wallets?.refreshed || 0, error: String(e.message || e).slice(0, 300) }, db).catch(() => {});
+    log.warn('yocharge', 'wallet refresh failed', { err: String(e.message || e).slice(0, 200), status: e.status || null });
+    out.error = String(e.message || e);
+  }
+  return out;
+}
+
 /* ── one run ────────────────────────────────────────────────────────────── */
 export async function collect({ db, now = new Date(), fetchImpl = fetch, sleep, log = defaultLog,
   key = get('YOCHARGE_API_KEY', ''), clientId = get('YOCHARGE_CLIENT_ID', ''), host = get('YOCHARGE_HOST', 'https://api.mena.yocharge.com'),

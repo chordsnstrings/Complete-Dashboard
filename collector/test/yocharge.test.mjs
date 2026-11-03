@@ -94,7 +94,11 @@ async function fakeFetch(u, opts = {}) {
   calls.push({ method: opts.method, url: u, headers: opts.headers });
   if (status !== 200) return json({ detail: 'Token does not exist.' }, status);
   const url = new URL(u);
-  if (url.pathname === '/open/v1/users/') return json(page(USERS, url));
+  if (url.pathname === '/open/v1/users/') {
+    /* ?id= answers exactly that customer, as PowerDrive's does (measured). */
+    const id = url.searchParams.get('id');
+    return json(page(id ? USERS.filter((u) => u.id === id) : USERS, url));
+  }
   if (url.pathname === '/open/v1/mini-transactions/') return json(page(RECENT, url));
   if (url.pathname === '/v3/mini-transactions/') return json(page(HISTORY[url.searchParams.get('user_id')] || [], url));
   return json({ detail: 'not found' }, 404);
@@ -445,6 +449,37 @@ console.log('\n7. the independent review\'s findings, each pinned');
   const dropped = await yc.dropUnwatchedSessions(q, new Set(['yA']));
   const left = (await q(`SELECT DISTINCT yc_user_id FROM charging_session`)).map((x) => x.yc_user_id);
   check('the sessions of customers no longer ours are dropped', dropped > 0 && j(left) === j(['yA']), j([dropped, left]));
+}
+/* ── 8. between the full reads: our drivers' wallets, every three hours ──── */
+console.log('\n8. our drivers\' wallets, between the full reads');
+{
+  const watchedNow = await yc.watchedUsers(q);
+  USERS.find((u) => u.id === 'yA').wallets[0].balance = '99.00';
+  calls.length = 0;
+  const r = await yc.collectWallets({ db, now: new Date('2026-11-03T11:00:00Z'), fetchImpl: fakeFetch, sleep: noSleep, key: 'k', clientId: 't',
+    host: 'https://pd.example', log: { info() {}, warn() {} } });
+  const asked = calls.filter((c) => new URL(c.url).pathname === '/open/v1/users/').map((c) => new URL(c.url).searchParams.get('id'));
+  const yA = (await q(`SELECT balance::float AS b FROM charging_user WHERE yc_user_id = 'yA'`))[0];
+  check('only our customers are asked for, one GET each by id — never the whole list', calls.every((c) => c.method === 'GET')
+    && asked.length === watchedNow.size && asked.every((id) => id && watchedNow.has(id)) && r.wallets?.refreshed === watchedNow.size,
+  j([asked, [...watchedNow], r.wallets]));
+  /* REVERSION (run 2026-11-03): every stored customer asked for instead of
+     the watched -> this check fails (candidates who are not ours yet asked). */
+  check('…and the balance on screen is the one PowerDrive holds now', yA?.b === 99, j(yA));
+  const v3 = calls.filter((c) => new URL(c.url).pathname === '/v3/mini-transactions/').length;
+  const day = calls.filter((c) => new URL(c.url).pathname === '/open/v1/mini-transactions/').length;
+  const run = (await q(`SELECT mode, status FROM collection_run WHERE source = 'yocharge' ORDER BY id DESC LIMIT 1`))[0];
+  check('the day\'s sessions are read with them, no history, and the run is logged as a wallet refresh',
+    day > 0 && v3 === 0 && run?.mode === 'wallets' && run?.status === 'ok', j([day, v3, run]));
+  /* REVERSION (run 2026-11-03): budget 0 dropped from the refresh's
+     syncSessions -> this check fails if any history is still waiting. */
+  status = 401;
+  const refused = await yc.collectWallets({ db, now: new Date('2026-11-03T12:00:00Z'), fetchImpl: fakeFetch, sleep: noSleep, key: 'k', clientId: 't',
+    host: 'https://pd.example', log: { info() {}, warn() {} } });
+  status = 200;
+  const cred = (await q(`SELECT state FROM credential_state WHERE provider = 'yocharge' ORDER BY checked_at DESC NULLS LAST LIMIT 1`).catch(() => [{}]))[0];
+  check('a refused key on the refresh says so on the banner, and the run is an error', !!refused.error && cred?.state === 'invalid', j([refused.error, cred]));
+  check('no key: nothing is asked', (await yc.collectWallets({ db, fetchImpl: () => { throw new Error('asked'); }, key: '', clientId: 't' })).skipped === 'YOCHARGE_API_KEY is not set');
 }
 srv.close();
 

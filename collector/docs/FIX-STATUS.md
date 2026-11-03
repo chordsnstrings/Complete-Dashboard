@@ -5654,6 +5654,14 @@ branch, each with a check that fails when the fix is reverted (all reverts run 2
 | YC18 | **Partial runs**: strangers stored when a run died after reading customers; every automatic link lost if a run was killed between the DELETE and the INSERTs; a wrongly linked customer's sessions kept after the link went | the prune runs in `finally`; the link replace is one transaction (pg client or PGlite's own); sessions of customers no longer watched are dropped, and such a customer is read again if they return | `yocharge` (reverts: no finally prune → fails; writes outside the transaction → 2 fail; backfill list not cut to the watched → fails) |
 | YC19 | Name/email candidates named one arbitrary person of several; a second confirmation could leave two people confirmed; the manual job read "done" over a skipped or failed run; a redirect would carry the tenant id; a window after today came out backwards; the API read a stale fleet-group setting; site names were not LOC; messages escaped twice | every person a name or email points at is offered with the count; a second confirmation answers 409; the job throws (→ `failed`); `redirect: 'error'`; `from` clamped; the fleet groups read from `app_setting`; `sites[].site` is LOC; `note()` given plain text | `yocharge` (revert the 409 → fails); the rest by reading |
 
+**YC20 — our drivers' wallets every three hours** (the operator, 2026-11-03: "just our drivers
+every 3 hours?"). `collectWallets` (`walletsTick`, `YOCHARGE_WALLETS_CRON` `17 3-23/6 * * *`
+Dubai, job mode `charging-wallets`): one `GET /open/v1/users/?id=` per watched customer — measured
+to answer exactly that customer with their wallets in 1.2–1.8 s — then the day's sessions (no
+history) and attribution; linking stays with the six-hourly full read. Shares the full read's
+one-at-a-time flag. `yocharge` 52/0 (reverts: every stored customer asked for → fails; history read
+on the refresh → fails); `credential_save_check` 109/0.
+
 **Not done, deliberately.** Matching an advance to a charge (a charger meters a car, an advance is
 owed by a person); charging anywhere but PowerDrive's network; any write to PowerDrive (the API can
 credit and debit a wallet, stop a live charge and renew the token — never called).

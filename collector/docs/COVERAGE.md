@@ -370,7 +370,11 @@ repository, never in it). Investigated read-only: **GET requests only**.
   - active with no trace in YoCharge at all: 4.
   - the 198's wallets: 136 non-zero, AED 22,907.30 in all; 40 of all matched slightly negative
     (lowest −48.44); 26 on the fleet wallet.
-- **As built (FIX-STATUS YC).** Read every six hours (`YOCHARGE_CRON`, `17 */6 * * *` Dubai) with the
+- **As built (FIX-STATUS YC).** Every customer read every six hours (`YOCHARGE_CRON`, `17 */6 * * *`
+  Dubai); between those, at 03:17, 09:17, 15:17 and 21:17 (`YOCHARGE_WALLETS_CRON`), only our
+  customers' wallets are refreshed — one `GET /open/v1/users/?id=` each, which answers exactly that
+  customer (1.2–1.8 s, measured 2026-11-03) — with the day's sessions, so a balance is at most ~3
+  hours old. Both read with the
   key (secret) and the tenant client id stored as settings — Settings › "Charging (PowerDrive)" — and
   on demand from Settings › "Read PowerDrive charging now". **Automatic only on a unique phone with
   agreeing names** — a distinctive shared word, or two ordinary ones; never a particle or one of the

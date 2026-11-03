@@ -10,7 +10,7 @@ import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
 import { recordCredentialVisibility, withPinnedSettings, get } from './settings.js';
 import { runDiscovery } from './sources/discovery.js';
-import { backfill, incremental, catchUp, fareRefresh, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk, payoutAudit, chargingTick } from './run.js';
+import { backfill, incremental, catchUp, fareRefresh, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk, payoutAudit, chargingTick, walletsTick } from './run.js';
 import { clearCheckpoint } from './checkpoint.js';
 import { config } from './config.js';
 import { log } from './log.js';
@@ -65,6 +65,7 @@ async function main() {
      run it once and look. */
   if (cmd === 'profile') return uberProfileTick();
   if (cmd === 'charging') return chargingTick();
+  if (cmd === 'charging-wallets') return walletsTick();
   if (cmd === 'audit') return uberAuditTick();
   if (cmd === 'discover') return withPinnedSettings(() => runDiscovery(pool, { log }));
   /* By hand. `sms-preview` decides without writing or sending anything and
@@ -351,6 +352,11 @@ async function main() {
        YOCHARGE_API_KEY and YOCHARGE_CLIENT_ID are set. */
     cron.schedule(get('YOCHARGE_CRON', '17 */6 * * *'), () => chargingTick()
       .catch((e) => log.error('scheduler', 'charging', { err: String(e) })), { timezone: 'Asia/Dubai' });
+    /* …and our own drivers' wallets at the hours between (03:17, 09:17, 15:17,
+       21:17 Dubai), one customer at a time — so a balance on screen is never
+       more than about three hours old (the operator, 2026-11-03). */
+    cron.schedule(get('YOCHARGE_WALLETS_CRON', '17 3-23/6 * * *'), () => walletsTick()
+      .catch((e) => log.error('scheduler', 'charging wallets', { err: String(e) })), { timezone: 'Asia/Dubai' });
     /* Ask Uber whether the past we hold is the past it has. 05:45 Dubai —
        after the overnight incremental, the analyst and the profile pull, and
        before the morning, because it spends real Uber report slots and the
@@ -471,11 +477,11 @@ async function main() {
           /* One call per driver, so it takes the job id and checkpoints per
              driver: a deploy landing mid-sweep resumes where it stopped. */
           else if (job.mode === 'profile') await uberProfileTick({ fleet: job.fleet || null, jobId: job.id });
-          else if (job.mode === 'charging') {
+          else if (job.mode === 'charging' || job.mode === 'charging-wallets') {
             /* A run that was skipped (no key, one already going) or failed is
                not a job done: the Settings page would otherwise say "done"
                over nothing read (the review, 2026-11-03). */
-            const r = await chargingTick();
+            const r = job.mode === 'charging' ? await chargingTick() : await walletsTick();
             if (r?.error || r?.skipped) throw new Error(`PowerDrive read ${r.error ? `failed: ${r.error}` : `skipped: ${r.skipped}`}`);
           }
           /* One Uber report per window and minutes each, so it takes the job

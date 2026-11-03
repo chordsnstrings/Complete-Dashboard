@@ -4329,7 +4329,7 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
 /* 'fares' is src/run.js fareRefresh(2) on demand — the 09:00 Dubai pass, for
    an operator who needs yesterday's Uber prices before the next scheduled
    one (2026-10-07: "I need the fares for yesterday. I need to check."). */
-const JOB_MODES = ['backfill', 'incremental', 'analyst', 'probe', 'timeline', 'timeline-roster', 'profile', 'audit', 'fares', 'charging'];
+const JOB_MODES = ['backfill', 'incremental', 'analyst', 'probe', 'timeline', 'timeline-roster', 'profile', 'audit', 'fares', 'charging', 'charging-wallets'];
 /* The fleets a run can be narrowed to. Taken from the configured Uber orgs
    rather than written down twice: a third fleet is a credential the operator
    pastes, not a code change, and a list that has to be edited alongside is a
