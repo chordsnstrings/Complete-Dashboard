@@ -8953,12 +8953,12 @@ app.get('/api/charging/wallets', (_req, r) => {
 /* The queue, on its own route since the review of 2026-11-03 (subject MRG). */
 app.get('/api/charging/review', (_req, r) => r.json({ ...PD_SYNC(), why: null,
   review: [
-    { yc_user_id: 'yc-r1', person_id: '105', reason: 'this mobile belongs to 2 of our records', yc_name: 'R. Okafor', yc_phone: '•••••••418',
+    { yc_user_id: 'yc-r1', person_id: '105', tier: 'candidate', reason: 'this mobile belongs to 2 of our records', yc_name: 'R. Okafor', yc_phone: '•••••••418',
       yc_fleet_group: 'ecofleet', our_name: drivers[5] },
-    { yc_user_id: 'yc-r2', person_id: '106', reason: 'the mobile matches but the names do not agree (no distinctive word in common)',
+    { yc_user_id: 'yc-r2', person_id: '106', tier: 'candidate', reason: 'the mobile matches but the names do not agree (no distinctive word in common)',
       yc_name: 'Driver Six', yc_phone: '•••••••902', yc_fleet_group: 'egari', our_name: drivers[6] },
   ],
-  unplaced: [{ yc_user_id: 'yc-u1', yc_name: 'Unplaced Customer', yc_phone: '•••••••557', yc_fleet_group: 'ecofleet' }] }));
+  unplaced: [{ yc_user_id: 'yc-u1', yc_name: 'Unplaced Customer', yc_phone: '•••••••557', yc_fleet_group: 'ecofleet', stranded: false }] }));
 app.get('/api/charging/sessions', (req, r) => {
   const to = String(req.query.to || dayISO(0)).slice(0, 10);
   const from = String(req.query.from || dayISO(29)).slice(0, 10);
@@ -8971,7 +8971,7 @@ app.get('/api/charging/sessions', (req, r) => {
       basis: { session_plate: 0, only_car: 1, nearest_trip: 3 } },
   ];
   r.json({ from, to, ...PD_SYNC(), why: null, currency: 'AED',
-    totals: { sessions: 27, charges: 25, no_energy: 2, kwh: 913.4, cost: 657.65, cost_unknown: 0, on_a_car: 22,
+    totals: { sessions: 27, charges: 25, no_energy: 2, energy_unknown: 0, kwh: 913.4, cost: 657.65, cost_unknown: 0, on_a_car: 22,
       basis: { session_plate: 2, only_car: 16, nearest_trip: 4, no_trip: 2, no_link: 1, not_yet: 0 } },
     vehicles,
     drivers: [0, 1, 2].map((i) => ({ person_id: String(100 + i), name: drivers[i], charges: 9 - i * 2, kwh: 330 - i * 60, cost: 238 - i * 43,

@@ -77,7 +77,10 @@ async function syncState(q) {
    could answer with a value from before a save (the review, 2026-11-03). */
 async function fleetGroupsOf(q) {
   const [s] = await q(`SELECT value FROM app_setting WHERE key = 'YOCHARGE_FLEET_GROUPS'`).catch(() => []);
-  return String(s?.value || get('YOCHARGE_FLEET_GROUPS', 'ecofleet,egari,ecofleet investor fleet')).replace(/\s*,\s*/g, ',');
+  /* A saved value is used as saved, an empty one included, as the collector
+     uses it; the default only when nothing is saved. */
+  const raw = s ? String(s.value ?? '') : String(get('YOCHARGE_FLEET_GROUPS', 'ecofleet,egari,ecofleet investor fleet'));
+  return raw.split(',').map((x) => x.trim()).filter(Boolean).join(',');
 }
 const whyOf = (s) => (s.customers ? null
   : s.status === 'error' ? `PowerDrive has not been read: ${s.error || 'the last run failed'}.`
@@ -103,11 +106,16 @@ const SPAN = `cs.started_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Dubai')
 async function reviewCounts(q) {
   const groups = await fleetGroupsOf(q);
   const [r] = await q(`SELECT
-      (SELECT count(*) FROM charging_link c WHERE c.tier = 'candidate'
+      (SELECT count(*) FROM charging_link c WHERE c.tier IN ('candidate', 'held')
+          AND EXISTS (SELECT 1 FROM driver d WHERE d.id = c.person_id)
           AND NOT EXISTS (SELECT 1 FROM charging_link x WHERE x.yc_user_id = c.yc_user_id AND x.tier IN ('confirmed', 'auto')
                             AND EXISTS (SELECT 1 FROM driver dd WHERE dd.id = x.person_id)))::int AS review,
-      (SELECT count(*) FROM charging_user u WHERE lower(u.fleet_group) = ANY(string_to_array(lower($1), ','))
-          AND NOT EXISTS (SELECT 1 FROM charging_link c WHERE c.yc_user_id = u.yc_user_id AND c.tier <> 'refused'))::int AS unplaced`, [groups]);
+      (SELECT count(*) FROM charging_user u
+        WHERE (lower(u.fleet_group) = ANY(string_to_array(lower($1), ','))
+               OR EXISTS (SELECT 1 FROM charging_link s WHERE s.yc_user_id = u.yc_user_id
+                            AND NOT EXISTS (SELECT 1 FROM driver d WHERE d.id = s.person_id)))
+          AND NOT EXISTS (SELECT 1 FROM charging_link c WHERE c.yc_user_id = u.yc_user_id AND c.tier <> 'refused'
+                            AND EXISTS (SELECT 1 FROM driver d WHERE d.id = c.person_id)))::int AS unplaced`, [groups]);
   return r || { review: 0, unplaced: 0 };
 }
 
@@ -160,23 +168,33 @@ export function chargingRoutes(app, { q, wrap }) {
     const s = await syncState(q);
     const groups = await fleetGroupsOf(q);
     const [review, unplaced] = await Promise.all([
-      q(`SELECT c.yc_user_id, c.person_id::text AS person_id, c.reason, u.name AS yc_name, u.phone_norm, u.fleet_group,
+      q(`SELECT c.yc_user_id, c.person_id::text AS person_id, c.tier, c.reason, u.name AS yc_name, u.phone_norm, u.fleet_group,
                 d.full_name AS our_name
            FROM charging_link c JOIN charging_user u ON u.yc_user_id = c.yc_user_id
-           LEFT JOIN driver d ON d.id = c.person_id
-          WHERE c.tier = 'candidate'
+           JOIN driver d ON d.id = c.person_id
+          WHERE c.tier IN ('candidate', 'held')
             AND NOT EXISTS (SELECT 1 FROM charging_link x WHERE x.yc_user_id = c.yc_user_id AND x.tier IN ('confirmed', 'auto')
                               AND EXISTS (SELECT 1 FROM driver dd WHERE dd.id = x.person_id))
-          ORDER BY u.name, c.person_id`),
-      q(`SELECT u.yc_user_id, u.name, u.phone_norm, u.fleet_group FROM charging_user u
-          WHERE lower(u.fleet_group) = ANY(string_to_array(lower($1), ','))
-            AND NOT EXISTS (SELECT 1 FROM charging_link c WHERE c.yc_user_id = u.yc_user_id AND c.tier <> 'refused')
+          ORDER BY (c.tier = 'held') DESC, u.name, c.person_id`),
+      /* Unplaced: in our fleet groups, or carrying a decision about a person
+         record that no longer exists (the second review: such a customer was
+         in no list at all), and with no live link a person could act on. */
+      q(`SELECT u.yc_user_id, u.name, u.phone_norm, u.fleet_group,
+                EXISTS (SELECT 1 FROM charging_link s WHERE s.yc_user_id = u.yc_user_id
+                          AND NOT EXISTS (SELECT 1 FROM driver d WHERE d.id = s.person_id)) AS stranded
+           FROM charging_user u
+          WHERE (lower(u.fleet_group) = ANY(string_to_array(lower($1), ','))
+                 OR EXISTS (SELECT 1 FROM charging_link s WHERE s.yc_user_id = u.yc_user_id
+                              AND NOT EXISTS (SELECT 1 FROM driver d WHERE d.id = s.person_id)))
+            AND NOT EXISTS (SELECT 1 FROM charging_link c WHERE c.yc_user_id = u.yc_user_id AND c.tier <> 'refused'
+                              AND EXISTS (SELECT 1 FROM driver d WHERE d.id = c.person_id))
           ORDER BY u.fleet_group, u.name`, [groups]),
     ]);
     return res.json({ ...s, why: whyOf(s),
-      review: review.map((r) => ({ yc_user_id: r.yc_user_id, person_id: r.person_id, reason: r.reason,
+      review: review.map((r) => ({ yc_user_id: r.yc_user_id, person_id: r.person_id, tier: r.tier, reason: r.reason,
         yc_name: r.yc_name || null, yc_phone: tail(r.phone_norm), yc_fleet_group: r.fleet_group || null, our_name: r.our_name || null })),
-      unplaced: unplaced.map((r) => ({ yc_user_id: r.yc_user_id, yc_name: r.name || null, yc_phone: tail(r.phone_norm), yc_fleet_group: r.fleet_group })),
+      unplaced: unplaced.map((r) => ({ yc_user_id: r.yc_user_id, yc_name: r.name || null, yc_phone: tail(r.phone_norm),
+        yc_fleet_group: r.fleet_group || null, stranded: !!r.stranded })),
     });
   }));
 
@@ -197,24 +215,39 @@ export function chargingRoutes(app, { q, wrap }) {
       /* One customer is one person. Already confirmed as somebody else: say
          so, and change nothing — the earlier decision is refused first, by a
          person, not overwritten here (the review, 2026-11-03). */
-      const [other] = await q(`SELECT person_id::text AS p FROM charging_link
-                                WHERE yc_user_id = $1 AND person_id <> $2 AND tier = 'confirmed'`, [yc, person]);
+      const [other] = await q(`SELECT c.person_id::text AS p FROM charging_link c
+                                WHERE c.yc_user_id = $1 AND c.person_id <> $2 AND c.tier = 'confirmed'
+                                  AND EXISTS (SELECT 1 FROM driver d WHERE d.id = c.person_id)`, [yc, person]);
       if (other) {
         return res.status(409).json({ error: 'already_confirmed', person_id: other.p,
           detail: 'This PowerDrive customer is already confirmed as another of our people. Refuse that link first.' });
       }
       /* Confirming retires every other suggestion for that customer — it is
          not two people's wallet. */
-      await q(`DELETE FROM charging_link WHERE yc_user_id = $1 AND person_id <> $2 AND tier IN ('auto', 'candidate')`, [yc, person]);
+      await q(`DELETE FROM charging_link WHERE yc_user_id = $1 AND person_id <> $2 AND tier IN ('auto', 'candidate', 'held')`, [yc, person]);
+      /* …and any decision about it that names a person record that no longer
+         exists: this confirmation replaces it (the second review: it
+         answered 409 for a dead person, and refusing that answered 404). */
+      await q(`DELETE FROM charging_link c WHERE c.yc_user_id = $1 AND NOT EXISTS (SELECT 1 FROM driver d WHERE d.id = c.person_id)`, [yc]);
     }
-    await q(`INSERT INTO charging_link (yc_user_id, person_id, tier, reason, decided_by, decided_at)
-             VALUES ($1, $2, $3, $4, $5, now())
-             ON CONFLICT (yc_user_id, person_id) DO UPDATE SET tier = EXCLUDED.tier, reason = EXCLUDED.reason,
-               decided_by = EXCLUDED.decided_by, decided_at = now()`,
-    [yc, person, decision, decision === 'confirmed' ? 'confirmed by a person' : 'refused by a person', who.by]);
+    try {
+      await q(`INSERT INTO charging_link (yc_user_id, person_id, tier, reason, decided_by, decided_at)
+               VALUES ($1, $2, $3, $4, $5, now())
+               ON CONFLICT (yc_user_id, person_id) DO UPDATE SET tier = EXCLUDED.tier, reason = EXCLUDED.reason,
+                 decided_by = EXCLUDED.decided_by, decided_at = now()`,
+      [yc, person, decision, decision === 'confirmed' ? 'confirmed by a person' : 'refused by a person', who.by]);
+    } catch (e) {
+      /* Two confirmations of one customer sent at once: the second meets the
+         one-confirmation index (sql/schema_v114.sql) — the same answer. */
+      if (e.code === '23505') {
+        return res.status(409).json({ error: 'already_confirmed',
+          detail: 'This PowerDrive customer was just confirmed as another of our people. Refuse that link first.' });
+      }
+      throw e;
+    }
     /* Its charges are put on cars again on the next run, against the person
        it now belongs to (or none). */
-    await q(`UPDATE charging_session SET plate_basis = NULL WHERE yc_user_id = $1`, [yc]);
+    await q(`UPDATE charging_session SET plate = NULL, plate_basis = NULL WHERE yc_user_id = $1`, [yc]);
     return res.json({ ok: true, yc_user_id: yc, person_id: String(person), tier: decision });
   }));
 
@@ -225,6 +258,8 @@ export function chargingRoutes(app, { q, wrap }) {
     const P = [from, to];
     const [tot, cars, drivers, days, sites] = await Promise.all([
       q(`SELECT count(*)::int AS sessions, count(*) FILTER (WHERE cs.kwh > 0)::int AS charges,
+                count(*) FILTER (WHERE cs.kwh IS NOT NULL AND cs.kwh <= 0)::int AS no_energy,
+                count(*) FILTER (WHERE cs.kwh IS NULL)::int AS energy_unknown,
                 coalesce(round(sum(cs.kwh) FILTER (WHERE cs.kwh > 0), 1), 0)::float AS kwh,
                 round(sum(cs.cost_incl_vat) FILTER (WHERE cs.kwh > 0), 2)::float AS cost,
                 count(*) FILTER (WHERE cs.kwh > 0 AND cs.cost_incl_vat IS NULL)::int AS cost_unknown,
@@ -261,7 +296,9 @@ export function chargingRoutes(app, { q, wrap }) {
     ]);
     const t = tot[0] || {};
     return res.json({ from, to, ...s, why: whyOf(s), currency: 'AED',
-      totals: { sessions: t.sessions || 0, charges: t.charges || 0, no_energy: (t.sessions || 0) - (t.charges || 0),
+      /* no_energy: PowerDrive said none; energy_unknown: it said nothing (the
+         second review — one was being counted as the other). */
+      totals: { sessions: t.sessions || 0, charges: t.charges || 0, no_energy: t.no_energy || 0, energy_unknown: t.energy_unknown || 0,
         /* null when no charge carried an amount; cost_unknown says how many
            charges the total could not include (never a silent 0). */
         kwh: t.kwh || 0, cost: t.cost ?? null, cost_unknown: t.cost_unknown || 0, on_a_car: t.on_a_car || 0,

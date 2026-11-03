@@ -566,7 +566,7 @@
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "api/charging_routes.js. PowerDrive (YoCharge white label) read by src/sources/yocharge.js every six hours. Window from winDays (from/to, period, days; nothing sent = the last 30 days). Body {from, to, synced_at, status, error, customers, wallets_at, why, currency, totals {sessions, charges (kWh > 0), no_energy, kwh, cost, on_a_car, basis {session_plate, only_car, nearest_trip, no_trip, no_link, not_yet}}, vehicles[] {plate, charges, kwh, cost, minutes, last_at, drivers, basis}, drivers[] {person_id, name, charges, kwh, cost, last_at, cars}, days[] {day, charges, kwh, cost}, sites[] (12) {site, charges, kwh}, sites_total}. Sites are LOC: over a narrow window they can place a named driver (the review, 2026-11-03). totals.cost is null when no charge states an amount; cost_unknown counts those the total leaves out. Read by the Charging page (api/public/charging.js drawCars)."
+  "notes": "api/charging_routes.js. PowerDrive (YoCharge white label) read by src/sources/yocharge.js every six hours. Window from winDays (from/to, period, days; nothing sent = the last 30 days). Body {from, to, synced_at, status, error, customers, wallets_at, why, currency, totals {sessions, charges (kWh > 0), no_energy (kWh stated as 0), energy_unknown (kWh not stated), kwh, cost, on_a_car, basis {session_plate, only_car, nearest_trip, no_trip, no_link, not_yet}}, vehicles[] {plate, charges, kwh, cost, minutes, last_at, drivers, basis}, drivers[] {person_id, name, charges, kwh, cost, last_at, cars}, days[] {day, charges, kwh, cost}, sites[] (12) {site, charges, kwh}, sites_total}. Sites are LOC: over a narrow window they can place a named driver (the review, 2026-11-03). totals.cost is null when no charge states an amount; cost_unknown counts those the total leaves out. Read by the Charging page (api/public/charging.js drawCars)."
  },
  {
   "method": "GET",
@@ -724,7 +724,7 @@
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "api/charging_routes.js. PowerDrive (YoCharge white label) read by src/sources/yocharge.js every six hours. The review queue, on its own route since the review of 2026-11-03: inside /api/charging/wallets (subject CASH) an HR officer — who holds identity.decide, the cap POST /api/charging/link needs — was refused the page holding the buttons. Body {synced_at, status, error, failed, customers, customers_read, wallets_at, why, review[] {yc_user_id, person_id, reason, yc_name, yc_phone (last three digits only), yc_fleet_group, our_name}, unplaced[] {yc_user_id, yc_name, yc_phone, yc_fleet_group}}. Read by the Charging page (drawReview)."
+  "notes": "api/charging_routes.js. PowerDrive (YoCharge white label) read by src/sources/yocharge.js every six hours. The review queue, on its own route since the review of 2026-11-03: inside /api/charging/wallets (subject CASH) an HR officer — who holds identity.decide, the cap POST /api/charging/link needs — was refused the page holding the buttons. Body {synced_at, status, error, failed, customers, customers_read, wallets_at, why, review[] {yc_user_id, person_id, tier candidate|held, reason, yc_name, yc_phone (last three digits only), yc_fleet_group, our_name}, unplaced[] {yc_user_id, yc_name, yc_phone, yc_fleet_group, stranded (a decision about them named a removed person record)}}. 'held' (sql/schema_v114.sql) is a fold's contradictory decisions, offered first. Read by the Charging page (drawReview)."
  },
  {
   "method": "GET",

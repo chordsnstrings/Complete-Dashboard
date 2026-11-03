@@ -4179,11 +4179,10 @@ export async function renderDriverDirectory(root) {
   for (const w of (wallets && !wallets._err && !wallets.why && Array.isArray(wallets.rows) ? wallets.rows : [])) {
     const k = String(w.person_id);
     const o = walletBy.get(k) || { balance: null, fleet: null, fleetUnknown: false, n: 0 };
-    o.n += 1;
     if (w.using_fleet_wallet) {
       if (w.fleet_limit_available == null) o.fleetUnknown = true;
       else o.fleet = (o.fleet || 0) + w.fleet_limit_available;
-    } else if (w.balance != null) o.balance = (o.balance || 0) + w.balance;
+    } else if (w.balance != null) { o.balance = (o.balance || 0) + w.balance; o.n += 1; }
     walletBy.set(k, o);
   }
   for (const r of rows) {

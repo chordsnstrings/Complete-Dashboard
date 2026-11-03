@@ -189,11 +189,15 @@ check('a stranger is linked to nobody', !links.some((l) => l.yc_user_id === 'yZ'
    link on "mohammed" (the review, 2026-11-03). */
 {
   const W = yc.nameWords;
-  check('names agree on a distinctive word, or on two ordinary ones — never on a particle or one common name alone',
-    yc.namesAgree(W('Ahmed Tarig Mohamed'), W('Tarig Ahmed')) && yc.namesAgree(W('Mohammed Ali Khan'), W('Mohammed Ali'))
-    && !yc.namesAgree(W('Ahmed Al Mansoori'), W('Khalid Al Nuaimi')) && !yc.namesAgree(W('Mohammed Rafiq'), W('Mohammed Shafiq')));
-  /* REVERSION (run 2026-11-03): namesAgree as "any shared word" (the first
-     build) -> this check fails ("Al" and "Mohammed" agree). */
+  const agree = (a, b) => yc.namesAgree(W(a), W(b), [W(b)]);
+  check('names agree on a distinctive word, or word for word — never on particles or common names alone',
+    agree('Ahmed Tarig Mohamed', 'Tarig Ahmed') && agree('Mohammed Ali', 'Mohammed Ali')
+    && !agree('Ahmed Al Mansoori', 'Khalid Al Nuaimi') && !agree('Mohammed Rafiq', 'Mohammed Shafiq')
+    && !agree('Muhammad Imran Khan', 'Muhammad Asif Khan') && !agree('Mohammed Ali', 'Mohammed Ali Hassan')
+    && !agree('Abdur Rahman', 'Abdur Rehman Malik'));
+  /* REVERSIONS (run 2026-11-03): namesAgree as "any shared word" (the first
+     build) -> fails ("Al" and "Mohammed" agree); "or two ordinary words" (the
+     first fix) -> fails ("Muhammad Imran Khan" is "Muhammad Asif Khan"). */
   check('a mobile is a UAE one only by its own country code: +966 05… is not ours',
     yc.phoneOf({ mobile_country_code: '+966', mobile_number: '0501000001' }) === null
     && yc.phoneOf({ mobile_country_code: '', mobile_number: '0501000001' }) === '971501000001');
@@ -347,8 +351,11 @@ console.log('\n7. the independent review\'s findings, each pinned');
   /* REVERSION (run 2026-11-03): the attributed_person condition removed ->
      this check fails (o1 stays no_link for ever). */
   const dec = await post('/api/charging/link', { yc_user_id: 'yK', person_id: Number(P.A), decision: 'refuse' });
-  const cleared = (await q(`SELECT plate_basis FROM charging_session WHERE id = 'o1'`))[0];
-  check('…and a decision through the page clears the customer\'s charges for the next run', dec.status === 200 && cleared.plate_basis === null, j(cleared));
+  const cleared = (await q(`SELECT plate, plate_basis FROM charging_session WHERE id = 'o1'`))[0];
+  check('…and a decision through the page takes the customer\'s charges off their cars until the next run — car and basis both',
+    dec.status === 200 && cleared.plate === null && cleared.plate_basis === null, j(cleared));
+  /* REVERSION (run 2026-11-03): only plate_basis cleared (the first fix) ->
+     this check fails (the charge still counted on C1, with no basis). */
 }
 {
   /* A night shift's car is not lost to the calendar day: a 00:30 charge
@@ -433,8 +440,47 @@ console.log('\n7. the independent review\'s findings, each pinned');
   await q(`INSERT INTO charging_link (yc_user_id, person_id, tier, decided_by) VALUES ('yC', $1, 'refused', 'hr@example.test')`, [P.C2]);
   await fold(P.C1, P.C2, true);
   const rowsC = await q(`SELECT person_id::text AS p, tier, reason FROM charging_link WHERE yc_user_id = 'yC'`);
-  check('two records judged apart — one confirmed, one refused — are one person now: the pair goes back to a person, unresolved',
-    rowsC.length === 1 && rowsC[0].p === P.C1 && rowsC[0].tier === 'candidate' && /decide again/.test(rowsC[0].reason), j(rowsC));
+  check('two records judged apart — one confirmed, one refused — are one person now: the pair is HELD for a person, with who decided what',
+    rowsC.length === 1 && rowsC[0].p === P.C1 && rowsC[0].tier === 'held' && /decide again/.test(rowsC[0].reason)
+    && /confirmed by hr@example\.test; refused by hr@example\.test/.test(rowsC[0].reason), j(rowsC));
+  /* …and stays held: the next run does not recompute it (the second review:
+     as a 'candidate' it became an automatic link, or nothing). */
+  await yc.linkUsers({ q, db });
+  const heldAfter = await q(`SELECT person_id::text AS p, tier FROM charging_link WHERE yc_user_id = 'yC'`);
+  const queue = (await get('/api/charging/review')).body.review;
+  check('a held pair survives the next run, is offered for review first, and its customer stays watched',
+    heldAfter.length === 1 && heldAfter[0].tier === 'held' && queue[0]?.yc_user_id === 'yC' && queue[0]?.tier === 'held'
+    && (await yc.watchedUsers(q)).has('yC'), j([heldAfter, queue[0]]));
+  /* REVERSION (run 2026-11-03): the fold writing 'candidate' (the first fix)
+     -> this check fails (the next run recomputed the pair). */
+  const confirmHeld = await post('/api/charging/link', { yc_user_id: 'yC', person_id: Number(P.C1), decision: 'confirm' });
+  check('a person decides a held pair like any other', confirmHeld.status === 200
+    && (await q(`SELECT tier FROM charging_link WHERE yc_user_id = 'yC'`))[0]?.tier === 'confirmed', j(confirmHeld.body));
+}
+{
+  /* A decision about a person record that no longer exists is no obstacle:
+     the 409 ignores it, a confirmation replaces it, and until then the
+     customer is listed with why (the second review: 409 then 404). */
+  const [g] = await q(`INSERT INTO driver (full_name) VALUES ('Gone Person') RETURNING id::text AS id`);
+  await q(`INSERT INTO charging_link (yc_user_id, person_id, tier, decided_by) VALUES ('yF', $1, 'confirmed', 'hr@example.test')`, [g.id]);
+  /* …and a customer with nothing else: no candidate, no fleet group. */
+  await q(`INSERT INTO charging_user (yc_user_id, name) VALUES ('yS', 'Stranded Customer')`);
+  await q(`INSERT INTO charging_link (yc_user_id, person_id, tier, decided_by) VALUES ('yS', $1, 'refused', 'hr@example.test')`, [g.id]);
+  await q(`DELETE FROM driver WHERE id = $1`, [g.id]);
+  const rv2 = (await get('/api/charging/review')).body;
+  const inQueue = rv2.review.some((r) => r.yc_user_id === 'yF' && r.person_id === P.F);
+  const listed = rv2.unplaced.find((u) => u.yc_user_id === 'yS');
+  const c = await post('/api/charging/link', { yc_user_id: 'yF', person_id: Number(P.F), decision: 'confirm' });
+  const rowsF = await q(`SELECT person_id::text AS p, tier FROM charging_link WHERE yc_user_id = 'yF'`);
+  check('a decision stranded on a removed person: its live suggestion stays in the queue and a confirmation replaces it — no 409',
+    inQueue && c.status === 200 && rowsF.length === 1 && rowsF[0].p === P.F && rowsF[0].tier === 'confirmed', j([inQueue, c.status, rowsF]));
+  check('…and a customer with nothing but such a decision is listed, saying so — not in no list at all',
+    listed?.stranded === true, j(listed));
+  /* REVERSION (run 2026-11-03): the 409 counting dead-person rows -> this
+     check fails (409 naming the removed person). */
+  let dup = null;
+  try { await q(`INSERT INTO charging_link (yc_user_id, person_id, tier) VALUES ('yF', $1, 'confirmed')`, [P.A]); } catch (e) { dup = e.code; }
+  check('one confirmation per customer is held by the database itself', dup === '23505', String(dup));
 }
 {
   /* A customer who leaves the watched set loses their sessions, and is read
@@ -447,8 +493,11 @@ console.log('\n7. the independent review\'s findings, each pinned');
   /* REVERSION (run 2026-11-03): backfilled kept for customers no longer
      watched -> this check fails (yA never read again). */
   const dropped = await yc.dropUnwatchedSessions(q, new Set(['yA']));
-  const left = (await q(`SELECT DISTINCT yc_user_id FROM charging_session`)).map((x) => x.yc_user_id);
-  check('the sessions of customers no longer ours are dropped', dropped > 0 && j(left) === j(['yA']), j([dropped, left]));
+  const left = (await q(`SELECT DISTINCT yc_user_id FROM charging_session ORDER BY 1`)).map((x) => x.yc_user_id);
+  check('only a customer a person refused, with nothing else open, loses their sessions; a lapsed link keeps them',
+    dropped === 2 && !left.includes('yK') && ['yA', 'yE', 'yG', 'yI'].every((id) => left.includes(id)), j([dropped, left]));
+  /* REVERSION (run 2026-11-03): dropping every unwatched customer's sessions
+     (the first fix) -> this check fails (yE's, a lapsed link's, deleted). */
 }
 /* ── 8. between the full reads: our drivers' wallets, every three hours ──── */
 console.log('\n8. our drivers\' wallets, between the full reads');

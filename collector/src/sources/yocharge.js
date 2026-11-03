@@ -54,10 +54,11 @@
      · none of the person's accounts is held by the same-person register
        (HELD_IDS: a refused or pending pair);
      · the two names AGREE: they share a distinctive word (three letters or
-       more, not a particle — al, bin, abu, md… — nor one of the commonest
-       given names — Muhammad, Ahmed, Ali, Khan…), or two words of any kind
-       but particles (the customer's name against the person's own and every
-       account's display name);
+       more, not a particle — al, bin, abu, abdur, md… — nor one of the
+       commonest given names — Muhammad, Ahmed, Ali, Khan…), or the customer's
+       name is word for word one of the person's names (their own, or one
+       account's display name) — two common words in common are NOT enough:
+       "Muhammad Imran Khan" is not "Muhammad Asif Khan" (the second review);
      · the customer's mobile is a UAE one by its own country code;
      · no decision about the customer names a person record that no longer
        exists (a fold the link did not follow);
@@ -151,7 +152,8 @@ export function phoneOf(u) {
   /* A UAE mobile only by its own country code (or none). Saudi and other
      Gulf mobiles are written 05X XXX XXXX too, and +966 0501234567 read as
      a bare local number became a UAE number (the review, 2026-11-03). */
-  if (cc && cc !== '971') return null;
+  const code = cc.replace(/^0+/, '');                     // '00971' is 971
+  if (code && code !== '971') return null;
   return uaeMobile(n) || uaeMobile(`971${n.replace(/^0+/, '')}`) || null;
 }
 export function userRow(u, now = new Date()) {
@@ -233,16 +235,20 @@ export const nameWords = words;
 /* Particles and the commonest given names: two of our drivers share them
    all the time, so on their own they say nothing about who someone is. A
    recycled number reaching a new "Mohammed …" must not link on "mohammed". */
-const PARTICLES = new Set(('al el bin ibn bint abu abd abdul abdel md mohd muhd mr mrs ms syed sayed sayyed sheikh shaikh sk '
-  + 'haji hafiz ul ud ur din uddin').split(' '));
+const PARTICLES = new Set(('al el bin ibn bint abu abd abdul abdel abdal abdil abdur abdus abdo md mohd muhd mr mrs ms '
+  + 'syed sayed sayyed sheikh shaikh sk haji hafiz ul ud ur din uddin').split(' '));
 const COMMON = new Set(('muhammad mohammad mohammed mohamed muhammed mohamad mohammod mohamd ahmed ahmad ali hassan hasan '
   + 'hussain hussein husain khan abdullah abdulla omar umar ibrahim ismail yusuf yousef yousuf khalid mahmoud mahmood mustafa '
   + 'shah raza iqbal akhtar rahman rehman kumar singh').split(' '));
-/** Do two names agree: a shared distinctive word, or two shared words that
-    are not particles. */
-export function namesAgree(a, b) {
-  const shared = [...a].filter((w) => b.has(w) && !PARTICLES.has(w));
-  return shared.some((w) => w.length >= 3 && !COMMON.has(w)) || shared.length >= 2;
+/** Do two names agree: a shared distinctive word with any of the person's
+    names (`b`, all their words), or the customer's words equal to one of the
+    person's names word for word (`each`, one Set per name; two words at
+    least, particles aside). */
+export function namesAgree(a, b, each = []) {
+  const bare = (s) => new Set([...s].filter((w) => !PARTICLES.has(w)));
+  if ([...a].some((w) => b.has(w) && w.length >= 3 && !PARTICLES.has(w) && !COMMON.has(w))) return true;
+  const mine = bare(a);
+  return mine.size >= 2 && each.some((n) => { const o = bare(n); return o.size === mine.size && [...mine].every((w) => o.has(w)); });
 }
 const plain = (s) => [...words(s)].join(' ');
 
@@ -257,14 +263,17 @@ export async function linkUsers({ q, db = null, fleetGroups = DEFAULT_FLEET_GROU
     q(`SELECT d.id::text AS person, d.full_name AS name, d.email, p.display_name
          FROM driver d LEFT JOIN driver_platform_id p ON p.driver_id = d.id AND p.detached_at IS NULL`),
     q(`SELECT c.yc_user_id, c.person_id::text AS person, c.tier, EXISTS (SELECT 1 FROM driver d WHERE d.id = c.person_id) AS alive
-         FROM charging_link c WHERE c.tier IN ('confirmed', 'refused')`),
+         FROM charging_link c WHERE c.tier IN ('confirmed', 'refused', 'held')`),
   ]);
   const personWords = new Map(); const personEmail = new Map(); const personName = new Map();
+  const personNames = new Map();       // person → one word-Set per name, for "word for word"
+  const addName = (person, s) => { const w = words(s); if (w.size) { if (!personNames.has(person)) personNames.set(person, []); personNames.get(person).push(w); } };
   const addTo = (m, k, v) => { if (!m.has(k)) m.set(k, new Set()); m.get(k).add(v); };
   for (const r of names) {
     if (!personWords.has(r.person)) personWords.set(r.person, new Set());
     for (const w of words(r.name)) personWords.get(r.person).add(w);
     for (const w of words(r.display_name)) personWords.get(r.person).add(w);
+    addName(r.person, r.name); addName(r.person, r.display_name);
     /* Every person an email or a name points at, not the first or the last:
        two of our people sharing one is a reason in itself (the review). */
     if (r.email) addTo(personEmail, String(r.email).trim().toLowerCase(), r.person);
@@ -274,7 +283,10 @@ export async function linkUsers({ q, db = null, fleetGroups = DEFAULT_FLEET_GROU
      followed — holds its customer back from any automatic link, and a
      confirmation stranded that way no longer settles it. */
   const stranded = new Set(decided.filter((d) => !d.alive).map((d) => d.yc_user_id));
-  const live = decided.filter((d) => d.alive);
+  /* A 'held' pair (a fold's contradictory decisions, sql/schema_v114.sql) is
+     a person's to decide: its customer gets nothing from a run. */
+  const heldUser = new Set(decided.filter((d) => d.alive && d.tier === 'held').map((d) => d.yc_user_id));
+  const live = decided.filter((d) => d.alive && d.tier !== 'held');
   const refused = new Set(live.filter((d) => d.tier === 'refused').map((d) => `${d.yc_user_id}|${d.person}`));
   const settledUser = new Set(live.filter((d) => d.tier === 'confirmed').map((d) => d.yc_user_id));
   const byPhone = new Map();
@@ -302,14 +314,14 @@ export async function linkUsers({ q, db = null, fleetGroups = DEFAULT_FLEET_GROU
   }
   const auto = []; const candidates = [];
   for (const u of users) {
-    if (settledUser.has(u.yc_user_id)) continue;
+    if (settledUser.has(u.yc_user_id) || heldUser.has(u.yc_user_id)) continue;
     const ph = viaPhone.get(u.yc_user_id);
     if (ph?.person) {
       let why = ph.why;
       if (!why && (personHits.get(ph.person)?.size || 0) > 1) why = `this person matches ${personHits.get(ph.person).size} PowerDrive customers`;
       if (!why && held(ph.person)) why = 'this person’s accounts are held by the same-person register';
       if (!why && stranded.has(u.yc_user_id)) why = 'a decision about this customer named a person record that no longer exists — decide again';
-      if (!why && !namesAgree(words(u.name), personWords.get(ph.person) || new Set())) {
+      if (!why && !namesAgree(words(u.name), personWords.get(ph.person) || new Set(), personNames.get(ph.person) || [])) {
         why = 'the mobile matches but the names do not agree (no distinctive word in common)';
       }
       if (refused.has(`${u.yc_user_id}|${ph.person}`)) continue;
@@ -394,11 +406,21 @@ export async function pruneStrangers(q, fleetGroups = DEFAULT_FLEET_GROUPS) {
   return r.length;
 }
 
-/** The sessions of a customer who is no longer ours — a link dropped, a
-    fleet group left — go: they counted on our cars and drivers only while
-    the customer was one of ours (the review, 2026-11-03). */
+/** The sessions of a customer a PERSON has said is not ours go: refused,
+    and with no other possible match left (no candidate, nothing held) and
+    in none of our fleet groups. The first fix dropped them whenever a link
+    lapsed, and the second review showed what that cost: PowerDrive marking
+    an auto-linked driver's account inactive (which drops the link), or a
+    second customer appearing on the same mobile (which demotes it), deleted
+    true charges on our cars. A lapsed link now leaves its charges where they
+    are; the next attribution files them as on no car, with why. */
 export async function dropUnwatchedSessions(q, watched) {
-  const r = await q(`DELETE FROM charging_session WHERE NOT (yc_user_id = ANY($1::text[])) RETURNING 1`, [[...watched]]);
+  const r = await q(`DELETE FROM charging_session s
+                      WHERE NOT (s.yc_user_id = ANY($1::text[]))
+                        AND EXISTS (SELECT 1 FROM charging_link c WHERE c.yc_user_id = s.yc_user_id AND c.tier = 'refused')
+                        AND NOT EXISTS (SELECT 1 FROM charging_link c WHERE c.yc_user_id = s.yc_user_id
+                                          AND c.tier IN ('auto', 'confirmed', 'candidate', 'held'))
+                  RETURNING 1`, [[...watched]]);
   return r.length;
 }
 
@@ -407,7 +429,7 @@ export async function dropUnwatchedSessions(q, watched) {
 export async function watchedUsers(q, fleetGroups = DEFAULT_FLEET_GROUPS) {
   const groups = String(fleetGroups).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   const rows = await q(`SELECT yc_user_id FROM charging_user WHERE lower(fleet_group) = ANY($1::text[])
-                        UNION SELECT yc_user_id FROM charging_link WHERE tier IN ('auto', 'confirmed')`, [groups]);
+                        UNION SELECT yc_user_id FROM charging_link WHERE tier IN ('auto', 'confirmed', 'held')`, [groups]);
   return new Set(rows.map((r) => String(r.yc_user_id)));
 }
 const dubaiDay = (t) => new Date(t + 4 * 3600e3).toISOString().slice(0, 10);
@@ -474,7 +496,11 @@ export async function syncSessions({ q, ycGet, now = new Date(), watched, budget
      · a driver's bookings are read per session by LATERAL over the
        (driver_ext_id, requested_at) index, bounded to ±NEAR_HOURS of the
        charge — which also stops a night shift's car being lost to the
-       calendar day (a 00:30 charge after an evening in car A is A's);
+       calendar day (a 00:30 charge after an evening in car A is A's). The
+       OFFSET 0 inside it is load-bearing: without it the planner flattened
+       the subquery and the time bounds became a join filter, not an index
+       condition (the second review: 0.9-1.4 s a 2,000-session batch at
+       585,600 trips against ~0.17 s with it);
      · plates are counted once, grouped;
      · ATTRIBUTE_BATCH sessions a statement, stamped with the run
        (attributed_at) so a batch never picks up one this run already did.
@@ -518,7 +544,8 @@ export async function attributeSessions(q, { days = ATTRIBUTE_DAYS, recheck = RE
              WHERE tr.driver_ext_id = p.external_id AND tr.platform = p.platform
                AND tr.requested_at >= t.started_at - make_interval(hours => $5::int)
                AND tr.requested_at <  t.started_at + make_interval(hours => $5::int)
-               AND tr.platform <> 'fms' AND coalesce(btrim(tr.plate), '') <> '') x
+               AND tr.platform <> 'fms' AND coalesce(btrim(tr.plate), '') <> ''
+             OFFSET 0) x
          WHERE t.person_id IS NOT NULL),
       plates AS (SELECT id, count(DISTINCT plate)::int AS n FROM trips GROUP BY id),
       nt AS (

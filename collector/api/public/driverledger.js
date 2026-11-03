@@ -113,8 +113,10 @@ async function chargingWallet(host, prof) {
   if (c?.why) { host.append(note(c.why, 'warn')); return; }
   if (!Array.isArray(c?.wallets) || !c.wallets.length) { host.append(note('The charging wallet could not be read: the answer was not the shape this page reads.', 'bad')); return; }
   if (c.failed) {
-    host.append(note(`The last PowerDrive read failed at ${dtStr(c.failed.at)} Dubai — ${c.failed.error}. `
-      + `${c.synced_at ? `This is as of the last good read, ${dtStr(c.synced_at)}.` : 'Nothing has been read successfully yet.'}`, 'warn'));
+    host.append(note(c.failed.status === 'partial'
+      ? `The last PowerDrive read, at ${dtStr(c.failed.at)} Dubai, was incomplete — ${c.failed.error}.`
+      : `The last PowerDrive read failed at ${dtStr(c.failed.at)} Dubai — ${c.failed.error}. `
+        + `${c.synced_at ? `This is as of the last good read, ${dtStr(c.synced_at)}.` : 'Nothing has been read successfully yet.'}`, 'warn'));
   }
   const tiles = c.wallets.map((w) => (w.using_fleet_wallet
     ? { label: 'Fleet charging limit left', value: w.fleet_limit_available == null ? '—' : aed(w.fleet_limit_available),
@@ -128,7 +130,7 @@ async function chargingWallet(host, prof) {
   /* Until this driver's whole history has been read (150 customers a run),
      the count is what has been read so far, and says so. */
   tiles.push({ label: c.history_read === false ? 'Charges, last 30 days (so far)' : 'Charges, last 30 days', value: fmt(l.charges),
-    sub: `${fmt(l.kwh)} kWh, ${l.cost == null ? 'no amount stated' : `${aed(l.cost)} paid`}`
+    sub: (!l.charges ? 'nothing charged in the last 30 days' : `${fmt(l.kwh)} kWh, ${l.cost == null ? 'no amount stated' : `${aed(l.cost)} paid`}`)
       + `${l.cost_unknown && l.cost != null ? ` (${fmt(l.cost_unknown)} without an amount)` : ''}`
       + `${c.history_read === false ? ' — the full history is still being read' : ''}` });
   host.append(moneyTiles(tiles));

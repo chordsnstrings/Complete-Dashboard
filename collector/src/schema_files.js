@@ -358,4 +358,7 @@ export const SCHEMA_FILES = [
      wallets, the reviewed links to our people, and our customers' charging
      sessions (src/sources/yocharge.js). */
   'schema_v113.sql',
+  /* v114: charging_link's 'held' tier (a fold's contradictory decisions,
+     never recomputed) and one confirmation per customer (a unique index). */
+  'schema_v114.sql',
 ];

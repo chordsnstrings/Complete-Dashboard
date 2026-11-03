@@ -138,8 +138,10 @@ function vehCharging(root, plate) {
     p.body.innerHTML = '';
     if (c?.why) { p.body.append(note(c.why, 'warn')); return; }
     if (c?.failed) {
-      p.body.append(note(`The last PowerDrive read failed at ${dtStr(c.failed.at)} Dubai — ${c.failed.error}. `
-        + `${c.synced_at ? `This is as of the last good read, ${dtStr(c.synced_at)}.` : 'Nothing has been read successfully yet.'}`, 'warn'));
+      p.body.append(note(c.failed.status === 'partial'
+        ? `The last PowerDrive read, at ${dtStr(c.failed.at)} Dubai, was incomplete — ${c.failed.error}.`
+        : `The last PowerDrive read failed at ${dtStr(c.failed.at)} Dubai — ${c.failed.error}. `
+          + `${c.synced_at ? `This is as of the last good read, ${dtStr(c.synced_at)}.` : 'Nothing has been read successfully yet.'}`, 'warn'));
     }
     if (c?.charges == null) { p.body.append(note('Charging could not be read: the answer was not the shape this page reads.', 'bad')); return; }
     if (!c.charges) {
