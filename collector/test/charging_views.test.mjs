@@ -103,6 +103,61 @@ for (const skin of ['arkiv', 'classic']) {
   }
 }
 
+/* Long lists fold (production's first read: 180 wallets, 124 suggestions,
+   51 cars — 15,000px of page, 87,000 on a phone). */
+{
+  console.log('\n#charging — long lists fold');
+  const many = (list, n) => Array.from({ length: n }, (_, i) => ({ ...list[i % list.length], yc_user_id: `yc-${i}`, person_id: String(100 + (i % 10)) }));
+  const { ctx, page } = await open('arkiv', 'charging', { fixtures: {
+    '/api/charging/wallets': (_q, real) => ({ ...real, rows: many(real.rows, 30) }),
+    '/api/charging/review': (_q, real) => ({ ...real, review: many(real.review, 25) }),
+    '/api/charging/sessions': (_q, real) => ({ ...real, vehicles: Array.from({ length: 20 }, (_, i) => ({ ...real.vehicles[0], plate: `C${i}` })) }),
+  } });
+  const r = await page.evaluate(() => {
+    const vis = (sel) => [...document.querySelectorAll(sel)].filter((e) => e.offsetParent !== null && !e.hidden).length;
+    const btn = (panel) => document.querySelector(`[data-panel="${panel}"] .foldbtn`)?.textContent.trim() || '';
+    return { wallets: vis('[data-panel="charging-wallets"] tbody tr'), wBtn: btn('charging-wallets'),
+      review: vis('[data-panel="charging-review"] li'), rBtn: btn('charging-review'),
+      cars: vis('[data-panel="charging-cars"] tbody tr'), cBtn: btn('charging-cars') };
+  });
+  check('the wallets, the queue and the cars show their first rows and say how many more there are',
+    r.wallets === 12 && /Show the other 18 wallets/.test(r.wBtn) && r.review === 10 && /Show the other 15 suggestions/.test(r.rBtn)
+    && r.cars === 12 && /Show the other 8 cars/.test(r.cBtn), JSON.stringify(r));
+  await page.click('[data-panel="charging-review"] .foldbtn');
+  const opened = await page.evaluate(() => [...document.querySelectorAll('[data-panel="charging-review"] li')].filter((e) => !e.hidden).length);
+  check('…and the queue opens whole on a click', opened === 25, String(opened));
+  await ctx.close();
+}
+/* REVERSION (run 2026-11-03): the queue's fold removed -> the first check
+   fails (all 25 suggestions shown, no control). */
+
+/* The overview's tile, beside the cash (the operator, 2026-11-03: "the
+   driver pages should also have charging wallet"). */
+const tileOf = (page) => page.evaluate(() => {
+  const t = [...document.querySelectorAll('#view .kpi')].find((x) => /^Charging wallet$/i.test(x.querySelector('.l')?.textContent.trim() || ''));
+  if (!t) return null;
+  const txt = (n) => (n ? n.textContent.replace(/\s+/g, ' ').trim() : '');
+  return { value: txt(t.querySelector('.n')), sub: txt(t.querySelector('.s')), na: txt(t.querySelector('.t-na')),
+    href: t.getAttribute('href') || t.querySelector('a')?.getAttribute('href') || '' };
+});
+for (const skin of ['arkiv', 'classic']) {
+  console.log(`\n#driver overview — ${skin}`);
+  for (const [addr, test] of [
+    ['drv-0', (t) => t?.value === 'AED 182.40' && /PowerDrive, read/.test(t.sub) && /#driver\/[^/]+\/money/.test(t.href)],
+    ['drv-1', (t) => t?.value === 'AED 912.30' && /fleet limit left/.test(t.sub)],
+    ['drv-5', (t) => t && !/AED/.test(t.value) && /No PowerDrive charging wallet is linked to this driver/.test(`${t.sub} ${t.na}`)],
+    ['U-TARIQ', (t) => t && !/AED/.test(t.value) && /not placed on a person/.test(`${t.sub} ${t.na}`)],
+  ]) {
+    const { ctx, page } = await open(skin, `driver/${addr}`);
+    const t = await tileOf(page);
+    check(`${addr}: the overview carries the charging wallet beside the cash — ${addr === 'drv-0' ? 'its balance, opening the Money tab'
+      : addr === 'drv-1' ? 'the fleet limit left' : addr === 'drv-5' ? 'no wallet: the reason, not AED 0' : 'not placed: says so'}`, test(t), JSON.stringify(t));
+    await ctx.close();
+  }
+}
+/* REVERSION (run 2026-11-03): chargingWalletTile left out of OV_TILES -> the
+   four overview checks fail in both skins (no tile at all). */
+
 for (const skin of ['arkiv', 'classic']) {
   console.log(`\n#vehicle — ${skin}`);
   {

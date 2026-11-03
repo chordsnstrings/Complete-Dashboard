@@ -15,12 +15,21 @@
    So every fold calls this, inside its own transaction where it has one:
      · the folded rows' machine links (auto, candidate) are dropped — the next
        run recomputes them for the survivor;
-     · a person's decision moves to the survivor; where the survivor and a
-       folded row decided the SAME way about one customer, one row stays;
-       where they decided DIFFERENTLY (one confirmed, one refused — two records
-       of one human, judged apart), the pair goes back to a person as a
-       candidate saying so, never resolved here;
-     · the customers touched have their charges re-attributed next run.
+     · a person's decision MOVES to the survivor — one UPDATE of its person
+       id, so it is never deleted first and lost if a write fails (the second
+       review: the paths in src/persons.js commit statement by statement), and
+       its decided_at and decided_by stay as they were;
+     · where the survivor and a folded row decided the SAME way about one
+       customer, one row stays;
+     · where they decided DIFFERENTLY (one confirmed, one refused — two records
+       of one human, judged apart), the pair becomes 'held' (sql/schema_v114.sql):
+       a tier the collector never recomputes, offered for review every run and
+       never linked automatically. It was 'candidate' in the first fix, and the
+       second review showed the next run deleting and recomputing it — into an
+       automatic link, or into nothing;
+     · the customers touched have their charges taken off cars until the next
+       run puts them on again (plate and basis both, so no charge is counted
+       on a car with no basis meanwhile).
    No import: src/persons.js and the merge route both reach it without
    pulling in the collector. */
 
@@ -45,22 +54,40 @@ export async function followPersonFold(q, survivor, gone) {
     const folded = list.filter((r) => Number(r.person) !== keep);
     if (!folded.length) continue;                                  // only the survivor's own row
     touched.push(yc);
-    const decisions = list.filter((r) => DECIDED.has(r.tier));
+    const mine = list.find((r) => Number(r.person) === keep) || null;
+    const decisions = list.filter((r) => DECIDED.has(r.tier) || r.tier === 'held');
     const tiers = new Set(decisions.map((r) => r.tier));
-    await q(`DELETE FROM charging_link WHERE yc_user_id = $1 AND person_id = ANY($2::bigint[])`, [yc, [keep, ...drop]]);
-    if (!decisions.length) continue;                               // machine rows only: the next run recomputes them
-    if (tiers.size === 1) {
-      const d = decisions.find((r) => Number(r.person) === keep) || decisions[0];
-      await q(`INSERT INTO charging_link (yc_user_id, person_id, tier, reason, decided_by, decided_at)
-               VALUES ($1, $2, $3, $4, $5, now())`, [yc, keep, d.tier, d.reason || null, d.decided_by || null]);
-    } else {
-      await q(`INSERT INTO charging_link (yc_user_id, person_id, tier, reason, decided_at)
-               VALUES ($1, $2, 'candidate', $3, now())`, [yc, keep,
-        'a person confirmed this customer for one record and refused it for another, and the two records are now one person — decide again']);
+    const removeFolded = (except = null) => q(`DELETE FROM charging_link WHERE yc_user_id = $1 AND person_id = ANY($2::bigint[])
+                                                 ${except != null ? 'AND person_id <> $3' : ''}`,
+    except != null ? [yc, drop, except] : [yc, drop]);
+    if (!decisions.length) { await removeFolded(); continue; }     // machine rows only: recomputed next run
+    const contradictory = tiers.has('held') || tiers.size > 1;
+    const why = contradictory
+      ? `held: decided differently for records now folded into one person (${decisions
+        .map((d) => `${d.tier}${d.decided_by ? ` by ${d.decided_by}` : ''}`).join('; ')}) — decide again`
+      : null;
+    if (mine && (DECIDED.has(mine.tier) || mine.tier === 'held')) {
+      /* The survivor's own decision stays; a contradiction holds it. */
+      if (contradictory) {
+        await q(`UPDATE charging_link SET tier = 'held', reason = $3 WHERE yc_user_id = $1 AND person_id = $2`, [yc, keep, why]);
+      }
+      await removeFolded();
+      continue;
     }
+    /* The survivor has no decision: a machine row of its gives way, and one
+       folded decision is moved onto it in a single UPDATE. */
+    if (mine) await q(`DELETE FROM charging_link WHERE yc_user_id = $1 AND person_id = $2`, [yc, keep]);
+    const carry = decisions[0];
+    if (contradictory) {
+      /* Off 'confirmed' before anything moves: one confirmation per customer
+         (sql/schema_v114.sql). */
+      await q(`UPDATE charging_link SET tier = 'held', reason = $3 WHERE yc_user_id = $1 AND person_id = $2`, [yc, Number(carry.person), why]);
+    }
+    await removeFolded(Number(carry.person));
+    await q(`UPDATE charging_link SET person_id = $3 WHERE yc_user_id = $1 AND person_id = $2`, [yc, Number(carry.person), keep]);
   }
   if (touched.length) {
-    await q(`UPDATE charging_session SET plate_basis = NULL WHERE yc_user_id = ANY($1::text[])`, [touched]);
+    await q(`UPDATE charging_session SET plate = NULL, plate_basis = NULL WHERE yc_user_id = ANY($1::text[])`, [touched]);
   }
   return touched.length;
 }

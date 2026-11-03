@@ -370,12 +370,21 @@ repository, never in it). Investigated read-only: **GET requests only**.
   - active with no trace in YoCharge at all: 4.
   - the 198's wallets: 136 non-zero, AED 22,907.30 in all; 40 of all matched slightly negative
     (lowest −48.44); 26 on the fleet wallet.
-- **As built (FIX-STATUS YC).** Read every six hours (`YOCHARGE_CRON`, `17 */6 * * *` Dubai) with the
+- **As built (FIX-STATUS YC).** Every customer read every six hours (`YOCHARGE_CRON`, `17 */6 * * *`
+  Dubai); between those, at 03:17, 09:17, 15:17 and 21:17 (`YOCHARGE_WALLETS_CRON`), only our
+  customers' wallets are refreshed — one `GET /open/v1/users/?id=` each, which answers exactly that
+  customer (1.2–1.8 s, measured 2026-11-03) — with the day's sessions, so a balance is at most ~3
+  hours old. Both read with the
   key (secret) and the tenant client id stored as settings — Settings › "Charging (PowerDrive)" — and
   on demand from Settings › "Read PowerDrive charging now". **Automatic only on a unique phone with
-  agreeing names** — a distinctive shared word, or two ordinary ones; never a particle or one of the
-  commonest given names alone — and a UAE mobile by its own country code (the conditions are in the
-  module's header; **192 automatic** on the 2026-11-03 read, 78 of the week's 111 active drivers);
+  agreeing names** — a distinctive shared word, or the customer's name word for word one of the
+  person's names; never particles or common given names alone — and a UAE mobile by its own country
+  code (the conditions are in the module's header). Measured on the scratch read: 190 automatic, 77
+  of the week's 111 active drivers. **Production's first read (2026-11-03, before the second
+  review's tighter rule): 3,324 customers read, 306 kept, 180 automatic links, 124 suggestions to
+  confirm, 25 fleet customers unplaced, AED 19,815.63 across the linked wallets (37 below zero, 23 on
+  the fleet wallet).** A fold's contradictory decisions are `held` (`sql/schema_v114.sql`) until a
+  person decides;
   every other possible match is a
   candidate with its reason in "Wallets to confirm" on the Charging page, confirmed or refused by a
   holder of `identity.decide` — the people who decide same-person pairs — and never by a run. A

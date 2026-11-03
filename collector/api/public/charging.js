@@ -28,7 +28,7 @@
    alone who was in it. Putting it beside a money figure would turn a caveat
    into a claim, so it is named here as the thing it is not. */
 import { el, esc, panel, note, loading, tableFrom, kpiRow, entity, empty,
-  contract, glance, absenceBand, pageFoot, dtStr } from './ui.js';
+  contract, glance, absenceBand, pageFoot, dtStr, foldRows } from './ui.js';
 import { fmt } from './charts.js';
 import { ledgerBand, formBars } from './ledger_ak.js';
 import { qAll, windowLabel, href, personAddr } from './data.js';
@@ -61,8 +61,10 @@ const BASIS_WORD = { session_plate: 'its own plate', only_car: 'the only car dri
 const when = (t) => (t ? dtStr(t) : '—');
 /* The last read failed after a good one: everything below is as of the good
    one, and the page says so above it (the review, 2026-11-03). */
-const failedNote = (x) => (x?.failed ? note(`The last PowerDrive read failed at ${when(x.failed.at)} Dubai — ${x.failed.error}. `
-  + `${x.synced_at ? `What is shown is as of the last good read, ${when(x.synced_at)}.` : 'Nothing has been read successfully yet.'}`, 'warn') : null);
+const failedNote = (x) => (!x?.failed ? null : x.failed.status === 'partial'
+  ? note(`The last PowerDrive read, at ${when(x.failed.at)} Dubai, was incomplete — ${x.failed.error}.`, 'warn')
+  : note(`The last PowerDrive read failed at ${when(x.failed.at)} Dubai — ${x.failed.error}. `
+    + `${x.synced_at ? `What is shown is as of the last good read, ${when(x.synced_at)}.` : 'Nothing has been read successfully yet.'}`, 'warn'));
 /* An amount PowerDrive did not give: absent, and how many, never AED 0. */
 const paid = (cost, unknown) => (cost == null ? '—' : aed(cost) || '—');
 const unknownSub = (unknown) => (unknown ? ` · ${fmt(unknown)} carr${unknown === 1 ? 'ies' : 'y'} no amount` : '');
@@ -84,7 +86,10 @@ function drawWallets(host, w) {
     { label: 'On the fleet wallet', value: fmt(t.on_fleet_wallet), sub: 'charge against a company limit' },
     { label: 'To confirm', value: fmt(t.review + t.unplaced), sub: `${fmt(t.review)} suggested, ${fmt(t.unplaced)} not placed` },
   ]));
-  host.append(tableFrom(w.rows, [
+  /* Folded to the first twelve (lowest balance first): production's first
+     read linked 180 drivers, and the whole list was 15,000px of page — on a
+     phone, 87,000. Every row is still built and sortable (ui.js foldRows). */
+  foldRows(host, tableFrom(w.rows, [
     { label: 'Driver', key: 'name', render: (r) => entity('driver', r.person_id != null ? personAddr(r.person_id) : null, r.name || `person ${r.person_id}`) },
     { label: 'Balance', key: 'balance', num: true, render: (r) => (r.balance == null
       ? '<span class="ent-off" title="the PowerDrive account carries no personal wallet">—</span>'
@@ -97,8 +102,9 @@ function drawWallets(host, w) {
     { label: 'Last charge', key: 'last_session_at', render: (r) => esc(when(r.last_session_at)) },
     { label: 'Charges, 30 days', key: 'charges_30d', num: true, render: (r) => esc(fmt(r.charges_30d)) },
     { label: 'Linked', key: 'tier', render: (r) => esc(r.tier === 'confirmed' ? 'confirmed' : 'automatic') },
-  ], { sortable: true, sortId: 'pdw', defaultSort: { key: 'balance', dir: 'asc' }, cards: true, cardLead: 'name' }));
-  host.append(el('p', 'cap', esc(`From PowerDrive, read every six hours — last read ${when(w.synced_at)} Dubai: `
+  ], { sortable: true, sortId: 'pdw', defaultSort: { key: 'balance', dir: 'asc' }, cards: true, cardLead: 'name' }),
+  { shown: 12, total: w.rows.length, noun: 'wallet', key: 'pd-wallets' });
+  host.append(el('p', 'cap', esc(`From PowerDrive: our drivers\u2019 wallets every three hours, every customer every six — last read ${when(w.synced_at)} Dubai: `
     + `${w.customers_read ? `${fmt(w.customers_read)} customers read, ` : ''}${fmt(w.customers)} kept — those in our fleet groups there `
     + 'or matching one of our drivers; nobody else\u2019s details are stored. A wallet is linked automatically only when its mobile belongs to exactly '
     + 'one of our drivers and one PowerDrive customer and the two names share a word; every other possible match waits below '
@@ -113,7 +119,7 @@ function drawReview(host, w, again) {
     const ul = el('ul', 'bul pd-review');
     for (const r of w.review) {
       const li = el('li');
-      li.innerHTML = `PowerDrive's <b>${esc(r.yc_name || 'unnamed customer')}</b>${r.yc_phone ? ` (${esc(r.yc_phone)})` : ''}`
+      li.innerHTML = `${r.tier === 'held' ? '<b>Held</b> — ' : ''}PowerDrive's <b>${esc(r.yc_name || 'unnamed customer')}</b>${r.yc_phone ? ` (${esc(r.yc_phone)})` : ''}`
         + `${r.yc_fleet_group ? ` in ${esc(r.yc_fleet_group)}` : ''} — is it our <b>${esc(r.our_name || `person ${r.person_id}`)}</b>? `
         + `<span class="dim">${esc(r.reason)}.</span> `;
       const yes = el('button', 'btn sm', 'Same person');
@@ -130,6 +136,22 @@ function drawReview(host, w, again) {
       ul.append(li);
     }
     host.append(ul);
+    /* The first ten, then the rest on request: the first production read
+       queued 124 suggestions, one long scroll of buttons. Held pairs sort
+       first, so a fold never hides one. */
+    const SHOWN = 10;
+    const items = [...ul.children];
+    if (items.length > SHOWN) {
+      const more = el('button', 'foldbtn');
+      let open = false;
+      const draw = () => {
+        items.forEach((li, i) => { li.hidden = !open && i >= SHOWN; });
+        more.textContent = open ? `Show fewer — the first ${fmt(SHOWN)}` : `Show the other ${fmt(items.length - SHOWN)} suggestions →`;
+      };
+      more.addEventListener('click', () => { open = !open; draw(); });
+      draw();
+      host.append(more);
+    }
   }
   if (w.unplaced.length) {
     const d = el('details', 'pd-unplaced');
@@ -137,7 +159,8 @@ function drawReview(host, w, again) {
     d.innerHTML = `<summary class="cap">${esc(`${fmt(n)} PowerDrive ${n === 1 ? 'customer' : 'customers'} in our fleet groups `
       + `${n === 1 ? 'matches' : 'match'} none of our drivers by mobile, email or name — a driver who has left, or one registered `
       + 'with a number we do not hold')}</summary>`
-      + `<p class="cap">${w.unplaced.map((u) => `${esc(u.yc_name || 'unnamed')} <span class="dim">${esc(u.yc_phone || '')} · ${esc(u.yc_fleet_group)}</span>`).join(' · ')}</p>`;
+      + `<p class="cap">${w.unplaced.map((u) => `${esc(u.yc_name || 'unnamed')} <span class="dim">${esc(u.yc_phone || '')}`
+        + `${u.yc_fleet_group ? ` · ${esc(u.yc_fleet_group)}` : ''}${u.stranded ? ' · a decision about them named a person record since removed' : ''}</span>`).join(' · ')}</p>`;
     host.append(d);
   }
   host.append(el('p', 'cap', 'Confirming says the PowerDrive customer IS that driver; it needs a signed-in Owner, Management or HR '
@@ -152,13 +175,16 @@ function drawCars(host, s) {
   const t = s.totals;
   const b = t.basis;
   host.append(kpiRow([
-    { label: `Charges, ${s.from} to ${s.to}`, value: fmt(t.charges), sub: `${fmt(t.no_energy)} more sessions delivered no energy and are not counted` },
+    { label: `Charges, ${s.from} to ${s.to}`, value: fmt(t.charges),
+      sub: `${fmt(t.no_energy)} more delivered no energy${t.energy_unknown ? `, ${fmt(t.energy_unknown)} state none` : ''} — not counted` },
     { label: 'Energy', value: `${fmt(t.kwh)} kWh`, sub: 'PowerDrive counts watt-hours; shown in kWh' },
-    { label: 'Paid', value: paid(t.cost), sub: `AED, VAT included, as each session’s payment states it${unknownSub(t.cost_unknown)}` },
+    { label: 'Paid', value: paid(t.cost),
+      sub: !t.charges ? 'nothing charged in these dates' : t.cost == null ? 'no charge in these dates states an amount'
+        : `AED, VAT included, as each session’s payment states it${unknownSub(t.cost_unknown)}` },
     { label: 'Put on a car', value: `${fmt(t.on_a_car)} of ${fmt(t.charges)}`,
       sub: `${fmt(b.session_plate)} by plate, ${fmt(b.only_car)} only car in 12 h, ${fmt(b.nearest_trip)} nearest booking` },
   ]));
-  host.append(tableFrom(s.vehicles, [
+  foldRows(host, tableFrom(s.vehicles, [
     { label: 'Car', key: 'plate', render: (v) => entity('vehicle', v.plate, v.plate) },
     { label: 'Charges', key: 'charges', num: true, render: (v) => esc(fmt(v.charges)) },
     { label: 'kWh', key: 'kwh', num: true, render: (v) => esc(fmt(v.kwh)) },
@@ -170,7 +196,8 @@ function drawCars(host, s) {
        header's sort arrow whenever Charges was the sort. */
     { label: 'How it was put on this car',
       render: (v) => esc(Object.entries(v.basis).filter(([, k]) => k).map(([k, n2]) => `${fmt(n2)} ${BASIS_WORD[k]}`).join(' · ')) },
-  ], { sortable: true, sortId: 'pdc', defaultSort: { key: 'charges', dir: 'desc' }, cards: true, cardLead: 'plate' }));
+  ], { sortable: true, sortId: 'pdc', defaultSort: { key: 'charges', dir: 'desc' }, cards: true, cardLead: 'plate' }),
+  { shown: 12, total: s.vehicles.length, noun: 'car', key: 'pd-cars' });
   const off = (b.no_trip || 0) + (b.no_link || 0) + (b.not_yet || 0);
   host.append(el('p', 'cap', esc(`${fmt(off)} charges are on no car: ${fmt(b.no_trip)} by a linked driver who drove no car within 12 hours of it, `
     + `${fmt(b.no_link)} by a PowerDrive customer in our fleet groups linked to none of our drivers`

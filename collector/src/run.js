@@ -561,6 +561,19 @@ export async function chargingTick() {
     return { error: String(e) };
   } finally { chargingBusy = false; }
 }
+/* …and between the full reads, our drivers' wallets only (yocharge.js
+   collectWallets) — under the same one-at-a-time flag, so it never runs over
+   a full read. */
+export async function walletsTick() {
+  if (chargingBusy) return { skipped: 'a charging run is already going' };
+  chargingBusy = true;
+  try {
+    return await withPinnedSettings(async () => { await loadSettings(); return yocharge.collectWallets({ db: pool }); });
+  } catch (e) {
+    log.error('yocharge', 'wallets tick failed', { err: String(e).slice(0, 200) });
+    return { error: String(e) };
+  } finally { chargingBusy = false; }
+}
 
 export async function uberProfileTick(opts) { return withPinnedSettings(() => uberProfileTickPinned(opts)); }
 async function uberProfileTickPinned({ fleet = null, jobId = null } = {}) {

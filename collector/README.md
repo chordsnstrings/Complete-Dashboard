@@ -42,7 +42,9 @@ Local (no Docker): `npm install && npm run migrate && npm run backfill && npm st
   - a cron **incremental** every 30 min re-pulls the trailing `INCREMENTAL_DAYS` of trips/earnings.
   - **PowerDrive charging** every six hours (`YOCHARGE_CRON=17 */6 * * *`, Dubai): every customer and
     wallet, the links to our people, our customers' sessions and the charges put on cars
-    (`src/sources/yocharge.js`; job mode `charging` for a run on demand).
+    (`src/sources/yocharge.js`; job mode `charging` for a run on demand). Between them, at 03:17,
+    09:17, 15:17 and 21:17 (`YOCHARGE_WALLETS_CRON`), our customers' wallets only, one by one, with
+    the day's sessions (job mode `charging-wallets`).
 - All writes are **idempotent upserts** keyed on the source's natural id (Uber Trip UUID, Yango order
   id, FMS `plate|start`, CABMAN `plate|fix-time`), so re-runs never duplicate.
 

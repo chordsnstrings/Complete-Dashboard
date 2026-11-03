@@ -58,6 +58,7 @@ export const SETTING_DEFAULTS = {
   /* Every six hours, at 17 past, off the half-hour runs: a full read of the
      customers takes ~20 minutes at the host's pace. */
   YOCHARGE_CRON: '17 */6 * * *',
+  YOCHARGE_WALLETS_CRON: '17 3-23/6 * * *',
   /* PowerDrive's names for our fleets there (measured 2026-11-03: ecofleet
      104 customers, egari 47, ecofleet investor fleet 5). */
   YOCHARGE_FLEET_GROUPS: 'ecofleet,egari,ecofleet investor fleet',
@@ -367,6 +368,8 @@ export const SETTING_DEFS = [
     hint: 'Comma-separated. Their customers\u2019 sessions are kept and a name-only match among them is offered for review.' },
   { key: 'YOCHARGE_CRON', group: 'Collector', label: 'Charging schedule (cron)', secret: false,
     hint: 'A full read of PowerDrive\u2019s customers takes ~20 minutes at its pace; every six hours is the default.' },
+  { key: 'YOCHARGE_WALLETS_CRON', group: 'Collector', label: 'Charging wallets refresh (cron)', secret: false,
+    hint: 'Our own drivers\u2019 wallets only, between the full reads: 03:17, 09:17, 15:17 and 21:17 Dubai by default.' },
   { key: 'TESLA_REGION', group: 'Tesla', label: 'Fleet API region', secret: false,
     hint: 'eu for the Middle East, na for the Americas and Asia-Pacific, cn for China' },
   { key: 'TESLA_CRON', group: 'Collector', label: 'Tesla schedule (cron)', secret: false,
