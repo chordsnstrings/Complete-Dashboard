@@ -125,10 +125,10 @@ function identityCard(p) {
    The operator, 2026-11-03: "we can track how many times each vehicles are
    charging". PowerDrive files a charge against a customer, rarely against a
    car, so each one is put on a car by its own plate, else by the only car the
-   driver drove that day, else by the nearest booking — and each row says
+   driver drove within 12 hours of it, else by the nearest booking — and each row says
    which. A car whose drivers have no linked wallet, or a charge on another
    network, is not here; the empty state says so rather than reading nought. */
-const PD_BASIS = { session_plate: 'its own plate', only_car: 'the only car driven that day', nearest_trip: 'the nearest booking' };
+const PD_BASIS = { session_plate: 'its own plate', only_car: 'the only car driven within 12 hours', nearest_trip: 'the nearest booking' };
 function vehCharging(root, plate) {
   const p = panel('Charging — PowerDrive', 'Charges put on this car in this window, and how each was put on it', 'veh-charging');
   root.append(p.panel);
@@ -136,11 +136,15 @@ function vehCharging(root, plate) {
   (async () => {
     const c = await qAll('/api/charging/vehicle', { plate });
     p.body.innerHTML = '';
-    if (c?.why) { p.body.append(note(esc(c.why), 'warn')); return; }
+    if (c?.why) { p.body.append(note(c.why, 'warn')); return; }
+    if (c?.failed) {
+      p.body.append(note(`The last PowerDrive read failed at ${dtStr(c.failed.at)} Dubai — ${c.failed.error}. `
+        + `${c.synced_at ? `This is as of the last good read, ${dtStr(c.synced_at)}.` : 'Nothing has been read successfully yet.'}`, 'warn'));
+    }
     if (c?.charges == null) { p.body.append(note('Charging could not be read: the answer was not the shape this page reads.', 'bad')); return; }
     if (!c.charges) {
       p.body.append(el('p', 'cap', esc(`No PowerDrive charge was put on ${c.plate} between ${c.from} and ${c.to}. A charge reaches a car `
-        + 'through its own plate, the only car its driver drove that day, or the nearest booking — so a charge by a driver with no '
+        + 'through its own plate, the only car its driver drove within 12 hours of it, or the nearest booking — so a charge by a driver with no '
         + 'linked wallet, or on another network, is not counted here.')));
       return;
     }
@@ -148,20 +152,24 @@ function vehCharging(root, plate) {
     p.body.append(kpiRow([
       { label: 'Charges', value: fmt(c.charges), sub: `${c.from} to ${c.to}` },
       { label: 'Energy', value: `${fmt(c.kwh)} kWh`, sub: `last charged ${dtStr(c.last_at)}` },
-      { label: 'Paid', value: money(c.cost), sub: 'AED, VAT included' },
+      { label: 'Paid', value: c.cost == null ? '—' : money(c.cost),
+        sub: `AED, VAT included${c.cost_unknown ? ` · ${fmt(c.cost_unknown)} without an amount` : ''}` },
       { label: 'By its own plate', value: `${fmt(b.session_plate)} of ${fmt(c.charges)}`,
-        sub: `${fmt(b.only_car)} the only car driven that day, ${fmt(b.nearest_trip)} nearest booking` },
+        sub: `${fmt(b.only_car)} the only car driven within 12 h, ${fmt(b.nearest_trip)} nearest booking` },
     ]));
     p.body.append(tableFrom(c.recent, [
       { label: 'When', key: 'started_at', render: (r) => esc(dtStr(r.started_at)) },
       { label: 'kWh', key: 'kwh', num: true, render: (r) => esc(fmt(r.kwh)) },
-      { label: 'Paid', key: 'cost', num: true, render: (r) => esc(money(r.cost)) },
+      { label: 'Paid', key: 'cost', num: true, render: (r) => (r.cost == null ? '<span class="ent-off" title="PowerDrive states no amount for this charge">—</span>' : esc(money(r.cost))) },
       { label: 'Site', key: 'site', render: (r) => esc(r.site || '—') },
       { label: 'Driver', key: 'driver', render: (r) => (r.person_id ? entity('driver', personAddr(r.person_id), r.driver || `person ${r.person_id}`)
         : '<span class="ent-off">no linked driver</span>') },
       { label: 'Put on this car by', key: 'plate_basis', render: (r) => esc(PD_BASIS[r.plate_basis] || '—') },
     ], { cards: true, cardLead: 'started_at' }));
-  })().catch((e) => { p.body.innerHTML = ''; p.body.append(note(esc(`Charging could not be read: ${e.message}`), 'bad')); });
+    if (c.recent.length < c.charges) {
+      p.body.append(el('p', 'cap', esc(`The ${fmt(c.recent.length)} most recent of the ${fmt(c.charges)} charges in these dates.`)));
+    }
+  })().catch((e) => { p.body.innerHTML = ''; p.body.append(note(`Charging could not be read: ${e.message}`, 'bad')); });
 }
 
 async function tabOverview(root, plate, prof) {

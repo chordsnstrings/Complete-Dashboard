@@ -471,7 +471,13 @@ async function main() {
           /* One call per driver, so it takes the job id and checkpoints per
              driver: a deploy landing mid-sweep resumes where it stopped. */
           else if (job.mode === 'profile') await uberProfileTick({ fleet: job.fleet || null, jobId: job.id });
-          else if (job.mode === 'charging') await chargingTick();
+          else if (job.mode === 'charging') {
+            /* A run that was skipped (no key, one already going) or failed is
+               not a job done: the Settings page would otherwise say "done"
+               over nothing read (the review, 2026-11-03). */
+            const r = await chargingTick();
+            if (r?.error || r?.skipped) throw new Error(`PowerDrive read ${r.error ? `failed: ${r.error}` : `skipped: ${r.skipped}`}`);
+          }
           /* One Uber report per window and minutes each, so it takes the job
              id and checkpoints per window: a deploy landing mid-audit resumes
              at the window it had reached rather than spending the slots

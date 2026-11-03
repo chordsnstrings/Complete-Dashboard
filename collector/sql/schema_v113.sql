@@ -82,14 +82,21 @@ CREATE TABLE IF NOT EXISTS charging_session (
   /* Which of OUR cars charged, and how that is known (attributeSessions):
        session_plate  PowerDrive's own vehicle number on the session equals
                       one of our plates;
-       only_car       the linked driver drove one car that day;
-       nearest_trip   they drove more than one; the car of the trip nearest
-                      the session's start;
-       no_trip        they drove no car that day — not attributed;
-       no_link        the customer is not linked to one of our people. */
-  plate           text,
-  plate_basis     text,
-  fetched_at      timestamptz NOT NULL DEFAULT now()
+       only_car       the linked driver drove one car within 12 hours of it;
+       nearest_trip   they drove more than one; the car of the booking
+                      nearest the session's start;
+       no_trip        they drove no car within 12 hours — not attributed;
+       no_link        the customer is not linked to one of our people.
+     attributed_person is who the session was attributed WITH, so a link
+     confirmed, dropped or moved later re-does it; attributed_at stamps the
+     run that did it, so a batched run never does one twice. (Edited before
+     it was ever deployed — production had not applied v113 when these two
+     columns were added, after the review of 2026-11-03.) */
+  plate              text,
+  plate_basis        text,
+  attributed_person  bigint,
+  attributed_at      timestamptz,
+  fetched_at         timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS charging_session_user_idx ON charging_session (yc_user_id, started_at);
 CREATE INDEX IF NOT EXISTS charging_session_started_idx ON charging_session (started_at);

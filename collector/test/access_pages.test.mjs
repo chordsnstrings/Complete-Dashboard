@@ -533,7 +533,11 @@ const sweep = async ({ skin, width, ui = 'desktop', scheme = 'light', addrs = AD
       const iw = innerWidth;
       const past = [];
       for (const n of document.querySelectorAll('.acx-page, .acx-page *')) {
-        if (n.parentElement?.closest('.tscroll, .acx-scroll')) continue;
+        /* .acx-tablewrap too: the class-targets table's own sideways scroller
+           (access.css, overflow-x: auto; max-width: 100%). Found when this
+           file first ran with a Postgres in reach, 2026-11-03: the table
+           scrolls inside it at 390px and the page does not. */
+        if (n.parentElement?.closest('.tscroll, .acx-scroll, .acx-tablewrap')) continue;
         const r = n.getBoundingClientRect();
         if (r.width > 0 && r.right > iw + 0.5) past.push(`${n.tagName.toLowerCase()}.${String(n.className).split(' ')[0]} ${Math.round(r.right)}`);
       }

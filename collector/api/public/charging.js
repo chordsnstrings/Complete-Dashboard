@@ -54,32 +54,46 @@ const TYPES = [
    where the link is certain or a person confirmed it — everything else waits
    in "Wallets to confirm", with its reason. A charge is a session that
    delivered energy; each one is put on a car by its own plate, the only car
-   the driver drove that day, or the nearest booking, and the table says
-   which. Only PowerDrive's network is seen: a charge elsewhere is not here. */
-const BASIS_WORD = { session_plate: 'its own plate', only_car: 'the only car driven that day', nearest_trip: 'the nearest booking' };
+   the driver drove within 12 hours of it, or the nearest booking, and the
+   table says which. Only PowerDrive's network is seen: a charge elsewhere is
+   not here. */
+const BASIS_WORD = { session_plate: 'its own plate', only_car: 'the only car driven within 12 hours', nearest_trip: 'the nearest booking' };
 const when = (t) => (t ? dtStr(t) : '—');
+/* The last read failed after a good one: everything below is as of the good
+   one, and the page says so above it (the review, 2026-11-03). */
+const failedNote = (x) => (x?.failed ? note(`The last PowerDrive read failed at ${when(x.failed.at)} Dubai — ${x.failed.error}. `
+  + `${x.synced_at ? `What is shown is as of the last good read, ${when(x.synced_at)}.` : 'Nothing has been read successfully yet.'}`, 'warn') : null);
+/* An amount PowerDrive did not give: absent, and how many, never AED 0. */
+const paid = (cost, unknown) => (cost == null ? '—' : aed(cost) || '—');
+const unknownSub = (unknown) => (unknown ? ` · ${fmt(unknown)} carr${unknown === 1 ? 'ies' : 'y'} no amount` : '');
 function drawWallets(host, w) {
   host.innerHTML = '';
-  if (!w || w._err || (!w.why && !w.totals)) { host.append(note(esc(`The charging wallets could not be read: ${w?._err?.message || 'the answer was not the shape this page reads'}`), 'bad')); return; }
-  if (w.why) { host.append(note(esc(w.why), 'warn')); return; }
+  if (!w || w._err || (!w.why && !w.totals)) { host.append(note(`The charging wallets could not be read: ${w?._err?.message || 'the answer was not the shape this page reads'}`, 'bad')); return; }
+  if (w.why) { host.append(note(w.why, 'warn')); return; }
+  const f = failedNote(w);
+  if (f) host.append(f);
   const t = w.totals;
   host.append(kpiRow([
     /* Subtitles kept short: a five-tile row clips anything past ~43
        characters to "…" in the Arkiv skin (seen on the first render). */
     { label: 'Drivers with a linked wallet', value: fmt(t.linked_people),
       sub: `${fmt(t.auto)} automatic, ${fmt(t.confirmed)} confirmed by a person` },
-    { label: 'Balance, all linked wallets', value: aed(t.balance) || '—', sub: `AED, as PowerDrive holds it — ${fmt(t.nonzero)} not zero` },
+    { label: 'Balance, all linked wallets', value: t.balance == null ? '—' : aed(t.balance) || '—',
+      sub: t.balance_unknown ? `${fmt(t.balance_unknown)} with no personal wallet, not counted` : `as PowerDrive holds it — ${fmt(t.nonzero)} not zero` },
     { label: 'Below zero', value: fmt(t.negative), sub: t.negative ? 'owing PowerDrive for charging already done' : 'none owing' },
     { label: 'On the fleet wallet', value: fmt(t.on_fleet_wallet), sub: 'charge against a company limit' },
     { label: 'To confirm', value: fmt(t.review + t.unplaced), sub: `${fmt(t.review)} suggested, ${fmt(t.unplaced)} not placed` },
   ]));
   host.append(tableFrom(w.rows, [
-    { label: 'Driver', key: 'name', render: (r) => `<a class="lnk" href="${href('driver', personAddr(r.person_id))}">${esc(r.name || `person ${r.person_id}`)}</a>` },
-    { label: 'Balance', key: 'balance', num: true, render: (r) => (r.balance == null ? '<span class="dim">—</span>'
+    { label: 'Driver', key: 'name', render: (r) => entity('driver', r.person_id != null ? personAddr(r.person_id) : null, r.name || `person ${r.person_id}`) },
+    { label: 'Balance', key: 'balance', num: true, render: (r) => (r.balance == null
+      ? '<span class="ent-off" title="the PowerDrive account carries no personal wallet">—</span>'
       : `<span class="${r.balance < 0 ? 'bad' : ''}">${esc(aed(r.balance))}</span>`) },
     { label: 'On hold', key: 'hold_amount', num: true, render: (r) => esc(r.hold_amount ? aed(r.hold_amount) : '—') },
     { label: 'Fleet wallet', key: 'fleet_limit_available', num: true,
-      render: (r) => (r.using_fleet_wallet ? `${esc(aed(r.fleet_limit_available) || '—')} <span class="dim">left of the limit</span>` : '<span class="dim">own wallet</span>') },
+      render: (r) => (!r.using_fleet_wallet ? '<span class="dim">own wallet</span>'
+        : r.fleet_limit_available == null ? '<span class="ent-off" title="on the fleet wallet, and PowerDrive states no limit left">limit not stated</span>'
+          : `${esc(aed(r.fleet_limit_available))} <span class="dim">left of the limit</span>`) },
     { label: 'Last charge', key: 'last_session_at', render: (r) => esc(when(r.last_session_at)) },
     { label: 'Charges, 30 days', key: 'charges_30d', num: true, render: (r) => esc(fmt(r.charges_30d)) },
     { label: 'Linked', key: 'tier', render: (r) => esc(r.tier === 'confirmed' ? 'confirmed' : 'automatic') },
@@ -92,7 +106,8 @@ function drawWallets(host, w) {
 }
 function drawReview(host, w, again) {
   host.innerHTML = '';
-  if (!w || w._err || w.why || !Array.isArray(w.review)) { host.append(el('p', 'cap', esc(w?.why || 'Nothing to confirm until PowerDrive has been read.'))); return; }
+  if (w?._err) { host.append(note(`The queue could not be read: ${w._err.message}`, 'bad')); return; }
+  if (!w || w.why || !Array.isArray(w.review)) { host.append(el('p', 'cap', esc(w?.why || 'Nothing to confirm until PowerDrive has been read.'))); return; }
   if (!w.review.length && !w.unplaced.length) { host.append(el('p', 'cap', 'Nothing waiting: every PowerDrive customer we can see is linked, refused, or not one of ours.')); return; }
   if (w.review.length) {
     const ul = el('ul', 'bul pd-review');
@@ -130,22 +145,24 @@ function drawReview(host, w, again) {
 }
 function drawCars(host, s) {
   host.innerHTML = '';
-  if (!s || s._err || (!s.why && !s.totals)) { host.append(note(esc(`Charging sessions could not be read: ${s?._err?.message || 'the answer was not the shape this page reads'}`), 'bad')); return; }
-  if (s.why) { host.append(note(esc(s.why), 'warn')); return; }
+  if (!s || s._err || (!s.why && !s.totals)) { host.append(note(`Charging sessions could not be read: ${s?._err?.message || 'the answer was not the shape this page reads'}`, 'bad')); return; }
+  if (s.why) { host.append(note(s.why, 'warn')); return; }
+  const f = failedNote(s);
+  if (f) host.append(f);
   const t = s.totals;
   const b = t.basis;
   host.append(kpiRow([
     { label: `Charges, ${s.from} to ${s.to}`, value: fmt(t.charges), sub: `${fmt(t.no_energy)} more sessions delivered no energy and are not counted` },
     { label: 'Energy', value: `${fmt(t.kwh)} kWh`, sub: 'PowerDrive counts watt-hours; shown in kWh' },
-    { label: 'Paid', value: aed(t.cost) || '—', sub: 'AED, VAT included, as each session’s payment states it' },
+    { label: 'Paid', value: paid(t.cost), sub: `AED, VAT included, as each session’s payment states it${unknownSub(t.cost_unknown)}` },
     { label: 'Put on a car', value: `${fmt(t.on_a_car)} of ${fmt(t.charges)}`,
-      sub: `${fmt(b.session_plate)} by plate, ${fmt(b.only_car)} only car that day, ${fmt(b.nearest_trip)} nearest booking` },
+      sub: `${fmt(b.session_plate)} by plate, ${fmt(b.only_car)} only car in 12 h, ${fmt(b.nearest_trip)} nearest booking` },
   ]));
   host.append(tableFrom(s.vehicles, [
-    { label: 'Car', key: 'plate', render: (v) => `<a class="lnk" href="${href('vehicle', v.plate)}">${esc(v.plate)}</a>` },
+    { label: 'Car', key: 'plate', render: (v) => entity('vehicle', v.plate, v.plate) },
     { label: 'Charges', key: 'charges', num: true, render: (v) => esc(fmt(v.charges)) },
     { label: 'kWh', key: 'kwh', num: true, render: (v) => esc(fmt(v.kwh)) },
-    { label: 'AED', key: 'cost', num: true, render: (v) => esc(aed(v.cost) || '—') },
+    { label: 'AED', key: 'cost', num: true, render: (v) => esc(paid(v.cost)) },
     { label: 'Minutes', key: 'minutes', num: true, render: (v) => esc(fmt(v.minutes)) },
     { label: 'Last charged', key: 'last_at', render: (v) => esc(when(v.last_at)) },
     { label: 'Drivers', key: 'drivers', num: true, render: (v) => esc(fmt(v.drivers)) },
@@ -155,7 +172,7 @@ function drawCars(host, s) {
       render: (v) => esc(Object.entries(v.basis).filter(([, k]) => k).map(([k, n2]) => `${fmt(n2)} ${BASIS_WORD[k]}`).join(' · ')) },
   ], { sortable: true, sortId: 'pdc', defaultSort: { key: 'charges', dir: 'desc' }, cards: true, cardLead: 'plate' }));
   const off = (b.no_trip || 0) + (b.no_link || 0) + (b.not_yet || 0);
-  host.append(el('p', 'cap', esc(`${fmt(off)} charges are on no car: ${fmt(b.no_trip)} by a linked driver who drove no car that day, `
+  host.append(el('p', 'cap', esc(`${fmt(off)} charges are on no car: ${fmt(b.no_trip)} by a linked driver who drove no car within 12 hours of it, `
     + `${fmt(b.no_link)} by a PowerDrive customer in our fleet groups linked to none of our drivers`
     + `${b.not_yet ? `, ${fmt(b.not_yet)} not yet worked out` : ''}. Only PowerDrive's network is seen: a charge anywhere else is not here.`)));
 }
@@ -165,12 +182,13 @@ async function powerDrive(root, before) {
   const cars = panel('Charging by car — PowerDrive', null, 'charging-cars');
   for (const p of [wal, rev, cars]) { root.insertBefore(p.panel, before); loading(p.body); }
   const read = async () => {
-    const [w, s] = await Promise.all([
+    const [w, rv, s] = await Promise.all([
       qAll('/api/charging/wallets').catch((e) => ({ _err: e })),
+      qAll('/api/charging/review').catch((e) => ({ _err: e })),
       qAll('/api/charging/sessions').catch((e) => ({ _err: e })),
     ]);
     drawWallets(wal.body, w);
-    drawReview(rev.body, w, read);
+    drawReview(rev.body, rv, read);
     drawCars(cars.body, s);
     return s;
   };
@@ -337,7 +355,7 @@ export async function renderCharging(root) {
   if (ak) { chargingGap(absHost, root, pd); return; }
 
   /* ── the panel this page exists for ─────────────────────────────────── */
-  gapPanel.body.append(note(esc(meterSentence(pd)), 'warn'));
+  gapPanel.body.append(note(meterSentence(pd), 'warn'));
 
   gapPanel.body.append(el('p', 'cap', 'What would have to happen, and what still would not:'));
   /* ul.bul — the class app.css actually styles (2372-2374), and the one

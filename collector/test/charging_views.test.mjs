@@ -77,7 +77,7 @@ for (const skin of ['arkiv', 'classic']) {
       /Charging wallet balance\s*AED 182\.40/.test(t) && /Charges, last 30 days\s*9/.test(t) && answer('/api/charging/driver')?.person_id === '401', t.slice(0, 300));
     const rows = await page.$$eval('[data-panel="driver-charging"] tbody tr', (r) => r.map((x) => x.textContent.replace(/\s+/g, ' ')));
     check('…its recent charges, each saying how it reached a car, or that it reached none',
-      rows.length === 3 && /its own plate/.test(rows[0]) && /no car driven that day/.test(rows[2]), JSON.stringify(rows));
+      rows.length === 3 && /its own plate/.test(rows[0]) && /no car driven within 12 hours/.test(rows[2]), JSON.stringify(rows));
     check('…and whether the link was automatic, in words', /Linked automatically: the mobile on the PowerDrive account belongs to this person/.test(t), t.slice(-400));
     await ctx.close();
   }
@@ -110,8 +110,8 @@ for (const skin of ['arkiv', 'classic']) {
     const t = await txt(page, '[data-panel="veh-charging"]');
     const a = answer('/api/charging/vehicle');
     check('a car\'s charges in the window, with the window the route answered', /Charges\s*11/.test(t) && a && t.includes(`${a.from} to ${a.to}`), t.slice(0, 300));
-    check('…how they reached the car, in the tile and on every row', /By its own plate\s*2 of 11\s*8 the only car driven that day, 1 nearest booking/.test(t)
-      && /its own plate/.test(t) && /the only car driven that day/.test(t), t.slice(0, 500));
+    check('…how they reached the car, in the tile and on every row', /By its own plate\s*2 of 11\s*8 the only car driven within 12 h, 1 nearest booking/.test(t)
+      && /its own plate/.test(t) && /the only car driven within 12 hours/.test(t), t.slice(0, 500));
     const links = await page.$$eval('[data-panel="veh-charging"] tbody a', (x) => x.map((e) => e.getAttribute('href')));
     check('…and each driver opens by the person address', links.length === 2 && links.every((h) => /^#driver\/p40[12]/.test(h || '')), JSON.stringify(links));
     await ctx.close();

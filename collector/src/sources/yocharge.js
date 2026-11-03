@@ -53,15 +53,24 @@
      · the person matches no other customer through another number;
      · none of the person's accounts is held by the same-person register
        (HELD_IDS: a refused or pending pair);
-     · the two names share at least one word (the customer's name against
-       the person's own and every account's display name);
+     · the two names AGREE: they share a distinctive word (three letters or
+       more, not a particle — al, bin, abu, md… — nor one of the commonest
+       given names — Muhammad, Ahmed, Ali, Khan…), or two words of any kind
+       but particles (the customer's name against the person's own and every
+       account's display name);
+     · the customer's mobile is a UAE one by its own country code;
+     · no decision about the customer names a person record that no longer
+       exists (a fold the link did not follow);
      · nobody has refused that pair.
    Anything short of that is a 'candidate' with its reason — a phone whose
    names disagree, a number on two people or two customers, an email alone, a
    name alone inside our fleet groups — for a person to confirm or refuse.
    'confirmed' and 'refused' are a person's decisions: the collector never
-   writes, changes or deletes them. Measured 2026-11-03 against production:
-   198 automatic (78 of the 111 drivers active that week), 73 to review. */
+   writes, changes or deletes them; when person rows fold, they follow the
+   survivor (src/charging_links.js). Measured 2026-11-03 against production:
+   198 automatic on "one shared word"; 192 on the reviewed rule above (the six
+   moved to review were none of them active that week; 78 of the 111 active
+   drivers stay automatic), 73 to review. */
 import { get } from '../settings.js';
 import { logRun } from '../db.js';
 import { noteCredential } from '../auth_state.js';
@@ -94,7 +103,9 @@ export function client({ host, key, clientId, fetchImpl = fetch, timeoutMs = 75_
       const ac = new AbortController();
       const t = setTimeout(() => ac.abort(), timeoutMs);
       try {
-        const r = await fetchImpl(url.toString(), { method: 'GET', signal: ac.signal,
+        /* redirect: 'error' — a redirect is never followed, so the key and
+           the tenant id only ever reach the host they were saved for. */
+        const r = await fetchImpl(url.toString(), { method: 'GET', redirect: 'error', signal: ac.signal,
           headers: { Authorization: `Token ${key}`, 'client-id': clientId, Accept: 'application/json' } });
         if (r.status === 200) return await r.json();
         const body = await r.text().catch(() => '');
@@ -137,7 +148,11 @@ export function phoneOf(u) {
   const cc = String(u?.mobile_country_code ?? '').replace(/\D/g, '');
   const n = String(u?.mobile_number ?? '').replace(/\D/g, '');
   if (!n) return null;
-  return uaeMobile(n) || uaeMobile(`${cc}${n.replace(/^0+/, '')}`) || null;
+  /* A UAE mobile only by its own country code (or none). Saudi and other
+     Gulf mobiles are written 05X XXX XXXX too, and +966 0501234567 read as
+     a bare local number became a UAE number (the review, 2026-11-03). */
+  if (cc && cc !== '971') return null;
+  return uaeMobile(n) || uaeMobile(`971${n.replace(/^0+/, '')}`) || null;
 }
 export function userRow(u, now = new Date()) {
   const w = (u.wallets || []).find((x) => x?.type === 'PERSONAL') || null;
@@ -214,29 +229,54 @@ export async function syncUsers({ q, ycGet, now = new Date(), sleep }) {
 /* ── 2. the link ────────────────────────────────────────────────────────── */
 const words = (s) => new Set(String(s || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
   .replace(/[^a-z ]/g, ' ').split(/\s+/).filter((w) => w.length > 1));
-const share = (a, b) => [...a].some((w) => b.has(w));
+export const nameWords = words;
+/* Particles and the commonest given names: two of our drivers share them
+   all the time, so on their own they say nothing about who someone is. A
+   recycled number reaching a new "Mohammed …" must not link on "mohammed". */
+const PARTICLES = new Set(('al el bin ibn bint abu abd abdul abdel md mohd muhd mr mrs ms syed sayed sayyed sheikh shaikh sk '
+  + 'haji hafiz ul ud ur din uddin').split(' '));
+const COMMON = new Set(('muhammad mohammad mohammed mohamed muhammed mohamad mohammod mohamd ahmed ahmad ali hassan hasan '
+  + 'hussain hussein husain khan abdullah abdulla omar umar ibrahim ismail yusuf yousef yousuf khalid mahmoud mahmood mustafa '
+  + 'shah raza iqbal akhtar rahman rehman kumar singh').split(' '));
+/** Do two names agree: a shared distinctive word, or two shared words that
+    are not particles. */
+export function namesAgree(a, b) {
+  const shared = [...a].filter((w) => b.has(w) && !PARTICLES.has(w));
+  return shared.some((w) => w.length >= 3 && !COMMON.has(w)) || shared.length >= 2;
+}
 const plain = (s) => [...words(s)].join(' ');
 
-/** Write the automatic links and the candidates; never touch a decision. */
-export async function linkUsers({ q, fleetGroups = DEFAULT_FLEET_GROUPS, book = null }) {
+/** Write the automatic links and the candidates; never touch a decision.
+    With `db`, the replace is one transaction: a run killed half way leaves
+    the links it found, not none (the review, 2026-11-03). */
+export async function linkUsers({ q, db = null, fleetGroups = DEFAULT_FLEET_GROUPS, book = null }) {
   const pb = book || await loadPhoneBook(q);
   const groups = new Set(String(fleetGroups).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
   const [users, names, decided] = await Promise.all([
     q(`SELECT yc_user_id, name, phone_norm, email, fleet_group FROM charging_user WHERE is_active IS NOT FALSE`),
     q(`SELECT d.id::text AS person, d.full_name AS name, d.email, p.display_name
          FROM driver d LEFT JOIN driver_platform_id p ON p.driver_id = d.id AND p.detached_at IS NULL`),
-    q(`SELECT yc_user_id, person_id::text AS person, tier FROM charging_link WHERE tier IN ('confirmed', 'refused')`),
+    q(`SELECT c.yc_user_id, c.person_id::text AS person, c.tier, EXISTS (SELECT 1 FROM driver d WHERE d.id = c.person_id) AS alive
+         FROM charging_link c WHERE c.tier IN ('confirmed', 'refused')`),
   ]);
   const personWords = new Map(); const personEmail = new Map(); const personName = new Map();
+  const addTo = (m, k, v) => { if (!m.has(k)) m.set(k, new Set()); m.get(k).add(v); };
   for (const r of names) {
     if (!personWords.has(r.person)) personWords.set(r.person, new Set());
     for (const w of words(r.name)) personWords.get(r.person).add(w);
     for (const w of words(r.display_name)) personWords.get(r.person).add(w);
-    if (r.email) personEmail.set(String(r.email).trim().toLowerCase(), r.person);
-    if (r.name && !personName.has(plain(r.name))) personName.set(plain(r.name), r.person);
+    /* Every person an email or a name points at, not the first or the last:
+       two of our people sharing one is a reason in itself (the review). */
+    if (r.email) addTo(personEmail, String(r.email).trim().toLowerCase(), r.person);
+    if (r.name && plain(r.name)) addTo(personName, plain(r.name), r.person);
   }
-  const refused = new Set(decided.filter((d) => d.tier === 'refused').map((d) => `${d.yc_user_id}|${d.person}`));
-  const settledUser = new Set(decided.filter((d) => d.tier === 'confirmed').map((d) => d.yc_user_id));
+  /* A decision about a person row that no longer exists — a fold no link
+     followed — holds its customer back from any automatic link, and a
+     confirmation stranded that way no longer settles it. */
+  const stranded = new Set(decided.filter((d) => !d.alive).map((d) => d.yc_user_id));
+  const live = decided.filter((d) => d.alive);
+  const refused = new Set(live.filter((d) => d.tier === 'refused').map((d) => `${d.yc_user_id}|${d.person}`));
+  const settledUser = new Set(live.filter((d) => d.tier === 'confirmed').map((d) => d.yc_user_id));
   const byPhone = new Map();
   for (const u of users) if (u.phone_norm) byPhone.set(u.phone_norm, (byPhone.get(u.phone_norm) || 0) + 1);
   const held = (person) => (pb.personAccounts.get(person) || []).some((a) => HELD_IDS.has(String(a.id)));
@@ -268,7 +308,10 @@ export async function linkUsers({ q, fleetGroups = DEFAULT_FLEET_GROUPS, book = 
       let why = ph.why;
       if (!why && (personHits.get(ph.person)?.size || 0) > 1) why = `this person matches ${personHits.get(ph.person).size} PowerDrive customers`;
       if (!why && held(ph.person)) why = 'this person’s accounts are held by the same-person register';
-      if (!why && !share(words(u.name), personWords.get(ph.person) || new Set())) why = 'the mobile matches but the names share no word';
+      if (!why && stranded.has(u.yc_user_id)) why = 'a decision about this customer named a person record that no longer exists — decide again';
+      if (!why && !namesAgree(words(u.name), personWords.get(ph.person) || new Set())) {
+        why = 'the mobile matches but the names do not agree (no distinctive word in common)';
+      }
       if (refused.has(`${u.yc_user_id}|${ph.person}`)) continue;
       (why ? candidates : auto).push({ yc_user_id: u.yc_user_id, person: ph.person, reason: why || 'mobile held by this person alone, and the names agree' });
       continue;
@@ -282,34 +325,55 @@ export async function linkUsers({ q, fleetGroups = DEFAULT_FLEET_GROUPS, book = 
       }
       continue;
     }
-    const viaEmail = u.email ? personEmail.get(u.email) : null;
-    if (viaEmail && !refused.has(`${u.yc_user_id}|${viaEmail}`)) {
-      candidates.push({ yc_user_id: u.yc_user_id, person: viaEmail, reason: 'the email matches; the mobile does not' });
+    const viaEmail = [...(u.email ? personEmail.get(u.email) || [] : [])];
+    if (viaEmail.length) {
+      const why = viaEmail.length > 1 ? `the email matches ${viaEmail.length} of our people; the mobile does not`
+        : 'the email matches; the mobile does not';
+      for (const person of viaEmail) {
+        if (!refused.has(`${u.yc_user_id}|${person}`)) candidates.push({ yc_user_id: u.yc_user_id, person, reason: why });
+      }
       continue;
     }
     if (groups.has(String(u.fleet_group || '').toLowerCase())) {
-      const viaName = personName.get(plain(u.name));
-      if (viaName && !refused.has(`${u.yc_user_id}|${viaName}`)) {
-        candidates.push({ yc_user_id: u.yc_user_id, person: viaName, reason: 'in our fleet group at PowerDrive; the name matches, nothing else does' });
+      const viaName = [...(personName.get(plain(u.name)) || [])];
+      const why = viaName.length > 1 ? `in our fleet group at PowerDrive; ${viaName.length} of our people share this name, and nothing else matches`
+        : 'in our fleet group at PowerDrive; the name matches, nothing else does';
+      for (const person of viaName) {
+        if (!refused.has(`${u.yc_user_id}|${person}`)) candidates.push({ yc_user_id: u.yc_user_id, person, reason: why });
       }
     }
   }
   /* Replace the collector's own rows wholesale; decisions stay as they are. */
-  await q(`DELETE FROM charging_link WHERE tier IN ('auto', 'candidate')`);
-  const write = async (rows, tier) => {
-    for (let i = 0; i < rows.length; i += 200) {
-      const part = rows.slice(i, i + 200);
-      const vals = []; const tuples = part.map((r, k) => {
-        vals.push(r.yc_user_id, Number(r.person), tier, r.reason);
-        return `($${k * 4 + 1}, $${k * 4 + 2}, $${k * 4 + 3}, $${k * 4 + 4})`;
-      });
-      await q(`INSERT INTO charging_link (yc_user_id, person_id, tier, reason) VALUES ${tuples.join(', ')}
-               ON CONFLICT (yc_user_id, person_id) DO NOTHING`, vals);
-    }
+  const replace = async (tq) => {
+    await tq(`DELETE FROM charging_link WHERE tier IN ('auto', 'candidate')`);
+    const write = async (rows, tier) => {
+      for (let i = 0; i < rows.length; i += 200) {
+        const part = rows.slice(i, i + 200);
+        const vals = []; const tuples = part.map((r, k) => {
+          vals.push(r.yc_user_id, Number(r.person), tier, r.reason);
+          return `($${k * 4 + 1}, $${k * 4 + 2}, $${k * 4 + 3}, $${k * 4 + 4})`;
+        });
+        await tq(`INSERT INTO charging_link (yc_user_id, person_id, tier, reason) VALUES ${tuples.join(', ')}
+                  ON CONFLICT (yc_user_id, person_id) DO NOTHING`, vals);
+      }
+    };
+    await write(auto, 'auto');
+    await write(candidates, 'candidate');
   };
-  await write(auto, 'auto');
-  await write(candidates, 'candidate');
+  await (db ? inTx(db, replace) : replace(q));
   return { auto: auto.length, candidates: candidates.length };
+}
+
+/** `fn(q)` in one transaction: a pg Pool's client, or PGlite's own. */
+async function inTx(db, fn) {
+  if (typeof db.transaction === 'function') return db.transaction((tx) => fn((t, p) => tx.query(t, p).then((r) => r.rows)));
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const out = await fn((t, p) => client.query(t, p).then((r) => r.rows));
+    await client.query('COMMIT');
+    return out;
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
 }
 
 /* ── 2b. a stranger is not kept ─────────────────────────────────────────── */
@@ -327,6 +391,14 @@ export async function pruneStrangers(q, fleetGroups = DEFAULT_FLEET_GROUPS) {
                         AND NOT EXISTS (SELECT 1 FROM charging_link c WHERE c.yc_user_id = u.yc_user_id)
                         AND NOT EXISTS (SELECT 1 FROM charging_session s WHERE s.yc_user_id = u.yc_user_id)
                   RETURNING 1`, [groups]);
+  return r.length;
+}
+
+/** The sessions of a customer who is no longer ours — a link dropped, a
+    fleet group left — go: they counted on our cars and drivers only while
+    the customer was one of ours (the review, 2026-11-03). */
+export async function dropUnwatchedSessions(q, watched) {
+  const r = await q(`DELETE FROM charging_session WHERE NOT (yc_user_id = ANY($1::text[])) RETURNING 1`, [[...watched]]);
   return r.length;
 }
 
@@ -356,7 +428,10 @@ export async function syncSessions({ q, ycGet, now = new Date(), watched, budget
     PAGE_SESSIONS, async (rows) => { recent += await upsert(q, 'charging_session', SESSION_COLS, 'id', keep(rows)); }, { sleep });
   await stateSet(q, 'sessions_through', dubaiDay(now.getTime()));
   /* Each watched customer's whole history, once. */
-  const done = new Set(await stateGet(q, 'backfilled') || []);
+  /* Only customers still watched count as read: one who left (and lost
+     their sessions with it) and came back is read again. */
+  const done = new Set((await stateGet(q, 'backfilled') || []).filter((id) => watched.has(id)));
+  await stateSet(q, 'backfilled', [...done]);   // the leaving is remembered even on a run that reads no history
   const todo = [...watched].filter((id) => !done.has(id)).sort().slice(0, budget);
   let history = 0;
   for (const id of todo) {
@@ -381,51 +456,89 @@ export async function syncSessions({ q, ycGet, now = new Date(), watched, budget
                     the session's start;
    and is otherwise left off every car with its reason — no_trip (the driver
    drove nothing that day) or no_link (the customer is not one of our people).
-   The basis is kept on the row, so a count can say how it was made. Redone for
-   the last ATTRIBUTE_DAYS each run — a booking can arrive late — and for any
-   session never attributed. */
+   The basis is kept on the row, so a count can say how it was made.
+
+   WHICH SESSIONS, each run: any never attributed; any whose customer's
+   current link is not the person it was attributed with (a link confirmed,
+   dropped or moved — attributed_person); the last ATTRIBUTE_DAYS (a booking
+   can arrive late); and a charge on no car over the catch-up horizon,
+   RECHECK_DAYS (a backfill can bring its booking weeks later).
+
+   HOW, and why it is shaped like this (the independent review, 2026-11-03):
+   the first build counted each session's distinct plates with a subquery
+   over the whole trips set per row — quadratic, 43 s at 20,000 rows in
+   PGlite — and matched each session against every trip its driver ever
+   made before filtering to the day, in ONE statement under the collector's
+   120-second timeout: the first history backfill would have been cancelled,
+   rolled back, and grown every run after. Now:
+     · a driver's bookings are read per session by LATERAL over the
+       (driver_ext_id, requested_at) index, bounded to ±NEAR_HOURS of the
+       charge — which also stops a night shift's car being lost to the
+       calendar day (a 00:30 charge after an evening in car A is A's);
+     · plates are counted once, grouped;
+     · ATTRIBUTE_BATCH sessions a statement, stamped with the run
+       (attributed_at) so a batch never picks up one this run already did.
+   A failure here does not fail the run (collect marks it partial). */
 export const ATTRIBUTE_DAYS = 8;
-export async function attributeSessions(q, { days = ATTRIBUTE_DAYS } = {}) {
-  const r = await q(`
-    WITH link AS (
-      SELECT DISTINCT ON (yc_user_id) yc_user_id, person_id FROM charging_link
-       WHERE tier IN ('confirmed', 'auto') ORDER BY yc_user_id, (tier = 'confirmed') DESC, person_id),
-    todo AS (
-      SELECT cs.id, cs.started_at, cs.vehicle_number, l.person_id,
-             date_trunc('day', cs.started_at AT TIME ZONE 'Asia/Dubai') AS d0
-        FROM charging_session cs LEFT JOIN link l ON l.yc_user_id = cs.yc_user_id
-       WHERE cs.started_at IS NOT NULL
-         AND (cs.plate_basis IS NULL OR cs.started_at > now() - make_interval(days => $1::int))),
-    sp AS (
-      SELECT DISTINCT ON (t.id) t.id, v.plate FROM todo t
-        JOIN vehicle v ON upper(regexp_replace(v.plate, '[^A-Za-z0-9]', '', 'g'))
-                        = upper(regexp_replace(t.vehicle_number, '[^A-Za-z0-9]', '', 'g'))
-       WHERE coalesce(btrim(t.vehicle_number), '') <> ''
-       ORDER BY t.id, v.plate),
-    trips AS (
-      SELECT t.id, btrim(tr.plate) AS plate, tr.requested_at, t.started_at
-        FROM todo t
-        JOIN driver_platform_id p ON p.driver_id = t.person_id AND p.detached_at IS NULL
-        JOIN trip tr ON tr.driver_ext_id = p.external_id AND tr.platform = p.platform
-       WHERE t.person_id IS NOT NULL AND tr.platform <> 'fms' AND coalesce(btrim(tr.plate), '') <> ''
-         AND tr.requested_at >= (t.d0 AT TIME ZONE 'Asia/Dubai')
-         AND tr.requested_at < ((t.d0 + interval '1 day') AT TIME ZONE 'Asia/Dubai')),
-    nt AS (
-      SELECT DISTINCT ON (id) id, plate,
-             (SELECT count(DISTINCT x.plate) FROM trips x WHERE x.id = trips.id) AS plates
-        FROM trips ORDER BY id, abs(extract(epoch FROM requested_at - started_at)), plate)
-    UPDATE charging_session cs SET
-      plate = coalesce(sp.plate, nt.plate),
-      plate_basis = CASE WHEN sp.plate IS NOT NULL THEN 'session_plate'
-                         WHEN nt.plates = 1 THEN 'only_car'
-                         WHEN nt.plates > 1 THEN 'nearest_trip'
-                         WHEN t.person_id IS NULL THEN 'no_link'
-                         ELSE 'no_trip' END
-      FROM todo t LEFT JOIN sp ON sp.id = t.id LEFT JOIN nt ON nt.id = t.id
-     WHERE cs.id = t.id
-    RETURNING cs.plate_basis`, [days]);
+export const RECHECK_DAYS = 31;
+export const ATTRIBUTE_BATCH = 2000;
+export const NEAR_HOURS = 12;
+export async function attributeSessions(q, { days = ATTRIBUTE_DAYS, recheck = RECHECK_DAYS, batch = ATTRIBUTE_BATCH,
+  maxBatches = 200, runAt = new Date() } = {}) {
   const n = {};
-  for (const x of r) n[x.plate_basis] = (n[x.plate_basis] || 0) + 1;
+  for (let i = 0; i < maxBatches; i++) {
+    const r = await q(`
+      WITH link AS (
+        SELECT DISTINCT ON (c.yc_user_id) c.yc_user_id, c.person_id FROM charging_link c
+         WHERE c.tier IN ('confirmed', 'auto') AND EXISTS (SELECT 1 FROM driver d WHERE d.id = c.person_id)
+         ORDER BY c.yc_user_id, (c.tier = 'confirmed') DESC, c.person_id),
+      todo AS (
+        SELECT cs.id, cs.started_at, cs.vehicle_number, l.person_id
+          FROM charging_session cs LEFT JOIN link l ON l.yc_user_id = cs.yc_user_id
+         WHERE cs.started_at IS NOT NULL
+           AND cs.attributed_at IS DISTINCT FROM $4::timestamptz
+           AND (cs.plate_basis IS NULL
+                OR cs.attributed_person IS DISTINCT FROM l.person_id
+                OR cs.started_at > now() - make_interval(days => $1::int)
+                OR (cs.plate_basis = 'no_trip' AND cs.started_at > now() - make_interval(days => $2::int)))
+         ORDER BY cs.started_at DESC, cs.id
+         LIMIT $3),
+      sp AS (
+        SELECT DISTINCT ON (t.id) t.id, v.plate FROM todo t
+          JOIN vehicle v ON upper(regexp_replace(v.plate, '[^A-Za-z0-9]', '', 'g'))
+                          = upper(regexp_replace(t.vehicle_number, '[^A-Za-z0-9]', '', 'g'))
+         WHERE coalesce(btrim(t.vehicle_number), '') <> ''
+         ORDER BY t.id, v.plate),
+      trips AS (
+        SELECT t.id, x.plate, x.requested_at, t.started_at
+          FROM todo t
+          JOIN driver_platform_id p ON p.driver_id = t.person_id AND p.detached_at IS NULL
+          CROSS JOIN LATERAL (
+            SELECT btrim(tr.plate) AS plate, tr.requested_at FROM trip tr
+             WHERE tr.driver_ext_id = p.external_id AND tr.platform = p.platform
+               AND tr.requested_at >= t.started_at - make_interval(hours => $5::int)
+               AND tr.requested_at <  t.started_at + make_interval(hours => $5::int)
+               AND tr.platform <> 'fms' AND coalesce(btrim(tr.plate), '') <> '') x
+         WHERE t.person_id IS NOT NULL),
+      plates AS (SELECT id, count(DISTINCT plate)::int AS n FROM trips GROUP BY id),
+      nt AS (
+        SELECT DISTINCT ON (id) id, plate FROM trips
+         ORDER BY id, abs(extract(epoch FROM requested_at - started_at)), plate)
+      UPDATE charging_session cs SET
+        plate = coalesce(sp.plate, nt.plate),
+        plate_basis = CASE WHEN sp.plate IS NOT NULL THEN 'session_plate'
+                           WHEN pl.n = 1 THEN 'only_car'
+                           WHEN pl.n > 1 THEN 'nearest_trip'
+                           WHEN t.person_id IS NULL THEN 'no_link'
+                           ELSE 'no_trip' END,
+        attributed_person = t.person_id,
+        attributed_at = $4::timestamptz
+        FROM todo t LEFT JOIN sp ON sp.id = t.id LEFT JOIN nt ON nt.id = t.id LEFT JOIN plates pl ON pl.id = t.id
+       WHERE cs.id = t.id
+      RETURNING cs.plate_basis`, [days, recheck, batch, runAt.toISOString(), NEAR_HOURS]);
+    for (const x of r) n[x.plate_basis] = (n[x.plate_basis] || 0) + 1;
+    if (r.length < batch) break;
+  }
   return n;
 }
 
@@ -440,17 +553,27 @@ export async function collect({ db, now = new Date(), fetchImpl = fetch, sleep, 
   const ycGet = client({ host, key, clientId, fetchImpl, sleep });
   const started = Date.now();
   const out = { users: 0, links: null, sessions: null };
+  let pruned = false;
   try {
     out.users = await syncUsers({ q, ycGet, now, sleep });
     await noteCredential(db, { provider: SOURCE, credential: 'YOCHARGE_API_KEY', state: 'ok', surface: 'users' });
     await stateSet(q, 'customers_read', out.users);
-    out.links = await linkUsers({ q, fleetGroups });
-    out.pruned = await pruneStrangers(q, fleetGroups);
+    out.links = await linkUsers({ q, db, fleetGroups });
     const watched = await watchedUsers(q, fleetGroups);
+    out.dropped = await dropUnwatchedSessions(q, watched);
+    out.pruned = await pruneStrangers(q, fleetGroups);
+    pruned = true;
     out.sessions = await syncSessions({ q, ycGet, now, watched, sleep });
-    out.attributed = await attributeSessions(q);
-    await logRun({ source: SOURCE, fleet_id: null, mode: 'users+sessions', status: 'ok',
-      rows_written: out.users + out.sessions.recent + out.sessions.history }, db);
+    /* The sessions are in; which car each was on is worked out after, and a
+       failure there marks the run partial rather than undoing the read. */
+    let attributionError = null;
+    try { out.attributed = await attributeSessions(q, { runAt: now }); } catch (e) {
+      attributionError = `charges not yet put on cars: ${String(e.message || e).slice(0, 200)}`;
+      log.warn('yocharge', 'attribution failed', { err: attributionError });
+    }
+    await logRun({ source: SOURCE, fleet_id: null, mode: 'users+sessions', status: attributionError ? 'partial' : 'ok',
+      rows_written: out.users + out.sessions.recent + out.sessions.history, error: attributionError }, db);
+    if (attributionError) out.attribution_error = attributionError;
     log.info('yocharge', 'run', { ...out, s: Math.round((Date.now() - started) / 1000) });
   } catch (e) {
     const refused = e.status === 401 || e.status === 403;
@@ -462,6 +585,10 @@ export async function collect({ db, now = new Date(), fetchImpl = fetch, sleep, 
       rows_written: out.users, error: String(e.message || e).slice(0, 300) }, db).catch(() => {});
     log.warn('yocharge', 'run failed', { err: String(e.message || e).slice(0, 200), status: e.status || null });
     out.error = String(e.message || e);
+  } finally {
+    /* A run that failed after reading customers must not leave strangers'
+       details stored until a later run succeeds (the review, 2026-11-03). */
+    if (!pruned) out.pruned = await pruneStrangers(q, fleetGroups).catch(() => null);
   }
   return out;
 }

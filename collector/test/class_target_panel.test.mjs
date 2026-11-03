@@ -120,8 +120,13 @@ async function scenario(sameDay) {
   await page.waitForTimeout(150);
   const said = await page.$eval('#host .acx-target .acx-dim[aria-live], #host [aria-live="polite"]', (p) => p.textContent);
   const m = said.match(/would come to (about )?AED ([\d,]+\.\d\d)/);
+  /* On a month's first three days there is no earlier day of the month to
+     save on, so the fixture saves today (setOn above) and the same-day rule
+     applies whichever scenario this is — found failing on 2026-11-03, the
+     third, with "about" where the earlier-day branch expected none. */
+  const savedToday = sameDay || setOn.getTime() > Date.now() - 3600e3;
   check('the preview says what these figures ask today and what the month comes to — "about" when the days gone are planned afresh',
-    !!m && /Over today’s 106 cars these figures ask AED/.test(said) && (sameDay ? m[1] === 'about ' && !/keep the AED/.test(said) : !m[1] && /keep the AED/.test(said)),
+    !!m && /Over today’s 106 cars these figures ask AED/.test(said) && (savedToday ? m[1] === 'about ' && !/keep the AED/.test(said) : !m[1] && /keep the AED/.test(said)),
     said.slice(0, 300));
   await page.click('[data-acx="target-save"]');
   await page.waitForFunction(() => /Saved from/.test(document.querySelector('.acx-msg')?.textContent || ''), null, { timeout: 20000 }).catch(() => {});

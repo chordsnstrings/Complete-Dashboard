@@ -4173,20 +4173,29 @@ export async function renderDriverDirectory(root) {
      itself off the table with the reason the route gives. */
   const wallets = await walletsP;
   const walletBy = new Map();
+  /* Only what PowerDrive stated is added: a wallet with no personal balance,
+     or a fleet wallet with no limit stated, adds nothing and makes its row say
+     so — the first build added 0 for each and drew "AED 0.00" (the review). */
   for (const w of (wallets && !wallets._err && !wallets.why && Array.isArray(wallets.rows) ? wallets.rows : [])) {
     const k = String(w.person_id);
-    const o = walletBy.get(k) || { balance: 0, fleet: null, n: 0 };
-    o.balance += w.balance || 0; o.n += 1;
-    if (w.using_fleet_wallet) o.fleet = (o.fleet || 0) + (w.fleet_limit_available || 0);
+    const o = walletBy.get(k) || { balance: null, fleet: null, fleetUnknown: false, n: 0 };
+    o.n += 1;
+    if (w.using_fleet_wallet) {
+      if (w.fleet_limit_available == null) o.fleetUnknown = true;
+      else o.fleet = (o.fleet || 0) + w.fleet_limit_available;
+    } else if (w.balance != null) o.balance = (o.balance || 0) + w.balance;
     walletBy.set(k, o);
   }
   for (const r of rows) {
     const w = r.person_id != null ? walletBy.get(String(r.person_id)) : null;
     r._cw = w || null;
-    r.charging_wallet = w ? Math.round((w.fleet != null ? w.fleet : w.balance) * 100) / 100 : null;
+    const v = w ? (w.fleet != null ? w.fleet : w.balance) : null;
+    r.charging_wallet = v == null ? null : Math.round(v * 100) / 100;
   }
+  /* Worded to hold whether nobody or only some rows carry a wallet: tableFrom
+     prints it after "N of M rows carry one" when the column is sparse. */
   const walletAbsent = wallets?._err ? `the charging wallets could not be read: ${wallets._err.message}`
-    : wallets?.why || 'no PowerDrive charging wallet is linked to anybody on this list';
+    : wallets?.why || 'a PowerDrive wallet is shown only where a driver\u2019s mobile matches one PowerDrive customer and the names agree, or a person confirmed the match';
   const active = rows.filter((r) => r.active_in_window);
   const idle = rows.filter((r) => !r.active_in_window && r.ever_driven);
   const never = rows.filter((r) => !r.ever_driven);
@@ -4452,8 +4461,10 @@ export async function renderDriverDirectory(root) {
         const w = r._cw;
         if (!w) return '<span class="ent-off" title="no PowerDrive charging wallet is linked to this person">—</span>';
         if (w.fleet != null) {
-          return `${money(w.fleet)}<span class="dim" title="charges against the company’s fleet limit — this is what is left of it"> · fleet</span>`;
+          return `${money(w.fleet)}<span class="dim" title="charges against the company\u2019s fleet limit \u2014 this is what is left of it"> · fleet</span>`;
         }
+        if (w.fleetUnknown) return '<span class="ent-off" title="on the company\u2019s fleet wallet, and PowerDrive states no limit left">fleet · limit not stated</span>';
+        if (w.balance == null) return '<span class="ent-off" title="the linked PowerDrive account carries no personal wallet">no wallet balance</span>';
         return `<span class="${w.balance < 0 ? 'bad' : ''}" title="${w.balance < 0 ? 'below zero: owing PowerDrive for charging already done' : 'as PowerDrive holds it'}">${money(w.balance)}</span>`
           + (w.n > 1 ? `<span class="dim" title="two PowerDrive accounts are linked to this person; added together"> · ${w.n} wallets</span>` : '');
       } },

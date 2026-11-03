@@ -373,7 +373,10 @@ repository, never in it). Investigated read-only: **GET requests only**.
 - **As built (FIX-STATUS YC).** Read every six hours (`YOCHARGE_CRON`, `17 */6 * * *` Dubai) with the
   key (secret) and the tenant client id stored as settings — Settings › "Charging (PowerDrive)" — and
   on demand from Settings › "Read PowerDrive charging now". **Automatic only on a unique phone with
-  agreeing names** (the six conditions are in the module's header); every other possible match is a
+  agreeing names** — a distinctive shared word, or two ordinary ones; never a particle or one of the
+  commonest given names alone — and a UAE mobile by its own country code (the conditions are in the
+  module's header; **192 automatic** on the 2026-11-03 read, 78 of the week's 111 active drivers);
+  every other possible match is a
   candidate with its reason in "Wallets to confirm" on the Charging page, confirmed or refused by a
   holder of `identity.decide` — the people who decide same-person pairs — and never by a run. A
   balance with no link renders absent with its reason, never 0. In `api/access/manifest.json` a
@@ -382,9 +385,11 @@ repository, never in it). Investigated read-only: **GET requests only**.
   of our fleet groups, matching none of our people at any tier and with no session stored is
   deleted (`pruneStrangers`) — the count read is kept, not the rows. **Sessions:** only watched
   customers' (our fleet groups + linked), from the last day read (a missed run is caught up, up to
-  31 days back) plus each watched customer's whole history once, 150 customers a run. A charge is
-  put on a car by its own plate, else the only car its linked driver drove that Dubai day, else the
-  booking nearest its start; the basis is stored on the row and every count says it.
+  31 days back) plus each watched customer's whole history once, 150 customers a run; a customer who
+  stops being ours loses their sessions and is read again if they return. A charge is put on a car
+  by its own plate, else the only car its linked driver drove within 12 hours of it, else the
+  booking nearest its start; the basis and the person it was worked out with are stored on the row,
+  so a changed link redoes it.
 - **NEVER CALL** (they move money, interrupt a live charge, or may rotate the token):
   `/open/v1/payments/wallet-transaction/` (credit/debit), `/open/v1/remote-action/` and
   `/v3/transactions/{id}/stop-transaction/` (start/stop a charge), `/v3/transactions/` POST,
@@ -965,6 +970,14 @@ Measured on production 2026-09-07, the first build under the v67 rule:
 driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
+
+* **A table keyed on a person id must follow person folds** (2026-11-03, FIX-STATUS YC13). Three
+  paths fold `driver` rows into one and DELETE the others — `src/persons.js` (twice: the spine's
+  fold every collector pass, and `foldComponent` on a #same-person confirm) and
+  `api/person_merge_routes.js`. Anything that stores `driver.id` without a foreign key (by design: an
+  FK would block the fold) is left pointing at a deleted id unless it is moved. `charging_link` was:
+  a refusal on a folded person turned into an automatic link on the next run. Add the move to all
+  three paths (`src/charging_links.js` is the pattern) whenever a new table keys on a person.
 
 * **A working PowerDrive key reads as dead on YoCharge's global host** (2026-11-03, COVERAGE
   "YoCharge / PowerDrive"). `api.yocharge.com` answers `{"detail":"Token does not exist."}` to a

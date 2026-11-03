@@ -148,14 +148,14 @@ console.log('\nPowerDrive');
   const rows = await page.$$eval('[data-panel="charging-wallets"] tbody tr', (trs) => trs.map((tr) => tr.innerText.replace(/\s+/g, ' ')));
   check('…a row a driver, lowest balance first, the fleet-wallet driver showing what is left of the limit',
     rows.length === 5 && /−AED 36\.75/.test(rows[0]) && rows.some((r) => /AED 912\.30 left of the limit/.test(r)), JSON.stringify(rows));
-  check('…each name opens the person, by the person address', (await page.$$eval('[data-panel="charging-wallets"] tbody a.lnk',
+  check('…each name opens the person, by the person address', (await page.$$eval('[data-panel="charging-wallets"] tbody a.ent',
     (a) => a.map((x) => x.getAttribute('href')))).every((h) => /^#driver\/p\d+/.test(h || '')));
   const cars = await page.$$eval('[data-panel="charging-cars"] tbody tr', (trs) => trs.map((tr) => tr.innerText.replace(/\s+/g, ' ')));
   check('charging by car: a row a car, most charges first, each saying how its charges reached it',
-    cars.length === 3 && /11/.test(cars[0]) && /2 its own plate · 8 the only car driven that day · 1 the nearest booking/.test(cars[0]), JSON.stringify(cars));
+    cars.length === 3 && /11/.test(cars[0]) && /2 its own plate · 8 the only car driven within 12 hours · 1 the nearest booking/.test(cars[0]), JSON.stringify(cars));
   const carTxt = await page.$eval('[data-panel="charging-cars"]', (e) => e.innerText.replace(/\s+/g, ' '));
   check('…and the charges on no car are counted with why, never dropped',
-    /3 charges are on no car: 2 by a linked driver who drove no car that day, 1 by a PowerDrive customer/.test(carTxt), carTxt.slice(-400));
+    /3 charges are on no car: 2 by a linked driver who drove no car within 12 hours of it, 1 by a PowerDrive customer/.test(carTxt), carTxt.slice(-400));
   /* A decision is the reader's, sent as exactly the pair on screen. */
   const sent = [];
   await page.route('**/api/charging/link', async (route) => {
@@ -164,7 +164,7 @@ console.log('\nPowerDrive');
   });
   const items = await page.$$('[data-panel="charging-review"] li');
   check('the queue offers each suggestion with its reason', items.length === 2
-    && /the mobile is on 2 of our records/.test(await items[0].innerText()), String(items.length));
+    && /this mobile belongs to 2 of our records/.test(await items[0].innerText()), String(items.length));
   await (await items[0].$('button.btn:not(.ghost)')).click();
   await page.waitForTimeout(400);
   await page.waitForSelector('[data-panel="charging-review"] li', { timeout: 10000 });

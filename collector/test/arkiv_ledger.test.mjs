@@ -236,7 +236,8 @@ if (want('charging')) {
   const e = await open('arkiv', 'charging', { fixtures: { '/api/ledger/entries': (_q, real) => ({ ...real, from: '2026-09-01',
     to: '2026-09-24', entries: [], by_person: [], totals: { ...real.totals, rows: 0, advance: null } }),
   '/api/charging/sessions': (_q, real) => ({ ...real, customers: 0, why: unread }),
-  '/api/charging/wallets': (_q, real) => ({ ...real, customers: 0, why: unread }) } });
+  '/api/charging/wallets': (_q, real) => ({ ...real, customers: 0, why: unread }),
+  '/api/charging/review': (_q, real) => ({ ...real, customers: 0, why: unread, review: [], unplaced: [] }) } });
   const es = await shape(e.page);
   check('an empty window: the hero is ABSENT with "no record, not a measured nought", over the dates answered',
     es.hero === 'Advanced over 2026-09-01 to 2026-09-24' && /no record, not a measured nought/.test(es.na[es.hero] || ''), JSON.stringify([es.hero, es.na]));
