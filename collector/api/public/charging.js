@@ -28,12 +28,13 @@
    alone who was in it. Putting it beside a money figure would turn a caveat
    into a claim, so it is named here as the thing it is not. */
 import { el, esc, panel, note, loading, tableFrom, kpiRow, entity, empty,
-  contract, glance, absenceBand, pageFoot } from './ui.js';
+  contract, glance, absenceBand, pageFoot, dtStr } from './ui.js';
 import { fmt } from './charts.js';
 import { ledgerBand, formBars } from './ledger_ak.js';
-import { qAll, windowLabel, href } from './data.js';
+import { qAll, windowLabel, href, personAddr } from './data.js';
 import { entryForm } from './entry_form.js';
 import { aed, loadPeople } from './deposit_core.js';
+import { post } from './access.js';
 
 /* CHARGING ADVANCES ONLY. A repayment is not charging-specific — see the head
    of this file — and offering one here would record an offset against a
@@ -43,6 +44,140 @@ const TYPES = [
     hint: 'Charging paid for on the driver’s behalf. Always a human entry: a charger meters a '
       + 'vehicle, and nothing in this building records who was in one.' },
 ];
+
+/* ── PowerDrive: the wallets, the queue, charging by car ──────────────────
+   The operator, 2026-11-03: "show charging wallet balance for the drivers
+   that we have … we need to be very precise", then "we can track how many
+   times each vehicles are charging". Read by src/sources/yocharge.js every six
+   hours from PowerDrive (a YoCharge white label); served by
+   api/charging_routes.js. A wallet is a named driver's money, shown only
+   where the link is certain or a person confirmed it — everything else waits
+   in "Wallets to confirm", with its reason. A charge is a session that
+   delivered energy; each one is put on a car by its own plate, the only car
+   the driver drove that day, or the nearest booking, and the table says
+   which. Only PowerDrive's network is seen: a charge elsewhere is not here. */
+const BASIS_WORD = { session_plate: 'its own plate', only_car: 'the only car driven that day', nearest_trip: 'the nearest booking' };
+const when = (t) => (t ? dtStr(t) : '—');
+function drawWallets(host, w) {
+  host.innerHTML = '';
+  if (!w || w._err || (!w.why && !w.totals)) { host.append(note(esc(`The charging wallets could not be read: ${w?._err?.message || 'the answer was not the shape this page reads'}`), 'bad')); return; }
+  if (w.why) { host.append(note(esc(w.why), 'warn')); return; }
+  const t = w.totals;
+  host.append(kpiRow([
+    { label: 'Drivers with a linked wallet', value: fmt(t.linked_people),
+      sub: `${fmt(t.auto)} linked automatically, ${fmt(t.confirmed)} confirmed by a person` },
+    { label: 'Balance, all linked wallets', value: aed(t.balance) || '—', sub: `AED, as PowerDrive holds it — ${fmt(t.nonzero)} not zero` },
+    { label: 'Below zero', value: fmt(t.negative), sub: t.negative ? 'owing PowerDrive for charging already done' : 'none owing' },
+    { label: 'On the fleet wallet', value: fmt(t.on_fleet_wallet), sub: 'charging against a company limit, not their own balance' },
+    { label: 'To confirm', value: fmt(t.review + t.unplaced), sub: `${fmt(t.review)} suggested links, ${fmt(t.unplaced)} fleet customers we cannot place` },
+  ]));
+  host.append(tableFrom(w.rows, [
+    { label: 'Driver', key: 'name', render: (r) => `<a class="lnk" href="${href('driver', personAddr(r.person_id))}">${esc(r.name || `person ${r.person_id}`)}</a>` },
+    { label: 'Balance', key: 'balance', num: true, render: (r) => (r.balance == null ? '<span class="dim">—</span>'
+      : `<span class="${r.balance < 0 ? 'bad' : ''}">${esc(aed(r.balance))}</span>`) },
+    { label: 'On hold', key: 'hold_amount', num: true, render: (r) => esc(r.hold_amount ? aed(r.hold_amount) : '—') },
+    { label: 'Fleet wallet', key: 'fleet_limit_available', num: true,
+      render: (r) => (r.using_fleet_wallet ? `${esc(aed(r.fleet_limit_available) || '—')} <span class="dim">left of the limit</span>` : '<span class="dim">own wallet</span>') },
+    { label: 'Last charge', key: 'last_session_at', render: (r) => esc(when(r.last_session_at)) },
+    { label: 'Charges, 30 days', key: 'charges_30d', num: true, render: (r) => esc(fmt(r.charges_30d)) },
+    { label: 'Linked', key: 'tier', render: (r) => esc(r.tier === 'confirmed' ? 'confirmed' : 'automatic') },
+  ], { sortable: true, sortId: 'pdw', defaultSort: { key: 'balance', dir: 'asc' }, cards: true, cardLead: 'name' }));
+  host.append(el('p', 'cap', esc(`From PowerDrive, read every six hours — last read ${when(w.synced_at)} Dubai: `
+    + `${w.customers_read ? `${fmt(w.customers_read)} customers read, ` : ''}${fmt(w.customers)} kept — those in our fleet groups there `
+    + 'or matching one of our drivers; nobody else\u2019s details are stored. A wallet is linked automatically only when its mobile belongs to exactly '
+    + 'one of our drivers and one PowerDrive customer and the two names share a word; every other possible match waits below '
+    + 'for a person. A driver with no linked wallet is not on this list, rather than shown with AED 0.')));
+}
+function drawReview(host, w, again) {
+  host.innerHTML = '';
+  if (!w || w._err || w.why || !Array.isArray(w.review)) { host.append(el('p', 'cap', esc(w?.why || 'Nothing to confirm until PowerDrive has been read.'))); return; }
+  if (!w.review.length && !w.unplaced.length) { host.append(el('p', 'cap', 'Nothing waiting: every PowerDrive customer we can see is linked, refused, or not one of ours.')); return; }
+  if (w.review.length) {
+    const ul = el('ul', 'bul pd-review');
+    for (const r of w.review) {
+      const li = el('li');
+      li.innerHTML = `PowerDrive's <b>${esc(r.yc_name || 'unnamed customer')}</b>${r.yc_phone ? ` (${esc(r.yc_phone)})` : ''}`
+        + `${r.yc_fleet_group ? ` in ${esc(r.yc_fleet_group)}` : ''} — is it our <b>${esc(r.our_name || `person ${r.person_id}`)}</b>? `
+        + `<span class="dim">${esc(r.reason)}.</span> `;
+      const yes = el('button', 'btn sm', 'Same person');
+      const no = el('button', 'btn sm ghost', 'Not this person');
+      const msg = el('span', 'cap');
+      const decide = async (decision) => {
+        yes.disabled = true; no.disabled = true; msg.textContent = ' Saving…';
+        try { await post('/api/charging/link', { yc_user_id: r.yc_user_id, person_id: Number(r.person_id), decision }); await again(); }
+        catch (e) { msg.textContent = ` ${e.message}`; yes.disabled = false; no.disabled = false; }
+      };
+      yes.addEventListener('click', () => decide('confirm'));
+      no.addEventListener('click', () => decide('refuse'));
+      li.append(yes, ' ', no, msg);
+      ul.append(li);
+    }
+    host.append(ul);
+  }
+  if (w.unplaced.length) {
+    const d = el('details', 'pd-unplaced');
+    const n = w.unplaced.length;
+    d.innerHTML = `<summary class="cap">${esc(`${fmt(n)} PowerDrive ${n === 1 ? 'customer' : 'customers'} in our fleet groups `
+      + `${n === 1 ? 'matches' : 'match'} none of our drivers by mobile, email or name — a driver who has left, or one registered `
+      + 'with a number we do not hold')}</summary>`
+      + `<p class="cap">${w.unplaced.map((u) => `${esc(u.yc_name || 'unnamed')} <span class="dim">${esc(u.yc_phone || '')} · ${esc(u.yc_fleet_group)}</span>`).join(' · ')}</p>`;
+    host.append(d);
+  }
+  host.append(el('p', 'cap', 'Confirming says the PowerDrive customer IS that driver; it needs a signed-in Owner, Management or HR '
+    + 'officer — whoever decides same-person pairs. Refusing keeps the pair from being offered again. A run never changes either.'));
+}
+function drawCars(host, s) {
+  host.innerHTML = '';
+  if (!s || s._err || (!s.why && !s.totals)) { host.append(note(esc(`Charging sessions could not be read: ${s?._err?.message || 'the answer was not the shape this page reads'}`), 'bad')); return; }
+  if (s.why) { host.append(note(esc(s.why), 'warn')); return; }
+  const t = s.totals;
+  const b = t.basis;
+  host.append(kpiRow([
+    { label: `Charges, ${s.from} to ${s.to}`, value: fmt(t.charges), sub: `${fmt(t.no_energy)} more sessions delivered no energy and are not counted` },
+    { label: 'Energy', value: `${fmt(t.kwh)} kWh`, sub: 'PowerDrive counts watt-hours; shown in kWh' },
+    { label: 'Paid', value: aed(t.cost) || '—', sub: 'AED, VAT included, as each session’s payment states it' },
+    { label: 'Put on a car', value: `${fmt(t.on_a_car)} of ${fmt(t.charges)}`,
+      sub: `${fmt(b.session_plate)} by their own plate, ${fmt(b.only_car)} the only car driven that day, ${fmt(b.nearest_trip)} the nearest booking` },
+  ]));
+  host.append(tableFrom(s.vehicles, [
+    { label: 'Car', key: 'plate', render: (v) => `<a class="lnk" href="${href('vehicle', v.plate)}">${esc(v.plate)}</a>` },
+    { label: 'Charges', key: 'charges', num: true, render: (v) => esc(fmt(v.charges)) },
+    { label: 'kWh', key: 'kwh', num: true, render: (v) => esc(fmt(v.kwh)) },
+    { label: 'AED', key: 'cost', num: true, render: (v) => esc(aed(v.cost) || '—') },
+    { label: 'Minutes', key: 'minutes', num: true, render: (v) => esc(fmt(v.minutes)) },
+    { label: 'Last charged', key: 'last_at', render: (v) => esc(when(v.last_at)) },
+    { label: 'Drivers', key: 'drivers', num: true, render: (v) => esc(fmt(v.drivers)) },
+    { label: 'How it was put on this car', key: 'charges',
+      render: (v) => esc(Object.entries(v.basis).filter(([, k]) => k).map(([k, n2]) => `${fmt(n2)} ${BASIS_WORD[k]}`).join(' · ')) },
+  ], { sortable: true, sortId: 'pdc', defaultSort: { key: 'charges', dir: 'desc' }, cards: true, cardLead: 'plate' }));
+  const off = (b.no_trip || 0) + (b.no_link || 0) + (b.not_yet || 0);
+  host.append(el('p', 'cap', esc(`${fmt(off)} charges are on no car: ${fmt(b.no_trip)} by a linked driver who drove no car that day, `
+    + `${fmt(b.no_link)} by a PowerDrive customer in our fleet groups linked to none of our drivers`
+    + `${b.not_yet ? `, ${fmt(b.not_yet)} not yet worked out` : ''}. Only PowerDrive's network is seen: a charge anywhere else is not here.`)));
+}
+async function powerDrive(root, before) {
+  const wal = panel('Charging wallets — PowerDrive', null, 'charging-wallets');
+  const rev = panel('Wallets to confirm', null, 'charging-review');
+  const cars = panel('Charging by car — PowerDrive', null, 'charging-cars');
+  for (const p of [wal, rev, cars]) { root.insertBefore(p.panel, before); loading(p.body); }
+  const read = async () => {
+    const [w, s] = await Promise.all([
+      qAll('/api/charging/wallets').catch((e) => ({ _err: e })),
+      qAll('/api/charging/sessions').catch((e) => ({ _err: e })),
+    ]);
+    drawWallets(wal.body, w);
+    drawReview(rev.body, w, read);
+    drawCars(cars.body, s);
+    return s;
+  };
+  return read();
+}
+/* What the page may say about a meter now that PowerDrive's sessions are read
+   — or why it still cannot. */
+const pdRead = (pd) => !!(pd && !pd._err && !pd.why && pd.totals);
+const meterSentence = (pd) => (pdRead(pd)
+  ? `Every figure above was typed by a person, and none of it is reconciled against a meter. PowerDrive’s charging sessions are read now — ${fmt(pd.totals.charges)} charges over ${pd.from} to ${pd.to}, at the top of this page — but matching an advance to them is not built: only PowerDrive’s network is seen, and a charger meters a car while an advance is owed by a person.`
+  : `Every figure above was typed by a person. None of it has been checked against a charging meter: ${pd?.why || 'PowerDrive’s charging sessions could not be read'}`);
 
 export async function renderCharging(root) {
   root.innerHTML = '';
@@ -67,6 +202,10 @@ export async function renderCharging(root) {
   if (ak) root.append(AK.band, formPanel.panel, whoPanel.panel, regPanel.panel, both.panel, absHost);
   else root.append(head.panel, formPanel.panel, whoPanel.panel, regPanel.panel, gapPanel.panel);
   loading(ak ? AK.tiles : head.body);
+  /* PowerDrive straight under the page's own summary (the 00 band, or the
+     old skin's tiles): the wallets and the cars, then the hand-kept register
+     and its form. */
+  const pdP = powerDrive(root, formPanel.panel);
 
   async function refresh() {
     /* qAll, not a hand-built query string: it carries the shell's own window
@@ -88,7 +227,7 @@ export async function renderCharging(root) {
 
     const t = reg.totals;
     const people = reg.by_person || [];
-    if (ak) chargingContract(AK, both, reg, dir);
+    if (ak) chargingContract(AK, both, reg, dir, await pdP);
     else head.body.append(kpiRow([
       /* ABSENT, NOT NOUGHT. This fell back to the literal 'AED 0.00' when
          totals.advance came back null — and null is what /api/ledger/entries
@@ -190,12 +329,11 @@ export async function renderCharging(root) {
   }
 
   await refresh();
-  if (ak) { chargingGap(absHost, root); return; }
+  const pd = await pdP;
+  if (ak) { chargingGap(absHost, root, pd); return; }
 
   /* ── the panel this page exists for ─────────────────────────────────── */
-  gapPanel.body.append(note('Every figure above was typed by a person. None of it has been '
-    + 'checked against a charging meter, because this database holds no charging session at '
-    + 'all — there is no table for one and no collector that fetches one.', 'warn'));
+  gapPanel.body.append(note(esc(meterSentence(pd)), 'warn'));
 
   gapPanel.body.append(el('p', 'cap', 'What would have to happen, and what still would not:'));
   /* ul.bul — the class app.css actually styles (2372-2374), and the one
@@ -205,10 +343,10 @@ export async function renderCharging(root) {
   const ul = el('ul', 'bul');
   const li = (h) => { const x = el('li'); x.innerHTML = h; return x; };
   ul.append(
-    li('<b>The data exists upstream.</b> Tesla serves past sessions at '
+    li('<b>Charging off PowerDrive\u2019s network exists upstream too.</b> Tesla serves past sessions at '
       + '<code>/api/1/dx/charging/history</code>, and energy with pricing at '
       + '<code>/api/1/dx/charging/sessions</code> — the second to business fleet owners only, '
-      + 'which this fleet is. So the gap is access, not availability.'),
+      + 'which this fleet is. So that gap is access, not availability.'),
     li('<b>The token cannot be renewed from this server.</b> The stored one expired on '
       + '2026-09-10, and Tesla’s auth edge answers this platform’s egress with an HTML 403 '
       + 'before OAuth sees the request. Measured. It has to be minted from a machine Tesla '
@@ -248,7 +386,7 @@ export async function renderCharging(root) {
    answered (fixed instead of drawn). */
 const spanOf = (reg) => (reg.from || reg.to
   ? `${reg.from || 'the first entry'} to ${reg.to || 'today'}` : 'the whole record');
-function chargingContract(AK, both, reg, dir) {
+function chargingContract(AK, both, reg, dir, pd = null) {
   const t = reg.totals;
   const people = reg.by_person || [];
   const roster = (dir?.people || []).filter((p) => p.name).length;
@@ -265,7 +403,10 @@ function chargingContract(AK, both, reg, dir) {
     { label: 'Entries', value: fmt(t.rows),
       sub: t.verification_rows ? `${fmt(t.verification_rows)} verification rows excluded from the figures`
         : 'each with a photograph of its proof' },
-    { label: 'A meter to check it against', na: 'none ingested — this database holds no charging session at all' },
+    pdRead(pd)
+      ? { label: 'PowerDrive charges, to check it against', value: fmt(pd.totals.charges),
+        sub: `over ${pd.from} to ${pd.to} — read, not yet reconciled with these advances` }
+      : { label: 'A meter to check it against', na: `none read — ${pd?.why || 'PowerDrive\u2019s sessions could not be read'}` },
   ]);
   /* The band's own note too: it read the control bar's window before the
      answer arrived, and the answer may cover something else. */
@@ -282,19 +423,21 @@ function chargingContract(AK, both, reg, dir) {
     { label: 'People the form can point at', n: dir?.ok ? roster : 0, outline: !dir?.ok,
       why: dir?.ok ? '' : 'the list of drivers could not be read' },
     { label: 'With a charging advance', n: people.length },
-    { label: 'With a charging session', na: 'none ingested', why: 'there is no table for one and no collector that fetches one' },
+    pdRead(pd)
+      ? { label: 'With a PowerDrive charge in these dates', n: (pd.drivers || []).length }
+      : { label: 'With a charging session', na: 'none read', why: pd?.why || 'PowerDrive\u2019s sessions could not be read' },
   ]);
-  both.body.append(el('p', 'cap', 'The third row has no count, not a count of nought: no charging session has ever been '
-    + 'collected, so the side a reconciliation would check against does not exist here.'));
+  both.body.append(el('p', 'cap', esc(pdRead(pd)
+    ? 'The third row counts drivers linked to a PowerDrive wallet who charged in these dates. Matching their charges to the advances above is not built: PowerDrive\u2019s network is the only one seen, and a charge is a car\u2019s while an advance is a person\u2019s.'
+    : 'The third row has no count, not a count of nought: no charging session has been read, so the side a reconciliation would check against does not exist here.')));
 }
 /* The gap panel's five bullets and its Supply caveat, as the † band — the
    text is the old panel's, cell by cell, nothing dropped. */
-function chargingGap(host, root) {
+function chargingGap(host, root, pd = null) {
   absenceBand(host, [
-    { label: 'A meter to check it against', fig: null, none: 'None ingested', html: true,
-      why: 'Every figure above was typed by a person, and none of it has been checked against a charging meter: '
-        + 'this database holds no charging session at all — no table for one, no collector that fetches one. '
-        + '<b>The data exists upstream.</b> Tesla serves past sessions at <code>/api/1/dx/charging/history</code>, and '
+    { label: 'A meter to check it against', fig: null, none: pdRead(pd) ? 'Not reconciled' : 'None read', html: true,
+      why: `${esc(meterSentence(pd))} `
+        + '<b>Charging off PowerDrive\u2019s network exists upstream too.</b> Tesla serves past sessions at <code>/api/1/dx/charging/history</code>, and '
         + 'energy with pricing at <code>/api/1/dx/charging/sessions</code> — the second to business fleet owners only, '
         + 'which this fleet is. So the gap is access, not availability.' },
     { label: 'Why the access is not there', fig: null, none: 'Token expired', html: true,

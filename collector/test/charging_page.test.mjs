@@ -100,8 +100,13 @@ check('and one past its retention says it was held and has since gone',
 
 /* ── THE PANEL THIS PAGE EXISTS FOR ────────────────────────────────────── */
 console.log('\nwhat it refuses to imply');
-check('the page states that no charging session is held at all',
-  /holds no charging session at all/i.test(body), body.slice(-900));
+/* PowerDrive's sessions ARE read now (2026-11-03) — the mock answers 25
+   charges — so the claim the page used to make, "this database holds no
+   charging session at all", would be false. What must hold instead: it says
+   they are read, and that matching an advance to them is NOT built. */
+check('the page says PowerDrive’s sessions are read, and that no advance has been matched to them',
+  /PowerDrive’s charging sessions are read now — 25 charges/.test(body) && /matching an advance to them is not built/.test(body)
+  && !/holds no charging session at all/i.test(body), body.slice(-900));
 check('and that the gap is ACCESS rather than availability — Tesla serves this',
   /dx\/charging\/sessions/.test(body) && /business fleet owners only/i.test(body));
 check('naming why the token cannot be renewed here, specifically',
@@ -133,6 +138,63 @@ check('and the page says WHY a repayment is not recorded here',
 check('sending the reader to Advances, where a repayment means what it says',
   (await page.$$eval('[data-panel="charging-form"] a.lnk', (a) => a.map((x) => x.getAttribute('href'))))
     .some((h) => /#advances/.test(h || '')));
+
+/* ── PowerDrive: wallets, the queue, charging by car ───────────────────── */
+console.log('\nPowerDrive');
+{
+  const wal = await page.$eval('[data-panel="charging-wallets"]', (e) => e.innerText);
+  check('the wallets panel: five linked drivers, the total, the one below zero',
+    /Drivers with a linked wallet\s*5/i.test(wal) && /AED 609\.75/.test(wal) && /Below zero\s*1/i.test(wal), wal.slice(0, 400));
+  const rows = await page.$$eval('[data-panel="charging-wallets"] tbody tr', (trs) => trs.map((tr) => tr.innerText.replace(/\s+/g, ' ')));
+  check('…a row a driver, lowest balance first, the fleet-wallet driver showing what is left of the limit',
+    rows.length === 5 && /−AED 36\.75/.test(rows[0]) && rows.some((r) => /AED 912\.30 left of the limit/.test(r)), JSON.stringify(rows));
+  check('…each name opens the person, by the person address', (await page.$$eval('[data-panel="charging-wallets"] tbody a.lnk',
+    (a) => a.map((x) => x.getAttribute('href')))).every((h) => /^#driver\/p\d+/.test(h || '')));
+  const cars = await page.$$eval('[data-panel="charging-cars"] tbody tr', (trs) => trs.map((tr) => tr.innerText.replace(/\s+/g, ' ')));
+  check('charging by car: a row a car, most charges first, each saying how its charges reached it',
+    cars.length === 3 && /11/.test(cars[0]) && /2 its own plate · 8 the only car driven that day · 1 the nearest booking/.test(cars[0]), JSON.stringify(cars));
+  const carTxt = await page.$eval('[data-panel="charging-cars"]', (e) => e.innerText.replace(/\s+/g, ' '));
+  check('…and the charges on no car are counted with why, never dropped',
+    /3 charges are on no car: 2 by a linked driver who drove no car that day, 1 by a PowerDrive customer/.test(carTxt), carTxt.slice(-400));
+  /* A decision is the reader's, sent as exactly the pair on screen. */
+  const sent = [];
+  await page.route('**/api/charging/link', async (route) => {
+    sent.push(route.request().postDataJSON());
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+  });
+  const items = await page.$$('[data-panel="charging-review"] li');
+  check('the queue offers each suggestion with its reason', items.length === 2
+    && /the mobile is on 2 of our records/.test(await items[0].innerText()), String(items.length));
+  await (await items[0].$('button.btn:not(.ghost)')).click();
+  await page.waitForTimeout(400);
+  await page.waitForSelector('[data-panel="charging-review"] li', { timeout: 10000 });
+  await (await (await page.$$('[data-panel="charging-review"] li'))[1].$('button.ghost')).click();
+  await page.waitForTimeout(400);
+  check('"Same person" and "Not this person" send that customer, that person, and the decision',
+    sent.length === 2 && sent[0].yc_user_id === 'yc-r1' && sent[0].person_id === 105 && sent[0].decision === 'confirm'
+    && sent[1].yc_user_id === 'yc-r2' && sent[1].person_id === 106 && sent[1].decision === 'refuse', JSON.stringify(sent));
+  /* REVERSION (run 2026-11-03): decide('confirm') sending decision: 'refuse'
+     -> this check fails. */
+}
+{
+  /* PowerDrive unread — the state production starts in: every panel says
+     why, nothing reads AED 0, and the meter sentence names the reason. */
+  /* Its own context: the first page's service worker would otherwise answer
+     these requests itself, and page.route never sees a worker's fetch. */
+  const ctx2 = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce', serviceWorkers: 'block' });
+  const p2 = await ctx2.newPage();
+  const unread = { why: 'PowerDrive has not been read yet — the charging collector runs every six hours once its key and client id are set (Settings → Charging).', customers: 0 };
+  await p2.route('**/api/charging/**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(unread) }));
+  await p2.goto(`${base}/?skin=classic#charging`, { waitUntil: 'load' });
+  await p2.waitForSelector('[data-panel="charging-people"] table', { timeout: 20000 });
+  await p2.waitForFunction(() => /has not been read yet/.test(document.querySelector('[data-panel="charging-wallets"]')?.innerText || ''), null, { timeout: 20000 }).catch(() => {});
+  const b2 = (await p2.evaluate(() => document.body.innerText)).replace(/\s+/g, ' ');
+  const w2 = await p2.$eval('[data-panel="charging-wallets"]', (e) => e.innerText);
+  check('unread: the wallets panel gives the reason and no figure', /has not been read yet/.test(w2) && !/AED/.test(w2), w2);
+  check('…and the meter sentence names the same reason, not "none ingested" or a nought',
+    /None of it has been checked against a charging meter: PowerDrive has not been read yet/.test(b2), b2.slice(-900));
+  await ctx2.close();
+}
 
 /* ── the source rule, checked in the source ────────────────────────────── */
 console.log('\nhow it gets its numbers');

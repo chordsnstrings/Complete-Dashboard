@@ -13,6 +13,7 @@ normalized on **license plate** so a driver/vehicle rolls up across every platfo
 | **Yango** | Ecosine | ≥12 months | `orders/list` cursor pages + driver summary + ledger | 40 rows/page |
 | **CABMAN/DT** | Ecosine | realtime only | poll `GetIVDData`, append snapshots | no history param |
 | **Bolt** | Egari (roster) | portal blocked | FI API roster; portal trips/earnings need a fresh refresh token | ~7-day token |
+| **PowerDrive** (YoCharge, charging) | both, as fleet groups | every session | `/open/v1/users` (all customers, pruned to ours) + `/open/v1/mini-transactions` + `/v3/mini-transactions?user_id=`; GET only | 40 users/page (more times out) · MENA host + tenant `client-id` · `src/sources/yocharge.js` (2026-11-03) |
 
 ## Run
 
@@ -39,6 +40,9 @@ Local (no Docker): `npm install && npm run migrate && npm run backfill && npm st
     and email on `driver_compliance`. All three were being discarded until 2026-09-14 — see
     `docs/COVERAGE.md`, "The live driver status was arriving every two minutes".
   - a cron **incremental** every 30 min re-pulls the trailing `INCREMENTAL_DAYS` of trips/earnings.
+  - **PowerDrive charging** every six hours (`YOCHARGE_CRON=17 */6 * * *`, Dubai): every customer and
+    wallet, the links to our people, our customers' sessions and the charges put on cars
+    (`src/sources/yocharge.js`; job mode `charging` for a run on demand).
 - All writes are **idempotent upserts** keyed on the source's natural id (Uber Trip UUID, Yango order
   id, FMS `plate|start`, CABMAN `plate|fix-time`), so re-runs never duplicate.
 

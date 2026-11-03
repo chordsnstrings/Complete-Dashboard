@@ -5613,3 +5613,35 @@ and when one is refused the banner's "Stopped" push is the message.
 
 **Waits on the operator:** the go-ahead to deploy — before 6 Nov 18:06 Dubai, or the first warning
 (for the tokens expiring 7 Nov) is missed — and a phone subscribed to the ntfy topic (HANDOFF 0.6).
+
+## YC — PowerDrive charging: wallets, links and sessions (2026-11-03)
+
+The operator: "Let's find out a way to show charging wallet balance for the drivers that we have.
+the name match might be different so we need to be very precise before we incorporate anything
+into production", then "go ahead and deploy with this build. let's figure out how we can have all
+sessions as well. we can track how many times each vehicles are charging".
+
+**What it was.** The Charging page held a hand-kept register of advances and said, correctly, that
+"this database holds no charging session at all". The fleet charges on PowerDrive (a YoCharge white
+label); its API holds every customer's wallet and every session, and nothing here read it.
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| YC1 | `src/sources/yocharge.js` + `sql/schema_v113.sql` (`charging_user`, `charging_link`, `charging_session`): one network primitive that sends GET and nothing else; every PowerDrive customer read in pages of 40 every six hours (`YOCHARGE_CRON`), credential state on the banner (a 401/403 marks the key invalid), a `collection_run` per run. `src/run.js chargingTick` runs pinned, one at a time; job mode `charging` | yes | no | `yocharge` 31/0 — every call a GET (and a source scan for any other method); revert `kwh` without ÷ 1000 → fails |
+| YC2 | The link: automatic only on a mobile held by exactly one of our people and one customer, the person matching no other customer, none of their accounts held by the same-person register, the names sharing a word, the pair never refused. Everything else a candidate with its reason (a number on two people or two customers, names that disagree, an email alone, a name alone inside our fleet groups). A person's confirm/refuse is never written, changed or deleted by a run | yes | no | `yocharge` (revert: the name test removed → 2 fail, Bravo's wallet linked to "Someone Else Entirely") |
+| YC3 | A stranger is not kept: all customers are read so a link can be judged against all of them, then anyone outside our fleet groups with no link at any tier and no session is deleted; the count read is kept as state, not rows | yes | no | `yocharge` (revert: the prune not called → 2 fail) |
+| YC4 | Sessions: only watched customers' (our fleet groups + linked) — from the last day read, so a missed run is caught up (≤ 31 days), never later than two days ago — and each watched customer's whole history once, 150 a run (1.2–1.5 s each, measured) | yes | no | `yocharge` (reverts: the watched filter removed → a stranger's charge stored; the catch-up removed → ten missed days never read) |
+| YC5 | Each charge put on a car: its own plate, else the only car the linked driver drove that Dubai day, else the nearest booking; else on no car with why (`no_trip`, `no_link`). The basis is on the row; redone for the last 8 days each run | yes | no | `yocharge` (all five bases reached) |
+| YC6 | `api/charging_routes.js` — `GET /api/charging/wallets`, `/sessions`, `/driver`, `/vehicle`, `POST /api/charging/link`; window by `winDays` (the page's own range); five manifest entries (`fleet: mixed`); a decision needs a signed-in `identity.decide` holder (401 / 403 otherwise) and records who; never held in the server's response cache (`api/cache.js` NEVER — a decision advances no data version, so a cached queue would redraw a confirmed pair as still waiting) nor in the browser's (`no-store`) | yes | no | `yocharge` (revert: anyone may decide → 2 fail); `cache` 59/0 (revert: the NEVER entry removed → fails, "12 then 12"); `access_manifest` 17/0; `mockapi` 10/0; `endpoint_coverage` 4/0 |
+| YC7 | Charging page: "Charging wallets — PowerDrive" (balances, below zero marked, the fleet-wallet limit left), "Wallets to confirm" (Same person / Not this person, each with its reason), "Charging by car — PowerDrive" (charges, kWh, AED, how each reached the car, the charges on no car counted with why). The meter sentences are state-aware: read → "read, not reconciled"; unread → the route's reason | yes | no | `charging_page` 41/0 (revert: Same person sending refuse → fails); `arkiv_ledger` 63/0 |
+| YC8 | Elsewhere: a Charging wallet column on the Drivers directory (joined on the person; no link a dash with its reason; before PowerDrive is read the column takes itself off with the route's reason); "Charging wallet — PowerDrive" on the driver money tab (a position; an account not placed on a person says so); "Charging — PowerDrive" on the vehicle overview (both skins) | yes | no | `charging_views` 32/0 (revert: no wallet → money(0) → 2 fail); classic fixture re-recorded for `drivers` ×2, `vehicle/L45235`, `charging`, both `…/money`, `settings` — each diffed against the base first: only the new column, panels and button |
+| YC9 | Settings: `YOCHARGE_API_KEY` (secret), `YOCHARGE_CLIENT_ID`, `YOCHARGE_HOST` (the MENA host), `YOCHARGE_FLEET_GROUPS`, `YOCHARGE_CRON`; a "Read PowerDrive charging now" button | yes | no | `credential_save_check` 109/0 (`chargingTick` listed among the pinned units) |
+
+**Not done, deliberately.** Matching an advance to a charge (a charger meters a car, an advance is
+owed by a person); charging anywhere but PowerDrive's network; any write to PowerDrive (the API can
+credit and debit a wallet, stop a live charge and renew the token — never called).
+
+**Pre-existing, not this change:** seven routes of `arkiv_classic_frozen` (`unit`, `unit/nonsense`,
+`unit?days=90&fleet=ecosine`, `month-target/2026-08`, `vehicle/L45235/movement`, `map`,
+`map/replay/L45235`) fail in this sandbox identically on the base tree and on the commit that last
+recorded them (`5c0f97e`); they were not re-recorded.

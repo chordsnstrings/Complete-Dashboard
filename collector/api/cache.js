@@ -114,6 +114,13 @@ const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/t
      identity-links page reads the same verdict and would be stale in the same
      way. Both are small reads over one table; neither is worth a cache. */
   '/api/same-person', '/api/drivers/identity-links',
+  /* …and PowerDrive's wallets (api/charging_routes.js, 2026-11-03), whose
+     "Wallets to confirm" queue is answered by a click on the Charging page —
+     the same failure, a confirmed pair redrawn as still waiting. The four
+     reads under /api/charging/ are small (a few hundred linked customers, the
+     sessions by an index on started_at), and the wallet balances themselves
+     move on PowerDrive's six-hourly run, so none is worth a cache. */
+  '/api/charging/',
   /* THE REVENUE TARGET, which the Owner's save and the trips-a-day setting
      move (api/target_routes.js). Neither advances the version above, so a save
      would be answered with the target from before it — the same failure as

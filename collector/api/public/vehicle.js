@@ -20,7 +20,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   noneChosen, verdict, foldRows,
   trackerState, trackerSpeed, stillNote, alertRateFigure, splitAlerts,
   segSourceLabel, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, kpiTiles, kpiCols, sourceToken, swatch } from './ui.js';
-import { qAll, href, parseHash, currentGen, alive, windowLabel } from './data.js';
+import { qAll, href, parseHash, currentGen, alive, windowLabel, personAddr } from './data.js';
 import { membersOf } from './cohorts.js';
 import { dubaiDay } from './tz.js';
 import { makeMap, fitTo, renderJourney } from './map.js';
@@ -120,6 +120,50 @@ function identityCard(p) {
 }
 
 /* ── tab: overview ───────────────────────────────────────────────────────── */
+/* CHARGING — PowerDrive's sessions put on this car (api/charging_routes.js).
+   ─────────────────────────────────────────────────────────────────────────
+   The operator, 2026-11-03: "we can track how many times each vehicles are
+   charging". PowerDrive files a charge against a customer, rarely against a
+   car, so each one is put on a car by its own plate, else by the only car the
+   driver drove that day, else by the nearest booking — and each row says
+   which. A car whose drivers have no linked wallet, or a charge on another
+   network, is not here; the empty state says so rather than reading nought. */
+const PD_BASIS = { session_plate: 'its own plate', only_car: 'the only car driven that day', nearest_trip: 'the nearest booking' };
+function vehCharging(root, plate) {
+  const p = panel('Charging — PowerDrive', 'Charges put on this car in this window, and how each was put on it', 'veh-charging');
+  root.append(p.panel);
+  loading(p.body);
+  (async () => {
+    const c = await qAll('/api/charging/vehicle', { plate });
+    p.body.innerHTML = '';
+    if (c?.why) { p.body.append(note(esc(c.why), 'warn')); return; }
+    if (c?.charges == null) { p.body.append(note('Charging could not be read: the answer was not the shape this page reads.', 'bad')); return; }
+    if (!c.charges) {
+      p.body.append(el('p', 'cap', esc(`No PowerDrive charge was put on ${c.plate} between ${c.from} and ${c.to}. A charge reaches a car `
+        + 'through its own plate, the only car its driver drove that day, or the nearest booking — so a charge by a driver with no '
+        + 'linked wallet, or on another network, is not counted here.')));
+      return;
+    }
+    const b = c.basis;
+    p.body.append(kpiRow([
+      { label: 'Charges', value: fmt(c.charges), sub: `${c.from} to ${c.to}` },
+      { label: 'Energy', value: `${fmt(c.kwh)} kWh`, sub: `last charged ${dtStr(c.last_at)}` },
+      { label: 'Paid', value: money(c.cost), sub: 'AED, VAT included' },
+      { label: 'How they reached this car', value: fmt(b.session_plate),
+        sub: `by its own plate; ${fmt(b.only_car)} the only car driven that day, ${fmt(b.nearest_trip)} the nearest booking` },
+    ]));
+    p.body.append(tableFrom(c.recent, [
+      { label: 'When', key: 'started_at', render: (r) => esc(dtStr(r.started_at)) },
+      { label: 'kWh', key: 'kwh', num: true, render: (r) => esc(fmt(r.kwh)) },
+      { label: 'Paid', key: 'cost', num: true, render: (r) => esc(money(r.cost)) },
+      { label: 'Site', key: 'site', render: (r) => esc(r.site || '—') },
+      { label: 'Driver', key: 'driver', render: (r) => (r.person_id ? entity('driver', personAddr(r.person_id), r.driver || `person ${r.person_id}`)
+        : '<span class="ent-off">no linked driver</span>') },
+      { label: 'Put on this car by', key: 'plate_basis', render: (r) => esc(PD_BASIS[r.plate_basis] || '—') },
+    ], { cards: true, cardLead: 'started_at' }));
+  })().catch((e) => { p.body.innerHTML = ''; p.body.append(note(esc(`Charging could not be read: ${e.message}`), 'bad')); });
+}
+
 async function tabOverview(root, plate, prof) {
   if (contract()) return tabOverviewAk(root, plate, prof);
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
@@ -131,6 +175,7 @@ async function tabOverview(root, plate, prof) {
   const plat = panel('Platform', 'Where its work comes from'); g2.append(plat.panel);
   const pay = panel('Payment', 'Card vs cash'); g2.append(pay.panel);
   const rev = panel('Revenue by day', 'Booked fare value'); root.append(rev.panel);
+  vehCharging(root, plate);
   [vol.body, who.body, prod.body, plat.body, pay.body, rev.body].forEach(loading);
 
   const [k, daily, dd, mix] = await Promise.all([
@@ -318,6 +363,7 @@ async function tabOverviewAk(root, plate, prof) {
   const kindP = panel('Harsh driving, by kind', 'What the tracker flagged; its own faults kept apart', 'veh-kinds');
   const personP = panel('Harsh driving, by person', 'Per 100 booked km on this car; the Safety tab has the detail', 'veh-persons');
   g4.append(kindP.panel, personP.panel);
+  vehCharging(root, plate);
   [earnP.body, bookP.body, fixP.body, whoP.body, chanP.body, verdP.body, hourP.body, kindP.body, personP.body].forEach(loading);
 
   const [k, daily, dd, mix, fleet] = await Promise.all([

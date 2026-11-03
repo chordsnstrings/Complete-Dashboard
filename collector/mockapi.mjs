@@ -8926,6 +8926,82 @@ app.get('/api/fleets', (_, r) => r.json({
    and answers what the real route answers one. */
 app.get('/api/fleets/accounts', (_, r) => r.status(401).json({ error: 'signin', detail: 'Sign in to see platform accounts.' }));
 
+/* PowerDrive charging (api/charging_routes.js), 2026-11-03: five drivers with
+   a linked wallet — one below zero, one on the fleet wallet, one confirmed by a
+   person — two suggestions waiting for a person, one fleet customer nobody
+   can place, and a month of charges on three cars, each put on its car a
+   different way. Every person id is the directory's (100 + i); the driver
+   page's profile ids are 401 + i, so person 401 has a wallet and 402 is on
+   the fleet wallet there. Synthetic names only; phones are tails. */
+const PD_SYNC = () => ({ synced_at: new Date(Date.now() - 2 * 36e5).toISOString(), status: 'ok', error: null,
+  customers: 412, customers_read: 3323, wallets_at: new Date(Date.now() - 2 * 36e5).toISOString() });
+const PD_ROWS = () => [
+  { i: 0, balance: 182.4, hold: 0, fleet: false, tier: 'auto' }, { i: 1, balance: -36.75, hold: 0, fleet: false, tier: 'auto' },
+  { i: 2, balance: 0, hold: 0, fleet: true, limit: 1500, left: 912.3, tier: 'auto' },
+  { i: 3, balance: 54, hold: 20, fleet: false, tier: 'confirmed' }, { i: 4, balance: 410.1, hold: 0, fleet: false, tier: 'auto' },
+].map((w) => ({ person_id: String(100 + w.i), name: drivers[w.i], tier: w.tier, yc_user_id: `yc-${w.i}`, balance: w.balance,
+  hold_amount: w.hold, using_fleet_wallet: w.fleet, fleet_limit: w.limit ?? null, fleet_limit_available: w.left ?? null,
+  fleet_group: w.i % 2 ? 'egari' : 'ecofleet', last_session_at: new Date(Date.now() - (w.i + 1) * 9e6).toISOString(), charges_30d: 14 - w.i * 2 }));
+app.get('/api/charging/wallets', (_req, r) => {
+  const rows = PD_ROWS();
+  r.json({ ...PD_SYNC(), why: null, currency: 'AED',
+    totals: { linked_people: rows.length, linked_wallets: rows.length, balance: Math.round(rows.reduce((a, w) => a + w.balance, 0) * 100) / 100,
+      nonzero: rows.filter((w) => w.balance).length, negative: rows.filter((w) => w.balance < 0).length,
+      on_fleet_wallet: rows.filter((w) => w.using_fleet_wallet).length, auto: 4, confirmed: 1, review: 2, unplaced: 1, fleet_groups_seen: 6 },
+    rows,
+    review: [
+      { yc_user_id: 'yc-r1', person_id: '105', reason: 'the mobile is on 2 of our records', yc_name: 'R. Okafor', yc_phone: '•••••••418',
+        yc_fleet_group: 'ecofleet', our_name: drivers[5] },
+      { yc_user_id: 'yc-r2', person_id: '106', reason: 'the names share no word', yc_name: 'Driver Six', yc_phone: '•••••••902',
+        yc_fleet_group: 'egari', our_name: drivers[6] },
+    ],
+    unplaced: [{ yc_user_id: 'yc-u1', yc_name: 'Unplaced Customer', yc_phone: '•••••••557', yc_fleet_group: 'ecofleet' }] });
+});
+app.get('/api/charging/sessions', (req, r) => {
+  const to = String(req.query.to || dayISO(0)).slice(0, 10);
+  const from = String(req.query.from || dayISO(29)).slice(0, 10);
+  const vehicles = [
+    { plate: plates[0], charges: 11, kwh: 412.6, cost: 297.07, minutes: 618, last_at: new Date(Date.now() - 9e6).toISOString(), drivers: 2,
+      basis: { session_plate: 2, only_car: 8, nearest_trip: 1 } },
+    { plate: plates[1], charges: 7, kwh: 266.1, cost: 191.59, minutes: 402, last_at: new Date(Date.now() - 18e6).toISOString(), drivers: 1,
+      basis: { session_plate: 0, only_car: 7, nearest_trip: 0 } },
+    { plate: plates[2], charges: 4, kwh: 150.2, cost: 108.14, minutes: 240, last_at: new Date(Date.now() - 27e6).toISOString(), drivers: 1,
+      basis: { session_plate: 0, only_car: 1, nearest_trip: 3 } },
+  ];
+  r.json({ from, to, ...PD_SYNC(), why: null, currency: 'AED',
+    totals: { sessions: 27, charges: 25, no_energy: 2, kwh: 913.4, cost: 657.65, on_a_car: 22,
+      basis: { session_plate: 2, only_car: 16, nearest_trip: 4, no_trip: 2, no_link: 1, not_yet: 0 } },
+    vehicles,
+    drivers: [0, 1, 2].map((i) => ({ person_id: String(100 + i), name: drivers[i], charges: 9 - i * 2, kwh: 330 - i * 60, cost: 238 - i * 43,
+      last_at: new Date(Date.now() - (i + 1) * 9e6).toISOString(), cars: i ? 1 : 2 })),
+    days: [0, 1, 2, 3].map((d) => ({ day: dayISO(d), charges: 6 - d, kwh: 220 - d * 30, cost: 158 - d * 21 })),
+    sites: [{ site: 'Al Quoz Hub', charges: 14, kwh: 520.3 }, { site: 'Marina Mall P2', charges: 11, kwh: 393.1 }] });
+});
+app.get('/api/charging/driver', (req, r) => {
+  const person = String(req.query.person || '').replace(/^p/i, '');
+  if (!person) return r.status(400).json({ error: 'person required' });
+  const w = person === '401' ? { yc_user_id: 'yc-0', tier: 'auto', balance: 182.4, hold_amount: 0, using_fleet_wallet: false, fleet_limit_available: null }
+    : person === '402' ? { yc_user_id: 'yc-2', tier: 'confirmed', balance: 0, hold_amount: 0, using_fleet_wallet: true, fleet_limit_available: 912.3 } : null;
+  r.json({ person_id: person, ...PD_SYNC(), currency: 'AED',
+    why: w ? null : 'No PowerDrive charging wallet is linked to this driver.',
+    wallets: w ? [{ ...w, fleet_group: 'ecofleet', last_session_at: new Date(Date.now() - 9e6).toISOString() }] : [],
+    last_30_days: w ? { charges: 9, kwh: 330.4, cost: 237.89 } : null,
+    recent: w ? [0, 1, 2].map((k) => ({ started_at: new Date(Date.now() - (k + 1) * 3e7).toISOString(), kwh: 38.2 - k * 4, cost: 27.5 - k * 3,
+      plate: k === 2 ? null : plates[0], plate_basis: k === 2 ? 'no_trip' : k ? 'only_car' : 'session_plate', site: 'Al Quoz Hub', minutes: 52 - k * 6 })) : [] });
+});
+app.get('/api/charging/vehicle', (req, r) => {
+  const plate = String(req.query.plate || '').toUpperCase();
+  if (!plate) return r.status(400).json({ error: 'plate required' });
+  const to = String(req.query.to || dayISO(0)).slice(0, 10);
+  const from = String(req.query.from || dayISO(29)).slice(0, 10);
+  const has = plate === plates[0];
+  r.json({ plate, from, to, ...PD_SYNC(), why: null, currency: 'AED',
+    charges: has ? 11 : 0, kwh: has ? 412.6 : 0, cost: has ? 297.07 : 0, last_at: has ? new Date(Date.now() - 9e6).toISOString() : null,
+    basis: { session_plate: has ? 2 : 0, only_car: has ? 8 : 0, nearest_trip: has ? 1 : 0 },
+    recent: has ? [0, 1].map((k) => ({ started_at: new Date(Date.now() - (k + 1) * 3e7).toISOString(), kwh: 38.2 - k * 4, cost: 27.5 - k * 3,
+      plate_basis: k ? 'only_car' : 'session_plate', site: 'Al Quoz Hub', driver: drivers[k], person_id: String(401 + k) })) : [] });
+});
+
 app.get(/^\/api\//, (_, r) => r.json([]));
 app.use(express.static(join(__dir, 'api', 'public')));
 app.get('*', (_, r) => r.sendFile(join(__dir, 'api', 'public', 'index.html')));

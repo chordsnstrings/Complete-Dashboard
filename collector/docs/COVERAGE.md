@@ -324,7 +324,7 @@ See `test/platform_flags_truth.test.mjs`.
 
 ---
 
-## YoCharge (charging) — investigated 2026-11-03, NOT integrated
+## YoCharge / PowerDrive (charging) — integrated 2026-11-03 (`src/sources/yocharge.js`, FIX-STATUS YC)
 
 The operator: "this is charging api for the complete charging system … Let's find out a way to
 show charging wallet balance for the drivers that we have. the name match might be different so we
@@ -346,8 +346,15 @@ repository, never in it). Investigated read-only: **GET requests only**.
   `fleet_limit_used`, `vehicles`, `last_charging_session`, and `wallets[]` (`type` PERSONAL,
   `balance`, `hold_amount`, `custom_credit_limit`).
 - **Currency is AED** — named on each transaction's `payment` (`/open/v1/mini-transactions/`, 415,422
-  sessions with kWh, duration, payment and user: a charging-session feed this product does not ingest
-  yet). The wallet itself names no currency.
+  sessions across all of PowerDrive with energy, duration, payment and user). The wallet itself names
+  no currency.
+- **Sessions, measured 2026-11-03:** the day feed `/open/v1/mini-transactions/?start_date&end_date`
+  carries every PowerDrive customer's sessions, ~470 a day. **`units_consumed` is watt-hours** —
+  10,335 for a 709-second session that cost AED 12.40 before VAT, i.e. 10.3 kWh at ~AED 1.20 — and
+  `duration` / `charging_duration` are seconds (equal to stop − start). One customer's whole history
+  is `/v3/mini-transactions/?user_id=`: 1.2–1.5 s a customer, and only that customer's rows (three
+  customers checked). PowerDrive rarely knows the car: of the 142 vehicles our fleet-group customers
+  registered, 34 carried a number and 15 equalled one of our plates.
 - **Our fleets are fleet groups there:** `ecofleet` 104 users, `egari` 47, `ecofleet investor fleet`
   5. A fleet-wallet driver (27 of ours) charges against `fleet_limit_available`, not their own
   balance.
@@ -363,10 +370,21 @@ repository, never in it). Investigated read-only: **GET requests only**.
   - active with no trace in YoCharge at all: 4.
   - the 198's wallets: 136 non-zero, AED 22,907.30 in all; 40 of all matched slightly negative
     (lowest −48.44); 26 on the fleet wallet.
-- **Precision rule for any build:** automatic only on a unique phone with agreeing names; everything
-  else is a candidate for the Same person review (`api/public/sameperson.js`), never an automatic
-  link. A balance with no link renders absent with its reason, never 0; it is a named driver's money
-  (EARN or CASH in `api/access/manifest.json`).
+- **As built (FIX-STATUS YC).** Read every six hours (`YOCHARGE_CRON`, `17 */6 * * *` Dubai) with the
+  key (secret) and the tenant client id stored as settings — Settings › "Charging (PowerDrive)" — and
+  on demand from Settings › "Read PowerDrive charging now". **Automatic only on a unique phone with
+  agreeing names** (the six conditions are in the module's header); every other possible match is a
+  candidate with its reason in "Wallets to confirm" on the Charging page, confirmed or refused by a
+  holder of `identity.decide` — the people who decide same-person pairs — and never by a run. A
+  balance with no link renders absent with its reason, never 0. In `api/access/manifest.json` a
+  balance is CASH, a phone CT (last three digits only), a review reason MRG. **A stranger is not
+  kept:** every customer is read, because a link is judged against all of them, then anyone in none
+  of our fleet groups, matching none of our people at any tier and with no session stored is
+  deleted (`pruneStrangers`) — the count read is kept, not the rows. **Sessions:** only watched
+  customers' (our fleet groups + linked), from the last day read (a missed run is caught up, up to
+  31 days back) plus each watched customer's whole history once, 150 customers a run. A charge is
+  put on a car by its own plate, else the only car its linked driver drove that Dubai day, else the
+  booking nearest its start; the basis is stored on the row and every count says it.
 - **NEVER CALL** (they move money, interrupt a live charge, or may rotate the token):
   `/open/v1/payments/wallet-transaction/` (credit/debit), `/open/v1/remote-action/` and
   `/v3/transactions/{id}/stop-transaction/` (start/stop a charge), `/v3/transactions/` POST,
@@ -947,6 +965,18 @@ Measured on production 2026-09-07, the first build under the v67 rule:
 driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
+
+* **A working PowerDrive key reads as dead on YoCharge's global host** (2026-11-03, COVERAGE
+  "YoCharge / PowerDrive"). `api.yocharge.com` answers `{"detail":"Token does not exist."}` to a
+  key that works: PowerDrive's tenant lives on `api.mena.yocharge.com` and needs its `client-id`
+  header beside `Authorization: Token …`. Both were found in the `cpms.powerdrive.ae` portal's own
+  bundle. Before calling a YoCharge key dead, try the MENA host with the tenant id.
+* **PowerDrive's `units_consumed` is watt-hours, not kWh** (2026-11-03). Read as kWh, every charge
+  is a thousand times too big (a 709-second session reads 10,335 kWh). `sessionRow` divides by
+  1,000; `test/yocharge.test.mjs` holds it.
+* **PowerDrive's customer list times out above ~50 a page** (2026-11-03). `page_size=1000` and
+  `=200` die at the host's 60-second gateway with a 504 (about 0.37 s of server time a customer).
+  40 a page is safe: ~84 pages, ~20 minutes for the full 3,323 — which is why it has its own cron.
 
 * **`jwtPayload` (src/util.js) reads the second dot-separated part of ANY
   string** (found 2026-11-03, FIX-STATUS EXP). A cookie jar whose dated token

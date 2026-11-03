@@ -9153,6 +9153,7 @@ V.settings = async (root) => {
     <button class="btn sec" id="runProbe">Describe every provider API</button>
     <button class="btn sec" id="runAnalyst">Run the analyst</button>
     <button class="btn sec" id="runFares">Fetch Uber fares (last 2 days)</button>
+    <button class="btn sec" id="runCharging">Read PowerDrive charging now</button>
     <span class="note" id="setNote"></span>`;
   credP.body.append(actions);
   const note = actions.querySelector('#setNote');
@@ -9184,6 +9185,10 @@ V.settings = async (root) => {
     runBack: ['backfill', 'backfill queued — this pulls up to 12 months and takes a while'],
     runProbe: ['probe', 'probe queued — it describes every provider surface and stores the shape'],
     runAnalyst: ['analyst', 'analyst queued — it costs one model call and judges its own claims'],
+    /* PowerDrive's customers, wallets and sessions (src/sources/yocharge.js),
+       outside its six-hourly schedule — the first read after its key and
+       client id are saved, above all. */
+    runCharging: ['charging', 'PowerDrive read queued — every customer and wallet, then the sessions; a full read takes about twenty minutes'],
   };
   /* Its own route, with no admin token (the operator, 2026-10-07): see
      POST /api/uber/fares/run in api/server.js. */

@@ -4134,6 +4134,9 @@ export async function renderDriverDirectory(root) {
   root.append(tblP.panel);
   loading(tblP.body); loading(grid);
 
+  /* PowerDrive's wallets, read beside the directory rather than after it —
+     the directory is the slow request here, so this one is free. */
+  const walletsP = qAll('/api/charging/wallets').catch((e) => ({ _err: e }));
   const rows = (await qAll('/api/drivers/directory')).map((r) => ({
     ...r,
     /* TRUE OR NOTHING, never false.
@@ -4158,6 +4161,32 @@ export async function renderDriverDirectory(root) {
      means "47th busiest of 361" has to be fixed to the person, not to the row
      they happen to be occupying. */
   rows.forEach((r, i) => { r._rank = i + 1; });
+  /* THE CHARGING WALLET, joined on the PERSON.
+     ─────────────────────────────────────────────────────────────────────
+     A PowerDrive wallet is linked to a person (api/charging_routes.js: by a
+     mobile only they and one PowerDrive customer hold, or by a person's
+     confirmation), so it joins the rows the spine placed — person_id — and
+     no other. Two wallets on one person are added together and say so. A
+     fleet-wallet driver charges against the company's limit, so their figure
+     is what is left of it, tagged. No link reads a dash with its reason,
+     never AED 0, and before PowerDrive has been read at all the column takes
+     itself off the table with the reason the route gives. */
+  const wallets = await walletsP;
+  const walletBy = new Map();
+  for (const w of (wallets && !wallets._err && !wallets.why && Array.isArray(wallets.rows) ? wallets.rows : [])) {
+    const k = String(w.person_id);
+    const o = walletBy.get(k) || { balance: 0, fleet: null, n: 0 };
+    o.balance += w.balance || 0; o.n += 1;
+    if (w.using_fleet_wallet) o.fleet = (o.fleet || 0) + (w.fleet_limit_available || 0);
+    walletBy.set(k, o);
+  }
+  for (const r of rows) {
+    const w = r.person_id != null ? walletBy.get(String(r.person_id)) : null;
+    r._cw = w || null;
+    r.charging_wallet = w ? Math.round((w.fleet != null ? w.fleet : w.balance) * 100) / 100 : null;
+  }
+  const walletAbsent = wallets?._err ? `the charging wallets could not be read: ${wallets._err.message}`
+    : wallets?.why || 'no PowerDrive charging wallet is linked to anybody on this list';
   const active = rows.filter((r) => r.active_in_window);
   const idle = rows.filter((r) => !r.active_in_window && r.ever_driven);
   const never = rows.filter((r) => !r.ever_driven);
@@ -4418,6 +4447,16 @@ export async function renderDriverDirectory(root) {
         ? `${money(r.revenue)}${r.priced_trips != null
           ? `<span class="dim" title="bookings of theirs that report a fare"> · ${fmt(r.priced_trips)}</span>` : ''}`
         : `<span class="ent-off" title="${UBER_FARE_WHY}. Until this week is collected the money for it is in Paid">—</span>`) },
+    { label: 'Charging wallet', key: 'charging_wallet', num: true, absent: walletAbsent,
+      render: (r) => {
+        const w = r._cw;
+        if (!w) return '<span class="ent-off" title="no PowerDrive charging wallet is linked to this person">—</span>';
+        if (w.fleet != null) {
+          return `${money(w.fleet)}<span class="dim" title="charges against the company’s fleet limit — this is what is left of it"> · fleet</span>`;
+        }
+        return `<span class="${w.balance < 0 ? 'bad' : ''}" title="${w.balance < 0 ? 'below zero: owing PowerDrive for charging already done' : 'as PowerDrive holds it'}">${money(w.balance)}</span>`
+          + (w.n > 1 ? `<span class="dim" title="two PowerDrive accounts are linked to this person; added together"> · ${w.n} wallets</span>` : '');
+      } },
     /* The verdict in the CELL, at the same thresholds the driver page's own
        tile has always used. 434 rows of bare percentages give a reader nothing
        to scan for; the whole reason to open this table is to find the people

@@ -69,6 +69,7 @@ const ARGS = {
   '/api/corporate/property': 'id=p-marina', '/api/corporate/leakage': 'kind=complimentary',
   '/api/corporate/approach': 'by=driver', '/api/tiers/mix': 'by=daypart',
   '/api/day': 'day=2026-08-05', '/api/slot': 'dow=2&hour=19',
+  '/api/charging/driver': 'person=1', '/api/charging/vehicle': `plate=${PLATES[0]}`,
 };
 
 const mockSrc = readFileSync('mockapi.mjs', 'utf8');

@@ -354,4 +354,8 @@ export const SCHEMA_FILES = [
      token (its setting and its expiry), so a restart never repeats one and a
      fresh paste is warned about again (api/alerts.js expiryTick). */
   'schema_v112.sql',
+  /* v113: charging from PowerDrive (YoCharge) — its customers and their
+     wallets, the reviewed links to our people, and our customers' charging
+     sessions (src/sources/yocharge.js). */
+  'schema_v113.sql',
 ];
