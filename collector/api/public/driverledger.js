@@ -35,7 +35,7 @@
    Retention is twelve months and the entry is permanent, so collapsing those
    makes an expired photograph read as an entry nobody ever documented. */
 import { el, esc, panel, note, loading, tableFrom, kpiRow, empty, countOf,
-  contract, glance, bandTiles, pageFoot } from './ui.js';
+  contract, glance, bandTiles, pageFoot, dtStr, fmt } from './ui.js';
 import { api, qAll, windowLabel } from './data.js';
 import { aed } from './deposit_core.js';
 
@@ -87,6 +87,69 @@ function moneyTiles(tiles, reasons = {}) {
   return g;
 }
 
+/* THE CHARGING WALLET — PowerDrive, linked to this person.
+   ─────────────────────────────────────────────────────────────────────────
+   The operator, 2026-11-03: "show charging wallet balance for the drivers that
+   we have … we need to be very precise". A POSITION like the tiles above it:
+   what the wallet holds as of PowerDrive's last read, whatever the toolbar
+   says, so it is read through a bare api() and its thirty days are its own.
+   A wallet is linked to a PERSON (api/charging_routes.js), never to one
+   platform account, so an account nobody has placed on a person cannot have
+   one — and says so, instead of reading AED 0. A driver on the company's
+   fleet wallet charges against what is left of its limit, not their own
+   balance; both are shown and the first is named. */
+const PD_BASIS = { session_plate: 'its own plate', only_car: 'the only car driven within 12 hours', nearest_trip: 'the nearest booking',
+  no_trip: 'no car driven within 12 hours', no_link: 'not linked' };
+async function chargingWallet(host, prof) {
+  host.innerHTML = '';
+  if (prof?.person_id == null) {
+    host.append(note('No charging wallet can be shown: this account has not been placed on a person, and a PowerDrive '
+      + 'wallet is linked to a person, never to one platform account.', 'warn'));
+    return;
+  }
+  let c;
+  try { c = await api(`/api/charging/driver?person=${encodeURIComponent(prof.person_id)}`); }
+  catch (e) { host.append(note(`The charging wallet could not be read: ${e.message}`, 'bad')); return; }
+  if (c?.why) { host.append(note(c.why, 'warn')); return; }
+  if (!Array.isArray(c?.wallets) || !c.wallets.length) { host.append(note('The charging wallet could not be read: the answer was not the shape this page reads.', 'bad')); return; }
+  if (c.failed) {
+    host.append(note(`The last PowerDrive read failed at ${dtStr(c.failed.at)} Dubai — ${c.failed.error}. `
+      + `${c.synced_at ? `This is as of the last good read, ${dtStr(c.synced_at)}.` : 'Nothing has been read successfully yet.'}`, 'warn'));
+  }
+  const tiles = c.wallets.map((w) => (w.using_fleet_wallet
+    ? { label: 'Fleet charging limit left', value: w.fleet_limit_available == null ? '—' : aed(w.fleet_limit_available),
+      sub: w.fleet_limit_available == null ? 'on the fleet wallet; PowerDrive states no limit left'
+        : `charges against ${w.fleet_group || 'the fleet'}\u2019s company limit; own wallet ${w.balance == null ? 'none' : aed(w.balance)}` }
+    : { label: 'Charging wallet balance', value: w.balance == null ? '—' : aed(w.balance),
+      sub: w.balance == null ? 'the PowerDrive account carries no personal wallet'
+        : w.balance < 0 ? 'below zero: owing PowerDrive for charging already done'
+          : `as PowerDrive holds it${w.hold_amount ? `, ${aed(w.hold_amount)} on hold` : ''}` }));
+  const l = c.last_30_days || { charges: 0, kwh: 0, cost: null, cost_unknown: 0 };
+  /* Until this driver's whole history has been read (150 customers a run),
+     the count is what has been read so far, and says so. */
+  tiles.push({ label: c.history_read === false ? 'Charges, last 30 days (so far)' : 'Charges, last 30 days', value: fmt(l.charges),
+    sub: `${fmt(l.kwh)} kWh, ${l.cost == null ? 'no amount stated' : `${aed(l.cost)} paid`}`
+      + `${l.cost_unknown && l.cost != null ? ` (${fmt(l.cost_unknown)} without an amount)` : ''}`
+      + `${c.history_read === false ? ' — the full history is still being read' : ''}` });
+  host.append(moneyTiles(tiles));
+  if (c.recent?.length) {
+    host.append(tableFrom(c.recent, [
+      { label: 'When', key: 'started_at', render: (r) => esc(dtStr(r.started_at)) },
+      { label: 'kWh', key: 'kwh', num: true, render: (r) => esc(fmt(r.kwh)) },
+      { label: 'Paid', key: 'cost', num: true, render: (r) => (r.cost == null ? '<span class="ent-off" title="PowerDrive states no amount for this charge">—</span>' : esc(aed(r.cost))) },
+      { label: 'Minutes', key: 'minutes', num: true },
+      { label: 'Site', key: 'site', render: (r) => esc(r.site || '—') },
+      { label: 'Car', key: 'plate', render: (r) => (r.plate ? `${esc(r.plate)} <span class="dim">· ${esc(PD_BASIS[r.plate_basis] || '')}</span>`
+        : `<span class="dim">${esc(PD_BASIS[r.plate_basis] || 'not yet worked out')}</span>`) },
+    ], { cards: true, cardLead: 'started_at' }));
+  }
+  host.append(el('p', 'cap', esc(`From PowerDrive, last read ${c.synced_at ? dtStr(c.synced_at) : '—'}. `
+    + (c.recent?.length && c.charges_total > c.recent.length ? `The ${fmt(c.recent.length)} most recent of ${fmt(c.charges_total)} charges on record. ` : '')
+    + (c.wallets.some((w) => w.tier === 'confirmed') ? 'The link to this person was confirmed by a person. '
+      : 'Linked automatically: the mobile on the PowerDrive account belongs to this person and to nobody else on either side, and the names share a word. ')
+    + 'Only PowerDrive’s chargers are seen.')));
+}
+
 export async function renderDriverLedger(root, id, prof) {
   root.innerHTML = '';
   const head = panel('Where they stand', null, 'driver-money');
@@ -113,10 +176,13 @@ export async function renderDriverLedger(root, id, prof) {
      tell which half moved when they changed the window has two figures that
      appear to contradict each other. */
   const regPanel = panel(`Statement for ${windowLabel()}`, null, 'driver-money-register');
-  root.append(head.panel, winP.panel, regPanel.panel);
+  const pdP = panel('Charging wallet — PowerDrive', null, 'driver-charging');
+  root.append(head.panel, pdP.panel, winP.panel, regPanel.panel);
   loading(head.body);
+  loading(pdP.body);
   loading(winP.body);
   loading(regPanel.body);
+  chargingWallet(pdP.body, prof).catch((e) => { pdP.body.innerHTML = ''; pdP.body.append(note(`The charging wallet could not be drawn: ${e.message}`, 'bad')); });
 
   /* The account this page is addressed by, and the platform if the profile
      names one — sent together so an id that two providers both use resolves to

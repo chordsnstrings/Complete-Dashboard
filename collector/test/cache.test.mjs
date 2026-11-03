@@ -33,6 +33,8 @@ app.get('/api/live/now', (_q, res) => { calls++; res.json({ n: calls }); });
 /* The two a reviewer's own click changes, rather than a collection run. */
 app.get('/api/same-person', (_q, res) => { calls++; res.json({ n: calls }); });
 app.get('/api/drivers/identity-links', (_q, res) => { calls++; res.json({ n: calls }); });
+/* PowerDrive's wallets and their queue, answered by a click on #charging. */
+app.get('/api/charging/wallets', (_q, res) => { calls++; res.json({ n: calls }); });
 /* The credential banner, which a Settings save rewrites (api/save_check.js). */
 app.get('/api/auth', (_q, res) => { calls++; res.json({ n: calls }); });
 app.post('/api/thing', (_q, res) => { calls++; res.json({ n: calls }); });
@@ -99,7 +101,7 @@ check('a realtime route is never cached, however cacheable it looks',
 
    Asserted on both, because they read the same verdict and the links page
    would go stale in exactly the same way. */
-for (const path of ['/api/same-person', '/api/drivers/identity-links']) {
+for (const path of ['/api/same-person', '/api/drivers/identity-links', '/api/charging/wallets']) {
   const a = await get(path);
   const b = await get(path);
   check(`${path} is never cached — a verdict must show on the next read`,

@@ -82,7 +82,22 @@ check('the spine starts with the yango account on its own person',
   `${(await q(`SELECT count(DISTINCT driver_id)::int n FROM driver_platform_id WHERE external_id IN ('W-UBER','W-BOLT','W-YANGO')`))[0].n} persons`);
 
 /* ── 1. THE ASSERTION THIS FILE EXISTS FOR ──────────────────────────────── */
+/* A PowerDrive charging decision about the yango account's own person
+   (src/charging_links.js, 2026-11-03) must follow the fold, or a refusal
+   becomes an automatic link on the next charging run. */
+const yangoPerson = (await q(`SELECT driver_id::text AS id FROM driver_platform_id WHERE external_id = 'W-YANGO'`))[0].id;
+await q(`INSERT INTO charging_link (yc_user_id, person_id, tier, decided_by) VALUES ('yc-fold', $1, 'refused', 'ahsan')`, [yangoPerson]);
 const yes = await decide('W-YANGO', 'same');
+{
+  const survivorId = (await q(`SELECT driver_id::text AS id FROM driver_platform_id WHERE external_id = 'W-YANGO'`))[0].id;
+  const pd = await q(`SELECT person_id::text AS p, tier FROM charging_link WHERE yc_user_id = 'yc-fold'`);
+  check('a PowerDrive decision about a folded person follows the fold to the survivor',
+    pd.length === 1 && pd[0].tier === 'refused' && pd[0].p === survivorId && (survivorId !== yangoPerson
+      || (await q(`SELECT count(*)::int n FROM driver WHERE id = $1`, [yangoPerson]))[0].n === 1), JSON.stringify([pd, survivorId, yangoPerson]));
+  /* REVERSION (run 2026-11-03): followPersonFold not called by
+     foldComponent -> this check fails when the yango person is the one
+     folded away (the refusal left on a deleted id). */
+}
 check('confirming folds the component in the SAME request',
   (await q(`SELECT count(DISTINCT driver_id)::int n FROM driver_platform_id
              WHERE external_id IN ('W-UBER','W-BOLT','W-YANGO')`))[0].n === 1,

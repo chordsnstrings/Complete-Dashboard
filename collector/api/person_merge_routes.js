@@ -31,6 +31,7 @@
    survivor's entries used to belong to somebody else. */
 import { signedInActor } from './access/actor.js';
 import { mergedIds } from './identity_map.js';
+import { followPersonFold } from '../src/charging_links.js';
 
 const SUPERVISORS = ['ahsan', 'haseeb', 'hossam', 'shohaib'];
 
@@ -109,6 +110,9 @@ export function personMergeRoutes(app, { q, wrap, tx }) {
               + 'the accounts listed above',
           })]);
 
+      /* A PowerDrive charging decision about the dropped person follows them
+         (src/charging_links.js), inside this transaction. */
+      await followPersonFold(tq, keep, [drop]);
       /* The dropped row goes only once nothing points at it. */
       await tq(`DELETE FROM driver WHERE id = $1`, [drop]);
       return { moved: moving.length,

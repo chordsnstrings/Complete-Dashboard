@@ -324,12 +324,84 @@ See `test/platform_flags_truth.test.mjs`.
 
 ---
 
+## YoCharge / PowerDrive (charging) — integrated 2026-11-03 (`src/sources/yocharge.js`, FIX-STATUS YC)
+
+The operator: "this is charging api for the complete charging system … Let's find out a way to
+show charging wallet balance for the drivers that we have. the name match might be different so we
+need to be very precise before we incorporate anything into production." A schema was supplied
+(OpenAPI 3.0.3, 25 paths, `servers: []`) and keys (`yc-napi-…`, 47 characters — held outside the
+repository, never in it). Investigated read-only: **GET requests only**.
+
+- **The fleet's charging operator is PowerDrive, a white label of YoCharge** (portal
+  `cpms.powerdrive.ae`), and it runs on **YoCharge's MENA region: `https://api.mena.yocharge.com`**,
+  not the global `api.yocharge.com` — both keys were refused there ("Token does not exist."), which
+  read like a dead key and was the wrong host. The host and PowerDrive's tenant `client-id` are in
+  the portal's own code (its axios instance); `Authorization: Token <key>` plus that `client-id`
+  answers 200. Django REST Framework; no rate-limit headers seen.
+- **`GET /open/v1/users?role=END_USER`: 3,323 users** (all of PowerDrive's customers, not only
+  ours). **Pages over ~50 time out** (504 at the 60-second gateway; about 0.37 s of server time per
+  user), so a full read is ~84 pages of 40, about 20 minutes. No filter but name, id and a
+  created-at range. Each user: `name`, `email`, `mobile_number` + `mobile_country_code`,
+  `fleet_group`, `is_using_fleet_wallet`, `fleet_limit` / `fleet_limit_available` /
+  `fleet_limit_used`, `vehicles`, `last_charging_session`, and `wallets[]` (`type` PERSONAL,
+  `balance`, `hold_amount`, `custom_credit_limit`).
+- **Currency is AED** — named on each transaction's `payment` (`/open/v1/mini-transactions/`, 415,422
+  sessions across all of PowerDrive with energy, duration, payment and user). The wallet itself names
+  no currency.
+- **Sessions, measured 2026-11-03:** the day feed `/open/v1/mini-transactions/?start_date&end_date`
+  carries every PowerDrive customer's sessions, ~470 a day. **`units_consumed` is watt-hours** —
+  10,335 for a 709-second session that cost AED 12.40 before VAT, i.e. 10.3 kWh at ~AED 1.20 — and
+  `duration` / `charging_duration` are seconds (equal to stop − start). One customer's whole history
+  is `/v3/mini-transactions/?user_id=`: 1.2–1.5 s a customer, and only that customer's rows (three
+  customers checked). PowerDrive rarely knows the car: of the 142 vehicles our fleet-group customers
+  registered, 34 carried a number and 15 equalled one of our plates.
+- **Our fleets are fleet groups there:** `ecofleet` 104 users, `egari` 47, `ecofleet investor fleet`
+  5. A fleet-wallet driver (27 of ours) charges against `fleet_limit_available`, not their own
+  balance.
+- **No external id on a user** (`external_meta_data` is on transactions only), so a user is matched
+  to one of our people by phone, email or name only.
+- **The match, measured 2026-11-03** (our 294 people on the compliance spine, 280 with a UAE mobile,
+  normalised by `src/smsala.js uaeMobile()`; 111 active — a trip in the last 8 days):
+  - phone held by exactly one of our people and one user: 214; **with the names sharing at least one
+    word too: 198 — 78 of the 111 active.** The 16 whose names share no word are not automatic.
+  - review, distinct people: **73** (29 active) — numbers held by more than one person on either
+    side (16 numbers), a person matching two users (20), email-only (31), name-only (5), and the 16
+    above. Plus 31 users in our fleet groups that match none of our phones.
+  - active with no trace in YoCharge at all: 4.
+  - the 198's wallets: 136 non-zero, AED 22,907.30 in all; 40 of all matched slightly negative
+    (lowest −48.44); 26 on the fleet wallet.
+- **As built (FIX-STATUS YC).** Read every six hours (`YOCHARGE_CRON`, `17 */6 * * *` Dubai) with the
+  key (secret) and the tenant client id stored as settings — Settings › "Charging (PowerDrive)" — and
+  on demand from Settings › "Read PowerDrive charging now". **Automatic only on a unique phone with
+  agreeing names** — a distinctive shared word, or two ordinary ones; never a particle or one of the
+  commonest given names alone — and a UAE mobile by its own country code (the conditions are in the
+  module's header; **192 automatic** on the 2026-11-03 read, 78 of the week's 111 active drivers);
+  every other possible match is a
+  candidate with its reason in "Wallets to confirm" on the Charging page, confirmed or refused by a
+  holder of `identity.decide` — the people who decide same-person pairs — and never by a run. A
+  balance with no link renders absent with its reason, never 0. In `api/access/manifest.json` a
+  balance is CASH, a phone CT (last three digits only), a review reason MRG. **A stranger is not
+  kept:** every customer is read, because a link is judged against all of them, then anyone in none
+  of our fleet groups, matching none of our people at any tier and with no session stored is
+  deleted (`pruneStrangers`) — the count read is kept, not the rows. **Sessions:** only watched
+  customers' (our fleet groups + linked), from the last day read (a missed run is caught up, up to
+  31 days back) plus each watched customer's whole history once, 150 customers a run; a customer who
+  stops being ours loses their sessions and is read again if they return. A charge is put on a car
+  by its own plate, else the only car its linked driver drove within 12 hours of it, else the
+  booking nearest its start; the basis and the person it was worked out with are stored on the row,
+  so a changed link redoes it.
+- **NEVER CALL** (they move money, interrupt a live charge, or may rotate the token):
+  `/open/v1/payments/wallet-transaction/` (credit/debit), `/open/v1/remote-action/` and
+  `/v3/transactions/{id}/stop-transaction/` (start/stop a charge), `/v3/transactions/` POST,
+  `/open/v1/add-new-user/` and its `/login/` ("Login / Renew Token"), and every POST/PUT/PATCH/
+  DELETE on favourite lists, support tickets and properties.
+
 ## Credentials, and what shape each one is
 
 | credential | shape | consequence |
 |---|---|---|
 | Uber driver photo URL | CloudFront pre-signed, **exactly 12 h** (43,200 s, two runs agreeing to 0.1 s) | never store the URL — store the bytes. `sql/schema_v63.sql` |
-| Bolt refresh token | JWT, **7-day** life (`iat`→`exp`), carries `fleet_owner_id` | a weekly human paste is a scheduled outage; check whether it rotates on use before storing one in an env var |
+| Bolt refresh token | JWT, **7-day** life (`iat`→`exp`), carries `fleet_owner_id` | a weekly human paste is a scheduled outage; check whether it rotates on use before storing one in an env var. Since 2026-11-03 a push goes out 24 h before its `exp` (api/alerts.js expiryTick) |
 | Yango | park id + API key on fleet-api.yango.tech (trips, roster, cars, ledger); park id + Yandex session cookie on the console (the weekly summary only) | read the console's answer, not its status: an HTML page is Yandex's edge refusing this server before the session is read (cookie **not checked**), JSON 401 is a signed-out session, JSON 403 is the park refused. "403 with the cookie, 401 without" was read as "the cookie is accepted" until 2026-09-29 — it is two different machines answering (trap 32) |
 | Uber timeline window | Uber refuses >31 days; the collector cuts at 30 | `MAX_WINDOW_DAYS` in `src/sources/uber_timeline.js` |
 
@@ -898,6 +970,36 @@ Measured on production 2026-09-07, the first build under the v67 rule:
 driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
+
+* **A table keyed on a person id must follow person folds** (2026-11-03, FIX-STATUS YC13). Three
+  paths fold `driver` rows into one and DELETE the others — `src/persons.js` (twice: the spine's
+  fold every collector pass, and `foldComponent` on a #same-person confirm) and
+  `api/person_merge_routes.js`. Anything that stores `driver.id` without a foreign key (by design: an
+  FK would block the fold) is left pointing at a deleted id unless it is moved. `charging_link` was:
+  a refusal on a folded person turned into an automatic link on the next run. Add the move to all
+  three paths (`src/charging_links.js` is the pattern) whenever a new table keys on a person.
+
+* **A working PowerDrive key reads as dead on YoCharge's global host** (2026-11-03, COVERAGE
+  "YoCharge / PowerDrive"). `api.yocharge.com` answers `{"detail":"Token does not exist."}` to a
+  key that works: PowerDrive's tenant lives on `api.mena.yocharge.com` and needs its `client-id`
+  header beside `Authorization: Token …`. Both were found in the `cpms.powerdrive.ae` portal's own
+  bundle. Before calling a YoCharge key dead, try the MENA host with the tenant id.
+* **PowerDrive's `units_consumed` is watt-hours, not kWh** (2026-11-03). Read as kWh, every charge
+  is a thousand times too big (a 709-second session reads 10,335 kWh). `sessionRow` divides by
+  1,000; `test/yocharge.test.mjs` holds it.
+* **PowerDrive's customer list times out above ~50 a page** (2026-11-03). `page_size=1000` and
+  `=200` die at the host's 60-second gateway with a 504 (about 0.37 s of server time a customer).
+  40 a page is safe: ~84 pages, ~20 minutes for the full 3,323 — which is why it has its own cron.
+
+* **`jwtPayload` (src/util.js) reads the second dot-separated part of ANY
+  string** (found 2026-11-03, FIX-STATUS EXP). A cookie jar whose dated token
+  comes before every other dot — `sid=…; sp-jwt-session=eyJ….….…; csid=…` —
+  parses as a token with an expiry. The Settings page's `expiry` and the
+  expiry push both rest on it; the push now requires a JWT AS A WHOLE (three
+  base64url parts, nothing else), and production's Uber jar reads `expiry:
+  null` today only because another cookie's dot comes first. Before trusting
+  an expiry read off a credential, check the value is a token and not a jar —
+  and remember the Uber jar's dated token is not the session anyway.
 
 * **"Cars that earned" is one figure in three places, and the per-car money
   columns are three different figures (found 2026-10-29, CLS).** The target's

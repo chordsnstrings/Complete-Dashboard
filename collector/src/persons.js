@@ -52,6 +52,7 @@ import { pool } from './db.js';
 import { log } from './log.js';
 import { mergedIds, canonicalName } from '../api/identity_map.js';
 import { identityLinks, linkedIds, clearIdentityLinkCache } from '../api/identity_links.js';
+import { followPersonFold } from './charging_links.js';
 
 /* Every account this fleet knows of, from the three tables that file one.
    trip is included because 302 accounts appear ONLY there — a driver who took
@@ -166,6 +167,8 @@ export async function foldComponent(db, extId, { dryRun = false } = {}) {
   await q(
     `UPDATE driver_platform_id SET driver_id = $1
       WHERE driver_id = ANY($2::bigint[]) AND detached_at IS NULL`, [survivor, gone]);
+  /* A PowerDrive decision about a folded row follows it (src/charging_links.js). */
+  await followPersonFold(q, survivor, gone);
   await q(`DELETE FROM driver WHERE id = ANY($1::bigint[])`, [gone]);
   return { folded: gone.length, persons: persons.length, survivor,
     accounts: mapped.length };
@@ -284,6 +287,8 @@ export async function refreshPersons(db = pool, { dryRun = false } = {}) {
         await q(
           `UPDATE driver_platform_id SET driver_id = $1
             WHERE driver_id = ANY($2::bigint[]) AND detached_at IS NULL`, [survivor, gone]);
+        /* …and any PowerDrive decision about it (src/charging_links.js). */
+        await followPersonFold(q, survivor, gone);
         /* Safe to remove: it now holds no account and has never held an
            entry, both just checked. A person row nothing references is a
            duplicate of the survivor, and leaving it would put the count this

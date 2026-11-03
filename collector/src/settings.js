@@ -51,6 +51,16 @@ export const SETTING_DEFAULTS = {
   CABMAN_EGARI_ID: '81',
   CABMAN_EGARI_USER: 'Egari_Luxury_Cars_Integration',
   CABMAN_CRON: '*/5 * * * *',
+  /* Charging (src/sources/yocharge.js): PowerDrive's customers live on
+     YoCharge's MENA region, not the global host — the global one answers
+     "Token does not exist." to a working key (docs/COVERAGE.md "YoCharge"). */
+  YOCHARGE_HOST: 'https://api.mena.yocharge.com',
+  /* Every six hours, at 17 past, off the half-hour runs: a full read of the
+     customers takes ~20 minutes at the host's pace. */
+  YOCHARGE_CRON: '17 */6 * * *',
+  /* PowerDrive's names for our fleets there (measured 2026-11-03: ecofleet
+     104 customers, egari 47, ecofleet investor fleet 5). */
+  YOCHARGE_FLEET_GROUPS: 'ecofleet,egari,ecofleet investor fleet',
   /* Uber's fares, hourly at five past — src/run.js fareRefresh says why. Five
      past so it queues behind the :00 incremental and lands before the :15
      rollup; hourly because Uber publishes a ride's fare hours after it and
@@ -343,6 +353,20 @@ export const SETTING_DEFS = [
      is EMEA, which Tesla routes through `eu`. Kept as a setting rather than a
      constant because the fleet could be re-homed and because getting it wrong
      produces an authentication error that reads like a bad secret. */
+  /* CHARGING — PowerDrive (a YoCharge white label). The key is minted on the
+     portal's API-keys page (cpms.powerdrive.ae/api-keys); the client id is
+     PowerDrive's tenant id, the one its own portal sends with every request.
+     Read-only: src/sources/yocharge.js can only send GET. */
+  { key: 'YOCHARGE_API_KEY', group: 'Charging (PowerDrive)', label: 'API key', secret: true,
+    hint: 'From the PowerDrive portal\u2019s API keys page. Read-only use: the collector only ever reads users, wallets and sessions.' },
+  { key: 'YOCHARGE_CLIENT_ID', group: 'Charging (PowerDrive)', label: 'Client id (tenant)', secret: false,
+    hint: 'PowerDrive\u2019s tenant id on YoCharge, sent as the client-id header beside the key.' },
+  { key: 'YOCHARGE_HOST', group: 'Charging (PowerDrive)', label: 'API host', secret: false,
+    hint: 'YoCharge\u2019s MENA region. The global host refuses a working PowerDrive key.' },
+  { key: 'YOCHARGE_FLEET_GROUPS', group: 'Charging (PowerDrive)', label: 'Our fleet groups at PowerDrive', secret: false,
+    hint: 'Comma-separated. Their customers\u2019 sessions are kept and a name-only match among them is offered for review.' },
+  { key: 'YOCHARGE_CRON', group: 'Collector', label: 'Charging schedule (cron)', secret: false,
+    hint: 'A full read of PowerDrive\u2019s customers takes ~20 minutes at its pace; every six hours is the default.' },
   { key: 'TESLA_REGION', group: 'Tesla', label: 'Fleet API region', secret: false,
     hint: 'eu for the Middle East, na for the Americas and Asia-Pacific, cn for China' },
   { key: 'TESLA_CRON', group: 'Collector', label: 'Tesla schedule (cron)', secret: false,

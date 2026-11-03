@@ -97,8 +97,17 @@ check('with both people still there afterwards',
   (await q(`SELECT count(*)::int n FROM driver`))[0].n === 2 && await bal(2) === 300);
 
 /* ── the merge ───────────────────────────────────────────────────────────── */
+/* A PowerDrive charging decision about the dropped person (src/charging_links.js,
+   2026-11-03): a refusal must reach the survivor, or the next run links that
+   customer to them automatically. */
+await q(`INSERT INTO charging_link (yc_user_id, person_id, tier, decided_by) VALUES ('yc-merge', 2, 'refused', 'ahsan')`);
 const done = await post({ keep: 1, drop: 2, by: 'ahsan',
   why: 'same phone and the same car on 119 days', dry_run: false });
+const pd = await q(`SELECT person_id::text AS p, tier FROM charging_link WHERE yc_user_id = 'yc-merge'`);
+check('a PowerDrive decision about the dropped person moves to the survivor inside the merge',
+  pd.length === 1 && pd[0].p === '1' && pd[0].tier === 'refused', JSON.stringify(pd));
+/* REVERSION (run 2026-11-03): followPersonFold not called by the merge ->
+   this check fails (the refusal left on person 2, who is gone). */
 check('the merge reports what it moved', done.body.moved_entries === 2
   && done.body.moved_amount === 300, JSON.stringify(done.body).slice(0, 200));
 

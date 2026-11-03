@@ -447,6 +447,287 @@
  },
  {
   "method": "GET",
+  "path": "/api/charging/driver",
+  "subject": "CASH",
+  "carries": [
+   "CASH",
+   "ID",
+   "LOC",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "person_id",
+     "wallets[].yc_user_id"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "wallets[].balance",
+     "wallets[].hold_amount",
+     "wallets[].fleet_limit_available",
+     "last_30_days.cost",
+     "recent[].cost"
+    ]
+   },
+   {
+    "class": "VEH",
+    "paths": [
+     "recent[].plate"
+    ]
+   },
+   {
+    "class": "LOC",
+    "paths": [
+     "recent[].site"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "synced_at",
+     "status",
+     "error",
+     "failed",
+     "customers",
+     "customers_read",
+     "wallets_at"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/charging_routes.js. PowerDrive (YoCharge white label) read by src/sources/yocharge.js every six hours. ?person=<driver.id>. Body {person_id, synced_at, status, error, customers, wallets_at, currency, why (null, or why no wallet is shown: PowerDrive not read / no wallet linked), wallets[] {yc_user_id, tier auto|confirmed, balance, hold_amount, using_fleet_wallet, fleet_limit_available, fleet_group, last_session_at}, last_30_days {charges, kwh, cost}, charges_total (all ever, so a cut recent list says so), recent[] (20) {started_at, kwh, cost, plate, plate_basis, site, minutes}}. A wallet balance is a named driver's money: CASH. A charge's site with its time places the driver: LOC. Read by the driver money tab (api/public/driverledger.js chargingWallet). 'mixed': a person's record across both fleets, no fleet on the rows."
+ },
+ {
+  "method": "GET",
+  "path": "/api/charging/sessions",
+  "subject": "VEH",
+  "carries": [
+   "CASH",
+   "ID",
+   "LOC",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "VEH",
+    "paths": [
+     "vehicles[].plate"
+    ]
+   },
+   {
+    "class": "ID",
+    "paths": [
+     "drivers[].person_id",
+     "drivers[].name"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "totals.cost",
+     "vehicles[].cost",
+     "drivers[].cost",
+     "days[].cost"
+    ]
+   },
+   {
+    "class": "LOC",
+    "paths": [
+     "sites[].site"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "synced_at",
+     "status",
+     "error",
+     "failed",
+     "customers",
+     "customers_read",
+     "wallets_at"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/charging_routes.js. PowerDrive (YoCharge white label) read by src/sources/yocharge.js every six hours. Window from winDays (from/to, period, days; nothing sent = the last 30 days). Body {from, to, synced_at, status, error, customers, wallets_at, why, currency, totals {sessions, charges (kWh > 0), no_energy, kwh, cost, on_a_car, basis {session_plate, only_car, nearest_trip, no_trip, no_link, not_yet}}, vehicles[] {plate, charges, kwh, cost, minutes, last_at, drivers, basis}, drivers[] {person_id, name, charges, kwh, cost, last_at, cars}, days[] {day, charges, kwh, cost}, sites[] (12) {site, charges, kwh}, sites_total}. Sites are LOC: over a narrow window they can place a named driver (the review, 2026-11-03). totals.cost is null when no charge states an amount; cost_unknown counts those the total leaves out. Read by the Charging page (api/public/charging.js drawCars)."
+ },
+ {
+  "method": "GET",
+  "path": "/api/charging/vehicle",
+  "subject": "VEH",
+  "carries": [
+   "CASH",
+   "ID",
+   "LOC",
+   "SYS",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "recent[].driver",
+     "recent[].person_id"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "cost",
+     "recent[].cost"
+    ]
+   },
+   {
+    "class": "LOC",
+    "paths": [
+     "recent[].site"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "synced_at",
+     "status",
+     "error",
+     "failed",
+     "customers",
+     "customers_read",
+     "wallets_at"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/charging_routes.js. PowerDrive (YoCharge white label) read by src/sources/yocharge.js every six hours. ?plate=, window as /api/charging/sessions. Body {plate, from, to, synced_at, status, error, customers, wallets_at, why, currency, charges, kwh, cost, last_at, basis {session_plate, only_car, nearest_trip}, recent[] (15) {started_at, kwh, cost, plate_basis, site, driver, person_id}}. Read by the vehicle page's overview (api/public/vehicle.js vehCharging)."
+ },
+ {
+  "method": "GET",
+  "path": "/api/charging/wallets",
+  "subject": "CASH",
+  "carries": [
+   "CASH",
+   "ID",
+   "SYS"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "rows[].person_id",
+     "rows[].name",
+     "rows[].yc_user_id"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "rows[].balance",
+     "rows[].hold_amount",
+     "rows[].fleet_limit",
+     "rows[].fleet_limit_available",
+     "totals.balance"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "synced_at",
+     "status",
+     "error",
+     "failed",
+     "customers",
+     "customers_read",
+     "wallets_at"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/charging_routes.js. PowerDrive (YoCharge white label) read by src/sources/yocharge.js every six hours. Body {synced_at (last ok/partial run), status, error, failed {at, status, error} when the latest run failed after a good one, customers, customers_read, wallets_at, why, currency, totals {linked_people, linked_wallets, balance (null when no wallet states one), balance_unknown, nonzero, negative, on_fleet_wallet, auto, confirmed, review, unplaced, fleet_groups_seen}, rows[] {person_id, name, tier, yc_user_id, balance, hold_amount, using_fleet_wallet, fleet_limit, fleet_limit_available, fleet_group, last_session_at, charges_30d}}. The review queue moved to /api/charging/review (2026-11-03) so the people who decide it need not hold CASH; review and unplaced here are counts only. Read by the Charging page (drawWallets) and the Drivers directory's Charging wallet column (api/public/driver.js)."
+ },
+ {
+  "method": "GET",
+  "path": "/api/charging/review",
+  "subject": "MRG",
+  "carries": [
+   "CT",
+   "ID",
+   "MRG",
+   "SYS"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "review[].person_id",
+     "review[].our_name",
+     "review[].yc_name",
+     "review[].yc_user_id",
+     "unplaced[].yc_name",
+     "unplaced[].yc_user_id"
+    ]
+   },
+   {
+    "class": "CT",
+    "paths": [
+     "review[].yc_phone",
+     "unplaced[].yc_phone"
+    ]
+   },
+   {
+    "class": "MRG",
+    "paths": [
+     "review[].reason"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "synced_at",
+     "status",
+     "error",
+     "failed",
+     "customers",
+     "customers_read",
+     "wallets_at"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/charging_routes.js. PowerDrive (YoCharge white label) read by src/sources/yocharge.js every six hours. The review queue, on its own route since the review of 2026-11-03: inside /api/charging/wallets (subject CASH) an HR officer — who holds identity.decide, the cap POST /api/charging/link needs — was refused the page holding the buttons. Body {synced_at, status, error, failed, customers, customers_read, wallets_at, why, review[] {yc_user_id, person_id, reason, yc_name, yc_phone (last three digits only), yc_fleet_group, our_name}, unplaced[] {yc_user_id, yc_name, yc_phone, yc_fleet_group}}. Read by the Charging page (drawReview)."
+ },
+ {
+  "method": "GET",
   "path": "/api/cohort/drivers",
   "subject": "ID",
   "carries": [
@@ -7383,6 +7664,31 @@
   "fleetKey": "",
   "cap": "collector.run",
   "notes": "api/server.js, beside /api/analyst/run. NOT behind requireAdmin, by the operator's ruling of 2026-10-07 (\"stop admin token check on this one\"): any caller can queue it. It queues collector_job(mode='fares', requested_by='fares-run'), which the worker runs as src/run.js fareRefresh(2): Uber's payments report for yesterday and the day before, the same pass that runs at 09:00 Dubai. Nothing it does is destructive or reads a secret: it asks Uber for prices and writes them onto trips already held. It answers 409 when a fares pass is already queued or running. Response {ok, queued:'fares', job_id, job}."
+ },
+ {
+  "method": "POST",
+  "path": "/api/charging/link",
+  "subject": "MRG",
+  "carries": [
+   "ID",
+   "MRG"
+  ],
+  "grain": "none",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "yc_user_id",
+     "person_id"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "identity.decide",
+  "notes": "api/charging_routes.js. Body {yc_user_id, person_id, decision confirm|refuse}. deciderOf: 401 unsigned, 403 without identity.decide (the same cap that decides same-person pairs). Confirming DELETEs the customer's other auto/candidate rows and upserts tier 'confirmed' with decided_by = the signed-in email; refusing upserts 'refused'. The collector never touches either tier. Answers {ok, yc_user_id, person_id, tier}."
  },
  {
   "method": "POST",

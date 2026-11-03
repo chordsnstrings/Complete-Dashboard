@@ -109,6 +109,9 @@ import { onlineHoursRoutes } from './online_hours_routes.js';
    the assistant's "historical location based on time" (2026-10-13). */
 import { whereRoutes } from './where_routes.js';
 import { samePersonRoutes } from './sameperson_routes.js';
+/* Charging from PowerDrive: wallets, the links to our people, sessions by car
+   (api/charging_routes.js over src/sources/yocharge.js). */
+import { chargingRoutes } from './charging_routes.js';
 import { registerRoutes } from './register_routes.js';
 /* Folding two people into one, and moving the money with them — the operation
    src/persons.js refuses to do by itself the moment either carries an entry. */
@@ -4326,7 +4329,7 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
 /* 'fares' is src/run.js fareRefresh(2) on demand — the 09:00 Dubai pass, for
    an operator who needs yesterday's Uber prices before the next scheduled
    one (2026-10-07: "I need the fares for yesterday. I need to check."). */
-const JOB_MODES = ['backfill', 'incremental', 'analyst', 'probe', 'timeline', 'timeline-roster', 'profile', 'audit', 'fares'];
+const JOB_MODES = ['backfill', 'incremental', 'analyst', 'probe', 'timeline', 'timeline-roster', 'profile', 'audit', 'fares', 'charging'];
 /* The fleets a run can be narrowed to. Taken from the configured Uber orgs
    rather than written down twice: a third fleet is a credential the operator
    pastes, not a code change, and a list that has to be edited alongside is a
@@ -7077,6 +7080,7 @@ whereRoutes(app, { q, wrap });
    an email merges on its own; a name that sits inside another name is a
    proposal and folds nothing until somebody answers it. */
 samePersonRoutes(app, { q, wrap });
+chargingRoutes(app, { q, wrap });
 /* The per-person transaction register — GET /api/driver/register. winDays and
    not win: every line in it is dated on a Dubai CALENDAR DAY (a trip's local
    day, a ledger entry's effective_on), so an endOfDay timestamp would compare

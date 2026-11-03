@@ -972,6 +972,9 @@ export const dialable = (raw) => {
 export const SOURCE_LABEL = {
   uber: 'Uber', yango: 'Yango', bolt: 'Bolt', hotel: 'Hotel', fms: 'FMS telematics',
   cabman: 'CABMAN',
+  /* PowerDrive's charging collector (src/sources/yocharge.js, 2026-11-03):
+     its runs and its key's state arrive under the YoCharge platform's name. */
+  yocharge: 'PowerDrive charging',
   /* The fleets are NOT here: they are named by the platforms (fleetLabel in
      access.js, from /api/auth/me), and sourceLabel() falls back to that. */
   /* A collector /api/status reports and this map had no entry for, so

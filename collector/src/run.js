@@ -18,6 +18,7 @@ import * as cabman from './sources/cabman.js';
 import * as hotel from './sources/hotel.js';
 import * as external from './sources/external.js';
 import * as events from './sources/events.js';
+import * as yocharge from './sources/yocharge.js';
 import { reconcile } from './reconcile.js';
 import { computeInsights } from './insights.js';
 import { runAnalyst } from './analyst.js';
@@ -546,6 +547,21 @@ async function uberTimelineTickPinned({ roster = false, days = 2 } = {}) {
 
    Given a job id it checkpoints per driver, so a container replaced mid-pass
    resumes at the driver it had reached rather than at the top. */
+/* Charging from PowerDrive (src/sources/yocharge.js): customers, links,
+   sessions. One at a time — a full read is ~20 minutes and two would only ask
+   the host for everything twice. */
+let chargingBusy = false;
+export async function chargingTick() {
+  if (chargingBusy) return { skipped: 'a charging run is already going' };
+  chargingBusy = true;
+  try {
+    return await withPinnedSettings(async () => { await loadSettings(); return yocharge.collect({ db: pool }); });
+  } catch (e) {
+    log.error('yocharge', 'tick failed', { err: String(e).slice(0, 200) });
+    return { error: String(e) };
+  } finally { chargingBusy = false; }
+}
+
 export async function uberProfileTick(opts) { return withPinnedSettings(() => uberProfileTickPinned(opts)); }
 async function uberProfileTickPinned({ fleet = null, jobId = null } = {}) {
   await loadSettings();

@@ -58,10 +58,15 @@
    Runs in the API process, which is one instance (as the banner's own
    reasoning assumes). What it cannot see is its own death: if the API is
    down, nothing here runs. The worker's death IS seen — every source's stall
-   clock runs out, CABMAN's first, after two hours. */
+   clock runs out, CABMAN's first, after two hours.
+
+   And a token's LAST DAY, from 2026-11-03 (expiryTick, below): a credential
+   with a stated expiry is a stop that can be seen coming, so it is pushed
+   24 hours ahead instead of announced once it has happened. */
 import { authHealth, label } from './auth_routes.js';
 import { publish as ntfyPublish } from '../src/ntfy.js';
-import { get, loadSettings } from '../src/settings.js';
+import { get, loadSettings, SETTING_DEFS } from '../src/settings.js';
+import { jwtPayload } from '../src/util.js';
 import { log as defaultLog } from '../src/log.js';
 
 export const ALERT_GAP_MS = 30 * 60e3;
@@ -266,6 +271,135 @@ export async function alertTick({
   return { sent: 1, changes: changes.length };
 }
 
+/* ── a token's last day ──────────────────────────────────────────────────
+   The operator, 2026-11-03: "for the any token refresh lets have a
+   notification about 24 hours before expiry". The banner speaks once a
+   source has STOPPED; a token with a hard, stated expiry is a stop that can
+   be seen coming. So every pass also reads each stored credential that
+   states its own expiry — a JWT's `exp`, the reading the Settings page
+   counts down (src/settings.js describeSettings, src/util.js jwtExpiry) —
+   and pushes ONE message when one enters its last EXPIRY_WARN_MS, saying
+   when it runs out and what to do.
+
+   WHICH TOKENS. On the day this was written, the two Bolt portal refresh
+   tokens (good until 7 Nov 2026, 18:06 and 18:07 Dubai): a hard 7-day life
+   that does not rotate (docs/COVERAGE.md "Credentials"), the weekly
+   re-capture that cost a morning of Bolt trips on 20 Oct when nobody looked.
+   Any credential pasted later that is a JWT with its own `exp` is watched
+   the same way, with two exceptions, each deliberate:
+     · a token that lives less than MIN_LIFETIME_MS from `iat` to `exp`
+       (Tesla's access token: about eight hours, minted by a keeper tool, not
+       re-captured by a person) is always inside its last day — a warning that
+       is always on is noise, and noise mutes the channel;
+     · the Uber session cookie. It is not a JWT as a whole, and the one dated
+       token inside it was measured NOT to be the session (api/auth_routes.js
+       header): Egari collected normally through an "expired" jwt-session. A
+       warning off that date would be false on a working fleet.
+   Cookies and keys that state no expiry (Uber's and Yango's sessions, the
+   hotel tokens) cannot be warned about ahead: when one is refused, the
+   banner's "Stopped" above is the message.
+
+   ONCE PER TOKEN. expiry_notice (sql/schema_v112.sql) keys a warning on the
+   setting AND its expiry, written only once ntfy accepted it: a restart or a
+   deploy repeats nothing, a failed push is retried on the next pass, and a
+   fresh paste — a new expiry — is warned about again when its own last day
+   comes. Tokens entering their last day in the same pass are one message:
+   the two Bolt tokens, minted 81 seconds apart, are one buzz. A token that
+   is ALREADY past its expiry is never warned about: it is not coming, it has
+   happened, and the banner says so in its own words. */
+export const EXPIRY_WARN_MS = 24 * 3600e3;
+export const MIN_LIFETIME_MS = 48 * 3600e3;
+/* What to do, by the Settings page's group (n: how many of its tokens are
+   due); the general line otherwise. */
+const RENEW = {
+  Bolt: (n) => `Re-capture ${n > 1 ? 'each' : 'it'} from the Bolt fleet portal and paste it on Settings → Bolt. One fleet at a time: `
+    + 'signing the owner in again kills the token already pasted for that fleet.',
+};
+const STOPS = { Bolt: (n) => (n > 1 ? 'Bolt trips and earnings for each fleet stop collecting when its token runs out.'
+  : 'Bolt trips and earnings for that fleet stop collecting when it runs out.') };
+
+/** Every stored credential that states its own expiry, as
+    {key, group, label, expires_at (ms), issued_at (ms | null)} — never the
+    value. `read` and `defs` are injectable for a test. */
+/* A JWT AS A WHOLE: three base64url parts and nothing else. jwtPayload reads
+   the second dot-separated part of ANY string, so a cookie jar whose dated
+   token happens to come before every other dot — `sid=…; sp-jwt-session=
+   eyJ….….…; csid=…` — parsed as a token with an expiry (caught by this
+   file's test on the first run). Production's Uber jar escaped it only by
+   the order of its cookies; this check does not depend on that. */
+const WHOLE_JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$/;
+export function expiringTokens({ defs = SETTING_DEFS, read = (k) => get(k, '') } = {}) {
+  const out = [];
+  for (const d of defs) {
+    if (!d.secret) continue;
+    const val = String(read(d.key) || '').trim();
+    if (!val || !WHOLE_JWT.test(val)) continue;
+    const p = jwtPayload(val);
+    const exp = Number(p?.exp) * 1000;
+    if (!Number.isFinite(exp) || exp <= 0) continue;
+    const iat = Number(p?.iat) * 1000;
+    const issued = Number.isFinite(iat) && iat > 0 ? iat : null;
+    if (issued != null && exp - issued < MIN_LIFETIME_MS) continue;
+    out.push({ key: d.key, group: d.group, label: d.label, expires_at: exp, issued_at: issued });
+  }
+  return out;
+}
+
+const dubaiDay = (t) => new Date(t).toLocaleString('en-GB', { timeZone: 'Asia/Dubai',
+  weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).replace(',', '');
+const left = (ms) => {
+  const m = Math.max(0, Math.round(ms / 60e3));
+  return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min` : `${m} min`;
+};
+
+/** One message for every token entering its last day in one pass. */
+export function composeExpiry(tokens, now, click = null) {
+  const sorted = [...tokens].sort((a, b) => a.expires_at - b.expires_at);
+  const name = (t) => `${t.group}: ${t.label}`;
+  const groups = [...new Set(sorted.map((t) => t.group))];
+  const todo = groups.map((g) => {
+    const n = sorted.filter((t) => t.group === g).length;
+    return [RENEW[g] ? RENEW[g](n) : `Paste a fresh ${n > 1 ? 'one for each' : 'one'} on the Settings page before then.`,
+      STOPS[g] ? STOPS[g](n) : null];
+  }).flat().filter(Boolean);
+  if (sorted.length === 1) {
+    const [t] = sorted;
+    return { title: `${name(t)} expires in ${Math.round((t.expires_at - now) / 3600e3)} h`,
+      message: [`Good until ${dubaiDay(t.expires_at)} Dubai (in ${left(t.expires_at - now)}).`, ...todo].join('\n'),
+      priority: 4, tags: ['hourglass_flowing_sand'], click };
+  }
+  return { title: `${sorted.length} tokens expire within ${Math.round(EXPIRY_WARN_MS / 3600e3)} h`,
+    message: [...sorted.map((t) => `${name(t)} — good until ${dubaiDay(t.expires_at)} Dubai (in ${left(t.expires_at - now)})`),
+      '', ...todo].join('\n'),
+    priority: 4, tags: ['hourglass_flowing_sand'], click };
+}
+
+/**
+ * One pass of the last-day check. Injectable like alertTick.
+ * @returns { sent, due?, keys?, skipped?, error? }
+ */
+export async function expiryTick({
+  q, publish = ntfyPublish, now = Date.now(), config = settings, tokens = null, warnMs = EXPIRY_WARN_MS,
+} = {}) {
+  const { topic, click } = await config();
+  if (!topic) return { sent: 0, skipped: 'NTFY_TOPIC is not set' };
+  const due = (tokens || expiringTokens()).filter((t) => t.expires_at > now && t.expires_at - now <= warnMs);
+  if (!due.length) return { sent: 0, due: 0 };
+  const seen = new Set((await q(`SELECT setting_key, (extract(epoch FROM expires_at) * 1000)::bigint AS ms FROM expiry_notice`))
+    .map((r) => `${r.setting_key}|${Number(r.ms)}`));
+  const fresh = due.filter((t) => !seen.has(`${t.key}|${t.expires_at}`));
+  if (!fresh.length) return { sent: 0, due: 0 };
+  /* To the Settings page, where the fresh token is pasted. */
+  const to = click ? `${String(click).replace(/[#?].*$/, '')}#settings` : null;
+  const sent = await publish(composeExpiry(fresh, now, to));
+  if (!sent.ok) return { sent: 0, due: fresh.length, error: sent.error };
+  for (const t of fresh) {
+    await q(`INSERT INTO expiry_notice (setting_key, expires_at, notified_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [t.key, new Date(t.expires_at).toISOString(), new Date(now).toISOString()]);
+  }
+  return { sent: 1, due: fresh.length, keys: fresh.map((t) => t.key) };
+}
+
 /** Every five minutes, from 90 seconds after boot. ALERTS=off to disable. */
 export function startAlerts({ q, everyMs = 5 * 60e3, firstMs = 90e3, enabled = true, log = defaultLog } = {}) {
   if (!enabled) return null;
@@ -279,6 +413,14 @@ export function startAlerts({ q, everyMs = 5 * 60e3, firstMs = 90e3, enabled = t
       else if (r.error) log.warn('alerts', 'ntfy not sent — will retry', r);
     } catch (e) {
       log.warn('alerts', 'pass failed', { err: String(e?.message || e).slice(0, 160) });
+    }
+    /* Its own try: a banner pass that fails must not cost a token's warning. */
+    try {
+      const x = await expiryTick({ q });
+      if (x.sent) log.info('alerts', 'expiry warning sent', { keys: x.keys });
+      else if (x.error) log.warn('alerts', 'expiry warning not sent — will retry', { error: x.error });
+    } catch (e) {
+      log.warn('alerts', 'expiry pass failed', { err: String(e?.message || e).slice(0, 160) });
     } finally { busy = false; }
   };
   const first = setTimeout(tick, firstMs); first.unref?.();
