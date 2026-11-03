@@ -324,6 +324,46 @@ See `test/platform_flags_truth.test.mjs`.
 
 ---
 
+## YoCharge (charging) — investigated 2026-11-03, NOT integrated
+
+The operator: "this is charging api for the complete charging system … Let's find out a way to
+show charging wallet balance for the drivers that we have. the name match might be different so we
+need to be very precise before we incorporate anything into production." A schema was supplied
+(OpenAPI 3.0.3, 25 paths, `servers: []`) and a key (`yc-napi-…`, 47 characters — held outside the
+repository, never in it). Investigated read-only: **GET requests only**.
+
+- **Host and auth, measured:** `https://api.yocharge.com` (production; the schema's examples use
+  `api.stage.yocharge.com`, and `api.dev.yocharge.com` also answers) — Django REST Framework.
+  `Authorization: Token <token>` plus a `client-id: <tenant uuid>` header. No credentials → 401
+  "Authentication credentials were not provided"; a bad token → 401 "Token does not exist".
+- **The key supplied is refused: "Token does not exist."** on production and staging (re-checked by a
+  second GET the same day), and as `client-id`, `Bearer`, `x-api-key`, and without its prefix. Its
+  shape matches YoCharge's token format, so it is likely a token for another host or tenant, or not
+  active. **Blocked on:** an active REST API token, its host/region, and the tenant `client-id`.
+- **Where a balance is (from the schema, not yet seen live):** `GET /open/v1/users?role=END_USER`
+  (DRF pages, `page_size` up to 1000) carries every user's `wallets[]` with `balance`,
+  `hold_amount`, `custom_credit_limit`; each user has `name`, `email`, `mobile_number` +
+  `mobile_country_code`, `vehicles[]`, `fleet_group`. `/v3/wallet-history/` is scoped to the
+  signed-in END USER, so for the fleet it is the users list or nothing. The wallet does not name its
+  currency — confirm it is AED on the first live read.
+- **No external id on a user** (`add-new-user` takes name, email, mobile only;
+  `external_meta_data` exists on transactions only), so a YoCharge user can be matched to one of our
+  people only by phone, email or name.
+- **NEVER CALL** (they move money, interrupt a live charge, or may rotate the token):
+  `/open/v1/payments/wallet-transaction/` (credit/debit), `/open/v1/remote-action/` and
+  `/v3/transactions/{id}/stop-transaction/` (start/stop a charge), `/v3/transactions/` POST,
+  `/open/v1/add-new-user/` and its `/login/` ("Login / Renew Token"), and every POST/PUT/PATCH/
+  DELETE on favourite lists, support tickets and properties.
+- **Our side of the match, measured on production:** phones are held per platform account in
+  `driver_compliance.phone` and per HR row in `hr_roster_row.phone`; `src/smsala.js uaeMobile()`
+  normalises to `9715XXXXXXXX`. Of 294 people on the compliance spine, 279 carry a UAE mobile —
+  266 distinct numbers, **13 numbers held by more than one person** — and 163 an email. Precision
+  rule for any build: a phone match is automatic only when the number belongs to exactly one of our
+  people and one YoCharge user; a shared number, an email-only or a name-only match is a CANDIDATE
+  for the Same person review (`api/public/sameperson.js`), never an automatic link. A balance with no
+  link renders absent with its reason, never 0; it is a named driver's money (EARN or CASH in
+  `api/access/manifest.json`).
+
 ## Credentials, and what shape each one is
 
 | credential | shape | consequence |
