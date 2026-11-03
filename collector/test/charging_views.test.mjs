@@ -110,7 +110,7 @@ for (const skin of ['arkiv', 'classic']) {
     const t = await txt(page, '[data-panel="veh-charging"]');
     const a = answer('/api/charging/vehicle');
     check('a car\'s charges in the window, with the window the route answered', /Charges\s*11/.test(t) && a && t.includes(`${a.from} to ${a.to}`), t.slice(0, 300));
-    check('…how they reached the car, in the tile and on every row', /by its own plate; 8 the only car driven that day, 1 the nearest booking/.test(t)
+    check('…how they reached the car, in the tile and on every row', /By its own plate\s*2 of 11\s*8 the only car driven that day, 1 nearest booking/.test(t)
       && /its own plate/.test(t) && /the only car driven that day/.test(t), t.slice(0, 500));
     const links = await page.$$eval('[data-panel="veh-charging"] tbody a', (x) => x.map((e) => e.getAttribute('href')));
     check('…and each driver opens by the person address', links.length === 2 && links.every((h) => /^#driver\/p40[12]/.test(h || '')), JSON.stringify(links));

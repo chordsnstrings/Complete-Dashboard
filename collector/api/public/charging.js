@@ -64,12 +64,14 @@ function drawWallets(host, w) {
   if (w.why) { host.append(note(esc(w.why), 'warn')); return; }
   const t = w.totals;
   host.append(kpiRow([
+    /* Subtitles kept short: a five-tile row clips anything past ~43
+       characters to "…" in the Arkiv skin (seen on the first render). */
     { label: 'Drivers with a linked wallet', value: fmt(t.linked_people),
-      sub: `${fmt(t.auto)} linked automatically, ${fmt(t.confirmed)} confirmed by a person` },
+      sub: `${fmt(t.auto)} automatic, ${fmt(t.confirmed)} confirmed by a person` },
     { label: 'Balance, all linked wallets', value: aed(t.balance) || '—', sub: `AED, as PowerDrive holds it — ${fmt(t.nonzero)} not zero` },
     { label: 'Below zero', value: fmt(t.negative), sub: t.negative ? 'owing PowerDrive for charging already done' : 'none owing' },
-    { label: 'On the fleet wallet', value: fmt(t.on_fleet_wallet), sub: 'charging against a company limit, not their own balance' },
-    { label: 'To confirm', value: fmt(t.review + t.unplaced), sub: `${fmt(t.review)} suggested links, ${fmt(t.unplaced)} fleet customers we cannot place` },
+    { label: 'On the fleet wallet', value: fmt(t.on_fleet_wallet), sub: 'charge against a company limit' },
+    { label: 'To confirm', value: fmt(t.review + t.unplaced), sub: `${fmt(t.review)} suggested, ${fmt(t.unplaced)} not placed` },
   ]));
   host.append(tableFrom(w.rows, [
     { label: 'Driver', key: 'name', render: (r) => `<a class="lnk" href="${href('driver', personAddr(r.person_id))}">${esc(r.name || `person ${r.person_id}`)}</a>` },
@@ -137,7 +139,7 @@ function drawCars(host, s) {
     { label: 'Energy', value: `${fmt(t.kwh)} kWh`, sub: 'PowerDrive counts watt-hours; shown in kWh' },
     { label: 'Paid', value: aed(t.cost) || '—', sub: 'AED, VAT included, as each session’s payment states it' },
     { label: 'Put on a car', value: `${fmt(t.on_a_car)} of ${fmt(t.charges)}`,
-      sub: `${fmt(b.session_plate)} by their own plate, ${fmt(b.only_car)} the only car driven that day, ${fmt(b.nearest_trip)} the nearest booking` },
+      sub: `${fmt(b.session_plate)} by plate, ${fmt(b.only_car)} only car that day, ${fmt(b.nearest_trip)} nearest booking` },
   ]));
   host.append(tableFrom(s.vehicles, [
     { label: 'Car', key: 'plate', render: (v) => `<a class="lnk" href="${href('vehicle', v.plate)}">${esc(v.plate)}</a>` },
@@ -147,7 +149,9 @@ function drawCars(host, s) {
     { label: 'Minutes', key: 'minutes', num: true, render: (v) => esc(fmt(v.minutes)) },
     { label: 'Last charged', key: 'last_at', render: (v) => esc(when(v.last_at)) },
     { label: 'Drivers', key: 'drivers', num: true, render: (v) => esc(fmt(v.drivers)) },
-    { label: 'How it was put on this car', key: 'charges',
+    /* No key: sorting by "how" means nothing, and a shared key lit this
+       header's sort arrow whenever Charges was the sort. */
+    { label: 'How it was put on this car',
       render: (v) => esc(Object.entries(v.basis).filter(([, k]) => k).map(([k, n2]) => `${fmt(n2)} ${BASIS_WORD[k]}`).join(' · ')) },
   ], { sortable: true, sortId: 'pdc', defaultSort: { key: 'charges', dir: 'desc' }, cards: true, cardLead: 'plate' }));
   const off = (b.no_trip || 0) + (b.no_link || 0) + (b.not_yet || 0);

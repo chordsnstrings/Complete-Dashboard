@@ -149,8 +149,8 @@ function vehCharging(root, plate) {
       { label: 'Charges', value: fmt(c.charges), sub: `${c.from} to ${c.to}` },
       { label: 'Energy', value: `${fmt(c.kwh)} kWh`, sub: `last charged ${dtStr(c.last_at)}` },
       { label: 'Paid', value: money(c.cost), sub: 'AED, VAT included' },
-      { label: 'How they reached this car', value: fmt(b.session_plate),
-        sub: `by its own plate; ${fmt(b.only_car)} the only car driven that day, ${fmt(b.nearest_trip)} the nearest booking` },
+      { label: 'By its own plate', value: `${fmt(b.session_plate)} of ${fmt(c.charges)}`,
+        sub: `${fmt(b.only_car)} the only car driven that day, ${fmt(b.nearest_trip)} nearest booking` },
     ]));
     p.body.append(tableFrom(c.recent, [
       { label: 'When', key: 'started_at', render: (r) => esc(dtStr(r.started_at)) },
