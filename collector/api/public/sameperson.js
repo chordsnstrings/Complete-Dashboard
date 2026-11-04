@@ -19,8 +19,9 @@
 import { el, esc, panel, loading, note, kpiRow, entity, pill, sourceLabel,
   dateStr, fmt, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, foldChildren, countOf } from './ui.js';
 import { hbars } from './charts.js';
-import { api } from './data.js';
+import { api, href } from './data.js';
 import { fleetLabel } from './access.js';
+import { readReview, drawReview } from './charging_review.js';
 
 const platPill = (p) => (p ? pill(sourceLabel(p)) : '');
 
@@ -124,6 +125,54 @@ function pairCard(p, onDecide) {
   return c;
 }
 
+/* ── PowerDrive's "Wallets to confirm", on this page too ───────────────────
+   The operator, 2026-11-04: "yes add it to the same person page too". The
+   PowerDrive customers (charging wallets) src/sources/yocharge.js could not
+   link to one of our drivers with certainty waited in a panel on the
+   Charging page only. On production that queue held 124 suggestions (101
+   PowerDrive accounts, 91 drivers), and 48 of them were there because one
+   driver has two records on our side — this page's own question. The people
+   who answer pairs here are the people who may answer those (identity.decide:
+   the Owner, Management, HR officers — the cap POST /api/charging/link asks
+   for), so both queues are now in one place.
+
+   THE SAME QUEUE, NOT A SECOND ONE. Read, drawn, folded and decided by
+   ./charging_review.js, which #charging draws with too: the same suggestions,
+   the same "Same person" / "Not this person", the same absences with their
+   reasons — PowerDrive not read yet, its queue not readable, nothing waiting.
+   Only what is read again after a decision is this page's choice: the queue
+   alone, because a PowerDrive link changes no pair above it.
+
+   WHAT IT DECIDES is said first, in the panel's own caption, because its
+   buttons share this page's words: which of OUR drivers a PowerDrive account
+   belongs to — never whether two of our records are one person. A reader who
+   took a "Same person" here for a fold of two of our records would be wrong
+   about what they had done, and nothing else on the panel would tell them.
+   FIFTEEN WORDS, AND THAT IS A RULE, NOT A STYLE: under the Arkiv skin
+   focus.js cuts a panel caption longer than that to one line. The first
+   render carried a 45-word caption, and Arkiv showed "…belongs to — not…",
+   hiding exactly the half that says what this is NOT. The link to the
+   wallets is its own short line under it, for the same reason.
+
+   WHERE IT SITS: straight under "Waiting for an answer", above "Already
+   answered" — the two questions this page asks a person side by side, then
+   the record of what has been answered. Below the answered pairs it would be
+   buried: the old skin draws every answered card (the page was 111,110 px
+   tall at 1440 with 365 of them — the contract note below), the Arkiv skin
+   twelve and a fold. And it has its own read, not the page's: a slow or
+   failed PowerDrive answer never holds up, or blanks, the pairs. */
+function powerDriveQueue() {
+  const p = panel('PowerDrive wallets to confirm',
+    'Which of our drivers owns a PowerDrive account — not whether two records are one person.', 'sp-charging-review');
+  p.body.append(el('p', 'cap', `The wallets themselves are on <a class="lnk" href="${href('charging')}">Charging</a>.`));
+  const host = el('div');
+  p.body.append(host);
+  loading(host);
+  const read = async () => drawReview(host, await readReview(), read);
+  read();
+  return p.panel;
+}
+
 export async function renderSamePerson(root) {
   root.innerHTML = '';
   /* Under the page contract (plan §4 same-person): a 00 band — waiting for
@@ -140,6 +189,9 @@ export async function renderSamePerson(root) {
   const queue = panel('Waiting for an answer',
     'One name sits inside the other, and nothing else says whether that is one person');
   root.append(queue.panel);
+  /* PowerDrive's queue between the pairs waiting and the pairs answered
+     (2026-11-04) — powerDriveQueue() says why there. */
+  root.append(powerDriveQueue());
   const done = panel('Already answered', 'A verdict here outlives every collector run');
   root.append(done.panel);
   [queue.body, done.body].forEach(loading);

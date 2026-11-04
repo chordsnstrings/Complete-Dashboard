@@ -350,12 +350,20 @@ async function main() {
        own six-hourly cron: a full read takes ~20 minutes at the host's pace
        and holds nothing else up here (src/sources/yocharge.js). Silent until
        YOCHARGE_API_KEY and YOCHARGE_CLIENT_ID are set. */
-    cron.schedule(get('YOCHARGE_CRON', '17 */6 * * *'), () => chargingTick()
+    /* A tick that steps aside (no key, or the other charging run still going)
+       says so in the log: the wallet refresh skipped itself silently at every
+       slot for its first day, and nothing showed it (2026-11-04). */
+    const skipped = (what) => (r) => { if (r?.skipped) log.info('scheduler', `${what} skipped`, { why: r.skipped }); };
+    cron.schedule(get('YOCHARGE_CRON', '17 */6 * * *'), () => chargingTick().then(skipped('charging'))
       .catch((e) => log.error('scheduler', 'charging', { err: String(e) })), { timezone: 'Asia/Dubai' });
     /* …and our own drivers' wallets at the hours between (03:17, 09:17, 15:17,
        21:17 Dubai), one customer at a time — so a balance on screen is never
-       more than about three hours old (the operator, 2026-11-03). */
-    cron.schedule(get('YOCHARGE_WALLETS_CRON', '17 3-23/6 * * *'), () => walletsTick()
+       more than about three hours old (the operator, 2026-11-03).
+       AN EXPLICIT LIST OF HOURS, NOT A STEPPED RANGE: node-cron 3.0.3 reads
+       '3-23/6' as the multiples of 6 inside 3..23 — 06, 12, 18 — so the
+       refresh fired in the same minute as the full read, met its busy flag,
+       and never ran (COVERAGE trap; test/yocharge.test.mjs pins the hours). */
+    cron.schedule(get('YOCHARGE_WALLETS_CRON', '17 3,9,15,21 * * *'), () => walletsTick().then(skipped('charging wallets'))
       .catch((e) => log.error('scheduler', 'charging wallets', { err: String(e) })), { timezone: 'Asia/Dubai' });
     /* Ask Uber whether the past we hold is the past it has. 05:45 Dubai —
        after the overnight incremental, the analyst and the profile pull, and

@@ -371,7 +371,8 @@ repository, never in it). Investigated read-only: **GET requests only**.
   - the 198's wallets: 136 non-zero, AED 22,907.30 in all; 40 of all matched slightly negative
     (lowest −48.44); 26 on the fleet wallet.
 - **As built (FIX-STATUS YC).** Every customer read every six hours (`YOCHARGE_CRON`, `17 */6 * * *`
-  Dubai); between those, at 03:17, 09:17, 15:17 and 21:17 (`YOCHARGE_WALLETS_CRON`), only our
+  Dubai); between those, at 03:17, 09:17, 15:17 and 21:17 (`YOCHARGE_WALLETS_CRON` =
+  `17 3,9,15,21 * * *` — see the node-cron trap below; it was a stepped range first), only our
   customers' wallets are refreshed — one `GET /open/v1/users/?id=` each, which answers exactly that
   customer (1.2–1.8 s, measured 2026-11-03) — with the day's sessions, so a balance is at most ~3
   hours old. Both read with the
@@ -979,6 +980,14 @@ Measured on production 2026-09-07, the first build under the v67 rule:
 driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
+
+* **node-cron 3.0.3 reads a stepped RANGE as the multiples of the step inside it** (2026-11-04,
+  FIX-STATUS YC30). `'17 3-23/6 * * *'` validates, and fires at hours 6, 12 and 18 — not 3, 9, 15
+  and 21 (`node-cron/src/convert-expression` turns it into `0 17 6,12,18 …`). The PowerDrive wallet
+  refresh written that way fired in the very minute of the six-hourly full read, met its busy
+  flag, skipped itself silently, and did not run once on schedule in its first day. Write an
+  explicit list of hours (`3,9,15,21`); `*/n` from midnight is read correctly. Check a schedule
+  through `node-cron/src/time-matcher` (test/yocharge.test.mjs §9 does), not by eye.
 
 * **A table keyed on a person id must follow person folds** (2026-11-03, FIX-STATUS YC13). Three
   paths fold `driver` rows into one and DELETE the others — `src/persons.js` (twice: the spine's

@@ -5655,7 +5655,8 @@ branch, each with a check that fails when the fix is reverted (all reverts run 2
 | YC19 | Name/email candidates named one arbitrary person of several; a second confirmation could leave two people confirmed; the manual job read "done" over a skipped or failed run; a redirect would carry the tenant id; a window after today came out backwards; the API read a stale fleet-group setting; site names were not LOC; messages escaped twice | every person a name or email points at is offered with the count; a second confirmation answers 409; the job throws (→ `failed`); `redirect: 'error'`; `from` clamped; the fleet groups read from `app_setting`; `sites[].site` is LOC; `note()` given plain text | `yocharge` (revert the 409 → fails); the rest by reading |
 
 **The second review (2026-11-03), of the fixes themselves.** A second reader, given only the fix
-commit `a379be9`, probed it in PGlite and found these; all fixed on PR #29, each proven by revert:
+commit `a379be9`, probed it in PGlite and found these; all fixed on PR #29 (live since `f230eaca`),
+each proven by revert:
 
 | id | what the second review found | what was done | proven |
 |---|---|---|---|
@@ -5668,15 +5669,58 @@ commit `a379be9`, probed it in PGlite and found these; all fixed on PR #29, each
 | YC27 | `followPersonFold` deleted then inserted, so a failed insert lost the decision in the paths that commit per statement; two confirmations sent at once both landed; and smaller: "0 kWh, no amount stated" for nothing charged, "no energy" for a session that stated none, '00971' read as foreign, the API's fleet groups ignoring a saved empty value, a partial run worded as a failure, "2 wallets" counting one with no balance | a decision is MOVED by one UPDATE (decided_at/by kept); a partial unique index allows one confirmation per customer (`23505` → 409); the empty figures say "nothing charged", `energy_unknown` is counted apart; the country code's leading zeros stripped; the saved value used as saved; "incomplete" for a partial run; wallets counted only with a balance | `yocharge` (the index: a second confirmed row is refused with 23505) |
 
 **YC28 — the wallet on the driver page's overview** (the operator, 2026-11-03, over a screenshot
-of the overview: "the driver pages should also have charging wallet"). A "Charging wallet" tile in
+of the overview: "the driver pages should also have charging wallet"). **Live** since `f230eaca`,
+screenshotted on production. A "Charging wallet" tile in
 the overview's band beside Cash on hand and Bank deposit, in both skins: the balance (or the fleet
 limit left), when PowerDrive was read, opening the Money tab; a dash with the reason for no link,
 an unplaced account, no personal wallet or an unread PowerDrive — never AED 0. `charging_views`
 40/0 (revert: the tile left out → 8 fail); `arkiv_people` 241/0 (the classic row is twelve tiles
 now); classic fixture re-recorded for `driver/drv-0` only, the tile its sole change.
 
+**YC29 — the queue on the Same person page too** (the operator, 2026-11-04: "yes add it to the
+same person page too"). **Written** (PR #30), **not on production**. PowerDrive's "Wallets to
+confirm" — 124 suggestions on production (101 accounts, 91 drivers), 48 of them there because one
+driver has two records on our side — is also a panel on #same-person now, in both skins, between
+"Waiting for an answer" and "Already answered": the two questions the page asks side by side, then
+what has been answered (below the answered pairs it would be buried — the old skin draws every
+answered card). ONE drawing for both pages: `api/public/charging_review.js` (`readReview`,
+`drawReview`), moved out of `charging.js` byte for byte (diffed), so the read, the fold and the
+POST cannot drift; the Same person page has its own read (a slow or failed PowerDrive answer never
+holds up the pairs) and reads only the queue again after a decision. The caption is fifteen words
+— "Which of our drivers owns a PowerDrive account — not whether two records are one person." —
+because Arkiv's focus pass (`focus.js`) cuts a longer panel caption to one line: the first render's
+45 words read "…belongs to — not…" there, hiding the half that says what this is not. The link to
+the wallets on #charging is its own line. The mock's `/api/charging/review` now answers `private,
+no-store` like the real route: without it the browser's swr store answered the queue's next read
+from a held copy, so a re-read after a decision and an unreadable queue showed the old list in the
+mock, never on production (the mock's other four charging routes still answer without it; nothing
+depends on it, left as found). Not on the first screen nor the phone's static path (`lazy_pages`:
+59 modules behind the pages, none runs at load; `tokens` §8: 20 phone modules, this not one).
+Proven: `charging_views` 56/0 — 14 new checks, 7 per skin, each revert-proven: the panel appended
+after "Already answered" → 2 fail; the 45-word caption restored → 1 fails (Arkiv; classic is never
+marked); `decide('confirm')` posting `refuse` → 2 fail; the unread branch keyed on the list alone
+→ 2 fail ("Nothing waiting" in place of the reason); this page's `again` a no-op → 2 fail;
+`readReview` without its catch → 2 fail and a page error; the panel not appended → all 14 fail.
+`arkiv_people` 241/0 (its order check now expects the panel between the two; panel not appended →
+fails). Classic fixture re-recorded for `same-person` only — the old and new renderings diffed:
+one inserted `<div class="panel" data-panel="sp-charging-review">`, nothing else moved. Also, one
+at a time: `charging_page` 41/0, `arkiv_ledger` 63/0, `hr_roster_page` 52/0, `arkiv_shell` 77/0,
+`lazy_pages` 27/0, `tokens` 150/0, `mockapi` 10/0, `endpoint_coverage` 4/0, `interlinking` 11/0,
+`money_precise` 21/0, `access_manifest` 17/0, `imports_resolve` 4/0, `arkiv_classic_frozen`
+146/7 (the seven pre-existing routes below; `charging` and `same-person` pass).
+
+**YC30 — the three-hourly refresh never ran on its schedule** (found on production, 2026-11-04).
+In its first day `collection_run` held no `wallets` run but the one started by hand, while the
+six-hourly full reads ran at every slot. node-cron 3.0.3 had read `'17 3-23/6 * * *'` as hours 6,
+12 and 18 — the full read's minutes — so the refresh met the full read's busy flag and skipped
+itself, without a log line. Now an explicit `'17 3,9,15,21 * * *'` (setting default and the
+index.js fallback), and a skipped scheduled tick logs `charging … skipped` with why.
+`yocharge` 58/0 (§9 reads both schedules through node-cron's own matcher; revert: the stepped
+range restored → fails, "06:17, 12:17, 18:17"); `credential_save_check` 109/0.
+
 **YC20 — our drivers' wallets every three hours** (the operator, 2026-11-03: "just our drivers
-every 3 hours?"). `collectWallets` (`walletsTick`, `YOCHARGE_WALLETS_CRON` `17 3-23/6 * * *`
+every 3 hours?"). **Live** since `f230eaca` (deployment `d7a9b6e3`); run once by hand on production
+(job 59: 4 minutes, 797 rows, ok). `collectWallets` (`walletsTick`, `YOCHARGE_WALLETS_CRON` `17 3-23/6 * * *`
 Dubai, job mode `charging-wallets`): one `GET /open/v1/users/?id=` per watched customer — measured
 to answer exactly that customer with their wallets in 1.2–1.8 s — then the day's sessions (no
 history) and attribution; linking stays with the six-hourly full read. Shares the full read's

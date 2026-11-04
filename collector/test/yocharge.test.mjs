@@ -530,6 +530,34 @@ console.log('\n8. our drivers\' wallets, between the full reads');
   check('a refused key on the refresh says so on the banner, and the run is an error', !!refused.error && cred?.state === 'invalid', j([refused.error, cred]));
   check('no key: nothing is asked', (await yc.collectWallets({ db, fetchImpl: () => { throw new Error('asked'); }, key: '', clientId: 't' })).skipped === 'YOCHARGE_API_KEY is not set');
 }
+/* ── 9. the schedules fire when they say ─────────────────────────────────── */
+console.log('\n9. the schedules, as node-cron reads them');
+{
+  /* Read through node-cron's own matcher, because the library's reading is
+     the one that runs: '17 3-23/6 * * *' validated, and fired at 06/12/18 —
+     the full read's minutes — so the refresh never ran (2026-11-04). */
+  const { createRequire } = await import('node:module');
+  const req = createRequire(import.meta.url);
+  const TimeMatcher = req('node-cron/src/time-matcher');
+  const { SETTING_DEFAULTS } = await import('../src/settings.js');
+  const idx = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  const fallback = (k) => (idx.match(new RegExp(`get\\('${k}', '([^']+)'\\)`)) || [])[1];
+  const fires = (expr) => {
+    const m = new TimeMatcher(expr, 'Asia/Dubai'); const out = [];
+    for (let t = Date.parse('2026-11-03T20:00:00Z'); t < Date.parse('2026-11-04T20:00:00Z'); t += 60000) {
+      if (m.match(new Date(t))) out.push(new Date(t + 4 * 3600e3).toISOString().slice(11, 16));
+    }
+    return out.sort();
+  };
+  const wallets = fires(SETTING_DEFAULTS.YOCHARGE_WALLETS_CRON);
+  const full = fires(SETTING_DEFAULTS.YOCHARGE_CRON);
+  check('the wallet refresh fires at 03:17, 09:17, 15:17 and 21:17 Dubai — never in a full read\'s minute',
+    j(wallets) === j(['03:17', '09:17', '15:17', '21:17']) && j(full) === j(['00:17', '06:17', '12:17', '18:17'])
+    && fallback('YOCHARGE_WALLETS_CRON') === SETTING_DEFAULTS.YOCHARGE_WALLETS_CRON && fallback('YOCHARGE_CRON') === SETTING_DEFAULTS.YOCHARGE_CRON,
+  j({ wallets, full, idx: [fallback('YOCHARGE_WALLETS_CRON'), fallback('YOCHARGE_CRON')] }));
+  /* REVERSION (run 2026-11-04): '17 3-23/6 * * *' restored -> this check
+     fails (06:17, 12:17, 18:17 — the full read's own minutes). */
+}
 srv.close();
 
 console.log(`\n${pass} passed, ${fail} failed`);

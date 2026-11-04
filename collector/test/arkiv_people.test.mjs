@@ -1389,7 +1389,15 @@ if (want('same-person')) {
       && s.values['Waiting for you'] === n(d.pending.length) && s.values['Confirmed one person'] === n(same.length)
       && s.values['Trips on the records they join'] === n(folded), JSON.stringify([s.values, folded]));
     const q = s.heads.indexOf('Waiting for an answer'); const a = s.heads.indexOf('Already answered');
-    check('the queue in full, first; then the answered', q > 0 && a === q + 1, JSON.stringify(s.heads));
+    /* PowerDrive's "Wallets to confirm" sits between the two since 2026-11-04
+       (the operator: "yes add it to the same person page too") — the two
+       questions this page asks side by side, then what has been answered;
+       sameperson.js powerDriveQueue says why. The pairs waiting still lead.
+       test/charging_views.test.mjs checks the panel itself.
+       REVERSION (run 2026-11-04): the panel not appended -> this check
+       fails. */
+    check('the queue in full, first; then PowerDrive’s wallets to confirm; then the answered',
+      q > 0 && s.heads[q + 1] === 'PowerDrive wallets to confirm' && a === q + 2, JSON.stringify(s.heads));
     const cards = await page.evaluate(() => ({ pending: [...document.querySelectorAll('#view .sp-pair:not(.done)')].map((c) => [...c.querySelectorAll('.sp-actions button')].map((b) => b.textContent)),
       done: [...document.querySelectorAll('#view .sp-pair.done')].map((c) => ({ hidden: c.hidden, undo: !!c.querySelector('.sp-verdict button'), word: c.querySelector('.sp-verdict b')?.textContent,
         bg: getComputedStyle(c).backgroundColor, op: getComputedStyle(c).opacity })) }));
