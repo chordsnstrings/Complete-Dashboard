@@ -15,12 +15,14 @@
        PowerDrive has been read the column takes itself off the table with
        the route's own reason;
      · a car's charges carry how each reached the car, and its drivers open
-       by the person address.
+       by the person address;
+     · the Same person page carries the "Wallets to confirm" queue too (the
+       operator, 2026-11-04) — see the last section.
    The mock's people: the directory's person ids are 100 + i (wallets on
    100–104: 182.40, −36.75, the fleet wallet with 912.30 left, 54.00,
    410.10); the driver page's profile ids are 401 + i (401 has a wallet, 402
    is on the fleet wallet, the rest have none). Synthetic names only. */
-import { harness } from './arkiv_pages.mjs';
+import { harness, settle } from './arkiv_pages.mjs';
 
 const { check, start, open, done } = harness('PowerDrive on the directory, the money tab and the vehicle page');
 await start();
@@ -176,6 +178,130 @@ for (const skin of ['arkiv', 'classic']) {
     const t = await txt(page, '[data-panel="veh-charging"]');
     check('a car with no charge: says so, and why one might be missing — never a nought',
       /No PowerDrive charge was put on L12615 between/.test(t) && /another network/.test(t) && !/Charges\s*0/.test(t), t);
+    await ctx.close();
+  }
+}
+
+/* ── The queue on the Same person page too ─────────────────────────────────
+   The operator, 2026-11-04: "yes add it to the same person page too" — the
+   PowerDrive "Wallets to confirm" queue, until then a panel on #charging
+   only, beside the name pairs on #same-person (on production 48 of its 124
+   suggestions existed because one driver has two records on our side). The
+   drawing is api/public/charging_review.js, shared with #charging, whose own
+   checks are test/charging_page.test.mjs's; what must hold HERE is the
+   wiring on this page, in both skins:
+     · the panel is on the page, between the pairs waiting and the pairs
+       answered (sameperson.js powerDriveQueue says why there);
+     · its caption says what it decides — which of our drivers owns a
+       PowerDrive account, not whether two records are one person — and the
+       reader can SEE all of it: the Arkiv skin's focus pass cuts a caption
+       over fifteen words to one line, and the first render's 45 words were
+       cut after "— not…";
+     · the wallets themselves are one click away, on #charging;
+     · the suggestions are the route's, each with its reason and both
+       buttons;
+     · "Same person" / "Not this person" send exactly the pair on screen and
+       the decision, and the queue is read again after each;
+     · PowerDrive not read yet: the reason and no figure; the queue not
+       readable: said in words, and the pairs still draw. */
+const SPQ = '[data-panel="sp-charging-review"]';
+const until = async (page, f, ms = 10000) => {
+  for (const t0 = Date.now(); Date.now() - t0 < ms;) { if (await f()) return true; await page.waitForTimeout(100); }
+  return false;
+};
+const queueText = (page) => page.evaluate((s) => {
+  const b = document.querySelector(`${s} .pbody`);
+  return { t: b?.textContent.replace(/\s+/g, ' ').trim() || '', li: b?.querySelectorAll('li').length ?? null,
+    btn: b?.querySelectorAll('button').length ?? null, pairs: document.querySelectorAll('#view .sp-pair').length };
+}, SPQ);
+for (const skin of ['arkiv', 'classic']) {
+  console.log(`\n#same-person — the PowerDrive queue, ${skin}`);
+  {
+    const { ctx, page, answers } = await open(skin, 'same-person');
+    const heads = await page.evaluate(() => [...document.querySelectorAll('#view .panel>h3')].map((h) => h.textContent.trim()));
+    const at = heads.indexOf('PowerDrive wallets to confirm');
+    check('the panel is on the page, between the pairs waiting and the pairs answered',
+      at > 0 && heads[at - 1] === 'Waiting for an answer' && heads[at + 1] === 'Already answered', JSON.stringify(heads));
+    /* REVERSION (run 2026-11-04): the panel appended after "Already
+       answered" instead -> this check fails (both skins); the panel not
+       appended at all -> this check and the three below fail. */
+    const cap = await page.evaluate((s) => {
+      const c = document.querySelector(`${s} > p.cap`);
+      if (!c) return null;
+      const cs = getComputedStyle(c);
+      return { t: c.textContent, shown: cs.display !== 'none' && c.offsetHeight > 0, clamp: cs.webkitLineClamp || 'none',
+        link: document.querySelector(`${s} .pbody a.lnk`)?.getAttribute('href') || '' };
+    }, SPQ);
+    check('…its caption says it decides which of our drivers owns a PowerDrive account, not whether two records are one person — all of it on the face of the page',
+      !!cap && /which of our drivers/i.test(cap.t) && /not whether two (?:of our )?records are one person/.test(cap.t) && cap.shown && cap.clamp === 'none',
+      JSON.stringify(cap));
+    /* REVERSION (run 2026-11-04): the first render's 45-word caption ("Each
+       answer here decides which of our drivers a PowerDrive charging account
+       belongs to — not whether two of our records are one person, …")
+       restored -> this check fails under Arkiv (clamp 1: focus.js cut it to
+       one line) and passes under classic, which focus.js never marks. */
+    check('…and the wallets themselves are one click away, on Charging', /^#charging\b/.test(cap?.link || ''), JSON.stringify(cap));
+    const real = answers.find((a) => a.path === '/api/charging/review')?.body;
+    const items = await page.$$eval(`${SPQ} li`, (li) => li.map((x) => ({ t: x.textContent.replace(/\s+/g, ' '),
+      b: [...x.querySelectorAll('button')].map((b) => b.textContent) })));
+    check('…the route’s suggestions, each with its reason and both buttons',
+      !!real && real.review.length === 2 && items.length === 2 && items.every((x, i) => x.t.includes(real.review[i].yc_name)
+        && x.t.includes(real.review[i].our_name) && x.t.includes(real.review[i].reason) && x.b.join('|') === 'Same person|Not this person'),
+      JSON.stringify(items));
+    /* A decision is the reader's, sent as exactly the pair on screen; the
+       queue is read again after it (this page's own `again`). */
+    const sent = [];
+    await page.route('**/api/charging/link', async (route) => {
+      sent.push(route.request().postDataJSON());
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    });
+    const reads = () => answers.filter((a) => a.path === '/api/charging/review').length;
+    const r0 = reads();
+    /* Guarded, so a page without the queue fails the check below instead of
+       dying on a click that waits 30 s for a button that is not there. */
+    if (items.length === 2) {
+      await page.click(`${SPQ} li:nth-child(1) button.btn:not(.ghost)`);
+      await until(page, () => reads() > r0);
+      await until(page, async () => (await page.$$(`${SPQ} li button:not([disabled])`)).length === 4);
+      const r1 = reads();
+      await page.click(`${SPQ} li:nth-child(2) button.ghost`);
+      await until(page, () => reads() > r1);
+    }
+    check('"Same person" and "Not this person" send that customer, that person and the decision — and the queue is read again after each',
+      sent.length === 2 && sent[0].yc_user_id === 'yc-r1' && sent[0].person_id === 105 && sent[0].decision === 'confirm'
+      && sent[1].yc_user_id === 'yc-r2' && sent[1].person_id === 106 && sent[1].decision === 'refuse' && reads() === r0 + 2,
+      JSON.stringify({ sent, reads: [r0, reads()] }));
+    /* REVERSION (run 2026-11-04): decide('confirm') sending decision:
+       'refuse' (charging_review.js) -> this check fails; this page's `again`
+       made a no-op (the queue not read after a decision) -> this check
+       fails. */
+    /* The queue's route failing, on the page opened afresh (#zzz-not-a-page
+       is the cheapest page to step through). */
+    await page.route('**/api/charging/review*', (route) => route.fulfill({ status: 500, contentType: 'application/json',
+      body: JSON.stringify({ error: 'internal', detail: 'the database did not answer' }) }));
+    await page.evaluate(() => { location.hash = '#zzz-not-a-page'; });
+    await page.waitForTimeout(600);
+    await page.evaluate(() => { location.hash = '#same-person'; });
+    await settle(page);
+    await until(page, async () => /could not be read/.test((await queueText(page)).t));
+    const e = await queueText(page);
+    check('the queue not readable: the panel says so in words, and the pairs around it still draw',
+      /The queue could not be read: 500 internal: the database did not answer/.test(e.t) && e.li === 0 && e.pairs > 0, JSON.stringify(e));
+    /* REVERSION (run 2026-11-04): readReview without its .catch -> this
+       check fails (the panel stays on its skeleton, and the rejection is a
+       page error). */
+    await ctx.close();
+  }
+  {
+    const unread = 'PowerDrive has not been read yet — the charging collector runs every six hours once its key and client id are set (Settings → Charging).';
+    const { ctx, page } = await open(skin, 'same-person', { fixtures: {
+      '/api/charging/review': (_q, real) => ({ ...real, customers: 0, why: unread, review: [], unplaced: [] }) } });
+    const q = await queueText(page);
+    check('PowerDrive not read yet: the panel gives the reason and no figure — no suggestion, no button, no count',
+      q.t.includes(unread) && q.li === 0 && q.btn === 0 && !/\d/.test(q.t) && q.pairs > 0, JSON.stringify(q));
+    /* REVERSION (run 2026-11-04): drawReview's unread branch keyed on the
+       list alone (`w.why ||` dropped) -> this check fails: the panel says
+       "Nothing waiting", a claim nobody measured, in place of the reason. */
     await ctx.close();
   }
 }

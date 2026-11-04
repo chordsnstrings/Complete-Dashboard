@@ -34,7 +34,7 @@ import { ledgerBand, formBars } from './ledger_ak.js';
 import { qAll, windowLabel, href, personAddr } from './data.js';
 import { entryForm } from './entry_form.js';
 import { aed, loadPeople } from './deposit_core.js';
-import { post } from './access.js';
+import { readReview, drawReview } from './charging_review.js';
 
 /* CHARGING ADVANCES ONLY. A repayment is not charging-specific — see the head
    of this file — and offering one here would record an offset against a
@@ -110,62 +110,10 @@ function drawWallets(host, w) {
     + 'one of our drivers and one PowerDrive customer and the two names share a word; every other possible match waits below '
     + 'for a person. A driver with no linked wallet is not on this list, rather than shown with AED 0.')));
 }
-function drawReview(host, w, again) {
-  host.innerHTML = '';
-  if (w?._err) { host.append(note(`The queue could not be read: ${w._err.message}`, 'bad')); return; }
-  if (!w || w.why || !Array.isArray(w.review)) { host.append(el('p', 'cap', esc(w?.why || 'Nothing to confirm until PowerDrive has been read.'))); return; }
-  if (!w.review.length && !w.unplaced.length) { host.append(el('p', 'cap', 'Nothing waiting: every PowerDrive customer we can see is linked, refused, or not one of ours.')); return; }
-  if (w.review.length) {
-    const ul = el('ul', 'bul pd-review');
-    for (const r of w.review) {
-      const li = el('li');
-      li.innerHTML = `${r.tier === 'held' ? '<b>Held</b> — ' : ''}PowerDrive's <b>${esc(r.yc_name || 'unnamed customer')}</b>${r.yc_phone ? ` (${esc(r.yc_phone)})` : ''}`
-        + `${r.yc_fleet_group ? ` in ${esc(r.yc_fleet_group)}` : ''} — is it our <b>${esc(r.our_name || `person ${r.person_id}`)}</b>? `
-        + `<span class="dim">${esc(r.reason)}.</span> `;
-      const yes = el('button', 'btn sm', 'Same person');
-      const no = el('button', 'btn sm ghost', 'Not this person');
-      const msg = el('span', 'cap');
-      const decide = async (decision) => {
-        yes.disabled = true; no.disabled = true; msg.textContent = ' Saving…';
-        try { await post('/api/charging/link', { yc_user_id: r.yc_user_id, person_id: Number(r.person_id), decision }); await again(); }
-        catch (e) { msg.textContent = ` ${e.message}`; yes.disabled = false; no.disabled = false; }
-      };
-      yes.addEventListener('click', () => decide('confirm'));
-      no.addEventListener('click', () => decide('refuse'));
-      li.append(yes, ' ', no, msg);
-      ul.append(li);
-    }
-    host.append(ul);
-    /* The first ten, then the rest on request: the first production read
-       queued 124 suggestions, one long scroll of buttons. Held pairs sort
-       first, so a fold never hides one. */
-    const SHOWN = 10;
-    const items = [...ul.children];
-    if (items.length > SHOWN) {
-      const more = el('button', 'foldbtn');
-      let open = false;
-      const draw = () => {
-        items.forEach((li, i) => { li.hidden = !open && i >= SHOWN; });
-        more.textContent = open ? `Show fewer — the first ${fmt(SHOWN)}` : `Show the other ${fmt(items.length - SHOWN)} suggestions →`;
-      };
-      more.addEventListener('click', () => { open = !open; draw(); });
-      draw();
-      host.append(more);
-    }
-  }
-  if (w.unplaced.length) {
-    const d = el('details', 'pd-unplaced');
-    const n = w.unplaced.length;
-    d.innerHTML = `<summary class="cap">${esc(`${fmt(n)} PowerDrive ${n === 1 ? 'customer' : 'customers'} in our fleet groups `
-      + `${n === 1 ? 'matches' : 'match'} none of our drivers by mobile, email or name — a driver who has left, or one registered `
-      + 'with a number we do not hold')}</summary>`
-      + `<p class="cap">${w.unplaced.map((u) => `${esc(u.yc_name || 'unnamed')} <span class="dim">${esc(u.yc_phone || '')}`
-        + `${u.yc_fleet_group ? ` · ${esc(u.yc_fleet_group)}` : ''}${u.stranded ? ' · a decision about them named a person record since removed' : ''}</span>`).join(' · ')}</p>`;
-    host.append(d);
-  }
-  host.append(el('p', 'cap', 'Confirming says the PowerDrive customer IS that driver; it needs a signed-in Owner, Management or HR '
-    + 'officer — whoever decides same-person pairs. Refusing keeps the pair from being offered again. A run never changes either.'));
-}
+/* The queue ("Wallets to confirm") is drawn by ./charging_review.js, which
+   the Same person page shares since 2026-11-04 (the operator: "yes add it to
+   the same person page too") — one drawing, so the two pages cannot drift.
+   It was this file's drawReview(), moved unchanged. */
 function drawCars(host, s) {
   host.innerHTML = '';
   if (!s || s._err || (!s.why && !s.totals)) { host.append(note(`Charging sessions could not be read: ${s?._err?.message || 'the answer was not the shape this page reads'}`, 'bad')); return; }
@@ -211,7 +159,7 @@ async function powerDrive(root, before) {
   const read = async () => {
     const [w, rv, s] = await Promise.all([
       qAll('/api/charging/wallets').catch((e) => ({ _err: e })),
-      qAll('/api/charging/review').catch((e) => ({ _err: e })),
+      readReview(),
       qAll('/api/charging/sessions').catch((e) => ({ _err: e })),
     ]);
     drawWallets(wal.body, w);

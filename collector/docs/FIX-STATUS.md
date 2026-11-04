@@ -5677,6 +5677,38 @@ an unplaced account, no personal wallet or an unread PowerDrive — never AED 0.
 40/0 (revert: the tile left out → 8 fail); `arkiv_people` 241/0 (the classic row is twelve tiles
 now); classic fixture re-recorded for `driver/drv-0` only, the tile its sole change.
 
+**YC29 — the queue on the Same person page too** (the operator, 2026-11-04: "yes add it to the
+same person page too"). **Written** (PR #30), **not on production**. PowerDrive's "Wallets to
+confirm" — 124 suggestions on production (101 accounts, 91 drivers), 48 of them there because one
+driver has two records on our side — is also a panel on #same-person now, in both skins, between
+"Waiting for an answer" and "Already answered": the two questions the page asks side by side, then
+what has been answered (below the answered pairs it would be buried — the old skin draws every
+answered card). ONE drawing for both pages: `api/public/charging_review.js` (`readReview`,
+`drawReview`), moved out of `charging.js` byte for byte (diffed), so the read, the fold and the
+POST cannot drift; the Same person page has its own read (a slow or failed PowerDrive answer never
+holds up the pairs) and reads only the queue again after a decision. The caption is fifteen words
+— "Which of our drivers owns a PowerDrive account — not whether two records are one person." —
+because Arkiv's focus pass (`focus.js`) cuts a longer panel caption to one line: the first render's
+45 words read "…belongs to — not…" there, hiding the half that says what this is not. The link to
+the wallets on #charging is its own line. The mock's `/api/charging/review` now answers `private,
+no-store` like the real route: without it the browser's swr store answered the queue's next read
+from a held copy, so a re-read after a decision and an unreadable queue showed the old list in the
+mock, never on production (the mock's other four charging routes still answer without it; nothing
+depends on it, left as found). Not on the first screen nor the phone's static path (`lazy_pages`:
+59 modules behind the pages, none runs at load; `tokens` §8: 20 phone modules, this not one).
+Proven: `charging_views` 56/0 — 14 new checks, 7 per skin, each revert-proven: the panel appended
+after "Already answered" → 2 fail; the 45-word caption restored → 1 fails (Arkiv; classic is never
+marked); `decide('confirm')` posting `refuse` → 2 fail; the unread branch keyed on the list alone
+→ 2 fail ("Nothing waiting" in place of the reason); this page's `again` a no-op → 2 fail;
+`readReview` without its catch → 2 fail and a page error; the panel not appended → all 14 fail.
+`arkiv_people` 241/0 (its order check now expects the panel between the two; panel not appended →
+fails). Classic fixture re-recorded for `same-person` only — the old and new renderings diffed:
+one inserted `<div class="panel" data-panel="sp-charging-review">`, nothing else moved. Also, one
+at a time: `charging_page` 41/0, `arkiv_ledger` 63/0, `hr_roster_page` 52/0, `arkiv_shell` 77/0,
+`lazy_pages` 27/0, `tokens` 150/0, `mockapi` 10/0, `endpoint_coverage` 4/0, `interlinking` 11/0,
+`money_precise` 21/0, `access_manifest` 17/0, `imports_resolve` 4/0, `arkiv_classic_frozen`
+146/7 (the seven pre-existing routes below; `charging` and `same-person` pass).
+
 **YC20 — our drivers' wallets every three hours** (the operator, 2026-11-03: "just our drivers
 every 3 hours?"). **Live** since `f230eaca` (deployment `d7a9b6e3`); run once by hand on production
 (job 59: 4 minutes, 797 rows, ok). `collectWallets` (`walletsTick`, `YOCHARGE_WALLETS_CRON` `17 3-23/6 * * *`

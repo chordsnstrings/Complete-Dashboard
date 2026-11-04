@@ -8950,8 +8950,15 @@ app.get('/api/charging/wallets', (_req, r) => {
       on_fleet_wallet: rows.filter((w) => w.using_fleet_wallet).length, auto: 4, confirmed: 1, review: 2, unplaced: 1, fleet_groups_seen: 6 },
     rows });
 });
-/* The queue, on its own route since the review of 2026-11-03 (subject MRG). */
-app.get('/api/charging/review', (_req, r) => r.json({ ...PD_SYNC(), why: null,
+/* The queue, on its own route since the review of 2026-11-03 (subject MRG).
+   NO-STORE, as the real route answers (api/charging_routes.js): without it
+   the browser's stale-while-revalidate store (data.js api(), swr.js) held a
+   copy and answered the queue's next read from it — so the re-read after a
+   decision, and a page opened while the queue cannot be read, showed the old
+   list in the mock and never on production (found 2026-11-04, putting the
+   queue on #same-person: test/charging_views.test.mjs's unreadable-queue
+   check failed against the mock alone). */
+app.get('/api/charging/review', (_req, r) => r.set('Cache-Control', 'private, no-store').json({ ...PD_SYNC(), why: null,
   review: [
     { yc_user_id: 'yc-r1', person_id: '105', tier: 'candidate', reason: 'this mobile belongs to 2 of our records', yc_name: 'R. Okafor', yc_phone: '•••••••418',
       yc_fleet_group: 'ecofleet', our_name: drivers[5] },
