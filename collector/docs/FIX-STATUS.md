@@ -5709,6 +5709,15 @@ at a time: `charging_page` 41/0, `arkiv_ledger` 63/0, `hr_roster_page` 52/0, `ar
 `money_precise` 21/0, `access_manifest` 17/0, `imports_resolve` 4/0, `arkiv_classic_frozen`
 146/7 (the seven pre-existing routes below; `charging` and `same-person` pass).
 
+**YC30 — the three-hourly refresh never ran on its schedule** (found on production, 2026-11-04).
+In its first day `collection_run` held no `wallets` run but the one started by hand, while the
+six-hourly full reads ran at every slot. node-cron 3.0.3 had read `'17 3-23/6 * * *'` as hours 6,
+12 and 18 — the full read's minutes — so the refresh met the full read's busy flag and skipped
+itself, without a log line. Now an explicit `'17 3,9,15,21 * * *'` (setting default and the
+index.js fallback), and a skipped scheduled tick logs `charging … skipped` with why.
+`yocharge` 58/0 (§9 reads both schedules through node-cron's own matcher; revert: the stepped
+range restored → fails, "06:17, 12:17, 18:17"); `credential_save_check` 109/0.
+
 **YC20 — our drivers' wallets every three hours** (the operator, 2026-11-03: "just our drivers
 every 3 hours?"). **Live** since `f230eaca` (deployment `d7a9b6e3`); run once by hand on production
 (job 59: 4 minutes, 797 rows, ok). `collectWallets` (`walletsTick`, `YOCHARGE_WALLETS_CRON` `17 3-23/6 * * *`

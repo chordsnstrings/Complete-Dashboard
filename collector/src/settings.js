@@ -58,7 +58,7 @@ export const SETTING_DEFAULTS = {
   /* Every six hours, at 17 past, off the half-hour runs: a full read of the
      customers takes ~20 minutes at the host's pace. */
   YOCHARGE_CRON: '17 */6 * * *',
-  YOCHARGE_WALLETS_CRON: '17 3-23/6 * * *',
+  YOCHARGE_WALLETS_CRON: '17 3,9,15,21 * * *',
   /* PowerDrive's names for our fleets there (measured 2026-11-03: ecofleet
      104 customers, egari 47, ecofleet investor fleet 5). */
   YOCHARGE_FLEET_GROUPS: 'ecofleet,egari,ecofleet investor fleet',
