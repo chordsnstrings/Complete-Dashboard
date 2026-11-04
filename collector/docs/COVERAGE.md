@@ -981,6 +981,13 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **"Uber not collected" is a fact about the PRODUCT, not about the business** (2026-11-04).
+  Before printing a month as having no Uber money, read the operator's ledger. Every weekly Uber
+  wire since October 2023 is there, exact to the fils, while the product starts on 2025-04-05 and
+  Uber's API no longer serves anything before about May 2025 ("Uber money before 5 Apr 2025"
+  below). A two-year report went out with Dec 2024 – Mar 2025 as "Bolt only", and the operator
+  had to point out what it was missing.
+
 * **node-cron 3.0.3 reads a stepped RANGE as the multiples of the step inside it** (2026-11-04,
   FIX-STATUS YC30). `'17 3-23/6 * * *'` validates, and fires at hours 6, 12 and 18 — not 3, 9, 15
   and 21 (`node-cron/src/convert-expression` turns it into `0 17 6,12,18 …`). The PowerDrive wallet
@@ -10563,6 +10570,63 @@ AED 383 per day worked; Model Y 2025 501 a day, Model Y 2023 379, Model Y 2024 3
   to the dirham for Oct 2025 – Jan 2026 (e.g. 1,779,338 of 1,779,452 trip value in Oct 2025), then
   falls to 9% (Feb), 4–5% (Apr–Jun) and 9–17% (Jul–Oct) of it. For gross per car use the earnings
   route above; for the Teslas the two agree exactly through January (883,551 in Oct 2025).
+
+## Uber money before 5 Apr 2025 — not in the product, not at Uber, in the company ledger — measured 2026-11-04
+
+Asked for a two-year performance report, the first draft printed Dec 2024 – Mar 2025 as "Bolt
+only — Uber not collected" and Period A's gross as AED 7.84m. The operator: *"there's uber gross
+income data fix it."* There is — just not anywhere the product or Uber's API can reach any more.
+
+**What the product holds** (`/api/money/sources`, `/api/finance/payouts`, `/api/coverage`): no Uber
+money of any kind before 2025-04-05. Trip fares (`uber_trips`) start 2025-04-05; Uber's
+organisation report (`platform_account_day`) and the wire register (`platform_payout`) start the
+same week; components 2026-02-09; the GraphQL breakdown 2026-02-06; the workbook import
+(`statement_import`) 2025-09-01; REST payments 2026-08-17. The payout walk's floor is the earliest
+Uber TRIP (`src/sources/uber_payout.js`, "THE WALK REACHES BACK AS FAR AS THE FLEET HAS WORKED"),
+so the days before it were never asked for, although the fleet was earning on Uber throughout.
+
+**What Uber still serves:** nothing for those months.
+`/api/probe/uber/report-columns?type=REPORT_TYPE_PAYMENTS_ORGANIZATION` answered *"invalid date
+range"* for the one-day windows 2024-12-02, 2025-04-04 and 2025-05-01. `/api/probe/uber/window`
+found 0 GraphQL earner rows and 0 REST earner-payments for 2–8 Dec 2024 and 3–9 Mar 2025. The ~17.6-
+month horizon above holds; on this date it starts after 2025-05-01.
+
+**What does exist:** the operator's Drive ledger, `Ecosine_Consolidated_Ledger` (consolidated again
+in `ARKS_Master_Ecosystem_Ledger`), category "Limousine Revenue". It records every weekly Uber wire,
+as "uber payment emirates nbd till …" for Ecosine (from 2023-10-30) and "… adcb till …" for Egari
+(from 2024-11-11; Emirates NBD before April 2025).
+* **It is exact.** Of the 110 Uber credits since 2025-04-07, 108 equal Uber's own register to the
+  fils, 104 of them on the same date. The two misses are a rounding (20,995.00 against 20,995.11)
+  and one entry booked at 74,602 against Uber's 70,451.88 (Egari, 2025-11-10).
+* **Use its DATE, not its label.** The date is the wire's Monday, or one or two days after it.
+  Egari's "till …" label lags that date by a week from mid-December 2024. Each wire pays the
+  Mon–Sun week before its Monday.
+* **One week of true gross exists too.** `Copy of UBER Report 1-22` in the same Drive is Uber's
+  raw transaction export for Ecosine: 3,366 rows, 15 Dec 05:30 – 23 Dec 03:48 Dubai. Work week
+  16–22 Dec 2024: fares 157,220.28, service fee −39,308.15 (25.0%), cash −30,679.11. It nets to
+  97,069.22, which is the 23 Dec wire in the ledger to the fils. The 16 Dec wire, 122,069.56, is its
+  `so.payout` row.
+
+**Gross ÷ wire is measurable and is NOT a constant.** Over the 82 settled weeks 2025-04-07 …
+2026-11-01, trip fares (`/api/finance/daily?platform=uber&fleet=…`) were divided by the register's
+wire for the same Mon–Sun period:
+
+| fleet | pooled | weekly p10–p90 | monthly range |
+|---|---|---|---|
+| Ecosine | 1.609 | 1.52–1.71 | 1.51–1.77 |
+| Egari | 1.642 | 1.52–1.80 | 1.52–1.80 |
+
+The ratio drifts: about 1.77 in summer 2025 and 1.51–1.59 through 2026. In-period, for the Ecosine
+week above, it was 1.620. Anything built on it is an ESTIMATE and must be printed as one.
+
+**Used once, in the report and not in the product.** Uber gross for 4 Nov 2024 – 4 Apr 2025 was
+estimated as AED 5.40m (5.06–5.94m at the lowest and highest monthly ratio). By month: Nov (4–30)
+944.8k, Dec 969.6k, Jan 1,161.7k, Feb 1,366.4k, Mar 846.5k, 1–4 Apr 116.0k. The in-period check
+(16–22 Dec) estimated 156,157 against 157,220 actual (−0.7%). With it, Uber + Bolt for the whole
+year is AED 13.23m (2024–25) against 12.29m (2025–26), ≈ −7%. That is ≈ +17% to 4 April and
+−26% after. The method: each ledger wire × its fleet's pooled ratio, spread evenly over the seven
+days of the week it pays. For 31 Mar – 6 Apr, the fares measured on 5–6 Apr are subtracted first,
+so nothing is counted twice.
 
 ## ntfy phone alerts — built 2026-10-20
 
