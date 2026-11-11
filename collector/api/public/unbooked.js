@@ -37,6 +37,19 @@ export const RUNG = {
   sole_custodian: 'the only person on record holding the car that day',
   ambiguous: 'one of several people who held the car',
 };
+/* The same rungs, short enough to sit in a row's facts beside the pill.
+   RUNG stays the sentence; this is its name, in the Activity tab's own words
+   (driver.js: "by time", "by the last trip on the car", "by day-custody
+   alone") and keeping what makes each an inference: "on record", "that day",
+   "the operator's rule". The first draft's "by the only person holding the
+   car" dropped all three and read as a person doing the naming (the review,
+   2026-11-11). */
+export const RUNG_SHORT = {
+  bracketed: 'by time — their own Uber trips either side of it',
+  last_trip: 'by the last Uber trip on the car — the operator’s rule',
+  sole_custodian: 'by day-custody alone — the only person on record with the car that day',
+  ambiguous: 'one of several on record with the car that day',
+};
 const NAMED = new Set(['bracketed', 'last_trip', 'sole_custodian']);
 const STRENGTH = { bracketed: 3, last_trip: 2, sole_custodian: 1, ambiguous: 0 };
 
@@ -94,6 +107,37 @@ export function ridesOf(res) {
     r.to = a.end_place?.area || r.segs.find((g) => g.end_place?.area)?.end_place?.area || null;
     r.sources = [...new Set(r.segs.map((g) => g.source_label || g.source))];
     r.source = a.source;
+    /* WHAT A PERSON CAN ACT ON, from the reading the ride counts (its time
+       and kilometres are that reading's, so its money and its gap are too).
+       The day page printed none of these although every row carries them:
+       the seat count (a sensor reading, not an inference), the fares the
+       fleet did not take at its own AED/km over these kilometres, and how
+       far the nearest booking was. A second reading only fills the seat
+       count when the counted one has none. Each is null when unknown, and
+       a page omits a null rather than print it as zero. */
+    const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+    r.passengers = num(a.passengers) ?? r.segs.map((g) => num(g.passengers)).find((v) => v != null) ?? null;
+    r.forgone = num(a.forgone_aed);
+    r.rate = num(a.aed_per_km);
+    r.rateBasis = a.rate_basis || null;
+    r.channels = a.channels_checked ? String(a.channels_checked).split(',').map((s) => s.trim()).filter(Boolean) : [];
+    /* THE NEAREST BOOKING, AS THE RECONCILER JUDGED IT — including whether it
+       ever ran. A cancelled order is a moment, not a ride (src/reconcile.js
+       nearestWords, test/nearest_cancelled.test.mjs): "nearest booking 0m
+       away · Bolt" is exactly what the operator read on 2026-10-14 as "it's a
+       bolt trip, not unauthorized", when 16 of the 17 such bookings were
+       cancelled. The reconciler's own reason says so in words the test pins
+       ("…a bolt booking that never ran — the driver cancelled after
+       accepting it; requested 12 min before…"); a verdict stored before that
+       wording is caught by the booking's own status instead. */
+    const reason = String(a.verdict_reason || '');
+    const never = reason.match(/booking that never ran — ([^;]+)/);
+    const st = String(a.nearest_booking?.status || '').toLowerCase().replace(/^optional_ride_/, '');
+    const didNotRun = !!never || /cancel|no_show|did_not|reject|not_completed/.test(st);
+    r.nearest = num(a.nearest_gap_min) != null
+      ? { platform: a.nearest_platform || null, gapMin: num(a.nearest_gap_min), ranNot: didNotRun,
+        why: never ? never[1].trim() : (didNotRun && st ? `status ${st.replace(/_/g, ' ')}` : null) }
+      : null;
     r.day = dayOf(r.start);
     /* The pieces on each Dubai day, for a 24-hour axis: a ride across
        midnight is drawn on both days, each piece to its own edge. */

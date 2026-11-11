@@ -2834,3 +2834,43 @@ production data, folding off → on: #payouts 2,327 → 976 visible words, #over
 **Not shipped yet:** the answer line and the Act-on strip computed per page from live data
 (the demo's were written from one snapshot), tile values that are whole sentences, cards that
 should be tables, and the phone build (`/m/`), which has its own stylesheet.
+
+## Rows cut to one line — the focus pass on layout rows (2026-11-11)
+
+The operator sent a screenshot of a driver's day: "unboooked journey in the drivers page are not
+properly formatted and doesn't show actionable data. audit, fix." The rows read "16:40…", the end
+time printed over "UNBOOKED JOURNEY · FROM", a "TO" with nothing after it — and the two jobs above
+them the same, "PICK-UP" and "DROP-OFF" with no address.
+
+**The cause, measured in the browser on production** (`bin/prod-mirror.mjs`, the day of 10 Nov 2026
+for the driver on L59841): each row carried `data-fx="lead"`, and arkiv.css cuts every lead to one
+line (`-webkit-line-clamp:1; overflow:hidden`) — 105 px of row shown as 50. focus.js judges text
+with no prose block around it by the nearest div, and for a row's "open ↗" link that div is the
+whole row: over 15 words, sparse in numbers, holding a link → "lead". Not the rows' own CSS.
+
+**The sweep** — `bin/focus-rows-audit.mjs`, every route in test/routes_list.mjs plus the pages it
+does not carry, 143 pages, Arkiv, focus on, every marked element that holds block children:
+
+| page | marked | what it did |
+|---|---|---|
+| driver day (10 Nov, L59841) | 7 × `div.dday-job` lead — 5 completed jobs and both unbooked journeys | each cut 105 → 50 px: addresses, km, fare, outcome, places, links gone |
+| `#segments` and its 6 filtered forms | 1 × `div.pbody` lead — the attribution chips | switched to the clamp's box model; nothing cut at 1440 |
+| `#feeds` | 2 × `div.cap` (absent, fold) | **not this fault**: `.cap` is a BLOCK the selector names, folded by design |
+
+Every other mark on every page was a real prose block. **Fixed** in focus.js ("A ROW IS NOT A
+PARAGRAPH"): when the fallback climbs to an element holding blocks, it is a layout, not prose,
+and is not judged; a BLOCK the selector names is judged as before. **After**, the same sweep on the
+working tree (`bin/live-ui.mjs`): only `#feeds`' two captions, as designed. Mark counts per page
+equal production's on every page but those eight, once slow pages are given the same settle (three
+pages first read 2 → 15, 2 → 23, 20 → 24; side by side at `SETTLE=8000` both servers read 15, 23,
+24 — the first read had caught them before their panels arrived).
+
+**The rows themselves** (FIX-STATUS UBJ): an unbooked journey now prints, on its face, the seat
+count, the fares forgone at the day's stated rate, the nearest booking (and whether it ever ran),
+the rung beside the pill — each absent with its reason when the reading cannot give it — with the
+car linked to its movement on the day and the journey as the way onward. An independent review
+found six faults in the first version (UBJ7), all fixed. Screenshots at 1440 (Arkiv and Classic)
+and 390, against production's own data: every row a grid, none clipped, no sideways scroll.
+
+To repeat: `node bin/prod-mirror.mjs &` then `node bin/focus-rows-audit.mjs http://127.0.0.1:8200
+/tmp/fx.json`; compare a working tree on :8100 with the same `SETTLE`.

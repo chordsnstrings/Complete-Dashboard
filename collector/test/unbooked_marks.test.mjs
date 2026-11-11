@@ -29,9 +29,18 @@ const drawn = (shift.days || []).filter((d) => d.first_min != null).map((d) => d
 const D1 = drawn[drawn.length - 2];          // a drawn day
 const D2 = drawn[drawn.length - 1];          // another
 const at = (day, hhmm) => new Date(`${day}T${hhmm}:00+04:00`).toISOString();
+/* What a reading carries that a person can act on (2026-11-11): the seat
+   count, the fares forgone at the fleet's AED/km and the nearest booking. */
+const RATE_BASIS = 'the fleet’s own rate over this window — AED 4.5/km. Revenue forgone, not a cash cost.';
+/* The shapes the server sends (api/unauthorized_routes.js dress(), src/reconcile.js). */
+const NO_RATE = 'no booking in this window carries both a fare and a distance, so there is no rate to value this at';
 const seg = (o) => ({ verdict: 'unauthorized', fleet_id: 'ecosine', plate: 'TST001', counts_once: true,
   source: 'fms_trip', source_label: 'FMS trip seat count', distance_km: 9.5,
+  passengers: 2, forgone_aed: 42.75, aed_per_km: 4.5, rate_basis: RATE_BASIS, nearest_platform: 'uber', nearest_gap_min: 95,
+  verdict_reason: 'no completed booking overlaps; nearest is a uber trip 95 min away', channels_checked: 'bolt,hotel,uber,yango',
   start_place: { area: 'Test Origin' }, end_place: { area: 'Test Destination' }, ...o });
+/* A place name past fifteen words with its label: data, never folded. */
+const LONG_PLACE = 'Test Origin Marasi Drive Business Bay Tower Two Gate Three Near The Long Bridge By The Water Front';
 /* Ride A on D1 23:10–23:40: two readings, both naming this person (last trip).
    Ride B on D2 10:00–10:30: the counted reading a candidate, the other naming
    them — named by one reading, one of several by the other.
@@ -45,8 +54,13 @@ const named = [
     counts_once: false, attribution_tier: 'bracketed', attribution_evidence: 'Named by time on TST001.' }),
 ];
 const cands = [
-  seg({ started_at: at(D2, '10:00'), ended_at: at(D2, '10:30'), attribution_tier: 'ambiguous' }),
-  seg({ started_at: at(D2, '15:00'), ended_at: at(D2, '15:20'), attribution_tier: 'ambiguous', distance_km: 4.1 }),
+  seg({ started_at: at(D2, '10:00'), ended_at: at(D2, '10:30'), attribution_tier: 'ambiguous', start_place: { area: LONG_PLACE } }),
+  /* A CABMAN reading (no seat count), on a day with no rate, and no booking
+     of any kind near it — each said absent WITH its reason, never as 0. */
+  seg({ started_at: at(D2, '15:00'), ended_at: at(D2, '15:20'), attribution_tier: 'ambiguous', distance_km: 4.1,
+    source: 'cabman', source_label: 'CABMAN DT', passengers: null, forgone_aed: null, aed_per_km: null, rate_basis: NO_RATE,
+    nearest_platform: null, nearest_gap_min: null,
+    verdict_reason: 'no booking of any kind on this plate in the window, across bolt, hotel, uber, yango' }),
 ];
 const BODY = {
   driver: { id: 'drv-0' },
@@ -56,12 +70,12 @@ const BODY = {
 };
 
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
-const open = async (hash, answer) => {
+const open = async (hash, answer, query = '') => {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
   const page = await ctx.newPage();
   const errs = []; page.on('pageerror', (e) => errs.push(String(e).slice(0, 200)));
   await page.route('**/api/driver/unauthorized**', (r) => answer(r));
-  await page.goto(`${base}/#${hash}`, { waitUntil: 'networkidle' });
+  await page.goto(`${base}/${query}#${hash}`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(800);
   return { page, errs, close: () => ctx.close() };
 };
@@ -160,7 +174,9 @@ console.log('\nThe day page: a row on the band, and each ride in the list at its
     const list = document.querySelector('.dday-list');
     const order = list ? [...list.children].filter((c) => c.classList.contains('dday-job'))
       .map((c) => ({ s: Number(c.dataset.s), unb: c.classList.contains('dday-unb'), named: c.classList.contains('named'),
-        text: c.textContent.replace(/\s+/g, ' ').slice(0, 400), href: c.querySelector('.dday-open')?.getAttribute('href') })) : [];
+        /* 900, not 400: the row's facts grew on 2026-11-11 (seat count, fares
+           forgone, nearest booking, the rung) and pushed its caveat past 400. */
+        text: c.textContent.replace(/\s+/g, ' ').slice(0, 900), href: c.querySelector('.dday-open')?.getAttribute('href') })) : [];
     const gaps = [...document.querySelectorAll('.dday-gap[data-from]')].map((g) => ({ from: Number(g.dataset.from), to: Number(g.dataset.to),
       said: [...g.querySelectorAll('.dday-ungap')].map((x) => x.textContent) }));
     return { label: row?.querySelector('.dday-onlab')?.textContent, total: row?.querySelector('.dday-ontot')?.textContent, marks, order, gaps };
@@ -184,6 +200,87 @@ console.log('\nThe day page: a row on the band, and each ride in the list at its
   check('…and no other wait claims one', got.gaps.filter((g) => g !== holding[0]).every((g) => !g.said.length), JSON.stringify(got.gaps));
   check('…with the way to the journey itself', unb.length > 0 && unb.every((u) => /^#segment\/TST001\//.test(u.href || '')), JSON.stringify(unb.map((u) => u.href)));
   check('nothing on the page threw', !p.errs.length, p.errs.join(' | '));
+  await p.close();
+}
+
+console.log('\nThe day page: each unbooked journey says what a person can act on (2026-11-11)');
+/* The operator: "unbooked journey in the drivers page … doesn't show
+   actionable data". Every reading carries the seat count, the fares forgone
+   at the fleet's own AED/km and the nearest booking; the row printed none. */
+{
+  const p = await open(`driver/drv-0/day?on=${D2}`, json(BODY), '?ui=desktop&skin=arkiv');
+  await p.page.waitForSelector('.dday-job.dday-unb', { timeout: 20000 }).catch(() => {});
+  await p.page.waitForTimeout(900);            // the focus pass's debounce, so its marks are on
+  const rows = await p.page.evaluate(() => [...document.querySelectorAll('.dday-job.dday-unb')].map((j) => {
+    const when = j.querySelector('.dday-when').getBoundingClientRect(), row = j.getBoundingClientRect();
+    const forgone = [...j.querySelectorAll('.dday-facts span')].find((s) => /fares forgone/.test(s.textContent));
+    return {
+      s: Number(j.dataset.s), text: j.textContent.replace(/\s+/g, ' '),
+      facts: [...j.querySelectorAll('.dday-facts')].map((f) => ({ seen: f.checkVisibility(), text: f.textContent.replace(/\s+/g, ' ').trim() })),
+      pts: [...j.querySelectorAll('.dday-pt')].map((x) => ({ seen: x.checkVisibility(), fx: x.dataset.fx || null, text: x.textContent.replace(/\s+/g, ' ').trim() })),
+      forgoneTitle: forgone?.getAttribute('title') || null,
+      car: j.querySelector('.dday-facts a.lnk')?.getAttribute('href') || null,
+      links: [...j.querySelectorAll(':scope > a')].map((a) => ({ text: a.textContent, href: a.getAttribute('href') })),
+      fx: j.dataset.fx || null, whenInset: Math.round(when.left - row.left),
+    };
+  }));
+  const gap = await p.page.evaluate(() => {
+    const g = document.querySelector('.dday-ungap');
+    return g ? { text: g.textContent, seen: g.checkVisibility(), fx: g.dataset.fx || null } : null;
+  });
+  const [b, c] = rows;
+  check('two unbooked rows on the day, at 10:00 and 15:00', rows.length === 2 && b.s === 600 && c.s === 900, JSON.stringify(rows.map((r) => r.s)));
+  check('ride B: "2 aboard by seat count", "nearest booking 1h 35m away · Uber" — a booking that ran, said as nothing more',
+    /\b2 aboard by seat count/.test(b.text) && /nearest booking 1h 35m away · Uber/.test(b.text) && !/never ran/.test(b.text), b.text);
+  check('…the money names its basis in words — "AED 42.75 fares forgone at this day’s AED 4.5/km", the rate as the route states it — and in full as its title',
+    /AED 42\.75 fares forgone at this day’s AED 4\.5\/km/.test(b.text) && b.forgoneTitle === RATE_BASIS, `${b.forgoneTitle} · ${b.text}`);
+  check('…and the rung it rests on, beside the pill', /named beside it/i.test(b.facts[1]?.text || '')
+    && /named by one reading, one of several by the other/.test(b.facts[1]?.text || ''), JSON.stringify(b.facts));
+  check('ride C (CABMAN, no rate that day, no booking near it): each absent WITH its reason, and no zero stands in',
+    /aboard not counted — CABMAN DT gives no seat count/.test(c.text)
+      && /fares forgone not valued — no booking that day carries both a fare and a distance/.test(c.text)
+      && /no booking on Bolt, Hotel, Uber, Yango touched this car near it/.test(c.text)
+      && !/AED 0\b/.test(c.text) && !/\b0 aboard/.test(c.text), c.text);
+  check('…and a candidate carries the pill alone, no rung that names them', /one of several/i.test(c.facts[1]?.text || '') && !/\bby (the|time|day-custody)\b/.test(c.facts[1]?.text || ''), JSON.stringify(c.facts));
+  check('both lines of facts are on the face of the row under the Arkiv focus pass', rows.every((r) => r.facts.length === 2 && r.facts.every((f) => f.seen) && !r.fx),
+    JSON.stringify(rows.map((r) => [r.fx, r.facts.map((f) => f.seen)])));
+  check('a place name past fifteen words is shown, never folded (data, not prose)', b.pts.length === 2 && b.pts.every((x) => x.seen && !x.fx)
+    && /Water Front/.test(b.pts[0].text), JSON.stringify(b.pts));
+  check('the car opens its own movement page on this day; the one way onward is the journey',
+    rows.every((r) => new RegExp(`^#vehicle/TST001/movement\\?(?:.*&)?day=${D2}(?:&|$)`).test(r.car || '') && r.links.length === 1
+      && /^#segment\/TST001\//.test(r.links[0].href) && /journey/.test(r.links[0].text)), JSON.stringify(rows.map((r) => [r.car, r.links])));
+  check('the clocks sit clear of the row’s critical stripe (inset ≥ 6 px)', rows.every((r) => r.whenInset >= 6), JSON.stringify(rows.map((r) => r.whenInset)));
+  const words = (s) => (s.match(/[A-Za-z0-9][A-Za-z0-9'’.,%+−\-/:]*/g) || []).length;
+  check('the wait that holds a ride says so in 15 words or fewer, so the focus pass keeps it visible',
+    gap && words(gap.text) <= 15 && gap.seen && /10:00–10:30 on TST001/.test(gap.text), JSON.stringify(gap));
+  check('nothing on the page threw', !p.errs.length, p.errs.join(' | '));
+  await p.close();
+}
+
+console.log('\nThe day page: a nearest booking that never ran says so');
+/* "nearest booking 0m away · Bolt" is what the operator read on 2026-10-14
+   as "it's a bolt trip, not unauthorized" — 16 of 17 such bookings had been
+   cancelled (test/nearest_cancelled.test.mjs). The reconciler's reason says
+   so; a verdict stored before that wording is caught by the booking's status. */
+for (const [name, patch, want] of [
+  ['the reconciler\'s reason', { nearest_platform: 'bolt', nearest_gap_min: 12,
+    verdict_reason: 'no completed booking overlaps; nearest is a bolt booking that never ran — the driver cancelled after accepting it; requested 12 min before the journey began' },
+  /nearest booking 12m away · Bolt — it never ran \(the driver cancelled after accepting it\)/],
+  ['an older verdict, by the booking\'s status', { nearest_platform: 'bolt', nearest_gap_min: 0,
+    verdict_reason: 'no completed booking overlaps; nearest is a bolt trip 0 min away', nearest_booking: { status: 'rider_cancelled' } },
+  /nearest booking 0m away · Bolt — it never ran \(status rider cancelled\)/],
+]) {
+  const body = { ...BODY, attributed: { ...BODY.attributed, rows: [{ ...named[0], ...patch }, named[1]] } };
+  const p = await open(`driver/drv-0/day?on=${D1}`, json(body), '?ui=desktop&skin=arkiv');
+  await p.page.waitForSelector('.dday-job.dday-unb', { timeout: 20000 }).catch(() => {});
+  const text = await p.page.evaluate(() => document.querySelector('.dday-job.dday-unb')?.textContent.replace(/\s+/g, ' ') || '');
+  check(`${name}: "${String(want).slice(1, 60)}…"`, want.test(text), text.slice(0, 500));
+  /* The rung keeps what makes it an inference ("the operator's rule"), in
+     the Activity tab's own words — never a bare "by the last Uber trip". */
+  if (name.startsWith('the reconciler')) {
+    check('…and the rung beside the pill says whose rule names them: "by the last Uber trip on the car — the operator’s rule"',
+      /named beside it.*by the last Uber trip on the car — the operator’s rule/i.test(text), text.slice(0, 500));
+  }
   await p.close();
 }
 
