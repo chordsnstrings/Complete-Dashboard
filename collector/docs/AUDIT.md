@@ -2866,10 +2866,11 @@ pages first read 2 → 15, 2 → 23, 20 → 24; side by side at `SETTLE=8000` bo
 24 — the first read had caught them before their panels arrived).
 
 **The rows themselves** (FIX-STATUS UBJ): an unbooked journey now prints, on its face, the seat
-count, the fares forgone (with its basis as the title), the nearest booking and the rung short
-beside the pill, and offers the journey and the car's day replayed on the map. Screenshots at 1440
-(Arkiv and Classic) and 390, against production's own data: every row a grid, none clipped, no
-sideways scroll.
+count, the fares forgone at the day's stated rate, the nearest booking (and whether it ever ran),
+the rung beside the pill — each absent with its reason when the reading cannot give it — with the
+car linked to its movement on the day and the journey as the way onward. An independent review
+found six faults in the first version (UBJ7), all fixed. Screenshots at 1440 (Arkiv and Classic)
+and 390, against production's own data: every row a grid, none clipped, no sideways scroll.
 
 To repeat: `node bin/prod-mirror.mjs &` then `node bin/focus-rows-audit.mjs http://127.0.0.1:8200
 /tmp/fx.json`; compare a working tree on :8100 with the same `SETTLE`.

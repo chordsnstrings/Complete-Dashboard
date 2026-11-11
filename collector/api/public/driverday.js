@@ -612,10 +612,43 @@ function unbookedOnDay(root, { res, day, list }) {
        expected to show and is not evidence of driving", so a fact that
        reads as damning and is by construction expected has no place on
        the face of an accusation. It stays on the journey's page, with that
-       note. Two ways onward instead of one bare "open ↗": the journey
-       itself, and the car's day replayed on the map. */
-    const how = r.mixed ? 'one reading, one of several by the other'
+       note.
+
+       What the independent review of 2026-11-11 changed, each against the
+       code it cited:
+         · A figure the reading cannot give is ABSENT WITH ITS REASON, as on
+           the journey page (segments.js segmentBand): no seat count from a
+           sensor that gives none, a journey with no rate or no distance not
+           valued, and no booking near it said in so many words — "no
+           booking on Bolt, Hotel, Uber, Yango touched this car near it" is
+           the strongest fact a row can carry, and it had been left out.
+         · The money says its basis in words, not only in a title a touch
+           screen never shows: this page asks for one day, so the row is
+           valued at that day's AED/km, and the journey page one click away
+           values it at its fleet's rate for the month (segment_routes.js
+           says why each names its basis rather than sharing one).
+         · A nearest booking that never ran says so (see unbooked.js).
+         · The car is a link to its movement page on this day — that page
+           honours the day against the car's own stored days, where the map
+           replay first offered honoured it only within the fleet's 400
+           newest plate-days and otherwise replayed another day under this
+           one's title. One way onward on the right, as on every job row. */
+    const how = r.mixed ? 'named by one reading, one of several by the other'
       : r.named ? (RUNG_SHORT[r.tier] || r.tier) : null;
+    const channelList = (xs) => xs.map(sourceLabel).join(', ');
+    const aboard = r.passengers != null
+      ? `<span><b>${esc(String(r.passengers))}</b> aboard by seat count</span>`
+      : `<span class="dim">aboard not counted — ${esc(r.sources.join(' and '))} gives no seat count</span>`;
+    const forgone = r.forgone != null
+      ? `<span${r.rateBasis ? ` title="${esc(r.rateBasis)}"` : ''}><b>${esc(money(r.forgone))}</b> fares forgone${
+        r.rate != null ? ` at this day’s <b>AED ${esc(fmt(r.rate, 2))}</b>/km` : ''}</span>`
+      : `<span class="dim"${r.rateBasis ? ` title="${esc(r.rateBasis)}"` : ''}>fares forgone not valued — ${esc(r.km == null
+        ? 'no distance was measured' : 'no booking that day carries both a fare and a distance')}</span>`;
+    const nearest = r.nearest
+      ? `<span>nearest booking <b>${esc(dur(r.nearest.gapMin))}</b> away${r.nearest.platform ? ` · ${esc(sourceLabel(r.nearest.platform))}` : ''}${
+        r.nearest.ranNot ? ` — <b class="t">it never ran</b>${r.nearest.why ? ` (${esc(r.nearest.why)})` : ''}` : ''}</span>`
+      : `<span>${esc(r.channels.length ? `no booking on ${channelList(r.channels)} touched this car near it`
+        : 'no nearby booking was recorded against this journey')}</span>`;
     body.innerHTML = `
       <div class="dday-leg">
         <div class="dday-pt"><i class="o"></i><span class="dday-lab">unbooked journey · from</span>
@@ -624,30 +657,24 @@ function unbookedOnDay(root, { res, day, list }) {
           <b>${esc(r.to || 'ground no trip has named')}</b></div>
       </div>
       <div class="dday-facts">
-        ${r.km != null ? `<span><b>${esc(fmt(r.km, 2))}</b> km</span>` : ''}
+        ${r.km != null ? `<span><b>${esc(fmt(r.km, 2))}</b> km</span>` : '<span class="dim">no distance measured</span>'}
         <span><b>${esc(dur(Math.max(1, Math.round((r.end - r.start) / 60000))))}</b> with a passenger aboard</span>
-        ${r.passengers != null ? `<span><b>${esc(String(r.passengers))}</b> aboard by seat count</span>` : ''}
-        ${r.forgone != null ? `<span${r.rateBasis ? ` title="${esc(r.rateBasis)}"` : ''}><b>${esc(money(r.forgone))}</b> fares forgone</span>` : ''}
-        <span>car <b>${esc(r.plate)}</b></span>
+        ${aboard}
+        ${forgone}
+        <span>car <a class="lnk" href="${href('vehicle', r.plate, 'movement', { day })}" title="${esc(`${r.plate}’s movement on ${day}, with its parked clusters and segments`)}"><b>${esc(r.plate)}</b></a></span>
       </div>
       <div class="dday-facts dday-ctx">
         <span class="dday-out">${pill(r.named ? 'named beside it' : 'one of several', r.named ? 'bad' : null)}</span>
-        ${how ? `<span>by <b class="t">${esc(how)}</b></span>` : ''}
-        ${r.nearest ? `<span>nearest booking <b>${esc(dur(r.nearest.gapMin))}</b> away${
-  r.nearest.platform ? ` · ${esc(sourceLabel(r.nearest.platform))}` : ''}</span>` : ''}
+        ${how ? `<span class="dday-rung">${esc(how)}</span>` : ''}
+        ${nearest}
         <span>seen by <b class="t">${esc(r.sources.join(' and '))}</b></span>
       </div>
       <div class="dday-why">${esc(w.rung.charAt(0).toUpperCase() + w.rung.slice(1))}. No channel booked this journey; this is an inference from the booking record, not a record of who drove.${
   r.evidence ? `<br><span class="dim">${esc(r.evidence)}</span>` : ''}</div>`;
-    const acts = el('div', 'dday-acts');
     const open = el('a', 'dday-open', 'journey ↗');
     open.href = href('segment', r.plate, r.anchor.started_at, r.source ? { source: r.source } : null);
-    open.title = 'This journey: the sensor reading, who the evidence names and what was around it';
-    const replay = el('a', 'dday-open', 'replay ↗');
-    replay.href = href('map', 'replay', r.plate, { day });
-    replay.title = `${r.plate} on ${day}, replayed on the map`;
-    acts.append(open, replay);
-    item.append(when, body, acts);
+    open.title = 'This journey: its track, the sensor reading, who the evidence names and what was around it';
+    item.append(when, body, open);
     const next = [...host.children].find((c) => c.classList.contains('dday-job') && Number(c.dataset.s) > piece.s);
     host.insertBefore(item, next || null);
     /* A ride inside a wait is said IN the wait. Ordered by start the ride

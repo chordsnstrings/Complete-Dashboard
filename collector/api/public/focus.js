@@ -62,8 +62,13 @@ const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
 
 /* Where prose lives, nearest first, and what is never prose to this pass. */
 const BLOCK = 'p, li, .note, .cap, dd, blockquote, .vdct-sub, .vdct-rec, .sp-ev, .sp-hint, .sub, .lede, .why';
+/* .dday-pt and .dday-facts are a day list's places and figures — a pick-up,
+   a drop-off, "83.11 km", "AED 374.00 fares forgone" — data, not prose. A
+   long address with its label passed 15 words and was folded out of sight
+   ("Downtown - برج خليفة - وسط مدينة دبي - دبي - United Arab Emirates"
+   under "pick-up"; found by the review of 2026-11-11). */
 const NOT_PROSE = 'svg, td, th, button, select, option, input, label, textarea, .kpi, h1, h2, h3, h4, summary, '
-  + '.num, .hb, .hbars, .track, .sechd, .pill, .chip, .fx-more, details:not([open])';
+  + '.num, .hb, .hbars, .track, .sechd, .pill, .chip, .fx-more, details:not([open]), .dday-pt, .dday-facts';
 const HOLDS_DATA = 'table, svg, canvas, .kpi, .kpis, .panel, .cband, .chartscroll, .hbars, button, select, input, details';
 const HOST = '.panel, section.cband, section, form, fieldset';
 /* What makes an element a LAYOUT rather than a paragraph: it holds blocks.
