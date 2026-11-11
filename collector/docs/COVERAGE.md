@@ -981,6 +981,21 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **Under Arkiv, focus.js decides what a row IS from its loose text** (2026-11-11, FIX-STATUS
+  UBJ1). Text with no prose block around it (`p`, `.cap`, `.note`, `.why`…) is judged by the
+  nearest div, so a list row whose only loose text was its "open ↗" link was judged as one
+  paragraph and cut to one line by arkiv.css — on production, every row of a driver's day. focus.js
+  now skips an element that holds blocks, but a new row built as one div of inline text would still
+  be judged: give a row's text its own element, and run `bin/focus-rows-audit.mjs` after adding a
+  list. A visible clamp reads as "the data is missing", not as a styling fault.
+
+* **On the mock, a page reached by navigation can redraw forever, and a second read races it**
+  (2026-11-11, FIX-STATUS UBJ6). `api()` paints from the answer it last held and fires
+  `data:refreshed` when the fresh one differs; mockapi's figures move on every request, so after a
+  link click every shared endpoint "differs" and the view is rebuilt every 300–500 ms. Production
+  does not (the data holds still). In a test, judge the value `waitForFunction` returned — never a
+  fixed sleep followed by a fresh read.
+
 * **"Uber not collected" is a fact about the PRODUCT, not about the business** (2026-11-04).
   Before printing a month as having no Uber money, read the operator's ledger. Every weekly Uber
   wire since October 2023 is there, exact to the fils, while the product starts on 2025-04-05 and

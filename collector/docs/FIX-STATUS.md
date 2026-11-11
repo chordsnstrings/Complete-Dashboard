@@ -5742,3 +5742,26 @@ for the first time in this environment and fails 5 checks identically on the pro
 overflow failures were the class-targets table's own sideways scroller, which the suite did not
 recognise (now it does). `class_target_panel` failed on a month's first three days — its "earlier
 day" save is necessarily today's then — and now expects what it sets up.
+
+## UBJ — unbooked journeys on the driver's day: whole rows, and what to act on (2026-11-11)
+
+The operator, with a screenshot of a driver's day: "unboooked journey in the drivers page are not
+properly formatted and doesn't show actionable data. audit, fix." docs/AUDIT.md "Rows cut to one
+line" has the audit; this is what was done.
+
+| id | what | written | production | proven |
+|---|---|---|---|---|
+| UBJ1 | **focus.js cut whole rows to one line.** Text with no prose block around it is judged by the nearest div; for a row's "open ↗" that is the row, marked `lead` and clamped (105 → 50 px). On production: all 7 rows of the 10 Nov day (5 jobs, 2 unbooked journeys) and the attribution chips of the 7 `#segments` pages. Now an element that holds blocks is a layout and is never judged; a BLOCK the selector names is judged as before | yes | no | `focus_layout` 58/0 — §6: a synthetic row (link-only loose text) unmarked, a grid, not clipped, while a real paragraph with a link is still `lead`; the mock's driver day, every row unmarked, grid, not clipped. **Reverted** (the one `continue`): both fail — rows `lead`, `flow-root`, clipped. Sweep of 143 pages before/after (AUDIT): only the 8 faulty pages change |
+| UBJ2 | **The row says what to act on**: the seat count ("3 aboard by seat count"), the fares forgone at the fleet's AED/km ("AED 374.00 fares forgone", the route's basis as its title), the nearest booking ("nearest booking 2h 37m away · Uber"), the rung short beside the pill ("by the last Uber trip on the car"). Each null is left out, never printed as 0. The Uber status at the start is left out on purpose: the route says it is "expected … not evidence of driving" | yes | no | `unbooked_marks` 36/0. **Reverted**, each caught: the seat count and forgone (2 checks), the nearest booking, the rung, a null forgone turned into 0 (`zero`) |
+| UBJ3 | Two ways onward instead of a bare "open ↗": `journey ↗` (the segment page) and `replay ↗` (`#map/replay/<plate>?day=<day>`, the car's day on the map) | yes | no | `unbooked_marks` — reverted (`replay`): caught |
+| UBJ4 | The wait that holds a ride says so in 13 words ("Unbooked journey inside this wait: 16:40–17:43 on L59841, named beside it — below.") — the 27-word form was folded under ⓘ notes, hiding the one line tying the wait to the ride | yes | no | `unbooked_marks` — ≤ 15 words and visible under focus; reverted (`gap`): caught |
+| UBJ5 | The row is padded clear of its own 3 px critical stripe: flush, "17:43" read "|7:43" once the row was whole | yes | no | `unbooked_marks` — clocks inset ≥ 6 px; reverted (`pad`): caught (inset 0) |
+| UBJ6 | **A test race, not a page fault**: `driver_day_page` "following one opens that day" failed 7 of 8 runs at `b6f71fd`. Following the link paints shared endpoints from `api()`'s held answers; the mock's figures move on every request, so each revalidation "differs", fires `data:refreshed` and the view is rebuilt every 300–500 ms; the check's second read caught a rebuild. Production through the mirror: one `#view` in 15 s, no `data:refreshed`. The check now reads the text that ended its wait | yes | — | `driver_day_page` 17/0 in 6 runs of 6 (was 1 of 8 at `b6f71fd`) |
+
+Also run, all green: `arkiv_fils` 80, `arkiv_people` 241, `arkiv_shell` 77, `charging_views` 56,
+`completeness` 15, `dangling_online` 55, `driver_day` 14, `driver_day_keys` 11, `driver_day_movement`
+33, `driver_day_outcome` 15, `forecast_page` 38, `interlinking` 11, `ledger_ui` 29, `nearest_cancelled`
+11, `occupancy_sources` 95, `person_address` 32, `reachability` 19, `revenue_target` 85,
+`segment_boundary` 6, `unauthorized_attribution` 221; `arkiv_classic_frozen` on the driver,
+`segments` and `unauthorized` routes 21/0 (the Classic skin's DOM did not move: the frozen day has
+no unbooked journey). Tool: `bin/focus-rows-audit.mjs`.

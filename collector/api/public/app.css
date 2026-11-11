@@ -2627,7 +2627,10 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 .dday-unbooked>i.x{background:var(--critical);opacity:1}
 .dday-unbooked>i.xc{background:var(--surface);box-shadow:inset 0 0 0 2px var(--critical);opacity:1}
 .dday-unbooked>i{height:8px}
-.dday-job.dday-unb{background:linear-gradient(90deg,var(--critical) 0 3px,transparent 3px)}
+/* Padded clear of its own stripe: flush, the 3 px of critical ran under the
+   first digit of both clocks and "17:43" read "|7:43" (seen once focus.js
+   stopped cutting the row to one line, 2026-11-11). */
+.dday-job.dday-unb{background:linear-gradient(90deg,var(--critical) 0 3px,transparent 3px);padding-left:12px}
 .dday-job.dday-unb.cand{background:linear-gradient(90deg,var(--critical-bg,var(--surface-2)) 0 3px,transparent 3px)}
 .dday-job.dday-unb .dday-pt>i.o{border-color:var(--critical)}
 .dday-where.dday-ungap{color:var(--critical);font-style:normal}
@@ -2657,6 +2660,12 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 .dday-facts b{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;color:var(--ink);font-weight:600}
 .dday-open{align-self:center;font-size:var(--t4);color:var(--accent);text-decoration:none;white-space:nowrap}
 .dday-open:hover{text-decoration:underline}
+/* An unbooked journey's second line of facts (the claim and its checks) and
+   its two ways onward (the journey, the car's day on the map). A fact whose
+   value is words, not a figure, keeps the text face: mono is for numbers. */
+.dday-facts.dday-ctx{margin-top:5px;align-items:center}
+.dday-facts b.t{font-family:inherit;font-variant-numeric:normal;font-weight:600}
+.dday-acts{align-self:center;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
 
 /* A gap. Tinted rather than ruled, so the eye reads the day as job / not-job
    before it reads a single word — which is the whole point of drawing a day
@@ -2674,6 +2683,8 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 @media (max-width:760px){
   .dday-job{grid-template-columns:52px 1fr;gap:10px}
   .dday-open{grid-column:2;justify-self:start;margin-top:6px}
+  .dday-acts{grid-column:2;flex-direction:row;gap:16px}
+  .dday-acts>.dday-open{margin-top:0}
   .dday-onlab{min-width:6rem}
   /* On a phone the track takes the whole width under its label and total,
      so the ruler's five times have room and every row keeps one clock. */

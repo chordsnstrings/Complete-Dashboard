@@ -20,7 +20,7 @@ import { dubaiDay } from './tz.js';
 import { channelKey } from './tokens.js';
 import { withheldSentence } from './access_model.js';
 import { unlessWithheld } from './access.js';
-import { ridesOf, rideWords, coverageWords, readable, truncationWords, clockOf } from './unbooked.js';
+import { ridesOf, rideWords, coverageWords, readable, truncationWords, clockOf, RUNG_SHORT } from './unbooked.js';
 
 const hhmm = (m) => {
   if (m == null || !Number.isFinite(m)) return '—';
@@ -584,6 +584,38 @@ function unbookedOnDay(root, { res, day, list }) {
     const when = el('div', 'dday-when');
     when.innerHTML = `<b>${esc(clock(r.start))}</b><span>${esc(clock(r.end))}</span>`;
     const body = el('div', 'dday-body');
+    /* WHAT A PERSON CAN ACT ON, ON THE FACE OF THE ROW.
+       ─────────────────────────────────────────────────────────────────────
+       The operator, 2026-11-11, of this list: "unbooked journey in the
+       drivers page are not properly formatted and doesn't show actionable
+       data." Two faults. The formatting was focus.js cutting the whole row
+       to one line (see "A ROW IS NOT A PARAGRAPH" there). The data was this
+       row: where and how far, and then the sensor's name — while the reading
+       behind it carried the three things that decide what to do next, and
+       the page printed none of them:
+         · how many people the seat sensor counted aboard (3 and 2 on the
+           two journeys of L59841 on 10 Nov 2026) — a reading, not a guess;
+         · the fares the fleet did not take, at its own AED/km over these
+           kilometres (AED 374.00 and 313.70) — said as revenue forgone, the
+           route's own words, never as a cost;
+         · how far the nearest booking was (2h 37m, 3h 59m) — the check
+           that it is not a booking filed a few minutes out.
+       So the row has two lines of facts: the journey (distance, time
+       occupied, aboard, forgone, car), then the claim about this person
+       (the pill and the rung it rests on, short) and the checks. The
+       rung's sentence, the caveat that none of this records who drove, and
+       the evidence stay below as the explanation they are — the focus pass
+       folds them under the panel's ⓘ notes like any other.
+
+       Left out on purpose: the person's Uber status when it began. The
+       route's own note says being offline on Uber "is what this feed is
+       expected to show and is not evidence of driving", so a fact that
+       reads as damning and is by construction expected has no place on
+       the face of an accusation. It stays on the journey's page, with that
+       note. Two ways onward instead of one bare "open ↗": the journey
+       itself, and the car's day replayed on the map. */
+    const how = r.mixed ? 'one reading, one of several by the other'
+      : r.named ? (RUNG_SHORT[r.tier] || r.tier) : null;
     body.innerHTML = `
       <div class="dday-leg">
         <div class="dday-pt"><i class="o"></i><span class="dday-lab">unbooked journey · from</span>
@@ -594,15 +626,28 @@ function unbookedOnDay(root, { res, day, list }) {
       <div class="dday-facts">
         ${r.km != null ? `<span><b>${esc(fmt(r.km, 2))}</b> km</span>` : ''}
         <span><b>${esc(dur(Math.max(1, Math.round((r.end - r.start) / 60000))))}</b> with a passenger aboard</span>
+        ${r.passengers != null ? `<span><b>${esc(String(r.passengers))}</b> aboard by seat count</span>` : ''}
+        ${r.forgone != null ? `<span${r.rateBasis ? ` title="${esc(r.rateBasis)}"` : ''}><b>${esc(money(r.forgone))}</b> fares forgone</span>` : ''}
         <span>car <b>${esc(r.plate)}</b></span>
-        <span>seen by <b>${esc(r.sources.join(' and '))}</b></span>
+      </div>
+      <div class="dday-facts dday-ctx">
         <span class="dday-out">${pill(r.named ? 'named beside it' : 'one of several', r.named ? 'bad' : null)}</span>
+        ${how ? `<span>by <b class="t">${esc(how)}</b></span>` : ''}
+        ${r.nearest ? `<span>nearest booking <b>${esc(dur(r.nearest.gapMin))}</b> away${
+  r.nearest.platform ? ` · ${esc(sourceLabel(r.nearest.platform))}` : ''}</span>` : ''}
+        <span>seen by <b class="t">${esc(r.sources.join(' and '))}</b></span>
       </div>
       <div class="dday-why">${esc(w.rung.charAt(0).toUpperCase() + w.rung.slice(1))}. No channel booked this journey; this is an inference from the booking record, not a record of who drove.${
   r.evidence ? `<br><span class="dim">${esc(r.evidence)}</span>` : ''}</div>`;
-    const open = el('a', 'dday-open', 'open ↗');
+    const acts = el('div', 'dday-acts');
+    const open = el('a', 'dday-open', 'journey ↗');
     open.href = href('segment', r.plate, r.anchor.started_at, r.source ? { source: r.source } : null);
-    item.append(when, body, open);
+    open.title = 'This journey: the sensor reading, who the evidence names and what was around it';
+    const replay = el('a', 'dday-open', 'replay ↗');
+    replay.href = href('map', 'replay', r.plate, { day });
+    replay.title = `${r.plate} on ${day}, replayed on the map`;
+    acts.append(open, replay);
+    item.append(when, body, acts);
     const next = [...host.children].find((c) => c.classList.contains('dday-job') && Number(c.dataset.s) > piece.s);
     host.insertBefore(item, next || null);
     /* A ride inside a wait is said IN the wait. Ordered by start the ride
@@ -614,9 +659,11 @@ function unbookedOnDay(root, { res, day, list }) {
        so the wait names the ride instead. */
     for (const gap of host.querySelectorAll('.dday-gap[data-from]')) {
       if (Number(gap.dataset.from) < piece.e && Number(gap.dataset.to) > piece.s) {
-        gap.append(el('div', 'dday-where dday-ungap', esc(`Inside this wait the car made a journey no channel booked, `
-          + `${w.when} on ${r.plate} — ${r.named ? 'this person named beside it' : 'this person one of several who held the car'}; `
-          + `${Number(gap.dataset.from) <= piece.s ? 'below' : 'above'}.`)));
+        /* Fifteen words or fewer, so the focus pass keeps it on the face of
+           the wait: the long form (27 words) was folded under ⓘ notes, which
+           hid the one line tying the wait to the journey inside it. */
+        gap.append(el('div', 'dday-where dday-ungap', esc(`Unbooked journey inside this wait: ${w.when} on ${r.plate}, `
+          + `${r.named ? 'named beside it' : 'one of several'} — ${Number(gap.dataset.from) <= piece.s ? 'below' : 'above'}.`)));
       }
     }
   }

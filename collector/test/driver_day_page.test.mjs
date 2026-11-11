@@ -80,11 +80,24 @@ console.log('\n§1 the links');
      sleep failed this check inside the full suite, where the machine is busy
      and the new day had not drawn yet. Either outcome ends the wait — the day
      drawn, or the "addressed as" note the defect produced. */
-  await page.waitForFunction(() => {
+  /* And judge THE TEXT THAT ENDED THE WAIT, not a second read of the page.
+     ─────────────────────────────────────────────────────────────────────
+     This read the text again after the wait, and on the mock that second
+     read raced a redraw: failed 7 of 8 runs at b6f71fd (2026-11-11), the
+     page text it printed being "AT", the id card's initials, and nothing
+     else. The cause is the mock, measured, not the page: following the link
+     paints the endpoints the two days share from api()'s held answers, the
+     mock's figures move on every request, so every revalidation "differs",
+     fires data:refreshed, and the view is rebuilt every 300–500 ms for as
+     long as the page is open (a new #view element in nearly every 100 ms
+     sample). Production does not: the same click through
+     bin/prod-mirror.mjs gave one #view in 15 s and no data:refreshed. So
+     the wait returns the text it matched, and the check reads that. */
+  const matched = await page.waitForFunction(() => {
     const t = document.querySelector('#view')?.innerText || '';
-    return /addressed as/.test(t) || (/19 Sept/i.test(t) && /Where the car went/i.test(t));
-  }, null, { timeout: 60000 }).catch(() => {});
-  const after = await page.evaluate(() => (document.querySelector('#view')?.innerText || ''));
+    return (/addressed as/.test(t) || (/19 Sept/i.test(t) && /Where the car went/i.test(t))) ? t : false;
+  }, null, { timeout: 60000 }).catch(() => null);
+  const after = matched ? await matched.jsonValue() : await page.evaluate(() => (document.querySelector('#view')?.innerText || ''));
   check('…and following one opens that day, not the "addressed as" note', !/addressed as/.test(after) && /19 Sept/i.test(after) && /Where the car went/i.test(after), after.slice(0, 200));
   await ctx.close();
 }

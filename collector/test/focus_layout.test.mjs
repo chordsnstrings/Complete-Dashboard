@@ -170,6 +170,58 @@ console.log('\n5 · the Classic skin');
   await p.ctx.close();
 }
 
+console.log('\n6 · a row is not a paragraph');
+/* Found on production 2026-11-11 from the operator's screenshot of a
+   driver's day: the text of a row's "open ↗" link has no prose block around
+   it, so focus.js judged it by the nearest div — the whole row — and cut the
+   row to one line: "16:40…", the end time over the label, every address,
+   distance and link below clipped (docs/AUDIT.md "Rows cut to one line"). A
+   container that holds blocks is a layout and is never judged as prose; a
+   real paragraph that links somewhere is still cut to its first line. */
+{
+  const p = await open('payouts');
+  await p.page.evaluate(() => {
+    const long = 'unbooked journey from Al Garhoud to Jumeirah Beach Residence with a passenger aboard on a car '
+      + 'this person held, seen by the seat sensor and booked by no channel the fleet works with';
+    const panelEl = document.createElement('div');
+    panelEl.className = 'panel'; panelEl.id = 'fxRowProbe';
+    panelEl.innerHTML = `<h3>Rows</h3>
+      <div class="xrow" style="display:grid;grid-template-columns:64px 1fr auto">
+        <div class="xwhen"><b>16:40</b><span>17:43</span></div>
+        <div class="xbody"><div class="xleg"><span class="xlab">from</span> <b>${long}</b></div></div>
+        <a href="#segment/TST001/x">open ↗</a>
+      </div>
+      <p class="xpara">${long}, and every word of it here is a sentence a reader reads <a href="#unauthorized">the list</a>.</p>`;
+    document.getElementById('view').append(panelEl);
+  });
+  await p.page.waitForTimeout(600);       // the observer's 120 ms debounce
+  const r = await p.page.evaluate(() => {
+    const row = document.querySelector('#fxRowProbe .xrow');
+    const para = document.querySelector('#fxRowProbe .xpara');
+    return { rowFx: row.dataset.fx || null, rowDisplay: getComputedStyle(row).display,
+      rowClipped: row.scrollHeight > row.clientHeight + 1, paraFx: para.dataset.fx || null };
+  });
+  check('a row whose only loose text is a link is not marked, stays a grid and is not clipped',
+    !r.rowFx && r.rowDisplay === 'grid' && !r.rowClipped, JSON.stringify(r));
+  check('…while a real paragraph with a link is still cut to its first line ("lead")', r.paraFx === 'lead', JSON.stringify(r));
+  await p.ctx.close();
+}
+{
+  /* The page it was found on, on the mock: a driver's day with jobs and an
+     unbooked journey (mockapi's unauthorized rows carry one on 17 Aug). */
+  const p = await open('driver/drv-0/day?on=2026-08-17');
+  await p.page.waitForSelector('.dday-job', { timeout: 20000 }).catch(() => {});
+  await p.page.waitForTimeout(800);
+  const rows = await p.page.evaluate(() => [...document.querySelectorAll('.dday-job')].map((j) => ({
+    unb: j.classList.contains('dday-unb'), fx: j.dataset.fx || null, display: getComputedStyle(j).display,
+    clipped: j.scrollHeight > j.clientHeight + 1 })));
+  check(`driver day: every row in the list is laid out whole — none marked, all grids, none clipped (${rows.length} rows, ${rows.filter((x) => x.unb).length} unbooked)`,
+    rows.length >= 2 && rows.some((x) => x.unb) && rows.every((x) => !x.fx && x.display === 'grid' && !x.clipped),
+    JSON.stringify(rows));
+  check('…and nothing on the page threw', !p.errs.length, p.errs.join(' | '));
+  await p.ctx.close();
+}
+
 await browser.close();
 srv.close();
 console.log(`\n${pass} passed, ${fail} failed`);

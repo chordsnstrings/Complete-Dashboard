@@ -66,6 +66,9 @@ const NOT_PROSE = 'svg, td, th, button, select, option, input, label, textarea, 
   + '.num, .hb, .hbars, .track, .sechd, .pill, .chip, .fx-more, details:not([open])';
 const HOLDS_DATA = 'table, svg, canvas, .kpi, .kpis, .panel, .cband, .chartscroll, .hbars, button, select, input, details';
 const HOST = '.panel, section.cband, section, form, fieldset';
+/* What makes an element a LAYOUT rather than a paragraph: it holds blocks.
+   See blocksIn() — "A ROW IS NOT A PARAGRAPH". */
+const LAYOUT = 'div, section, article, ul, ol, dl, table, figure, header, footer, nav, aside, form, fieldset';
 
 /* A statement that a figure is ABSENT, refused or not compared stays on the
    face of the page, cut to one line: the house principle is that a figure
@@ -128,7 +131,38 @@ function blocksIn(root, view) {
   for (let n; (n = w.nextNode());) {
     const el = n.parentElement;
     let b = el.closest(BLOCK);
-    if (!b || !root.contains(b)) b = el.closest('div, section, span') || el;
+    if (!b || !root.contains(b)) {
+      b = el.closest('div, section, span') || el;
+      /* A ROW IS NOT A PARAGRAPH.
+         ─────────────────────────────────────────────────────────────────
+         A text node with no prose block around it is judged by the nearest
+         div, section or span, and for most text that is the element that
+         holds it. For a LINK's text it is not: "open ↗" sits in an <a>, and
+         the nearest div above it is the whole row the link belongs to. So
+         the row was judged as one paragraph: over 15 words, sparse in
+         numbers, and holding a link, it was marked "lead", and arkiv.css cut
+         every lead to one line (-webkit-line-clamp:1, overflow:hidden).
+
+         Found on production 2026-11-11, from the operator's screenshot of a
+         driver's day ("unbooked journey in the drivers page are not
+         properly formatted and doesn't show actionable data"). The day list
+         of 10 Nov for the driver on L59841 had all seven of its rows marked
+         — five jobs and two unbooked journeys — each cut from 105 px to 50:
+         the start time ellipsised ("16:40…"), the end time printed over the
+         row's label, and every address, distance, fare, place, kilometre
+         figure and link below the first line clipped away. The sweep of all
+         141 pages (docs/AUDIT.md, "Rows cut to one line") found the same
+         fault in the attribution panel of all seven Unauthorized-trips
+         pages; every other marked element was a real prose block.
+
+         An element that holds blocks is a layout — a row, a card, a panel
+         body — and its own stray text (a link, a label) is not prose. The
+         design already says a container of prose and figures is left whole
+         (the header of this file); this is that rule, applied where the
+         fallback climbed into one. Only the fallback: a BLOCK the selector
+         named (.cap, .note, p…) is still judged as it always was. */
+      if ([...b.children].some((c) => c.matches(LAYOUT))) continue;
+    }
     if (!root.contains(b) || b === root || b === view || b.dataset.fx) continue;
     if (b.querySelector(HOLDS_DATA)) continue;
     out.add(b);
