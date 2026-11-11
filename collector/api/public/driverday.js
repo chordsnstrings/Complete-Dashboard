@@ -661,7 +661,8 @@ function unbookedOnDay(root, { res, day, list }) {
         <span><b>${esc(dur(Math.max(1, Math.round((r.end - r.start) / 60000))))}</b> with a passenger aboard</span>
         ${aboard}
         ${forgone}
-        <span>car <a class="lnk" href="${href('vehicle', r.plate, 'movement', { day })}" title="${esc(`${r.plate}’s movement on ${day}, with its parked clusters and segments`)}"><b>${esc(r.plate)}</b></a></span>
+        ${r.plate ? `<span>car <a class="lnk" href="${href('vehicle', r.plate, 'movement', { day })}" title="${esc(`${r.plate}’s movement on ${day}, with its parked clusters and segments`)}"><b>${esc(r.plate)}</b></a></span>`
+    : '<span class="dim">no plate on the reading</span>'}
       </div>
       <div class="dday-facts dday-ctx">
         <span class="dday-out">${pill(r.named ? 'named beside it' : 'one of several', r.named ? 'bad' : null)}</span>
