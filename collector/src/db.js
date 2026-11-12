@@ -305,6 +305,8 @@ async function runMigrations(client) {
    3-second lock_timeout inside), on the migration's own locked session so
    the API and the collector never both do it. A busy object waits for the
    next boot; the API meanwhile narrows its rows in the API alone, as before.
+   The pass as a whole stops after 20 seconds (the API answers 503 until it
+   is done) and leaves the rest, reported 'deferred', to the next boot.
 
    On every boot, not once: a later migration that creates a fleet table,
    or sql/schema_v53.sql rebuilding nine views (which resets
@@ -318,7 +320,7 @@ async function runMigrations(client) {
    state, never a silent absence. Nothing here can fail the boot. */
 async function rowSecurityPass(db) {
   try {
-    const sec = await secureFleetScope(db, { lockMs: 3000 });
+    const sec = await secureFleetScope(db, { lockMs: 3000, budgetMs: 20000 });
     const changed = sec.objects.filter((o) => o.result !== 'nothing to do');
     if (!sec.ran) log.warn('db', 'row-level security pass not run', { reason: sec.reason });
     else if (changed.length) {

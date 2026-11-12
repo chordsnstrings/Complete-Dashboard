@@ -192,9 +192,16 @@ console.log('\n4. an administrator creates the role; the next boot secures every
 let firstPass;
 {
   await upg.exec(`CREATE ROLE ${RLS_ROLE} NOLOGIN NOINHERIT; GRANT ${RLS_ROLE} TO app_user;`);
+  /* A pass out of time leaves the rest to the next boot, said so, and the
+     next pass picks up where it stopped. REVERSION: drop the budget test in
+     secureFleetScope — nothing is deferred and this check fails. */
+  const short = await asRole(upg, 'app_user', () => secureFleetScope(udb, { budgetMs: 0 }));
+  const deferred = short.objects.filter((o) => /^deferred: /.test(o.result));
+  check('a boot pass out of time defers the rest, saying so (and counts it as short)',
+    deferred.length > 50 && deferred.every((o) => securedShort(o.result)), `${deferred.length} of ${short.objects.length}`);
   firstPass = await asRole(upg, 'app_user', () => secureFleetScope(udb));
   const bad = firstPass.objects.filter((o) => securedShort(o.result));
-  check('the boot pass secured every object, refused none', firstPass.objects.length > 100 && bad.length === 0,
+  check('the next pass secured every object left, refused none', firstPass.objects.length > 50 && bad.length === 0,
     bad.slice(0, 3).map((o) => `${o.rel}: ${o.result}`).join(' | '));
   const t = await fleetTables(upg);
   const spine = t.find((r) => r.relname === 'driver');

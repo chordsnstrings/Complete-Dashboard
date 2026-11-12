@@ -264,9 +264,15 @@ export function parseRlsCacheKey(key) {
    migration could not create it) is a reason, not a failure. */
 /* Did fm_rls_secure() leave this object short of the policy? Its answer
    lists what it did, then the problem: 'granted SELECT, busy: …'. */
-export const securedShort = (result) => /(?:^|, )(?:busy|refused|failed): /.test(String(result || ''));
+export const securedShort = (result) => /(?:^|, )(?:busy|refused|failed|deferred): /.test(String(result || ''));
 
-export async function secureFleetScope(db, { lockMs = 3000 } = {}) {
+/* `budgetMs` bounds the whole pass. It runs before the API serves (the
+   migration gate answers 503 meanwhile), and on the first boot with v124 —
+   fifty objects, a deploy's old containers still reading them — every busy
+   object could cost its full lockMs. What the budget does not reach is
+   reported 'deferred' and finished by the next boot, exactly as a busy object
+   is. */
+export async function secureFleetScope(db, { lockMs = 3000, budgetMs = Infinity } = {}) {
   let plan;
   try {
     plan = (await db.query('SELECT rel::text AS rel, why FROM fm_rls_plan()')).rows;
@@ -274,7 +280,12 @@ export async function secureFleetScope(db, { lockMs = 3000 } = {}) {
     return { ran: false, reason: `The row-level security plan could not be read: ${String(e.message || e).slice(0, 200)}`, objects: [] };
   }
   const objects = [];
+  const t0 = Date.now();
   for (const p of plan) {
+    if (Date.now() - t0 > budgetMs) {
+      objects.push({ rel: p.rel, why: p.why, result: 'deferred: the boot pass used its time budget; the next boot continues' });
+      continue;
+    }
     let result;
     try {
       result = (await db.query('SELECT fm_rls_secure($1::regclass, $2::int) AS r', [p.rel, lockMs])).rows[0]?.r;

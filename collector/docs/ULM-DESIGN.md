@@ -1470,7 +1470,9 @@ policy: a migration file runs as one transaction, and ENABLE ROW LEVEL SECURITY,
 ALTER VIEW each hold an ACCESS EXCLUSIVE lock to its end — on fifty objects at once, behind a
 forty-second rollup. `src/db.js` runs the plan right after the migrations on every boot, one object
 per statement, each with a 3-second `lock_timeout`; a busy object is skipped and finished at the
-next boot. When everything is secured the plan is empty and the pass is one catalog query. The
+next boot, and the whole pass stops after 20 seconds (the API answers 503 until it ends), leaving
+the rest `deferred` to the next boot. When everything is secured the plan is empty and the pass is
+one catalog query. The
 same pass re-secures what later migrations undo and secures fleet tables they add. Then a probe
 assumes the role for real and decides; the boot log says "row-level security in use", "in use,
 partly: …" or "not in use: <the reason>".
