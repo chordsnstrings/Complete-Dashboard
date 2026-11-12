@@ -29,11 +29,15 @@
 import { readWorkbook } from './xlsx.js';
 import { readWageSheet } from './sheet.js';
 
-/* Twenty-four megabytes unpacked. A wage workbook is a few tabs of a few
-   hundred rows; the HR export, the largest workbook this product reads, is
-   255 KB for 143 people. Ten times anything real, and well inside a worker's
-   heap on a 512 MB machine. */
-export const MAX_UNPACKED = 24 * 1048576;
+/* Eight megabytes unpacked. A wage workbook is a few tabs of a few hundred
+   rows; the HR export, the largest workbook this product reads, is 255 KB for
+   143 people. Measured in the review (2026-11-12): a tab of 500 rows × 30
+   columns unpacks to about 0.8 MB, so 8 MB is a workbook of ten such tabs, or
+   one tab of 5,000 rows — and that tab reads in under half a second inside the
+   worker's limits (api/wage_sheet_routes.js LIMITS). It was 24 MB in the first
+   draft, which with a 160 MB worker heap let one upload take ~110 MB of a
+   container the API alone has taken to 82% of 512 MB. */
+export const MAX_UNPACKED = 8 * 1048576;
 /* Forty tabs. The corpus's largest workbook has a handful; a file with
    hundreds is not a wage sheet, and reading every one is work nobody asked
    for. The tabs past the limit are counted and named as unread. */

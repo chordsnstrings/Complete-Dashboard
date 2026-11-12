@@ -2041,9 +2041,12 @@ export async function renderVehicleDirectory(root) {
   const draw = (list, term) => {
     tblP.body.innerHTML = '';
     if (!list.length) {
+      /* The set-aside plates are searched too (they are in the table), but
+         they are not "vehicles on the books" — the count says them apart. */
       tblP.body.append(note(`No vehicle matches “${term}”. Searching plate, VIN, make, model and driver `
-        + `across the ${fmt(rows.length)} vehicles on the books — every one is loaded, so this is the `
-        + 'whole fleet and not a page of it.'));
+        + `across the ${fmt(rows.length - asideN)} vehicles on the books`
+        + (asideN ? ` and the ${fmt(asideN)} ${plural(asideN, 'plate', 'plates')} set aside` : '')
+        + ' — every one is loaded, so this is the whole fleet and not a page of it.'));
       return;
     }
     const tbl = tableFrom(list, cols, {
@@ -2058,9 +2061,24 @@ export async function renderVehicleDirectory(root) {
     /* The VIN is searchable, because the sentence above says it is — and
        because a VIN is the one identifier that survives a plate change, so
        "which car was this" is a question only this field can answer. */
-    const list = t ? rows.filter((r) => `${r.plate} ${r.vin || ''} ${r.make} ${r.model} `
-      + `${r.current_driver}`.toLowerCase().includes(t)) : rows;
-    bar.querySelector('#vdn').textContent = `${fmt(list.length)} of ${fmt(rows.length)} vehicles`;
+    /* THE BOX NEVER FILTERED (found in the review of WIRE, 2026-11-12; the
+       line dates from 2026-08-21). It read `${plate} … ${model} ` +
+       `${current_driver}`.toLowerCase().includes(t) — and a member call binds
+       tighter than +, so that is a string plus a BOOLEAN: "L45235  Tesla Y
+       false", truthy for every row and every term. Any search kept the whole
+       register, and "No vehicle matches" below could never be reached. The
+       haystack is joined first and searched once; a missing make or driver
+       is left out rather than searched as the word "null". */
+    const hay = (r) => [r.plate, r.vin, r.make, r.model, r.current_driver].filter(Boolean).join(' ').toLowerCase();
+    const list = t ? rows.filter((r) => hay(r).includes(t)) : rows;
+    /* THE SAME COUNT AS THE ONE ABOVE IT (review, 2026-11-12). This line
+       counted every row, set-aside plates included, so the first keystroke
+       turned "141 vehicles · 132 set aside" back into "273 of 273 vehicles"
+       — the very figure the roster wiring took down, back on the page the
+       moment anyone searched, and still there after the box was cleared. */
+    const hitAside = list.filter((r) => r.set_aside).length;
+    bar.querySelector('#vdn').textContent = `${fmt(list.length - hitAside)} of ${fmt(rows.length - asideN)} vehicles`
+      + (hitAside ? ` · ${fmt(hitAside)} set aside` : '');
     draw(list, t);
   };
   await handoverPanel(hoP.body);

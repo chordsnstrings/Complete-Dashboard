@@ -10821,3 +10821,25 @@ its first caller that takes a file from a browser, and two of its properties mat
   half-month spellings after "Salary Sheet -" or "month of" ("Salary Sheet - April 1-15, 2025",
   "for the month of January Dated 16 to 31, 2025"), and a bare "April 1-15, 2025" is refused as
   not understood. A page or import that files by `kind` must allow all three.
+
+### The review of WIRE — traps it added (2026-11-12)
+
+* **`a + b.toLowerCase().includes(t)` is a string plus a boolean.** A member call binds tighter
+  than `+`, so `` `${plate} ${model} ` + `${driver}`.toLowerCase().includes(t) `` is
+  `"L45235 Tesla Y false"` — truthy for every row and every term. The #vehicles search box kept
+  the whole register for every search from 2026-08-21 to this review, and nothing failed: a filter
+  that never filters looks like a filter on every row that should match. Join the haystack first,
+  search it once, and test a term that must match NOTHING.
+* **A worker thread's heap is the API's memory.** `resourceLimits` bounds the worker, not the
+  container: the worker lives in the API's process, on a basic-xxs whose API alone peaked at 81.9%
+  of 512 MB (93 MB left). Size the worker against that headroom, never against 512 MB — the first
+  draft of the wage-sheet preview allowed ~210 MB, enough to OOM-kill the whole API on one upload.
+  Measured: a real wage tab (500 × 30) costs the worker +23 MB; 5,000 rows +45 MB.
+* **A count printed beside a list must be the list's own drop.** `/api/fleet/roster` first said
+  "132 plates set aside" above `/api/live` while some of the 132 were still on it (a departed
+  CABMAN plate keeps its FMS fix; a pending plate was never written). `n` is now what the list
+  lost — the same predicate as `/api/kpis` `tracked_set_aside`; `held` is the roster's own count.
+* **Under the contract a plain `.note` can leave the face after render.** The focus pass folds it
+  within a second or two (the register's "No vehicle matches" note is in the DOM and not visible);
+  a browser test that reads `innerText` for a plain note passes or fails on timing. Read the
+  note's `textContent` when the wording is the question, and use a warn note when it must be seen.

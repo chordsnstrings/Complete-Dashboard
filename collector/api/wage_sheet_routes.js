@@ -36,14 +36,16 @@
    While sign-in is optional on production, "who may call it" is anyone, so
    the cost of one request is bounded on every axis it has:
      size       4 MB of body (express.raw), the HR import's limit; a 413 past it
-     unpacking  24 MB in total, enforced by zlib while inflating
+     unpacking  8 MB in total, enforced by zlib while inflating
                 (src/salary/xlsx.js maxBytes) — a zip bomb is refused mid-way
      CPU        a worker thread, terminated after TIMEOUT_MS: the reader's
                 regular expressions are lazy and correct, but a document built
                 with thousands of unclosed tags makes them quadratic, and that
                 must cost a 504, not the event loop every page shares
-     memory     the worker's heap is capped (resourceLimits), and Buffers it
-                allocates are bounded by the unpacking cap above
+     memory     the worker's heap is capped (resourceLimits, LIMITS below), and
+                Buffers it allocates are bounded by the unpacking cap above —
+                about 90 MB at the very worst, on a machine the API alone has
+                taken to 82% of 512 MB (COVERAGE, "Memory over 14 days")
      company    one preview at a time; a second, while one runs, is a 429
    The page that calls it sends one file per click, so none of these is felt
    by a person using it as intended. */
@@ -62,15 +64,38 @@ const sheetBody = express.raw({ type: XLSX_TYPES, limit: BODY_LIMIT });
    basic-xxs; this is a ceiling for a file that is not one. */
 export const TIMEOUT_MS = 15_000;
 const WORKER = new URL('../src/salary/preview_worker.js', import.meta.url);
-/* The worker's own heap, kept well inside a 512 MB machine that is also
-   running the API. Buffers are outside it and bounded by MAX_UNPACKED. */
-const LIMITS = { maxOldGenerationSizeMb: 160, maxYoungGenerationSizeMb: 32, codeRangeSizeMb: 16, stackSizeMb: 4 };
+/* THE WORKER'S OWN HEAP, sized against what the API leaves of 512 MB.
+   ─────────────────────────────────────────────────────────────────────────
+   The first draft gave the worker 160 MB of old generation and 32 of young,
+   beside a 24 MB unpacking cap. Every byte of that is in the same container
+   as the API, and the API's own peak over 14 days was 81.9% of 512 MB — 93 MB
+   of headroom (COVERAGE, "Memory over 14 days"). A worker allowed to grow to
+   ~210 MB is allowed to take the container past its limit, and an out-of-
+   memory kill there restarts the whole API, replaying the migrations, for
+   every page and every reader at once — on a route an anonymous visitor can
+   call while sign-in is optional. Measured in the review (2026-11-12, the
+   worker's whole RSS growth, sampled every 5 ms): a 500-row × 30-column tab
+   +23 MB; 5,000 rows (ten times a real wage sheet) +45 MB under these limits
+   and an 8 MB unpacking cap; 14,000 rows under the old limits +110 MB. So:
+   48 + 8 MB of heap, the unpacking cap at 8 MB (src/salary/preview.js), and a
+   file that needs more is refused with the reason rather than read. Buffers
+   are outside this heap and bounded by MAX_UNPACKED.
+   test/wage_sheet_preview.test.mjs §5 holds the budget and reads the 5,000-row
+   tab under it. */
+export const LIMITS = { maxOldGenerationSizeMb: 48, maxYoungGenerationSizeMb: 8, codeRangeSizeMb: 16, stackSizeMb: 4 };
 
 const NO_FILE = 'no workbook arrived. Send the .xlsx as the raw request body with content-type '
   + `${XLSX_TYPES[0]} (or application/octet-stream).`;
+/* "Written anywhere" has to survive the access layer: for a signed-in caller
+   the gate appends one audit line for any route with an action (actor, route,
+   status, the query's KEY names — api/access/middleware.js auditOnFinish), so
+   the sentence says that line exists rather than claiming nothing at all was
+   written (review, 2026-11-12). Nothing of the workbook is in it. */
 const NOTHING_KEPT = 'Nothing was stored: this is the classifier alone. The workbook was read in '
-  + 'memory and discarded, and no wage, person or verdict was written anywhere. The payslip '
-  + 'import itself waits on the operator’s answers about which gross a payslip uses.';
+  + 'memory and discarded, and no wage, person or verdict was written anywhere — a signed-in '
+  + 'preview leaves only the access log’s line that one was asked for, with nothing of the file '
+  + 'in it. The payslip import itself waits on the operator’s answers about which gross a '
+  + 'payslip uses.';
 
 /* One workbook, read off the API's thread. Resolves — never rejects — with
    { result } or { timedOut } or { error }, and the worker is always stopped. */

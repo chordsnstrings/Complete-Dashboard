@@ -19,7 +19,10 @@
    REVERSION, proved 2026-11-12 by copying each file, removing the lines and
    restoring it byte for byte: the #live note (app.js), the #map legend line
    (app.js), the #safety verdict clause (app.js), and the register's tiles and
-   tracker cell (vehicle.js) — each makes its section here fail.
+   tracker cell (vehicle.js) — each makes its section here fail. And from the
+   review (2026-11-12): the search handler's count, which counted every row
+   so the first keystroke put the set-aside plates back — reverted, the two
+   search checks in #vehicles fail.
 
    Synthetic data only: every page renders against mockapi.mjs, with
    /api/fleet/roster, /api/kpis and /api/vehicles/directory overridden where a
@@ -87,13 +90,14 @@ console.log('\n#map');
 
 console.log('\n#vehicles');
 {
-  let total = 0;
+  let total = 0, lastPlate = '';
   const { ctx, page } = await open('arkiv', 'vehicles', { fixtures: {
     '/api/fleet/roster': ROSTER,
     /* Two of the mock's rows set aside the way the server sets them aside:
        no VIN, nothing else on record. */
     '/api/vehicles/directory': (_, real) => {
       total = real.length;
+      lastPlate = real[real.length - 1]?.plate || '';
       return real.map((r, i) => (i >= real.length - 2 ? { ...r, vin: null, vin_channels: null, distinct_vins: 0,
         trips: 0, telematics_journeys: 0, cab_days_moved: 0, set_aside: 'departed' } : r));
     },
@@ -105,6 +109,31 @@ console.log('\n#vehicles');
   check('a note under the verdict names them, with the roster’s reason, where a reader can see it',
     await seenNote(page, '2 plates are set aside: the tracker has stopped listing them'));
   check('the search count says it too', /\d+ vehicles · 2 set aside/.test(await text(page, '#vdn')), await text(page, '#vdn'));
+  /* After a keystroke, and after the box is cleared (review, 2026-11-12):
+     the search handler counted every row, so the first keystroke put the
+     set-aside plates back into "N of M vehicles" and clearing kept them. */
+  await page.fill('#vdq', 'zz-no-such-car');
+  /* Read from the note's text, not innerText: under the contract the focus
+     pass folds a plain note out of sight within a second or two (a separate,
+     older matter, recorded in FIX-STATUS WIRE), and this check is about what
+     the sentence counts. */
+  const noMatch = await page.evaluate(() => [...document.querySelectorAll('#view .note')]
+    .map((n) => n.textContent.replace(/\s+/g, ' ')).find((x) => /No vehicle matches/.test(x)) || '');
+  check('a search that matches nothing names the set-aside plates apart from the vehicles on the books',
+    noMatch.includes(`across the ${total - 2} vehicles on the books and the 2 plates set aside`), noMatch);
+  /* And the box filters at all: it read `…` + `${driver}`.toLowerCase()
+     .includes(t), a string plus a boolean, so every term kept every row
+     (pre-existing since 2026-08-21, found here). */
+  await page.fill('#vdq', lastPlate);
+  check('searching one set-aside plate finds that row alone, and counts it apart',
+    (await text(page, '#vdn')).trim() === `0 of ${total - 2} vehicles · 1 set aside`
+    && (await page.evaluate(() => [...document.querySelectorAll('#view .panel')]
+      .find((x) => /^Every vehicle/.test(x.querySelector('h3')?.textContent || ''))
+      ?.querySelectorAll('table tbody tr').length)) === 1,
+    `${await text(page, '#vdn')} for ${lastPlate}`);
+  await page.fill('#vdq', '');
+  check('and the cleared search counts the vehicles, not the set-aside plates',
+    (await text(page, '#vdn')).trim() === `${total - 2} of ${total - 2} vehicles · 2 set aside`, await text(page, '#vdn'));
   check('the row’s tracker cell reads "set aside", not "quiet"', await page.evaluate(() =>
     [...document.querySelectorAll('#view table td')].some((td) => td.textContent.trim() === 'set aside')));
   await ctx.close();

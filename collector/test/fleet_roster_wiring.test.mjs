@@ -32,12 +32,18 @@
      · the directory without set_aside         → section 3 fails
      · no api/fleet_roster_routes.js           → section 4 fails (404)
      · api/fleet_roster.js as first written    → section 6 fails ('failed'
-       read worded as "not written yet", and cached) */
+       read worded as "not written yet", and cached)
+   And from the review (2026-11-12), each reverted the same way:
+     · /api/fleet/roster answering n = held   → section 4 "n counts the plates
+       the live list actually lost" fails (4, beside a list showing L1003)
+     · live_cars without the roster read      → section 8 fails (a set-aside
+       plate called "no tracker, or mistyped") */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
 import { clearRosterCache, fleetRoster, rosterFor, exclusionNote, excludedPlates } from '../api/fleet_roster.js';
 import { LATEST_FIX, ROSTER_KEEP } from '../api/telemetry_sql.js';
+import { toolbox } from '../api/agent_tools.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -114,8 +120,19 @@ check('a listed plate carries null, not a missing key', 'set_aside' in (by.L1001
 
 console.log('\n4. GET /api/fleet/roster: the note the pages print');
 const r = await get('/api/fleet/roster');
-check('answers with the roster’s counts', r.status === 200 && r.body.n === 4 && r.body.held === 4
+check('answers with the roster’s counts', r.status === 200 && r.body.held === 4
   && r.body.departed === 3 && r.body.pending === 1 && r.body.listed === 1, JSON.stringify(r.body).slice(0, 200));
+/* n is what /api/live LOST, not what the roster holds (review, 2026-11-12):
+   #live and #map print this sentence above /api/live's rows. L1003 still
+   shows through its FMS fix and L1009 was never written, so of the four set
+   aside, two (L1002, L1005) left the list — the same two /api/kpis counts in
+   tracked_set_aside. With n = held the sentence said 4 beside a list that
+   still showed L1003. */
+check('n counts the plates the live list actually lost (L1002, L1005), with the sentence worded for that count',
+  r.body.n === 2 && /^2 plates set aside: /.test(r.body.reason || '')
+  /* and every plate the table holds is either on the live list or in n */
+  && r.body.n === k.tracked_set_aside && live.body.length + r.body.n === 5,
+  JSON.stringify({ n: r.body.n, reason: r.body.reason }));
 check('the plates themselves, sorted, so the claim can be checked', JSON.stringify(r.body.plates) === '["L1002","L1003","L1005","L1009"]',
   JSON.stringify(r.body.plates));
 check('a count-free reason for a page that counts its own rows', /stopped listing them/.test(r.body.why || ''), r.body.why);
@@ -183,6 +200,30 @@ check('ROSTER_KEEP coalesces, so a NULL list keeps every CABMAN fix', /coalesce\
 const [nullSafe] = await q(`SELECT count(*)::int n FROM telemetry_snapshot t WHERE ${ROSTER_KEEP('t.')}`, [null]);
 const [all] = await q('SELECT count(*)::int n FROM telemetry_snapshot');
 check('and Postgres agrees: with no list, every row passes', nullSafe.n === all.n, `${nullSafe.n} of ${all.n}`);
+
+/* §8 THE ASSISTANT (review, 2026-11-12). api/agent_tools.js live_cars reads
+   /api/live, so it got the smaller list with no word — and for a set-aside
+   plate it answered "no tracker position is on record — the car may have no
+   tracker, or the plate may be mistyped", a reason that is not the true one.
+   Reverted (the roster read in live_cars), every check here fails. */
+console.log('\n8. the assistant says what the live list left out');
+{
+  clearRosterCache();
+  const run = toolbox({ fetchApi: (p) => get(p), now: () => Date.now() });
+  const ctx = { results: new Map(), drivers: new Map(), store(x) { return x; } };
+  const one = await run('live_cars', { plate: 'L1002' }, ctx);
+  check('a set-aside plate is named as set aside, not as "no tracker" or "mistyped"',
+    /L1002 is not on the live list: the tracker has set it aside/.test(one.error || '') && !/mistyped/.test(one.error || ''),
+    JSON.stringify(one).slice(0, 240));
+  const none = await run('live_cars', { plate: 'L4040' }, ctx);
+  check('a plate the roster does not hold keeps the old reasons, and no roster claim',
+    /no tracker position is on record for L4040/.test(none.error || '') && !/set it aside|stopped listing/.test(none.error || ''),
+    JSON.stringify(none).slice(0, 240));
+  const all = await run('live_cars', {}, ctx);
+  check('the fleet-wide answer carries the roster’s sentence for the list',
+    all.values?.cars_with_a_position === 3 && /left out of this list: 2 plates set aside/.test(all.note || ''),
+    JSON.stringify({ values: all.values, note: all.note }).slice(0, 300));
+}
 
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);

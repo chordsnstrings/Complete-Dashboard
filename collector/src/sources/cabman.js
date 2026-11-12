@@ -227,7 +227,13 @@ function stepRoster(prev, seen, nowIso) {
        files this change does not touch. A collector that announces an effect
        the product has not implemented is the same defect as a page with a
        false reason, one layer down, and the next reader would have believed
-       the denominator was already fixed. */
+       the denominator was already fixed.
+       WIRE (2026-11-12) wired the read side: /api/live, the /api/kpis tracker
+       counts and the vehicle register read this roster through
+       api/fleet_roster.js, and GET /api/fleet/roster says what they set aside
+       — so the paragraph above describes the code before that. The sentence
+       below stays as it is: still true of every page, and the API words its
+       own exclusion (fleet_roster.js) rather than relaying this one. */
     departed_reason: 'CABMAN has stopped listing these plates — each was absent from the feed '
       + 'for more than a day of polling. They are published as departed here; whether a given '
       + 'page still counts them depends on whether it reads this field yet',

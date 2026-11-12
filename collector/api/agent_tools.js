@@ -937,6 +937,19 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
         col('motion', 'Moving', 'text'), col('speed_kmh', 'Km/h', 'int'), col('passenger', 'Passenger', 'text'),
         col('position_time', 'Position at', 'text'), col('position_age_min', 'Age', 'min'), col('driver', 'Driver', 'text'),
         col('fleet', 'Fleet', 'text'), col('tracker', 'Tracker', 'text'), col('lat', 'Lat', 'num'), col('lng', 'Lng', 'num')];
+      /* WHAT THE LIVE LIST LEAVES OUT, relayed (review of WIRE, 2026-11-12).
+         /api/live now drops the CABMAN fixes of every plate the collector's
+         roster set aside (FIXLIST C18), and the pages print the roster's
+         sentence beside it. This tool relayed the smaller list with no word,
+         and for one plate it said "no tracker position is on record — the car
+         may have no tracker, or the plate may be mistyped": for a plate the
+         tracker has stopped listing, a reason that is not the true one. So
+         the roster is read beside the list, the same sentence goes into the
+         notes, and a set-aside plate is named as set aside. A refusal or an
+         error reading it changes nothing — no claim is made from it. */
+      const ro = await get(`/api/fleet/roster${fleet ? `?${qs({ fleet })}` : ''}`);
+      const roster = ro.body && !ro.withheld && !ro.error ? ro.body : null;
+      const rosterNote = roster && (roster.known === false || roster.n) ? roster.reason || null : null;
       const notes = [
         locHidden ? 'positions (area and coordinates) are withheld from this person\'s role — say so in one sentence; do not guess where any car is' : null,
         held, 'live = a tracker position in the last 30 minutes; a stale row is the last position the tracker reported, with its age — never say a stale car is there now',
@@ -945,8 +958,22 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
       if (plate) {
         const r = rows[0];
         if (!r) {
+          /* `plates` is the roster's set-aside list — withheld below full
+             vehicle access, and capped at 200 — so membership is claimed only
+             where the list is there and whole; otherwise the possibility is
+             said beside the other two. */
+          const list = Array.isArray(roster?.plates) ? roster.plates : null;
+          const hit = list ? list.find((x) => samePlate(x)) : null;
+          if (hit) {
+            return { kind: 'value', definition, filters,
+              error: `${hit} is not on the live list: the tracker has set it aside — it has stopped listing that plate, `
+                + 'or has listed it too few times to be believed — so no position is given for it as where the car is now. '
+                + 'The vehicle register still lists it' };
+          }
+          const maybeAside = roster?.held && (!list || roster.truncated)
+            ? `, or it may be one of the ${roster.held} plates the tracker has stopped listing, which the live list leaves out` : '';
           return { kind: 'value', definition, filters,
-            error: `no tracker position is on record for ${plate}${fleet ? ` in ${fleetWord(fleet)}` : ''} — the car may have no tracker, or the plate may be mistyped (find_car checks it)` };
+            error: `no tracker position is on record for ${plate}${fleet ? ` in ${fleetWord(fleet)}` : ''} — the car may have no tracker, or the plate may be mistyped (find_car checks it)${maybeAside}` };
         }
         return { kind: 'table', definition, filters, source: '/api/live', columns, rows,
           values: { plate: r.plate, area: r.area, state: r.state, motion: r.motion, speed_kmh: r.speed_kmh,
@@ -962,7 +989,10 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           seat_not_reported: live.filter((r) => r.passenger === 'not reported').length },
         kinds: { cars_with_a_position: 'int', live: 'int', stale: 'int', moving: 'int', stopped: 'int', with_passenger: 'int',
           empty: 'int', seat_not_reported: 'int' },
-        note: [...notes, 'moving/stopped/passenger counts are over the live cars only'].join(' — ') };
+        /* The list's own exclusion, on the list's answer only — a one-car
+           answer that found its car is not about the plates left out. */
+        note: [...notes, 'moving/stopped/passenger counts are over the live cars only',
+          rosterNote ? `left out of this list: ${rosterNote}` : null].filter(Boolean).join(' — ') };
     },
 
     async driver_status(a, ctx) {

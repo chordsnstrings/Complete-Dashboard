@@ -111,9 +111,16 @@ export function unzip(buf, { maxBytes = Infinity } = {}) {
   const entryCount = buf.readUInt16LE(eocd + 10);
   let off = buf.readUInt32LE(eocd + 16);
   let unpacked = 0;
-  const tooBig = () => new Error(`this workbook unpacks to more than ${Math.round(maxBytes / 1048576)} MB, `
-    + 'which no wage sheet comes near — refused rather than unpacked, because a file that '
-    + 'compresses that far is built to exhaust the memory of whatever opens it');
+  /* The reason has to be true of every file it can be said of. It used to
+     end "because a file that compresses that far is built to exhaust the
+     memory of whatever opens it" — true of a deflate bomb, false of a big
+     honest workbook that simply holds more than the cap, which compresses no
+     further than any other. So it says what is known: the size, how far past
+     a wage sheet that is, and the two things such a file can be. */
+  const tooBig = () => new Error(`this workbook unpacks to more than ${Math.round(maxBytes / 1048576)} MB — `
+    + 'far past any wage sheet, whose tabs of a few hundred rows unpack to under one — so it was '
+    + 'refused rather than unpacked: a file that size is either not a wage sheet or built to '
+    + 'exhaust the memory of whatever opens it');
   if (off === 0xffffffff || entryCount === 0xffff) {
     throw new Error('this archive is Zip64 and this reader does not implement it. '
       + 'Zip64 appears past 65,535 entries or 4 GiB; a salary workbook that '

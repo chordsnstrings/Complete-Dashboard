@@ -18,7 +18,11 @@
         (413), a zip bomb (refused by the unpacking cap while inflating), and a
         tab built to make the reader's regular expressions quadratic — stopped
         by the clock (504) while the API keeps answering, with a second upload
-        refused (429) rather than queued behind it.
+        refused (429) rather than queued behind it;
+     4. the unpacking cap in the reader itself;
+     5. the memory budget (review, 2026-11-12): the worker's heap plus the
+        unpacking cap inside the ~93 MB the API leaves of 512 MB at its peak,
+        and a tab ten times a real wage sheet still read inside them.
 
    FIXTURES ARE SYNTHESISED HERE (src/xlsx_write.js and hand-built zips):
    the real corpus is driver payroll and none of it may enter the repository.
@@ -29,13 +33,16 @@
      · src/salary/xlsx.js without maxBytes   → §3 "zip bomb" and §4 fail
      · the route reading in-thread, no worker → §3 "still answering",
        "429" and "clock" fail
-     · src/salary/preview.js without the hidden-tab refusal → §1 fails */
+     · src/salary/preview.js without the hidden-tab refusal → §1 fails
+     · (review) LIMITS back to 160 + 32 MB and MAX_UNPACKED to 24 MB → §5's
+       budget check fails */
 import express from 'express';
 import { readFileSync } from 'node:fs';
 import { Workbook, zip } from '../src/xlsx_write.js';
 import { readWorkbook } from '../src/salary/xlsx.js';
 import { previewWorkbook } from '../src/salary/preview.js';
-import { wageSheetRoutes } from '../api/wage_sheet_routes.js';
+import { wageSheetRoutes, readInWorker, LIMITS } from '../api/wage_sheet_routes.js';
+import { MAX_UNPACKED } from '../src/salary/preview.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -206,7 +213,7 @@ console.log('\n3. what one hostile file may cost');
   const b = bomb();
   const zb = await post(b);
   check(`a zip bomb (${Math.round(b.length / 1024)} KB that unpacks to 30 MB) is refused by the unpacking cap`,
-    zb.status === 400 && /unpacks to more than 24 MB/.test(zb.body?.refusals?.[0] || ''), JSON.stringify(zb.body).slice(0, 240));
+    zb.status === 400 && /unpacks to more than 8 MB/.test(zb.body?.refusals?.[0] || ''), JSON.stringify(zb.body).slice(0, 240));
   check('and nothing touched a database here either', calls.length === 0);
   srv.close();
 }
@@ -246,6 +253,36 @@ console.log('\n4. the unpacking cap, in the reader');
   let open = null;
   try { open = readWorkbook(bomb()).sheets.length; } catch (e) { open = e.message; }
   check('and with no cap (the corpus tools, the HR import) nothing changes', open === 1, String(open));
+}
+
+/* §5 THE MEMORY BUDGET (review, 2026-11-12). The worker lives in the API's
+   container, and the API alone peaked at 81.9% of 512 MB over 14 days — 93 MB
+   of headroom. The first draft allowed 160 MB of old generation, 32 of young
+   and a 24 MB unpacking cap, so one upload (anonymous, while sign-in is
+   optional) could take the container past its limit and restart the API.
+   Reverted to those numbers, the first check fails; the second proves the
+   tighter limits still read ten times a real wage sheet. */
+console.log('\n5. the memory budget, against what the API leaves of 512 MB');
+{
+  const heapMb = LIMITS.maxOldGenerationSizeMb + LIMITS.maxYoungGenerationSizeMb;
+  const unpackMb = MAX_UNPACKED / 1048576;
+  check(`the worker's heap plus the unpacking cap stays inside the API's 93 MB of headroom (${heapMb} + ${unpackMb} MB)`,
+    heapMb + unpackMb <= 70, JSON.stringify({ LIMITS, unpackMb }));
+  /* A tab of 5,000 rows × 30 columns — ten times a real wage sheet — under
+     the real limits, through the real worker. */
+  const wb = new Workbook({ created: new Date('2026-11-12T08:00:00Z') });
+  const s = wb.sheet('Payslips');
+  s.text('Ecosine Transports LLC', 'title');
+  s.text('Salary for the month of November 2025');
+  for (let i = 0; i < 5; i++) s.blank();
+  s.header(['Emp. ID', 'Name', ...Array.from({ length: 28 }, (_, i) => `Col ${i}`)]);
+  for (let r = 0; r < 5000; r++) {
+    s.row([`D${r}`, `Driver number ${r}`, ...Array.from({ length: 28 }, (_, i) => (i % 3 ? r * i + 0.5 : `text ${r} ${i}`))]);
+  }
+  const out = await readInWorker(wb.toBuffer(), { filename: 'Ecosine wages November 2025.xlsx' });
+  check('…and a 5,000-row tab, ten times a real one, still reads inside them', out.result?.ok === true
+    && out.result.sheets?.[0]?.rows === 5000,
+  JSON.stringify(out.timedOut ? 'timed out' : out.error ? String(out.error.code || out.error.message) : out.result?.refusals));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
