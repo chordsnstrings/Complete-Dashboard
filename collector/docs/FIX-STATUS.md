@@ -5834,3 +5834,35 @@ Also run after the pages: `arkiv_skin` 119, `class_target_panel` 22, `fleet_name
 `signin_methods_browser` drives the sign-in page itself), `tokens` 150. Screenshots of the sign-in
 page at 390/1280 px, light and dark, with both buttons: `PKY_SHOTS=<dir> node
 test/signin_methods_browser.test.mjs`.
+
+**Independent review of PKY (2026-11-12).** `git diff 90d76da...` read as a security reviewer, then
+fixed on the same branch. Confirmed sound and left alone: the CBOR/COSE/authenticator-data parsing;
+the challenge (one use, five minutes, bound to the user and session for registration and step-up);
+user verification, origin, crossOrigin, the RP id hash and the user handle on a no-email sign-in; the
+OIDC state (one use, bound to the browser by an HttpOnly cookie), nonce, PKCE, exact issuer, JWKS key
+choice and the ID-token claims; CSRF on every state-changing signed-in route; the `back` address (a
+path only, `/api` and `/signin` refused, then signin.js safeBack); every new route `self` in the
+manifest; `test/mount.mjs` needs nothing (the new name is used at server.js:6874, outside the slice,
+lines 546–6791, measured); v121 additive and in v88's own pattern; open mode unchanged. Found and
+fixed:
+
+| id | what | where | test | state |
+|---|---|---|---|---|
+| PKY20 | **A cloned passkey's earlier session stayed signed in.** A regression is seen by whichever copy signs in SECOND, so the session the first sign-in opened may be the copy's; switching the credential off left it alive for the rest of its seven days. Now every session of the person ends (sessions do not record which passkey opened them, and the copy cannot be told from the original — as the admin's `remove_passkeys` does), the refusal says so, and the audit carries `sessions_ended` | `api/access/signin_methods.js:290` (judgeAssertion) | `access_passkey_sso` §5: "every session the person had is ended, the earlier passkey session among them", "…with the sessions it ended". **Reverted** (no revocation): both fail | written, not deployed |
+| PKY21 | **"Unlink single sign-on" was offered for "a mailbox the company gave to somebody else" — backwards.** The link is what refuses the address's new holder (another subject: `other_identity`); once unlinked, the next verified sign-on for the address links afresh, to the OLD holder's account. The page now says to unlink only when the provider ACCOUNT changes hands or is replaced, and to offboard for a mailbox given away | `api/public/signin_methods_admin.js` personSigninMethods note; `api/access/routes.js:804` comment | `access_passkey_sso` §12 now pins the semantics: unlinked, the old subject no longer opens the account; the next verified sign-on for the address links afresh; offboarded, a new holder of the address is refused (`inactive`). A wording fix: nothing behavioural to revert | written, not deployed |
+| PKY22 | **A suspended and reinstated single-sign-on account could never sign in again.** `reinstate` took `password_changed_at` as "finished setting up"; an account single sign-on opened has no password, so it went back to `invited`, which single sign-on refuses (`invite_expired`: the invitation is long gone) and a passkey refuses (`inactive`). Now a link or a live passkey counts too; offboarding removes both, so a rehire still starts from an invitation | `api/access/routes.js:775`; `otherWayIn`, `api/access/signin_methods.js:112` | `access_passkey_sso` §12: reinstated → `active`, and single sign-on opens it again; an invitation never accepted still goes back to `invited`. **Reverted**: both fail (`"invited"`, `/signin?sso=invite_expired`) | written, not deployed |
+| PKY23 | **`no_access` broke the pages.** api/public/data.js shows a 403 as "This is not shown to your role", with the server's reason, only for the codes on its list; PKY9's new code was not on it, so an account with no role met "Could not load this view … Try again", and panels wrapped in `unlessWithheld()` threw instead of standing aside (before PKY9 the same accounts got `withheld`/`fleet_scope`, both listed) | `api/public/data.js:231` | `access_passkey_sso` §12 (data.js lists `no_access` with `withheld`). Failed before the fix | written, not deployed |
+| PKY24 | **True reasons on "confirm it is you" for an account with no password and no code.** The server said "Use your passkey, or turn on two-step" to an account with no passkey, and the dialog said "Add a passkey" — but adding one needs this very confirmation. Now the passkey is named only when the person has one that works (passkeys on, PUBLIC_URL ready); otherwise two-step, first | `api/access/routes.js:461` (`usablePasskeys`, `api/access/signin_methods.js:122`); `api/public/access.js:449` | `access_passkey_sso` §12, both cases (with a passkey row and without). Failed before the fix | written, not deployed |
+| PKY25 | **Hardening.** The attestation format's name — the authenticator's own text, up to 64 KB, kept only by the audit log — is cut to 32 characters. The browser test's port moves with `PKY_BROWSER_PORT` (default 8310), so a full run need not collide | `api/access/webauthn.js:321`; `test/signin_methods_browser.test.mjs:71` | `webauthn` §4 (a 5,000-character format comes back as 32; failed before). `signin_methods_browser` 35/0 on port 8360 | written, not deployed |
+
+Run after the review, all green: `access_passkey_sso` 126, `webauthn` 80, `oidc` 53,
+`signin_methods_browser` 35 (`PKY_BROWSER_PORT=8360`), `access_core` 211, `access_manifest` 17,
+`server_wiring` 5, `tokens` 150, `signin_page` 35, `api_refusals` 13, `arkiv_shell` 77,
+`nav_sections` 17.
+
+Left as they were, on purpose: a passkey cannot be the FIRST second factor of a role that must use
+two-step (the session is restricted until an app is set up; ULM-DESIGN "As built" says why); an
+`OIDC_ISSUER` whose exact issuer ends in "/" (Auth0, some Okta tenants) cannot be used, because the
+value is trimmed before the exact comparison — it refuses, it lets nothing through, and Google and
+Entra issuers carry no slash; passkey and single sign-on sign-ins do not consult `locked_until` (the
+fifty-failure lock is against password guessing, which neither is).

@@ -65,7 +65,10 @@ let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 const skip = (why) => { console.log(`  - skipped: ${why}`); process.exit(0); };
 
-const PORT = 8310;
+/* PKY_BROWSER_PORT moves it (review, 2026-11-12): a full run, or a
+   reviewer given another port, must not share 8310 with another process.
+   Always a localhost port: WebAuthn will not take an IP address as RP id. */
+const PORT = Number(process.env.PKY_BROWSER_PORT) || 8310;
 const BASE = `http://localhost:${PORT}`;
 const free = await new Promise((r) => { const s = createServer(); s.once('error', () => r(false)); s.listen(PORT, () => s.close(() => r(true))); });
 if (!free) skip(`port ${PORT} is in use`);

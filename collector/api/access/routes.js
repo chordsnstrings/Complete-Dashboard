@@ -27,7 +27,7 @@ import { sendSms, uaeMobile, maskPhone } from '../../src/smsala.js';
    are company settings below, and taking them off a person is an account
    action below, so both keep this file's Owner, step-up, ceiling and audit
    rules instead of a second copy of them. */
-import { signinMethodChanges, removePasskeys, unlinkSso } from './signin_methods.js';
+import { signinMethodChanges, removePasskeys, unlinkSso, otherWayIn, usablePasskeys } from './signin_methods.js';
 
 const MIN_REASON = 3;
 
@@ -453,9 +453,16 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       if (step != null) { ok = true; await db.query('UPDATE access_user SET totp_last_step = $2 WHERE id = $1', [u.id, step]); }
     } else if (!u.password_hash) {
       /* No code and no password (an account single sign-on opened): neither
-         can confirm it, and "that password is not right" would not be why. */
-      return fail(res, 409, 'no_method', 'Your account has no password or two-step code to confirm with. '
-        + 'Use your passkey, or turn on two-step sign-in on your account page.');
+         can confirm it, and "that password is not right" would not be why.
+         What CAN confirm it is said exactly (review, 2026-11-12): the person's
+         passkey if they have one that works; otherwise two-step, first —
+         adding a passkey needs this very confirmation, so "use your passkey"
+         to somebody with none pointed at a door that does not open. */
+      const keys = await usablePasskeys(db, fm.user.id, { cfg: await svc.getConfig(db) });
+      return fail(res, 409, 'no_method', keys
+        ? 'Your account has no password or two-step code to confirm with: confirm with your passkey (“Use a passkey”).'
+        : 'Your account has no password or two-step code to confirm with, and no passkey that can be used. '
+          + 'Turn on two-step sign-in on your account page first.');
     } else if (req.body?.password) {
       ok = verifyPassword(String(req.body.password), u.password_hash);
     }
@@ -760,7 +767,13 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       await svc.updateUser(db, id, { status: 'suspended', suspended_reason: reason });
       await svc.revokeUserSessions(db, id, 'suspended');
     } else if (action === 'reinstate') {
-      await svc.updateUser(db, id, { status: target.password_changed_at ? 'active' : 'invited', suspended_reason: null });
+      /* Back to active if they had finished setting up: a password, or — for
+         an account single sign-on opened, which has none — a link or a
+         passkey still in place (review, 2026-11-12: it went back to
+         'invited', and then nothing could open it). Offboarding removes
+         both, so a rehire still starts from an invitation. */
+      const done = Boolean(target.password_changed_at) || await otherWayIn(db, id);
+      await svc.updateUser(db, id, { status: done ? 'active' : 'invited', suspended_reason: null });
     } else if (action === 'offboard') {
       if (reason.length < MIN_REASON) return fail(res, 400, 'reason', 'Say why.');
       await svc.updateUser(db, id, { status: 'offboarded', offboarded_at: new Date().toISOString(), suspended_reason: reason });
@@ -789,8 +802,13 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       await removePasskeys(db, id);
       await svc.revokeUserSessions(db, id, 'passkeys removed by admin');
     } else if (action === 'unlink_sso') {
-      /* The provider's account is no longer this person's: the link goes, and
-         so does every session, since a sign-on may have opened one. */
+      /* The provider's ACCOUNT is no longer this person's (handed to somebody
+         else, or replaced by a new one for them): the link goes, and so does
+         every session, since a sign-on may have opened one. NOT for a mailbox
+         given to somebody else: the link is what refuses the address's new
+         holder, and once it is gone the next verified sign-on for the address
+         links afresh to this account — offboard instead (review, 2026-11-12;
+         signin_methods_admin.js says so on the page). */
       await unlinkSso(db, id);
       await svc.revokeUserSessions(db, id, 'single sign-on unlinked by admin');
     } else {

@@ -316,7 +316,9 @@ export function verifyRegistration({ credential, challenge, rp }) {
     ? [...new Set(r.transports.filter((t) => TRANSPORTS.includes(t)))].slice(0, 8) : [];
   return {
     credentialId: credential.id, publicKey: keyToSpki(key), alg, algName: ALG_NAME[alg],
-    signCount: ad.signCount, transports, aaguid: ad.aaguid, backupEligible: ad.be, backedUp: ad.bs, fmt,
+    /* fmt is the authenticator's own text (up to the attestation object's
+       64 KB) and only the audit log keeps it: a label, so it is cut. */
+    signCount: ad.signCount, transports, aaguid: ad.aaguid, backupEligible: ad.be, backedUp: ad.bs, fmt: fmt.slice(0, 32),
   };
 }
 

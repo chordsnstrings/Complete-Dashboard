@@ -10786,3 +10786,19 @@ from the environment only (`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`
 * **A harness page that renders one module must load `who` first.** app.js loads it at boot; the
   "confirm it is you" dialog reads `who.user.totp` to ask for a code or a password, and without it
   asked an Owner with two-step for a password.
+* **Unlinking single sign-on re-opens the account to the next holder of its address** (review,
+  2026-11-12). The provider's subject decides only while a link exists; with none, the first verified
+  sign-on for an address links by the address. So for a mailbox the company gave to somebody else the
+  link is the protection (the new holder is refused, `other_identity`) and the right action is to
+  offboard the old account; unlinking is for the provider ACCOUNT changing hands. The same holds for
+  anyone who never used single sign-on at all: offboard people whose mailbox is reassigned.
+* **A new refusal code must also go on api/public/data.js's withheld list.** The page shows a 403 as
+  "not shown to your role" with the server's reason only for the codes listed there; any other code
+  is "Could not load this view", and every `unlessWithheld()` panel throws. `no_access` (PKY9) was
+  missed and found in review (PKY23).
+* **`password_changed_at` is not "finished setting up" any more.** An account single sign-on opened
+  never has a password; `reinstate` sent such accounts back to `invited` until review (PKY22). Ask
+  `otherWayIn` (api/access/signin_methods.js) as well.
+* **A passkey counter regression is seen by the SECOND copy to sign in**, so the session the first
+  one opened may be the attacker's: disabling the credential alone leaves it signed in. Every session
+  of the person ends (PKY20).

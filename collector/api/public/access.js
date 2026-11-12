@@ -444,7 +444,9 @@ export function confirmIdentity() {
       if (!noBox) return;
       for (const n of dlg.querySelectorAll('label, input, button[type="submit"]')) n.hidden = true;
       dlg.querySelector('p').textContent = pk.hidden
-        ? 'Your account has no password or two-step code to confirm with. Add a passkey or turn on two-step sign-in on your account page.'
+        /* Not "add a passkey": adding one needs this very confirmation
+           (review, 2026-11-12). Two-step is the way in for such an account. */
+        ? 'Your account has no password or two-step code to confirm with, and no passkey that can be used. Turn on two-step sign-in on your account page first.'
         : 'This change needs you to re-confirm with your passkey.';
     }).catch(() => { /* the box still works for a password or a code */ });
     dlg.querySelector('form').addEventListener('submit', async (e) => {

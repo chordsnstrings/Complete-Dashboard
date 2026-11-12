@@ -1408,7 +1408,8 @@ every phone acceptable" is now a switch, not a project.
   User verification is required, which is what makes a passkey two factors: a passkey session counts
   as two-step (§5.1), including for a role that must use it. The RP id and origin come from
   `PUBLIC_URL`, read from the environment. A signature counter that goes backwards disables the
-  credential with the reason. Step-up ("confirm it is you") accepts the person's own passkey.
+  credential with the reason and ends every session of the person, since the copy may hold one
+  (review, 2026-11-12). Step-up ("confirm it is you") accepts the person's own passkey.
 - **Single sign-on.** OpenID Connect, authorization code with PKCE, nonce and a browser-bound state,
   for ONE issuer (the company's own tenant). Issuer, client id and secret are environment variables,
   never Settings values. Only an address the provider verified, on a domain the Owner listed; an

@@ -146,6 +146,12 @@ const opts = (challenge = crypto.randomBytes(32).toString('base64url')) => creat
   const p = makeAuthenticator(); const op = opts();
   check('another attestation format is accepted with its statement ignored (the trust of "none")',
     verifyRegistration({ credential: p.create(op, { fmt: 'packed', attStmt: new Map([['alg', -7], ['sig', Buffer.alloc(8)]]) }), challenge: op.challenge, rp }).fmt === 'packed');
+  /* Review, 2026-11-12: the format's name is whatever the authenticator
+     wrote (up to the attestation object's 64 KB) and goes into the audit
+     log; it is a label, so it is cut. */
+  const lf = makeAuthenticator(); const olf = opts();
+  check('…and that format\'s name, which only the audit log keeps, is cut to 32 characters',
+    verifyRegistration({ credential: lf.create(olf, { fmt: 'x'.repeat(5000) }), challenge: olf.challenge, rp }).fmt.length === 32);
   const lenient = makeAuthenticator(); const ol = opts();
   const cred = lenient.create(ol);
   cred.response.attestationObject = `${cred.response.attestationObject.slice(0, 10)}$$${cred.response.attestationObject.slice(10)}`;

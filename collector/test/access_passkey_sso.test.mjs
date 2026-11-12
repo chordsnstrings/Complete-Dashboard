@@ -40,7 +40,16 @@
      · signin_methods.js passkey register/options: drop the stepupFresh
        check — "adding a passkey needs a fresh re-confirmation" fails.
      · routes.js config: drop the signinMethodChanges call — "the Owner
-       turns passkeys on" fails (the switch is ignored). */
+       turns passkeys on" fails (the switch is ignored).
+   And by the independent review, same day (docs/FIX-STATUS.md PKY20–25):
+     · signin_methods.js judgeAssertion: no session revocation on a
+       regression — "every session the person had is ended, the earlier
+       passkey session among them" and "…with the sessions it ended" fail.
+     · routes.js reinstate: password_changed_at alone — "suspended and
+       reinstated, an account single sign-on opened is active again" and
+       "…single sign-on opens it again" fail (invited, invite_expired).
+     · the data.js no_access entry and the two step-up sentences failed
+       before their fixes. */
 import { PGlite } from '@electric-sql/pglite';
 import express from 'express';
 import { readFileSync } from 'node:fs';
@@ -316,15 +325,28 @@ console.log('\n5. a counter that goes backwards switches the passkey off');
   await stepUp(b, clk);
   const o = await b.post('/api/auth/passkey/register/options', {});
   await b.post('/api/auth/passkey/register', { credential: k2.create(o.json.publicKey) });
-  const first = await passkeySignIn(browser(), k2);
+  const early = browser();
+  const first = await passkeySignIn(early, k2);
   check('a counting authenticator signs in (counter 1)', first.status === 200);
   const cloned = await passkeySignIn(browser(), k2, { count: 1 });
   check('the same counter again is refused as a copy, the reason given', cloned.status === 403 && cloned.json.error === 'passkey_cloned'
     && /counter went backwards/.test(cloned.json.detail));
+  /* Review, 2026-11-12: which of the two copies opened the EARLIER session
+     cannot be known — a copy used first is exactly what makes the original's
+     next sign-in look like a regression — so switching the credential off is
+     not enough: the session the copy may already hold has to end too. Before
+     the fix the earlier passkey session stayed signed in for the rest of its
+     seven days. */
+  check('…and every session the person had is ended, the earlier passkey session among them',
+    (await early.get('/api/auth/me')).json.signedIn === false && (await b.get('/api/auth/me')).json.signedIn === false);
+  check('…and the refusal says so', /Every session on this account has been signed out/.test(cloned.json.detail), cloned.json.detail);
   const after = await passkeySignIn(browser(), k2, { count: 9 });
   check('…and the passkey stays off, even with a higher counter', after.status === 403 && after.json.error === 'passkey_disabled');
-  check('…recorded in the audit log', (await auditOf('auth.passkey_counter_regressed')).length === 1);
-  const list = await b.get('/api/auth/passkeys');
+  const reg = await auditOf('auth.passkey_counter_regressed');
+  check('…recorded in the audit log, with the sessions it ended', reg.length === 1 && reg[0].detail.sessions_ended >= 2, JSON.stringify(reg[0]?.detail));
+  const again = browser();
+  await signInPassword(again, clk);
+  const list = await again.get('/api/auth/passkeys');
   check('the account page shows it switched off, and why', /went backwards/.test(list.json.passkeys[0].disabled_reason || ''));
 }
 
@@ -572,18 +594,76 @@ console.log('\n12. single sign-on: two-step, invitations and new accounts');
   const sees = await nb.get('/api/t/kpis');
   check('…so it sees nothing until an Access admin gives it a role — and is told exactly that', sees.status === 403
     && sees.json.error === 'no_access' && /no access to anything yet/.test(sees.json.detail), JSON.stringify(sees.json));
+  /* Review, 2026-11-12: the pages' data layer (api/public/data.js) turns a
+     403 into "This is not shown to your role" with the server's reason only
+     for the codes on its list; any other code became "Could not load this
+     view" with a Try again button, and a panel wrapped in unlessWithheld()
+     threw instead of standing aside. Before PKY9 such an account was sent
+     'withheld' or 'fleet_scope', both on the list; 'no_access' was not. */
+  const dataSrc = readFileSync(new URL('../api/public/data.js', import.meta.url), 'utf8');
+  check('…and the pages show it as an answer with a reason, not as a failure (data.js lists no_access with withheld)',
+    /\[\s*'withheld'[^\]]*'no_access'[^\]]*\]\.includes\(j\.error\)/.test(dataSrc));
   check('the new account is in the audit log', (await auditOf('auth.sso_provisioned')).length === 1);
   const pw = await nb.post('/api/auth/password', { current: '', next: 'a brand new password here' });
   check('changing a password it does not have says the true reason', pw.status === 409 && /has no password here/.test(pw.json.detail));
+  /* Review, 2026-11-12: the sentence used to say "Use your passkey, or turn
+     on two-step" to an account that has no passkey — and adding one needs
+     this very re-confirmation first. Two-step is the way in for such an
+     account; a passkey only for one that has one. */
   const st = await nb.post('/api/auth/stepup', { password: 'anything' });
-  check('re-confirming without a password or a code says the true reason', st.status === 409 && /no password or two-step code/.test(st.json.detail));
+  check('re-confirming without a password, a code or a passkey says two-step comes first — not "use your passkey"', st.status === 409
+    && /no password or two-step code/.test(st.json.detail) && /two-step sign-in on your account page first/.test(st.json.detail)
+    && !/use your passkey/i.test(st.json.detail), st.json.detail);
+  const pkRow = await db.query(`INSERT INTO access_passkey (user_id, credential_id, public_key, alg, user_handle)
+    VALUES ($1, 'review-only-credential-id-0001', 'unused', -7, 'h-new') RETURNING id`, [created.id]);
+  const st2 = await nb.post('/api/auth/stepup', { password: 'anything' });
+  check('…and, to one that has a passkey, to confirm with it', st2.status === 409 && /Use a passkey/.test(st2.json.detail), st2.json.detail);
+  await db.query('DELETE FROM access_passkey WHERE id = $1', [pkRow.rows[0].id]);
 
-  /* Unlinking: the provider's account is no longer this person's. */
+  /* Review, 2026-11-12: reinstating used password_changed_at alone to tell
+     an account that had finished setting up from an invitation. One single
+     sign-on opened has no password, so a suspension and a reinstatement
+     sent it back to 'invited' — and then neither single sign-on (an
+     invitation long expired: 'invite_expired') nor a passkey ('inactive')
+     could open it again. */
   await freshStepUp(ob, owner);
-  const un = await ob.post(`/api/access/users/${fin.id}`, { action: 'unlink_sso', reason: 'mailbox reassigned' });
+  const su = await ob.post(`/api/access/users/${created.id}`, { action: 'suspend', reason: 'test suspension' });
+  const re = await ob.post(`/api/access/users/${created.id}`, { action: 'reinstate' });
+  check('suspended and reinstated, an account single sign-on opened is active again, not an invitation', su.status === 200
+    && re.status === 200 && re.json.user?.status === 'active', JSON.stringify(re.json.user?.status ?? re.json));
+  const reopened = await sso(browser(), { claims: { sub: 'sub-new', email: 'newcomer@example.test' } });
+  check('…and single sign-on opens it again', reopened.to?.startsWith('/signin?sso=done'), reopened.to);
+  const su2 = await ob.post(`/api/access/users/${old.id}`, { action: 'suspend', reason: 'test suspension' });
+  const re2 = await ob.post(`/api/access/users/${old.id}`, { action: 'reinstate' });
+  check('…while an invitation never accepted goes back to being an invitation, as before', su2.status === 200
+    && re2.json.user?.status === 'invited', JSON.stringify(re2.json.user?.status ?? re2.json));
+
+  /* Unlinking: the provider ACCOUNT now belongs to somebody else, or was
+     replaced by a new one for this person. (Not for a mailbox given to
+     somebody else — see below.) */
+  await freshStepUp(ob, owner);
+  const un = await ob.post(`/api/access/users/${fin.id}`, { action: 'unlink_sso', reason: 'provider account reassigned' });
   check('the Owner unlinks a person\'s single sign-on, and their sessions end', un.status === 200
     && (await db.query('SELECT 1 FROM access_sso_identity WHERE user_id = $1', [fin.id])).rows.length === 0
     && (await sb.get('/api/auth/me')).json.signedIn === false);
+  await sso(browser(), { claims: { sub: 'sub-0001', email: 'someone.else@example.test' } });
+  const moved = (await db.query('SELECT user_id FROM access_sso_identity WHERE issuer = $1 AND subject = $2', [idp.issuer, 'sub-0001'])).rows[0];
+  check('…so the provider account that was linked no longer opens the person\'s account', moved && Number(moved.user_id) !== fin.id);
+  /* Review, 2026-11-12: the admin page offered "Unlink" for "a mailbox the
+     company gave to somebody else". That is backwards. While the link
+     stands, the new holder of the address (another subject) is refused
+     (§11, other_identity); once it is gone, the next verified sign-on for
+     the address links afresh — to the old holder's account. The page now
+     says so, and points at offboarding, which shuts the account to every
+     sign-on. */
+  const relinked = await sso(browser(), { claims: { sub: 'sub-0003', email: fin.email } });
+  check('after an unlink the next verified sign-on for the address links afresh (why the page warns against unlinking for a reassigned mailbox)',
+    relinked.to?.startsWith('/signin?sso=done'), relinked.to);
+  await freshStepUp(ob, owner);
+  const off = await ob.post(`/api/access/users/${fin.id}`, { action: 'offboard', reason: 'left the company' });
+  const newHolder = await sso(browser(), { claims: { sub: 'sub-0004', email: fin.email } });
+  check('an offboarded person\'s address, now somebody else\'s at the provider, does not open their account', off.status === 200
+    && newHolder.to === '/signin?sso=inactive', newHolder.to);
 }
 
 console.log('\n13. throttles, and open mode once more');

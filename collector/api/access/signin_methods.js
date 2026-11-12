@@ -103,6 +103,28 @@ export async function unlinkSso(db, userId) {
   const { rowCount } = await db.query('DELETE FROM access_sso_identity WHERE user_id = $1', [userId]);
   return rowCount;
 }
+/* A way in that is not a password: a single sign-on link, or a passkey that
+   is not switched off. routes.js `reinstate` reads it (review, 2026-11-12):
+   an account single sign-on opened never has a password, so
+   password_changed_at alone said "never finished setting up" and a
+   reinstated account went back to 'invited', which neither single sign-on
+   (its invitation long expired) nor a passkey will open. */
+export async function otherWayIn(db, userId) {
+  const { rows: [r] } = await db.query(
+    `SELECT EXISTS (SELECT 1 FROM access_sso_identity WHERE user_id = $1)
+         OR EXISTS (SELECT 1 FROM access_passkey WHERE user_id = $1 AND disabled_at IS NULL) AS yes`, [userId]);
+  return Boolean(r?.yes);
+}
+/* The passkeys a person could re-confirm with right now: none while passkeys
+   are off or the platform is not ready for them. routes.js /api/auth/stepup
+   reads it to say what CAN confirm an account that has no password and no
+   code, instead of offering a passkey to somebody who has none. */
+export async function usablePasskeys(db, userId, { cfg, env = process.env } = {}) {
+  if (cfg?.passkeys !== 'on' || !wa.rpConfig(env).ok) return 0;
+  const { rows: [r] } = await db.query(
+    'SELECT count(*)::int AS n FROM access_passkey WHERE user_id = $1 AND disabled_at IS NULL', [userId]);
+  return r?.n || 0;
+}
 async function ssoIdentitiesOf(db, userId) {
   const { rows } = await db.query(
     'SELECT id, issuer, email, created_at, last_used_at FROM access_sso_identity WHERE user_id = $1 ORDER BY created_at', [userId]);
@@ -256,8 +278,21 @@ export function signinMethodRoutes(app, { db, layer, wrap, log = { info() {}, wa
     if (v.regressed || !(await recordPasskeyUse(db, row.id, v))) {
       const why = regressionReason(v);
       await disablePasskey(db, row.id, why);
-      await audit(req, 'auth.passkey_counter_regressed', 'user', row.user_id, { passkey: row.id, stored: v.before, presented: v.signCount });
-      fail(res, 403, 'passkey_cloned', `This passkey has been switched off: ${why} Sign in another way, remove it on your account page, and add it again.`);
+      /* EVERY SESSION ENDS TOO (review, 2026-11-12). A regression is seen by
+         whichever copy signs in SECOND — a copy used first is exactly what
+         makes the original's next sign-in look like this — so the session
+         the earlier sign-in opened may be the copy's, and switching the
+         credential off did nothing to it: it stayed signed in for the rest
+         of its seven days. Sessions do not record which passkey opened
+         them, and the copy cannot be told from the original, so all of the
+         person's sessions end, as when an admin removes their passkeys
+         (routes.js remove_passkeys). This one included, on a step-up. */
+      const ended = await svc.revokeUserSessions(db, row.user_id, 'a copy of a passkey was detected');
+      layer.cache.clear();
+      await audit(req, 'auth.passkey_counter_regressed', 'user', row.user_id,
+        { passkey: row.id, stored: v.before, presented: v.signCount, sessions_ended: ended });
+      fail(res, 403, 'passkey_cloned', `This passkey has been switched off: ${why} Every session on this account has been signed out, `
+        + 'since the copy may hold one. Sign in another way, remove it on your account page, and add it again.');
       return null;
     }
     return { row, v };

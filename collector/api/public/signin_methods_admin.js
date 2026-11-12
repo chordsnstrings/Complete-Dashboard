@@ -135,7 +135,18 @@ export function personSigninMethods(u, ctx) {
       keys.length ? twice('Remove their passkeys', 'Press again to remove', 'remove_passkeys', `${who2}’s passkeys are removed and every session they had is ended.`) : null,
       links.length ? twice('Unlink single sign-on', 'Press again to unlink', 'unlink_sso', `${who2}’s single sign-on is unlinked and every session they had is ended.`) : null,
       msg));
-    node.append(el('p', 'depnote', 'For a lost phone, or a mailbox the company gave to somebody else. Both sign them out everywhere.'));
+    /* WHICH BUTTON FOR WHICH LOSS (review, 2026-11-12). This said "for a lost
+       phone, or a mailbox the company gave to somebody else" of both — and
+       for the mailbox it is backwards. The link is what refuses the new
+       holder of the address (another account at the provider: other_identity
+       in signin_methods.js); unlinked, the next verified sign-on for the
+       address links afresh, to THIS account. Unlinking is for the provider
+       ACCOUNT changing hands or being replaced; a mailbox given away calls
+       for offboarding, which no sign-on opens. test/access_passkey_sso §12. */
+    node.append(el('p', 'depnote', 'Both sign them out everywhere. Remove their passkeys for a lost or stolen phone or key. '
+      + 'Unlink single sign-on when their account at the provider now belongs to somebody else, or was replaced by a new one for them. '
+      + 'Do not unlink because their mailbox was given to somebody else: the link is what stops the new holder of the address signing in as them. '
+      + 'Offboard this account instead.'));
   })();
   return node;
 }
