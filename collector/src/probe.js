@@ -372,19 +372,19 @@ export function surfaces({ from, to }) {
        every night this row recorded {http_status: 404, record_count: 0}, and
        for months the product's record of the surface was "the provider has
        nothing here" about a feed that serves per-trip money at sub-minute
-       freshness (docs/COVERAGE.md "Uber's live per-trip feed WORKS").
+       freshness: docs/COVERAGE.md, "Uber's live per-trip feed WORKS".
 
        Asked now through src/sources/uber_transactions.js — the collector's
        own request builder, so the probe and the collector describe one
        request: POST, the snake_case envelope, timeRange IN_RANGE over epoch
-       milliseconds as strings, the newest legal 15-minute window (ending at
-       least six minutes ago). Not the probe's three-day window, which this
+       milliseconds as strings, the newest legal 15-minute window, ending at
+       least six minutes ago. Not the probe's three-day window, which this
        surface cannot serve: it answers 15 minutes at a time from the last 24
        hours. The surface keeps its name, so its provider_probe row is
        corrected in place rather than joined by a second one. Its fields are
        measured against the columns they land in, uber_live_transaction. */
     add('uber', 'transactions', TXN_COLS,
-      'OAuth REST — POST, the newest legal 15-minute window (the feed serves only the last 24 h)',
+      'OAuth REST — POST, the newest legal 15-minute window; the feed serves only the last 24 h',
       async () => {
         const { data, status } = await probeTransactions({ org: config.uber.org });
         return { data, status };
