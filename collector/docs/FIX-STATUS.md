@@ -5803,7 +5803,10 @@ not a departed CABMAN plate, so the roster cannot take it out, and requiring a f
 tile in the Classic skin, which `arkiv_classic_frozen` holds byte for byte (the mock's stale row 7
 moves at 35 km/h) — a fixture re-record and the operator's word on what Moving means. Also not
 done: `/api/kpis` tracker counts ignore `?fleet=` (they did before this change; the exclusion
-follows the same all-fleet scope). Run, green: `fleet_roster_wiring` 36/0, `fleet_roster_pages`
+follows the same all-fleet scope); and the assistant's live and vehicle tools
+(`api/agent_tools.js`, which read `/api/live` and `/api/vehicles/directory`) get the smaller,
+filtered answers but do not yet carry the roster's sentence into what they relay — the next
+reader of those tools should add `/api/fleet/roster` beside them. Run, green: `fleet_roster_wiring` 36/0, `fleet_roster_pages`
 13/0, `live_fix` 13/0, `vehicle_directory` 34/0, `access_manifest` 17/0, `mockapi` 10/0,
 `arkiv_classic_frozen` (the touched routes) 19/0.
 
@@ -5825,4 +5828,8 @@ production and `ADMIN_TOKEN` unset, a 1.5 KB file of unclosed tags blocks the wh
 (quadratic: about 4x per doubling — 85 ms, 348 ms, 1,545 ms for 50, 100, 200 KB of XML), and a
 4 MB deflate bomb can unpack to gigabytes outside the heap. The fix is the same as WIRE11–12: pass
 `maxBytes` and read in a worker. Run, green: `wage_sheet_preview` 31/0, `wage_sheet_panel` 9/0,
-`salary_xlsx` 45/0, `hr_roster_import` 88/0, `access_manifest` 17/0, `arkiv_ledger` (salary) 10/0.
+`salary_xlsx` 45/0, `hr_roster_import` 88/0, `access_manifest` 17/0, `arkiv_ledger` (salary) 10/0,
+`route_smoke` 60/0, `access_core` 211/0, `completeness` 15/0, `reachability` 19/0, `agent_reach`
+74/0. Not green, and not this change's: `truncation` 23/1 — its one failure names
+`/api/target.days` and `/api/target/month.days` (30 rows over a 30-day November window, read as a
+cap); `api/target_routes.js` is untouched here.
