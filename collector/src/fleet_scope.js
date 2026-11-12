@@ -47,8 +47,12 @@
    figure or record a fact during a scoped request says so explicitly with
    outsideFleetScope() (monthWeights does) — a visible, greppable exemption
    instead of a silent one. The scope also closes when the response ends
-   (enterFleetScope), so the bookkeeping that runs after it — the access audit,
-   the slow-query plan — runs exactly as it always has.
+   (enterFleetScope), so the bookkeeping that runs after it — the access
+   audit — runs exactly as it always has. (The slow-query plan does not run
+   after it: api/server.js logs it as its statement finishes, before the
+   answer, so a scoped statement is planned under the reader's role — plain
+   EXPLAIN, which the read-only transaction allows, and the plan shows the
+   policy's filter. Corrected in the independent review, 2026-11-12.)
 
    WHO IS NARROWED, AND WHO IS NOT. Only a request the gate marks: a signed-in
    person or wall screen whose grants cover some fleets but not all, reading
