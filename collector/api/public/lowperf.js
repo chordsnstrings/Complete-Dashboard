@@ -669,6 +669,11 @@ export async function lowPerformersPage(outer, param = null, sub = null) {
     api('/api/lowperf/watch').catch(() => ({ lists: [] })),
   ]);
   if (!alive(gen)) return null;
+  /* ANS — the answer line and Act-on strip (answers.js 'low-performers'),
+     from the list just fetched, its failure included. Imported when used:
+     this module is on the phone's static import graph (m/screens.js), which
+     never draws an answer (see targetpage.js for the whole argument). */
+  import('./answers.js').then((m) => m.answer(outer, 'low-performers', { v, hotelWord: HOTEL_WORD[v.hotel] || null })).catch(() => {});
   if (v._err) {
     const msg = `<p class="tg-absent">${esc(`The list could not be read: ${v._err.message || 'no answer'}`)}</p>`;
     head.innerHTML = msg; list.body.innerHTML = msg;

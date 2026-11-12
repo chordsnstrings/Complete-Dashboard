@@ -2874,3 +2874,50 @@ and 390, against production's own data: every row a grid, none clipped, no sidew
 
 To repeat: `node bin/prod-mirror.mjs &` then `node bin/focus-rows-audit.mjs http://127.0.0.1:8200
 /tmp/fx.json`; compare a working tree on :8100 with the same `SETTLE`.
+
+
+## ANS — the answer line and Act-on strip, rendered (2026-11-12)
+
+The per-page half of FOCUS (FIX-STATUS ANS). How the pass was done: Chromium (`test/browser.mjs`
+launchChromium, service workers blocked, Asia/Dubai), desktop build, Arkiv, at 1280×900 and
+390×900, light and dark — first against `mockapi.mjs` (the fourteen main pages and four more), then
+against `test/preview.mjs` on :8309 (the real route handlers over the seeded fixture, August 2026),
+then the rules alone over twelve production responses piped in one at a time (FIX-STATUS ANS,
+"Checked against production's own data"). The scratch script reads each page's `#pageAnswer` and
+prints the line, the basis, every action with its address and target, `#view`'s first child and
+the page's scroll width.
+
+| measure | result |
+|---|---|
+| where the box sits | between `.topbar` and `#view` on all 18 pages; never inside `#view`, whose first child is unchanged (`cband`, `cband tp-month`, `stack lp-page`, `toolbar`, `tabs` — whatever the page drew before) |
+| absent lines | each with the server's own reason where it sent one — preview: #target and #month-target "No target is set for November 2026. The Owner sets it in Set up › Access."; #supply "This selection has no availability feed…"; #vehicles "None of the 5 plates on record carries a VIN…"; #retention the server's "Fewer than two complete months…"; #analyst "No model is configured…"; production: #analyst the model's own Token Plan error |
+| actions | at most three on every page; every address a real route; every in-page action finds its panel (`answers` §4) |
+| contrast | every text in the box at AA or better, light and dark (the test computes it against the colour each text sits on) |
+| 390 | no page widened by the box (scroll width 390 on every page the box is on, except #target on the mock, which was already 985 — finding 3 below); every action 44px or taller |
+| Classic | no box, no class: the old skin's DOM does not move |
+
+Findings — not fixed here (outside this workstream), each with what the answer does about it:
+
+1. **#live's Moving tile counts a stale car's last speed.** On the preview "0 of 5 cars reported
+   within 30 minutes" sat above a tile reading Moving 5: all five were silent over a day, and the
+   tile counts every row whose last fix had speed > 3. The verdict uses > 5 km/h, the tile > 3.
+   The answer counts only cars whose fix is under 30 minutes old ("28 of them moving", production)
+   and says so in its basis; the tile is unchanged.
+2. **#payouts on an empty register answers over the sentinel range.** `payout_routes.js`
+   `payoutRange` returns `scope:'window'` with `window:['2000-01-01','2100-01-01']` when the
+   register is empty; a sentence built from it read "between 1 Jan 2000 and 1 Jan 2100". The answer
+   treats the sentinel as the whole record ("No transfer has been collected from any platform yet").
+3. **#target and #month-target at 390 are still 985–1012 px wide** (the audit of 2026-11-12,
+   MEDIUM 3: `table.hp` in a non-scrolling `.tablewrap`). The answer box itself fits; the page does
+   not.
+4. **The preview server answers /api/auth/me with 404** on every page (one console error per
+   load): `test/preview.mjs` does not mount the access routes. Harmless to the pages; it is noise in
+   any error count taken there.
+5. **#retention on the mock**: the last month's `flow.left` (0) and `stopped_last_month` (5)
+   disagree — mockapi's two fields are independent. On production they agree (60 and 60), as the
+   route computes both from the same months.
+
+To repeat: `PORT=8309 node test/preview.mjs &`, then for each page read
+`document.getElementById('pageAnswer')` (line, basis, `.ans-act-i` hrefs and `data-to`) at 1280 and
+390 under `?ui=desktop&skin=arkiv`, in both colour schemes; `node test/answers.test.mjs` does the
+same on mockapi and asserts it. Stop the preview by its PID.

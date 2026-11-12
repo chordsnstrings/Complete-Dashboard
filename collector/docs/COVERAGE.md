@@ -10754,3 +10754,31 @@ it again.
   - platform bookings (167);
   - the five dataset-coverage counts (154 each). These are one per `/api/coverage` computation, roughly every 7.4 min.
 - `/api/coverage` measured 16.9 s, 19.3 s and 32.7 s cold.
+
+
+## ANS — traps found building the answer line (2026-11-12)
+
+* **`ui.js panel(title, cap, key)` stamps `key` as `data-panel`, not as a class.** A selector
+  `.payout-diff` finds nothing; `[data-panel="payout-diff"]` finds the panel. Hand-built bands
+  (`section.cband.tp-month`, `.lp-head`) DO carry their key as a class. The first in-page actions
+  of the answer strip used the class form and scrolled nowhere on every page;
+  `answerline.js findTarget()` now tries `data-panel` first, then the class, and a heading by its
+  opening words.
+* **A module on the phone's static import graph cannot statically import a new module** without
+  that module joining `sw.js`'s precache list (`test/tokens.test.mjs` §8 walks the graph from
+  `/m/app.js`). `targetpage.js` and `lowperf.js` are on it (m/screens.js imports them for the Today
+  card and the low-performer screens), so their answer hooks load `answers.js` with `import()`,
+  which the walker does not follow and the phone never runs.
+* **Anything placed between `.topbar` and `#view` changes `arkiv_shell` §3's main-column order**
+  — it names every child of `.main` in order. The answer host is there by design; that check now
+  includes `pageAnswer`. Anything placed INSIDE `#view` before the page's first band breaks
+  `page_contract` §7, `arkiv_pages` and `arkiv_money`, which read `#view.firstElementChild`.
+* **`ui.js`'s formatters print an unread figure as "—"** — right in a table cell, wrong in a
+  sentence, and no pattern can tell it from the house's punctuation dash. Sentences built from
+  `fmt`/`money`/`countOf`/`pct` need a strict wrapper that refuses a non-number (answers.js `F`,
+  `M`, `C`, `P`); `Math.abs(null)` is 0, so an absolute value needs the same guard.
+* **`payout_routes.js` answers an empty register over 2000-01-01 → 2100-01-01** with
+  `scope:'window'`. Any sentence that prints the response's `window` must treat that range as "the
+  whole record".
+* **`pkill -f test/preview.mjs` matches every worktree's preview server**, not only one's own — on
+  a machine shared by several builders, stop a server by the PID it started with.

@@ -381,6 +381,15 @@ export async function targetPage(root) {
       rev.body.innerHTML = hoursHtml(h.revenue, h, { isMoney: true });
       tri.body.innerHTML = hoursHtml(h.trips, h, { isMoney: false });
     }
+    /* ANS — the page's answer line and Act-on strip (answers.js 'target'),
+       from the three answers just drawn, again on every minute's redraw.
+       Imported when used, not at the top: this module is on the PHONE's
+       static import graph (m/screens.js takes the Today card from it), the
+       phone never draws an answer, and every module that graph reaches must
+       be on the service worker's precache list (test/tokens.test §8). On the
+       desktop app.js has already loaded answers.js, so this resolves at once;
+       a module that will not load draws nothing rather than a wrong line. */
+    import('./answers.js').then((m) => m.answer(root, 'target', { t, h, live })).catch(() => {});
     return true;
   };
   await draw();

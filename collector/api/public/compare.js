@@ -38,6 +38,8 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
 import { q, href, parseHash, state, qChan, currentGen, alive } from './data.js';
 import { dubaiDay, TZ } from './tz.js';
 import { withheldSentence } from './access_model.js';
+/* ANS: the page's answer line and Act-on strip (answers.js). */
+import { answer } from './answers.js';
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -705,6 +707,7 @@ async function compareContract(root, aParam, bParam) {
 
   const p = await qChan('/api/compare', { a, b, cut });
   if (!alive(gen)) return;
+  answer(root, 'compare', { p, a, b });
   const A = p.totals.a, B = p.totals.b;
   const partial = p.cut_minutes < 1440;
   head.querySelector('.sechd-note').textContent = partial

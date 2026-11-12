@@ -1585,3 +1585,50 @@
 :root[data-skin="arkiv"][data-focus="on"]:not([data-fx-sec="Today"]) .todaynow .tn-links a:not(:first-child){display:none}
 :root[data-skin="arkiv"][data-focus="on"]:not([data-fx-sec="Today"]) .todaynow .lb-figs{gap:4px 0}
 :root[data-skin="arkiv"][data-focus="on"]:not([data-fx-sec="Today"]) .todaynow .lb-figs .tn-f b{font-size:var(--t6)}
+
+/* ══ ANS — THE ANSWER LINE AND THE ACT-ON STRIP (answerline.js, answers.js) ══
+   The second half of FOCUS (HANDOFF 0.9; FIX-STATUS ANS). Between the title
+   block and #view, in the shell's own gutter (--shell-x), so the title, the
+   answer and the first panel stand on one vertical line. The look is the
+   demo's the operator reviewed on 2026-10-22: the answer in one weight up at
+   --d1, its basis small and grey under it, and the actions on a pale wash,
+   each a whole-row link with its arrow. Every colour is a token, so the dark
+   theme is the same rules (app.css redefines --w-pos, --ink, --ink-2, --grey,
+   --hair and --paper-2 under it). The label is --ink-2, not --sem-pos: green
+   text on the green wash is under AA at this size in both themes (measured,
+   FIX-STATUS ANS). On a narrow screen each action is a 44px row, the house's
+   touch floor. The Classic skin never builds the box (answerline.js
+   mountAnswer asks contract()). */
+:root[data-skin="arkiv"] #pageAnswer{display:grid;gap:8px;padding:14px var(--shell-x) 0;
+  max-width:calc(980px + 2 * var(--shell-x));box-sizing:border-box}
+:root[data-skin="arkiv"] #pageAnswer + #view{padding-top:22px}
+:root[data-skin="arkiv"] .ans-line{margin:0;font-family:var(--sans);font-size:var(--d1);line-height:1.35;
+  font-weight:600;color:var(--ink);max-width:62ch;text-wrap:pretty;overflow-wrap:anywhere}
+:root[data-skin="arkiv"] .ans-line.ans-na{font-weight:500;color:var(--ink-2)}
+:root[data-skin="arkiv"] .ans-na-l{font-family:var(--mono);font-size:var(--t2);font-weight:500;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--grey);margin-right:8px;vertical-align:2px;white-space:nowrap}
+:root[data-skin="arkiv"] .ans-basis{margin:-2px 0 0;font-size:var(--t5);line-height:1.45;color:var(--grey);max-width:90ch}
+:root[data-skin="arkiv"] .ans-act{display:grid;gap:2px;margin-top:4px;padding:10px 14px;max-width:760px;
+  background:var(--w-pos);box-sizing:border-box}
+:root[data-skin="arkiv"] .ans-act.ans-act-none{background:var(--paper-2)}
+:root[data-skin="arkiv"] .ans-act-t{font-family:var(--mono);font-size:var(--t1);font-weight:500;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--ink-2);margin-bottom:2px}
+:root[data-skin="arkiv"] .ans-acts{list-style:none;margin:0;padding:0}
+:root[data-skin="arkiv"] .ans-acts li{border-top:1px solid var(--hair)}
+:root[data-skin="arkiv"] .ans-acts li:first-child{border-top:0}
+:root[data-skin="arkiv"] .ans-act-i{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  padding:5px 0;color:var(--ink);text-decoration:none;font-size:var(--t7);line-height:1.4}
+:root[data-skin="arkiv"] .ans-act-i:hover .ans-act-x{text-decoration:underline;text-underline-offset:3px}
+:root[data-skin="arkiv"] .ans-act-i:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+:root[data-skin="arkiv"] .ans-act-x{min-width:0;overflow-wrap:anywhere}
+:root[data-skin="arkiv"] .ans-act-go{flex:none;color:var(--ink-2)}
+:root[data-skin="arkiv"] .ans-act-n{margin:0;font-size:var(--t7);line-height:1.4;color:var(--ink-2)}
+/* Where an action lands on this page: a ring that says "here", then goes. */
+:root[data-skin="arkiv"] .ans-target{outline:2px solid var(--ink);outline-offset:6px}
+@media (max-width:720px){
+  :root[data-skin="arkiv"] #pageAnswer{gap:6px}
+  :root[data-skin="arkiv"] .ans-line{font-size:var(--t9)}
+  :root[data-skin="arkiv"] .ans-act{padding:6px 12px}
+  :root[data-skin="arkiv"] .ans-act-i{min-height:44px;align-items:center;padding:6px 0}
+}
+@media print{:root[data-skin="arkiv"] .ans-act{display:none}}

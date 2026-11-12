@@ -21,6 +21,8 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, entity,
   dayStr, dateStr, dtStr, money, pct, sourceLabel, countOf, plural, verdict, foldRows,
   UBER_FARE_WHY, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, sourceToken } from './ui.js';
 import { q, href, state, windowLabel } from './data.js';
+/* ANS: the page's answer line and Act-on strip (answers.js). */
+import { answer } from './answers.js';
 
 export const ROSTER_TABS = [
   { id: 'all', label: 'Everyone', ic: '◧' },
@@ -108,6 +110,7 @@ export async function renderRoster(root) {
   loading(host);
   const d = await q('/api/roster');
   host.innerHTML = '';
+  answer(root, 'roster', d);
   const t = d.totals;
   const AKB = ak ? glanceBand(host, windowLabel()) : null;
   /* Which TILE the verdict's figure is, by name. notRepeated() folds the

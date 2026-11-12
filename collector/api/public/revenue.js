@@ -21,6 +21,8 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, pct,
 import { channelKey } from './tokens.js';
 import { q, href, hrefFilter, state, currentGen, alive, windowLabel } from './data.js';
 import { revenueVerdict } from './verdicts.js';
+/* ANS: the page's answer line and Act-on strip (answers.js). */
+import { answer } from './answers.js';
 
 const BASIS = {
   /* THE BASIS THIS PRODUCT NOW PREFERS, and the pill that says so.
@@ -79,6 +81,7 @@ async function revenuePage(root, { ak = false } = {}) {
   const d = await q('/api/revenue');
   if (ak && !alive(gen)) return;
   host.innerHTML = '';
+  answer(root, 'revenue', d);
 
   /* A channel with no booking is not the same as a channel that is not there.
      The endpoint returns only the channels with rows, so a filter that matches

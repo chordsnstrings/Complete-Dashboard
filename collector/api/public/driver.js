@@ -32,6 +32,8 @@ import { CHANNEL_ORDER } from './tokens.js';
 import { qAll, href, currentGen, alive, windowLabel,
   personAddr, personIdOf, rewriteParam } from './data.js';
 import { driversVerdict } from './verdicts.js';
+/* ANS: the directory's answer line and Act-on strip (answers.js 'drivers'). */
+import { answer } from './answers.js';
 import { renderDriverDay } from './driverday.js';
 /* One driver against their own record, week by week and month by month. Its
    own module for the same reason driverday.js is: this file is already the
@@ -4295,6 +4297,11 @@ export async function renderDriverDirectory(root) {
         + (notFilled.length ? ` · ${fmt(notFilled.length)} with no real licence date on file` : '')
       : '');
   bar.querySelector('#dn').textContent = summary(rows.length);
+  /* ANS: the same counts the toolbar line above prints, so the answer and the
+     line cannot disagree; drawn again when the backlog of pairs arrives. */
+  const answerDrivers = () => answer(root, 'drivers', { total: rows.length, active: active.length,
+    idle: idle.length, never: never.length, expired: expired.length, notFilled: notFilled.length, pendingPairs });
+  answerDrivers();
   /* Fetched after the count is on screen and never blocking it: a backlog
      figure is context, and a directory that waited for it would be slower for
      everybody to tell them something only sometimes true. */
@@ -4303,6 +4310,7 @@ export async function renderDriverDirectory(root) {
       if (!alive(gen) || !c) return;
       pendingPairs = c.pending || null;
       spinePeople = c.people ?? null;
+      if (pendingPairs) answerDrivers();
       if (!pendingPairs && spinePeople === rows.length) return;
       const host = bar.querySelector('#dn');
       if (host) host.textContent = summary(rows.length);
