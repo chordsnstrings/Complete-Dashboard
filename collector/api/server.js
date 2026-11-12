@@ -159,6 +159,9 @@ import { accessLayer } from './access/middleware.js';
 import { accessRoutes, housekeeping as accessHousekeeping } from './access/routes.js';
 import { bootstrapOwner } from './access/service.js';
 import { INTERNAL_TOKEN } from './access/internal.js';
+/* Liveness and the per-client request budget, both mounted before the caller
+   is identified — api/ops.js. */
+import { makeHealth, makeRateLimiter } from './ops.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
 
@@ -255,6 +258,37 @@ app.use((req, res, next) => {
   res.set('retry-after', '5');
   return res.status(503).json({ error: 'starting', detail: 'migrations are still applying — retry shortly' });
 });
+
+/* LIVENESS, THEN THE REQUEST BUDGET — both before the caller is identified.
+   ─────────────────────────────────────────────────────────────────────────
+   Liveness: the process is up and the event loop is turning. Nothing more —
+   a liveness probe that touches the database restarts a healthy container
+   every time the database hiccups. The route was always memory-only, but it
+   was registered below `app.use(access.identify)`, and identify() queries
+   access_config for every /api path first; with the pool full of slow reads
+   the platform's probe queued behind them, timed out, and the restart emptied
+   the cache (the loop /api/ready's comment describes). Registered here it
+   answers before identify(), the budget and the cache, and also says which
+   commit and which front end this process serves — api/ops.js has the fields
+   and the measurements.
+
+   The budget (api/ops.js): 600 reads and 60 changes a minute, 20 assistant
+   questions per 10 minutes and 10 provider-calling actions an hour per client,
+   429 with Retry-After beyond that. Before identify() too, so a client over
+   budget costs no access_config query. The process's own warmer and refresh
+   are exempt by the same isInternal() rule identify() uses for kind 'system',
+   and so is every other self-call — the assistant's tool calls above all,
+   which come over loopback with the asker's cookie (api/ops.js, selfCall()).
+
+   `shellHash` is read through a getter: it is computed far below, with the
+   static files, and is initialised long before anything can connect. */
+const requestBudget = makeRateLimiter({ log });
+app.get('/api/health', makeHealth({
+  migrating: () => !migrationsDone,
+  frontend: () => shellHash,
+  limiter: requestBudget,
+}));
+app.use(requestBudget);
 
 /* Read responses are cached against a data version, not a clock — see
    api/cache.js. Registered before the routes so a hit never reaches one, and
@@ -492,10 +526,9 @@ const CANON = personFold;
 // them counts it twice. See sql/schema_v7.sql.
 const FB = `${F} AND is_booking`;
 
-/* Liveness: the process is up and the event loop is turning. Nothing more —
-   a liveness probe that touches the database restarts a healthy container
-   every time the database hiccups. */
-app.get('/api/health', (_, res) => res.json({ ok: true, migrating: !migrationsDone }));
+/* Liveness (/api/health) is registered near the top of this file, above the
+   access layer, so that it never waits on the pool — see "LIVENESS, THEN THE
+   REQUEST BUDGET" and api/ops.js. */
 
 /* Readiness: can this instance actually answer? A green health check in front
    of a missing view is worse than a red one, because it routes users to it. */

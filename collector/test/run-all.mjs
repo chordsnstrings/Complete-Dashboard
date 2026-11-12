@@ -22,9 +22,47 @@ import { createServer } from 'node:net';
    Imported rather than re-derived: a local copy of the clock is how
    onlinetime.js came to print a collector time in UTC. */
 import { dubaiDay } from '../api/window.js';
+/* The options CI needs (--skip-browser, --allow-fail, --shard, --jobs, --only,
+   --list), decided in a module of their own so they can be tested without
+   running the suite. With no option given, nothing below behaves differently
+   from before they existed. */
+import { parseRunArgs, browserFiles, shardOf, verdict } from './run_all_lib.mjs';
 
 const files = readdirSync('test').filter((f) => f.endsWith('.test.mjs')).sort();
 if (!files.length) { console.error('no test files found — is the cwd the collector root?'); process.exit(1); }
+
+const opts = parseRunArgs(process.argv.slice(2));
+if (opts.error) { console.error(opts.error); process.exit(2); }
+/* What is left out, and why, is printed before anything runs: a CI run that
+   skips 88 files must say so on its first screen, not leave it to be inferred
+   from a smaller total at the end. */
+const needBrowser = opts.skipBrowser ? browserFiles(files) : new Map();
+let runFiles = files.filter((f) => !needBrowser.has(f));
+if (opts.only) {
+  const unknown = [...opts.only].filter((f) => !files.includes(f));
+  if (unknown.length) { console.error(`--only names no such file: ${unknown.join(', ')}`); process.exit(2); }
+  runFiles = runFiles.filter((f) => opts.only.has(f));
+}
+runFiles = shardOf(runFiles, opts.shard);
+const missingAllowed = [...opts.allowFail].filter((f) => !files.includes(f));
+if (missingAllowed.length) console.log(`WARNING: --allow-fail names no such file: ${missingAllowed.join(', ')}`);
+if (needBrowser.size) {
+  console.log(`--skip-browser: ${needBrowser.size} file(s) need a browser and are left out; `
+    + 'the :8099 mock server is neither started nor probed.');
+  for (const [f, why] of needBrowser) console.log(`  - ${f}: ${why}`);
+}
+if (opts.shard) console.log(`shard ${opts.shard.k} of ${opts.shard.n}: ${runFiles.length} file(s)`);
+if (opts.allowFail.size) console.log(`allowed to fail (known, not counted): ${[...opts.allowFail].join(', ')}`);
+/* Written in one piece and exited only once it has reached the pipe: stdout
+   to a pipe is asynchronous here, and an exit straight after 300 console.log
+   calls was measured cutting the listing off at 8,806 bytes, half-way through
+   (test/run_all_flags.test.mjs reads it through a pipe, as CI does). */
+const flushed = () => new Promise((r) => process.stdout.write('', r));
+if (opts.list) {
+  console.log(`\n${runFiles.length} file(s) would run:\n${runFiles.map((f) => `  ${f}`).join('\n')}`);
+  await flushed();
+  process.exit(0);
+}
 
 /* The browser tests need a server, and this used to not be its problem.
    ─────────────────────────────────────────────────────────────────────────
@@ -113,7 +151,12 @@ const startMock = async (port, base) => {
 
 let mock = null;
 let base = BASE;
-if (await answering(BASE)) {
+/* --skip-browser: no file that runs needs the mock server, so it is neither
+   started nor probed — a CI machine has nothing on 8099, and a run that
+   started one anyway would spend its first seconds on a server nobody reads. */
+if (opts.skipBrowser) {
+  /* nothing to start */
+} else if (await answering(BASE)) {
   const n = await bookingsToday(BASE);
   if (n > 0) {
     console.log(`using the server already on ${BASE} — ${n} booking(s) for ${TODAY}`);
@@ -149,12 +192,12 @@ if (await answering(BASE)) {
 /* Every browser test file reads SMOKE_BASE, and a spawn with no `env` inherits
    this one — so this single line is what points them at whichever server the
    block above settled on. */
-process.env.SMOKE_BASE = base;
+if (!opts.skipBrowser) process.env.SMOKE_BASE = base;
 const stopMock = () => { if (mock && mock.exitCode === null) mock.kill('SIGTERM'); };
 process.on('exit', stopMock);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { stopMock(); process.exit(1); });
 
-const LIMIT = Math.max(1, Math.min(4, cpus().length - 1));
+const LIMIT = opts.jobs ?? Math.max(1, Math.min(4, cpus().length - 1));
 const results = [];
 
 /* A file that prints nothing and exits 0 is a file that did not run its
@@ -205,13 +248,14 @@ function run(file) {
   });
 }
 
-const queue = [...files];
+const queue = [...runFiles];
 await Promise.all(Array.from({ length: LIMIT }, async () => {
   while (queue.length) {
     const r = await run(queue.shift());
     results.push(r);
     const bad = r.code !== 0 || r.failed === null || r.failed > 0;
-    console.log(`${bad ? '✗' : '✓'} ${r.file.padEnd(34)} ${String(r.passed).padStart(4)} passed`
+    const mark = bad ? (opts.allowFail.has(r.file) ? '~' : '✗') : '✓';
+    console.log(`${mark} ${r.file.padEnd(34)} ${String(r.passed).padStart(4)} passed`
       + `${r.failed ? `, ${r.failed} FAILED` : ''}`
       + `${r.timedOut ? ', TIMED OUT' : r.failed === null ? ', NO TALLY REPORTED' : ''}`
       + `  ${r.secs}s`);
@@ -221,8 +265,17 @@ await Promise.all(Array.from({ length: LIMIT }, async () => {
 }));
 
 results.sort((a, b) => a.file.localeCompare(b.file));
-const broken = results.filter((r) => r.code !== 0 || r.failed === null || r.failed > 0);
+/* Without --allow-fail this is the old rule exactly: any file that failed,
+   or never reported a tally, fails the run. */
+const { broken, allowed, allowedPassed } = verdict(results, opts.allowFail);
 const total = results.reduce((a, r) => a + r.passed, 0);
-console.log(`\n${results.length} files, ${total} assertions, ${broken.length} file(s) failing`);
+for (const r of allowed) console.log(`~ ${r.file} failed and is on --allow-fail (known; not counted)`);
+for (const r of allowedPassed) console.log(`~ ${r.file} is on --allow-fail but PASSED — take it off the list`);
+console.log(`\n${results.length} files, ${total} assertions, ${broken.length} file(s) failing`
+  + `${allowed.length ? `, ${allowed.length} allowed to fail` : ''}`
+  + `${needBrowser.size ? `, ${needBrowser.size} left out (need a browser)` : ''}`);
+if (broken.length) console.log(`failing: ${broken.map((r) => r.file).join(', ')}`);
 stopMock();
+/* The summary is the line CI's log is read for: let it reach the pipe first. */
+await flushed();
 process.exit(broken.length ? 1 : 0);

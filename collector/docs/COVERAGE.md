@@ -10754,3 +10754,129 @@ it again.
   - platform bookings (167);
   - the five dataset-coverage counts (154 each). These are one per `/api/coverage` computation, roughly every 7.4 min.
 - `/api/coverage` measured 16.9 s, 19.3 s and 32.7 s cold.
+
+## Operations basics — health, client address, deploy, CI (2026-11-12, branch fix/ops)
+
+What the OPS workstream learned that is not written down above. FIX-STATUS "OPS" has the rows.
+
+### Traps this added to the list
+
+* **A memory-only route is only as fast as the middleware in front of it.**
+  `/api/health` never touched the database, yet it waited on it: it was
+  registered below `app.use(access.identify)`, and identify() runs
+  `svc.getConfig(db)` for every `/api` path before any route. Anything that
+  must answer while the pool is full (the platform's probe above all) has to
+  be registered ABOVE the access layer — it now is, in api/server.js — and a
+  test of it must stand a stuck identify() behind it
+  (test/ops_health_budget.test.mjs), because a test with a fast database
+  cannot tell the two orders apart.
+* **On production `req.ip` is not the reader.** Responses carry
+  `server: cloudflare` and `cf-ray` (measured 2026-11-12), so a request passes
+  Cloudflare and then App Platform's router before it reaches the container,
+  and `trust proxy` 1 makes `req.ip` the address the nearest proxy reported —
+  possibly a Cloudflare edge shared by unrelated readers. The request budget
+  keys on `do-connecting-ip`, then `cf-connecting-ip`, then `req.ip`.
+  **Assumed, not verified:** that App Platform sets `do-connecting-ip` to the
+  reader's address and overwrites a client-sent one. Nothing reachable from
+  the sandbox echoes request headers. `/api/health`'s `rate_limit` block
+  reports, by header NAME only, which source keyed the last request
+  (`key_source_last`), this one (`key_source_this_request`) and every request
+  since boot (`key_sources_since_boot`): after the deploy, read it through the
+  public URL. A stream of `req.ip` means neither header arrives.
+* **Express routes case-insensitively and ignores one trailing slash,** so
+  anything that classifies a request by its path (a budget, a gate) must
+  lower-case it and drop the slash first: `/api/Probe/uber/rest/` reaches the
+  probe handler. The access gate refuses a capitalised `/API` prefix and a
+  trailing slash, but not capitals after the prefix.
+* **The live spec now has a record and a check.**
+  `collector/deploy/app-spec.redacted.yaml` is the spec as measured on
+  2026-11-12, with every value replaced by `<set in DigitalOcean>`; it cannot
+  be applied as it stands (it would blank every variable). `node
+  bin/app-spec.mjs --check` (DO_APP_ID + DIGITALOCEAN_TOKEN, or `--token-file`
+  outside the repo) says whether production still matches it. Until
+  `COMMIT_SHA` is added in DigitalOcean the check reports that drift on each
+  component — plus anything the audit brief got wrong (`source_dir` and
+  `dockerfile_path` were stated by it, not read from a raw spec dump).
+* **`/api/health`'s `commit` needs `COMMIT_SHA = ${_self.COMMIT_HASH}`.**
+  `_self` is the component the variable sits on; `COMMIT_HASH` is the commit
+  DigitalOcean built it from. A reference that is not resolved can reach the
+  process as its literal text (not observed here; assumed, defensively), so
+  the API refuses any value containing `${` and says so (`commit_reason`)
+  rather than print it as a commit. Adding the
+  variable is a spec change, so it redeploys the last BUILT commit (trap 25):
+  add it, then `node bin/deploy.mjs`.
+* **`process.exit()` straight after a burst of `console.log` truncates output
+  read through a pipe.** stdout to a pipe is asynchronous in Node here: the
+  runner's `--list` printed 300 lines and exited, and a reader on the other end
+  of a pipe got 8,806 bytes — half the list, differently cut on every run.
+  CI reads every log through a pipe. Write long output in one piece and wait
+  for it to drain (`process.stdout.write('', cb)`) before exiting; the runner
+  now does so for `--list` and for its final summary.
+* **A test can need a browser without importing one.**
+  `numbers_audit_identity` imports nothing of playwright; it spawns
+  `bin/numbers-audit.mjs`, which launches Chromium through `test/browser.mjs`.
+  Any rule for "which tests need a browser" must follow spawned bin/ scripts
+  as well as imports (test/run_all_lib.mjs does). 88 of 397 files need one.
+* **CI on GitHub: what it can and cannot run.** `.github/workflows/ci.yml`
+  runs on pull requests into the production branch and by hand. A manual run
+  (`workflow_dispatch`) is only offered once the workflow file is on the
+  repository's DEFAULT branch — GitHub's rule, not this file's. The runner's
+  default parallelism is CPUs − 1, which is ONE on a two-CPU runner (GitHub's
+  standard runner for a private repository), so CI passes `--jobs=2` and splits the
+  suite in four shards. Not allow-listed, and liable to fail CI at certain
+  hours for reasons of the clock rather than the code: `payout_scope` (20:00–
+  24:00 UTC) and `forecast_yoy` (a month boundary) — system audit 2026-11-12.
+* **`trust proxy` is still 1 with Cloudflare in front.** api/server.js's own
+  comment says the hop count must be counted, never guessed, if a CDN is put in
+  front. Cloudflare now is (above). Whether App Platform's router already
+  folds Cloudflare's hop into the one it reports is not measured, so the count
+  was left alone: `req.ip` feeds the sign-in throttle and the ledger's audit
+  column, and a wrong count there is a forgeable address recorded as fact.
+  The request budget does not depend on it unless neither connecting-ip
+  header arrives.
+* **Production's `/api/health` before this branch** (GET, 2026-11-12 04:2xZ,
+  production `52cbf9d`): `{"ok":true,"migrating":false}` and nothing else —
+  no commit, no front end — served `cache-control: private` through
+  Cloudflare (`server: cloudflare`, a `cf-ray`). `/sw.js` served
+  `const VERSION = 'fleet-714b035d76ad'`: `fleet-` + 12 hex, the string the
+  new `frontend` field reports from the same `shellHash`. After the deploy,
+  health should carry `commit`, `frontend`, `started_at`, `uptime_s` and
+  `rate_limit`, with `cache-control: no-store`.
+  Re-measured by the review, 2026-11-12 ~05:40Z: the same two answers
+  (`{"ok":true,"migrating":false}`, `cache-control: private`, and
+  `fleet-714b035d76ad`).
+
+### What the review of fix/ops added (2026-11-12)
+
+* **A loopback caller is not necessarily "the system".** The assistant's
+  tool calls (`api/agent_routes.js`, `fetchApi`) come from 127.0.0.1 carrying
+  the ASKER's cookie and no internal token, so a budget that exempts only
+  token-bearing loopback calls (isInternal) puts every conversation on the
+  server under one `127.0.0.1` key, and — worse for the deploy check —
+  counts every tool call as `req.ip`, the source whose presence means "the
+  platform sends neither connecting-ip header". `selfCall()` in api/ops.js
+  (a loopback socket and none of X-Forwarded-For, Forwarded, X-Real-IP,
+  do-/cf-connecting-ip) is the rule; health counts self-calls apart, as
+  `self_calls_since_boot`. Anything that classifies callers by address has to
+  know about this path: a per-asker loopback fetch is not a reader and not
+  the warmer either.
+* **The house's own tools reach production from ONE address, and after this
+  deploy they share one budget.** `bin/live-ui.mjs`, `bin/prod-mirror.mjs`,
+  `bin/page-audit.mjs` and `bin/live-audit.mjs` all fetch production from the
+  sandbox's egress address, so together they get 600 reads a minute. A full
+  render audit through live-ui is "something over a thousand upstream
+  requests" (its own header); run sequentially that has stayed well under the
+  budget, but parallel browser contexts can pass it, and the page then shows
+  the 429's reason ("too many requests from this address — try again in N
+  seconds") — a refusal, not a product defect. Run audits one context at a
+  time, or set `RATE_LIMIT_READS_PER_MIN` higher for the pass (a spec change:
+  it redeploys the last built commit, trap 25).
+* **Production runs Node 20; CI and this sandbox run Node 22.**
+  `collector/Dockerfile` is `FROM node:20-slim`; `.github/workflows/ci.yml`
+  uses Node 22 (as its brief specified) and the sandbox has v22.22.0. A green
+  run therefore does not prove the code runs on production's runtime: an API
+  that exists only from Node 21/22 (`Object.groupBy`, `Promise.withResolvers`,
+  the new `Set` methods) passes `node --check` and every test here and throws
+  on production. None is used in src/, api/ or bin/
+  today (grep, 2026-11-12). Either move the Dockerfile to Node 22 or give CI a
+  Node 20 leg before relying on CI for this.
