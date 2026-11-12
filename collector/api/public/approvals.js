@@ -46,7 +46,7 @@ export async function approvalsPage(root) {
     const done = data.proposals.filter((p) => p.status !== 'open');
     const ak = contract();
     let list, doneBox;
-    if (ak) ({ list, doneBox } = contractFrame(host, data.proposals, open, done));
+    if (ak) ({ list, doneBox } = contractFrame(host, open, done));
     else {
       host.innerHTML = `
       <p class="ap-lede">Changes one person prepared that a second person must commit. What is committed is exactly what was stored when it was prepared.</p>
@@ -107,7 +107,7 @@ export async function approvalsPage(root) {
    (panel(); arkiv.css numbers them), and † says what the server does not
    send. Every figure is a count of what /api/access/proposals returned —
    nothing is derived. The old skin draws exactly what it drew before. */
-function contractFrame(host, all, open, done) {
+function contractFrame(host, open, done) {
   host.replaceChildren();
   const yours = open.filter((p) => p.canCommit).length;
   const mine = open.filter((p) => p.mine).length;

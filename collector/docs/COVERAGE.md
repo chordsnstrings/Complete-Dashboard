@@ -10787,3 +10787,7 @@ it again.
   something to evict by, and reading every entry's headers on every write is a scan per answer.
   sw.js keeps `[storedAt, bytes]` per address in an entry of the same cache, so it dies with the
   cache (sign-out, scope change) and survives the worker being stopped when idle (ARK6).
+- **index.html's pre-paint script is one function full of `var`s.** `var` is function-scoped, so
+  a block that declares a name the script already uses reassigns it: the first draft of the
+  theme-colour collapse declared `var pick`, which is the phone/desktop choice a few lines up. It
+  was harmless only because nothing read `pick` after it. Give a new block its own names.

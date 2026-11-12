@@ -115,10 +115,12 @@
       /* …and the browser's bar in the CHOSEN theme's paper, read from its own
          meta above rather than written a second time (signin.html does the
          same): the metas answer the OS's scheme, not the reader's choice. */
+      /* Its own names: `var` is function-scoped, and `pick` above is the
+         phone/desktop choice. */
       var metas = document.querySelectorAll('meta[name="theme-color"]');
-      var pick = null;
-      for (var j = 0; j < metas.length; j++) if ((metas[j].getAttribute('media') || '').indexOf(t) >= 0) pick = metas[j].getAttribute('content');
-      if (pick) for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', pick);
+      var barColour = null;
+      for (var j = 0; j < metas.length; j++) if ((metas[j].getAttribute('media') || '').indexOf(t) >= 0) barColour = metas[j].getAttribute('content');
+      if (barColour) for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', barColour);
     }
   } catch (e) { /* default to the OS preference */ }
   /* FOCUS (focus.js): stamped before the first paint, so a reader who turned

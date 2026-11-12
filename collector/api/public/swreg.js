@@ -60,6 +60,7 @@ function paint() {
     box.id = NOTICE_ID;
     box.setAttribute('role', 'status');
     view.parentElement.insertBefore(box, view);
+    watchRedraws(view.parentElement);
   }
   box.innerHTML = oldest
     ? `<b>Offline.</b> The figures on this page are copies this browser kept, the oldest from ${esc(dtStr(oldest))} (Dubai time) — not live answers. They are replaced as soon as the server answers again.`
@@ -84,15 +85,19 @@ export function onWorkerMessage(ev) {
   paint();
 }
 
-/* The page was redrawn: #view is a new node (app.js freshView), so the line
-   no longer describes what is on screen. */
-function watchRedraws() {
-  const view = document.getElementById('view');
-  const host = view?.parentElement;
+/* The page was redrawn: #view is a new node (app.js freshView replaces it in
+   place), so the line no longer describes what is on screen. Watched from
+   where #view is WHEN THE LINE IS SHOWN, not from where it was at
+   registration: the Arkiv shell (shell.js) builds its structure on the first
+   render, which can land after the worker is registered. */
+let watcher = null;
+function watchRedraws(host) {
   if (!host || typeof MutationObserver !== 'function') return;
-  new MutationObserver(() => {
-    if (shownFor && document.getElementById('view') !== shownFor) clear();
-  }).observe(host, { childList: true });
+  watcher?.disconnect();
+  watcher = new MutationObserver(() => {
+    if (shownFor && document.getElementById('view') !== shownFor) { clear(); watcher?.disconnect(); watcher = null; }
+  });
+  watcher.observe(host, { childList: true });
 }
 
 let registered = false;
@@ -116,8 +121,7 @@ export function registerWorker({ nav = typeof navigator !== 'undefined' ? naviga
     win.location.reload();
   });
   sw.addEventListener('message', onWorkerMessage);
-  watchRedraws();
-  const go = () => { sw.register('/sw.js', { scope: '/' }).catch(() => { /* http, or blocked */ }); };
+  const go =() => { sw.register('/sw.js', { scope: '/' }).catch(() => { /* http, or blocked */ }); };
   if (win.document?.readyState === 'complete') go();
   else win.addEventListener('load', go, { once: true });
   return true;
