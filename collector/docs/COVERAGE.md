@@ -10765,3 +10765,25 @@ it again.
   `import()` (themecolor.js), which the test does not count.
 - **Chromium serialises an inset box-shadow colour first**: `rgb(35, 98, 211) 3px 0px 0px 0px
   inset`. A test matching `/inset 3px/` never matches; match both orders.
+- **A service worker that answers GETs from its cache but lets HEAD through blinds the deploy
+  check.** app.js `deployOf` asks `X-FM-Build` with `HEAD` + `cache: 'no-store'`; sw.js returned
+  early for every non-GET, so under a cache-first worker the check compared the server's build
+  with the server's build while the tab ran a cached app.js. sw.js now answers HEAD for shell
+  paths from the copy it would serve, and keeps only its own deploy's code (ARK7).
+- **`clients.claim()` fires `controllerchange` on a page no worker served.** A "reload on
+  controllerchange" policy therefore reloads every first visit a few seconds in (the phone still
+  does), and a guard read once at load ("was there a controller?") misses a later takeover in the
+  same visit — the page stays on the old code. Track it: the first change is the first claim, any
+  later one is a deploy (swreg.js, ARK5).
+- **The worker's offline answer is a 503.** data.js treated it as a slow gateway: it waited
+  1.2 s, retried, and told the reader "the server took too long", which is false — the server was
+  never reached. Detect `x-sw-cache: miss` before the gateway rule (ARK8).
+- **Absence in a service-worker cache is only evidence after a put that should happen has had its
+  chance.** The worker keeps a response after answering the page, so "not in the cache" read at
+  once passes whether or not the code would have kept it — the first draft of
+  `test/sw_desktop.test.mjs` passed with the build guard deleted. Fetch a positive control that
+  must be kept, wait for it, then look for the one that must not be.
+- **A size bound on a Cache Storage cache needs its own ledger.** `Cache.keys()` order is not
+  something to evict by, and reading every entry's headers on every write is a scan per answer.
+  sw.js keeps `[storedAt, bytes]` per address in an entry of the same cache, so it dies with the
+  cache (sign-out, scope change) and survives the worker being stopped when idle (ARK6).

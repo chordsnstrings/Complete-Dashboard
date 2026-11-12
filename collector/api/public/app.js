@@ -10638,5 +10638,9 @@ whoReady.then((go) => {
   /* The chat assistant's button and window (agentchat.js), on <body> so it
      outlives every view. Mounted only once sign-in is settled. */
   mountAssistant();
+  /* The service worker on the desktop build, registered once the page has
+     loaded (swreg.js, HANDOFF §4.5). Loaded on demand, like themecolor.js:
+     it is not first-screen code. */
+  import('./swreg.js').then((m) => m.registerWorker()).catch(() => { /* no worker: the page works as before */ });
 });
 setInterval(() => { if (state.view === 'live') render(); }, 60000);

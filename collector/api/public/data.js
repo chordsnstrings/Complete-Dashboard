@@ -161,9 +161,17 @@ export const alive = (g) => g === renderGen;
    Only for GETs without options: a POST is not safe to repeat, and this must
    never turn one collection trigger into two. */
 const GATEWAY = new Set([502, 503, 504]);
+/* The service worker's own "offline" answer (sw.js: a 503 stamped
+   x-sw-cache: miss when the network failed and it holds no copy). The desktop
+   registers the worker too since 2026-11-12 (swreg.js), and a 503 here is
+   NOT a slow gateway: retrying it waits 1.2 s for the same answer, and
+   failure() below would tell the reader the server "took too long" when the
+   server was never reached — a false reason, which this product does not
+   print. */
+const swOffline = (r) => r.status === 503 && r.headers?.get?.('x-sw-cache') === 'miss';
 async function fetchWithRetry(path, opts) {
   const r = await fetch(path, opts);
-  if (r.ok || opts || !GATEWAY.has(r.status)) return r;
+  if (r.ok || opts || !GATEWAY.has(r.status) || swOffline(r)) return r;
   await new Promise((res) => setTimeout(res, 1200));
   return fetch(path, opts);
 }
@@ -174,6 +182,10 @@ async function fetchWithRetry(path, opts) {
    sentence belonged — the reader learns nothing and cannot tell a slow query
    from a broken one. */
 async function failure(r) {
+  if (swOffline(r)) {
+    return 'This browser is offline, or the server cannot be reached, and it has kept no copy of these '
+      + 'figures to show. They load once the connection is back.';
+  }
   const text = await r.text().catch(() => '');
   if (GATEWAY.has(r.status) || /^\s*<(!doctype|html)/i.test(text)) {
     return `${r.status} — the server took too long to answer. It is usually still `

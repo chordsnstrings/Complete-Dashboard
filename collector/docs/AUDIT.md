@@ -2903,3 +2903,13 @@ workstream's): the phone's `rowMark` on the unexplained-occupancy list marks onl
 mark.
 
 To repeat: `node test/arkiv_plumbing.test.mjs` (90 checks, the mock on a free port).
+
+**The desktop service worker** (FIX-STATUS ARK5–8), rendered with service workers ALLOWED: the
+mock wrapped as `api/server.js` wraps the worker (`/sw.js` with `VERSION` rewritten to a
+fingerprint, every code response stamped `X-FM-Build`), desktop 1280, Arkiv light. Found: the page
+is claimed without a reload on first visit; a second deploy's worker takes over and reloads it
+once (the first draft never reloaded a page first claimed after load — fixed); with the server
+unreachable, a kept answer paints and one line above #view says it is a kept copy, how old in
+Dubai time, not live, and goes when the page is redrawn from live answers; a missing answer says
+the browser is offline instead of "the server took too long". To repeat: `node
+test/sw_desktop.test.mjs` (23 checks).
