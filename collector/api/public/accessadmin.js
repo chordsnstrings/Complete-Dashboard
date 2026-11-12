@@ -48,7 +48,7 @@ const TABS = [
   { id: 'roles', label: 'Roles', sub: 'What each role sees, class by class, and what it can do' },
   { id: 'requests', label: 'Requests', sub: 'Access people asked for from a page that was not open to them' },
   { id: 'approvals', label: 'Approvals', sub: 'Sensitive grants waiting for an Owner' },
-  { id: 'reviews', label: 'Reviews', sub: 'Each quarter, every team’s access kept or removed person by person' },
+  { id: 'reviews', label: 'Reviews', sub: 'Every quarter, and monthly for sensitive access: each role and team place kept or taken out, line by line' },
   { id: 'screens', label: 'Screens', sub: 'Wall displays: signed in with a screen link, no person behind them' },
   { id: 'audit', label: 'Audit', sub: 'Who did what, when — append-only, each entry chained to the one before' },
   { id: 'settings', label: 'Settings', sub: 'Whether sign-in is required, and the company-wide sign-in rules' },
@@ -939,81 +939,89 @@ function approvalsTab(host, ctx) {
 }
 
 /* ═════════════════════════ Reviews ═════════════════════════ */
-function quarterNow() {
-  const d = new Date();
-  return `${d.getUTCFullYear()}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
-}
+/* A review is a CYCLE since 2026-11-12 (ULM-DESIGN §11.3; the server is
+   api/access/reviews.js, the cards api/public/reviews_ui.js): every role
+   given directly and every place in a team that holds a role, each line
+   with whoever decides it — the team's lead, or an Access admin or the
+   Owner — and what became of it. It closes 14 days after it opens; a line
+   nobody decided ends 14 days after that unless someone attests it first. */
 async function reviewsTab(host, ctx) {
-  const period = quarterNow();
-  const top = panel(`This quarter (${period})`, 'Every quarter each team’s lead — or an admin — looks at who is in the team and keeps or removes '
-    + 'each person. Removing someone takes the team’s roles away from them at once.', 'acx-review-open');
-  const msg = msgLine();
-  const openBtn = h('button', { type: 'button', class: 'btn primary', 'data-acx': 'review-open' }, 'Open this quarter’s review for every team');
-  openBtn.addEventListener('click', async () => {
-    const r = await act(openBtn, msg, () => post('/api/access/reviews/open', {}));
-    if (!r) return;
-    ctx.say(r.opened ? `Opened ${r.period} for ${plural(r.opened, 'team', 'teams')}; each is due in 14 days.`
-      : `Every team already has a ${r.period} review${ctx.teams.length ? '' : ' — and there are no teams to review'}.`, r.opened ? 'ok' : 'warn');
-    await ctx.reload();
-  });
-  top.body.append(ctx.teams.length ? h('div', { class: 'acx-actions' }, openBtn, msg)
-    : empty('There are no teams, so there is nothing to review: reviews are per team. Make teams under Teams.'));
-  host.append(top.panel);
-
   let d;
   try { d = await getJson('/api/access/reviews'); } catch (e) { host.append(note(`The reviews could not be read: ${e.message}`, 'err')); return; }
-  const reviews = d.reviews || [];
-  const open = reviews.filter((r) => !r.closed_at);
-  const closed = reviews.filter((r) => r.closed_at);
+  const { reviewCards, KIND_WORD } = await import('./reviews_ui.js');
+  const cycles = d.cycles || [];
+  const items = d.items || [];
+  const open = cycles.filter((c) => !c.closed_at);
+  const closed = cycles.filter((c) => c.closed_at);
+  const sched = d.schedule || {};
+
+  const top = panel(`This month: the ${sched.thisMonth?.period || ''} ${KIND_WORD[sched.thisMonth?.kind] || 'review'}`, sched.why || null, 'acx-review-open');
+  const msg = msgLine();
+  const opener = (kind, label) => {
+    const b = h('button', { type: 'button', class: kind === 'quarterly' ? 'btn primary' : 'btn', 'data-acx': kind === 'quarterly' ? 'review-open' : `review-open-${kind}` }, label);
+    b.addEventListener('click', async () => {
+      const r = await act(b, msg, () => post('/api/access/reviews/open', { kind }));
+      if (!r) return;
+      ctx.say(`Opened the ${r.period} ${KIND_WORD[kind]}: ${plural(r.items, 'line', 'lines')} to attest `
+        + `(${plural(r.grants, 'role given directly', 'roles given directly')}, ${plural(r.memberships, 'team place', 'team places')}), due ${dateStr(r.due_at)}.`);
+      await ctx.reload();
+    });
+    return b;
+  };
+  top.body.append(h('div', { class: 'acx-actions' },
+    opener('quarterly', 'Open this quarter’s review'), opener('monthly', 'Open this month’s sensitive-access review'),
+    opener('adhoc', 'Open an extra review now'), msg));
+  top.body.append(h('p', { class: 'acx-p acx-dim' }, `A review is due ${d.rules?.openDays ?? 14} days after it opens. A line nobody decided by then `
+    + `ends ${d.rules?.unattestedDays ?? 14} days later unless someone attests it first. Nobody attests their own access; an Owner’s is attested by another Owner, `
+    + 'and the only Owner is never ended by a review.'));
+  host.append(top.panel);
 
   const op = panel('Open reviews', null, 'acx-reviews');
-  if (!open.length) op.body.append(empty('No review is open. Open this quarter’s above; each team then appears here with its members.'));
-  for (const r of open) op.body.append(reviewCard(r, ctx));
+  if (!open.length) op.body.append(empty('No review is open. Open one above; each line then appears here with whoever decides it.'));
+  for (const c of open) {
+    const n = c.counts || {};
+    const head = h('p', { class: 'acx-p', html: `<b>${esc(c.period)} ${esc(KIND_WORD[c.kind] || '')}</b> · opened ${esc(dtStr(c.opened_at))} by ${esc(c.opened_by ? ctx.nameOf(c.opened_by) : 'the schedule')}`
+      + ` · ${esc(plural(n.pending || 0, 'line waits', 'lines wait'))}, ${esc(String(n.kept || 0))} kept, ${esc(String(n.revoked || 0))} taken out` });
+    const cmsg = msgLine();
+    const close = h('button', { type: 'button', class: 'btn', 'data-acx': 'review-close' }, 'Close it now');
+    close.addEventListener('click', async () => {
+      const r = await act(close, cmsg, () => post(`/api/access/reviews/${c.id}/close`, {}));
+      if (!r) return;
+      ctx.say(`Closed ${c.period}: ${plural(r.unattested, 'line was', 'lines were')} not attested and end ${dateStr(r.expires_at)} unless attested first`
+        + `${r.keptOwner ? `; the only Owner’s access was kept` : ''}.`, r.unattested ? 'warn' : 'ok');
+      await ctx.reload();
+    });
+    op.body.append(head, h('div', { class: 'acx-actions' }, close, cmsg));
+    const mine = items.filter((i) => i.cycle_id === c.id && i.state === 'pending');
+    for (const el2 of reviewCards(mine, { cycle: c, fleets: ctx.fleets, say: ctx.say, reload: ctx.reload })) op.body.append(el2);
+  }
   host.append(op.panel);
+
+  const ending = items.filter((i) => i.state === 'unattested');
+  if (ending.length) {
+    const ep = panel('Not attested — ending', 'These were in a review that closed with nobody deciding them. Each ends on the date shown unless someone attests it first.', 'acx-reviews-ending');
+    for (const c of closed) {
+      const mine = ending.filter((i) => i.cycle_id === c.id);
+      if (mine.length) for (const el2 of reviewCards(mine, { cycle: c, fleets: ctx.fleets, say: ctx.say, reload: ctx.reload })) ep.body.append(el2);
+    }
+    host.append(ep.panel);
+  }
 
   const cp = panel('Finished reviews', null, 'acx-reviews-done');
   if (!closed.length) cp.body.append(empty('No review has been finished yet.'));
   else {
     cp.body.append(tableFrom(closed, [
-      { label: 'Team', key: 'team_name', render: (r) => esc(r.team_name) },
-      { label: 'Quarter', key: 'period', render: (r) => esc(r.period) },
-      { label: 'Attested', key: 'closed_at', render: (r) => `${esc(dtStr(r.closed_at))}<div class="acx-sub">by ${esc(ctx.nameOf(r.attested_by))}</div>` },
-      { label: 'Taken out', key: 'decisions', render: (r) => {
-        const out = (r.decisions || []).filter((x) => x.keep === false).map((x) => ctx.nameOf(x.userId));
-        return out.length ? esc(out.join(', ')) : '<span class="dim">nobody</span>';
+      { label: 'Review', key: 'period', render: (c) => `<b>${esc(c.period)}</b><div class="acx-sub">${esc(KIND_WORD[c.kind] || '')}</div>` },
+      { label: 'Opened', key: 'opened_at', render: (c) => `${esc(dtStr(c.opened_at))}<div class="acx-sub">by ${esc(c.opened_by ? ctx.nameOf(c.opened_by) : 'the schedule')}</div>` },
+      { label: 'Closed', key: 'closed_at', render: (c) => `${esc(dtStr(c.closed_at))}<div class="acx-sub">by ${esc(c.closed_by ? ctx.nameOf(c.closed_by) : 'the schedule, on its due date')}</div>` },
+      { label: 'What became of each line', key: 'counts', render: (c) => {
+        const n = c.counts || {};
+        return esc([`${n.kept || 0} kept`, `${n.revoked || 0} taken out`, n.unattested ? `${n.unattested} ending` : null,
+          n.expired ? `${n.expired} ended unattested` : null, n.gone ? `${n.gone} already gone` : null].filter(Boolean).join(' · '));
       } },
-    ], { compact: true, cards: true, cardLead: 'team_name' }));
+    ], { compact: true, cards: true, cardLead: 'period' }));
   }
   host.append(cp.panel);
-}
-
-function reviewCard(r, ctx) {
-  const t = ctx.teamById.get(r.team_id);
-  const overdue = new Date(r.due_at).getTime() < Date.now();
-  const card = h('div', { class: 'acx-card', 'data-review': String(r.id) },
-    h('p', { class: 'acx-p', html: `<b>${esc(r.team_name)}</b> · ${esc(r.period)} · due ${esc(dateStr(r.due_at))} ${overdue ? '<span class="pill bad">overdue</span>' : ''}` }));
-  const members = (t?.members || []).map((id) => ctx.byId.get(id)).filter(Boolean);
-  if (!members.length) card.append(empty('Nobody is in this team, so attesting it records only that.'));
-  const choices = members.map((u) => {
-    const name = `acx-rv-${r.id}-${u.id}`;
-    const keep = h('input', { type: 'radio', name, value: 'keep', checked: true, id: uid() });
-    const drop = h('input', { type: 'radio', name, value: 'remove', id: uid() });
-    card.append(h('div', { class: 'acx-rv' }, h('span', { class: 'acx-rv-who' }, u.name || u.email, h('span', { class: 'dim' }, ` · ${u.status}`)),
-      h('label', { class: 'acx-check', for: keep.id }, keep, 'Keep'), h('label', { class: 'acx-check', for: drop.id }, drop, 'Take out')));
-    return { u, keep };
-  });
-  const msg = msgLine();
-  const btn = h('button', { type: 'button', class: 'btn primary', 'data-acx': 'attest' }, 'Attest this team');
-  btn.addEventListener('click', async () => {
-    const decisions = choices.map(({ u, keep }) => ({ userId: u.id, keep: keep.checked }));
-    const res = await act(btn, msg, () => post(`/api/access/reviews/${r.id}/attest`, { decisions }));
-    if (!res) return;
-    const out = decisions.filter((x) => !x.keep).length;
-    ctx.say(`${r.team_name} attested for ${r.period}${out ? `; ${plural(out, 'person', 'people')} taken out` : '; everyone kept'}.`);
-    await ctx.reload();
-  });
-  card.append(h('div', { class: 'acx-actions' }, btn, msg));
-  return card;
 }
 
 /* ═════════════════════════ Screens ═════════════════════════ */
@@ -1087,6 +1095,11 @@ const ACTION_WORDS = {
   'access.role_created': 'made a role', 'access.requested': 'asked for access', 'access.request_approved': 'approved a request',
   'access.request_declined': 'declined a request', 'access.device_created': 'set up a screen', 'access.device_revoked': 'switched off a screen',
   'access.config_changed': 'changed the sign-in settings', 'access.review_opened': 'opened a review', 'access.review_attested': 'attested a team',
+  'access.review_kept': 'kept a line of a review', 'access.review_revoked': 'took out a line of a review',
+  'access.review_gone': 'decided a review line that had already ended', 'access.review_closed': 'closed a review',
+  'access.review_expired': 'ended access nobody attested', 'access.user_dormant': 'suspended an account nobody had signed in to for 60 days',
+  'finding.taken': 'took a finding', 'finding.assigned': 'gave a finding to someone', 'finding.closed': 'closed a finding',
+  'finding.reopened': 'reopened a finding',
   'access.preview_started': 'started previewing a role', 'access.preview_ended': 'ended a preview', 'access.housekeeping': 'daily tidy-up',
   'proposal.declined': 'declined a proposal', 'proposal.withdrawn': 'withdrew a proposal',
 };

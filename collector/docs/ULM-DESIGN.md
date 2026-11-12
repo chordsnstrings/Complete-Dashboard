@@ -1427,3 +1427,9 @@ section REV has one row per change.
   wall screen: the CSV's first line, and a workbook's properties, every sheet's print footer and a
   last "Exported by" sheet. A visitor while sign-in is optional gets the file as before. No emailed
   report carries an attachment (they are HTML and text bodies), so there is none to stamp.
+- **Where it shows.** Set up → Access → Reviews lists each open review card by card (a team, or
+  the roles given directly), the unattested lines with their end dates, and the finished reviews;
+  a team lead who manages no access finds their team's lines on Your account. "Who is on it" is a
+  panel on each finding's own page (#action/<rule>/<subject>); the #action and #insights absence
+  cells now say what is still not recorded — whether the fact itself changed, and who cleared a
+  finding its rule stopped finding.
