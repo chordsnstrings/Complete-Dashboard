@@ -122,6 +122,15 @@ export const SETTING_DEFAULTS = {
   ANALYST_MODEL: 'MiniMax-M3',
   BACKFILL_MONTHS: '12',
   INCREMENTAL_DAYS: '3',
+  /* Data retention (src/data_retention.js). dry_run counts what a pass would
+     remove and removes nothing; only "on" removes. Telemetry is thinned past
+     400 days and never inside the weekly backfill's window whatever this
+     says; alerts are kept for ever unless a number of days (at least 365) is
+     set — FMS keeps them ~100 days, so ours are the only long-term record. */
+  RETENTION_MODE: 'dry_run',
+  RETENTION_TELEMETRY_DAYS: '400',
+  RETENTION_ALERT_DAYS: '0',
+  RETENTION_BATCH: '5000',
   /* The two sites the operator named. Written as they appear in the address
      text, because that is the only handle the trip data gives — there is no
      geofence to match against. */
@@ -376,6 +385,16 @@ export const SETTING_DEFS = [
     hint: 'One request per car per run — Tesla bills per call and a sleeping car must not be woken' },
 
   { key: 'BACKFILL_MONTHS', group: 'Collector', label: 'Backfill months', secret: false },
+  /* Data retention — the nightly pass at 19:53 UTC (src/data_retention.js).
+     Its record is on the Settings page under "Data retention". */
+  { key: 'RETENTION_MODE', group: 'Data retention', label: 'Retention mode', secret: false,
+    hint: 'dry_run (the default) counts what the nightly pass would remove and removes nothing; on removes it; off skips the pass.' },
+  { key: 'RETENTION_TELEMETRY_DAYS', group: 'Data retention', label: 'Thin positions older than (days)', secret: false,
+    hint: 'Past this age a car keeps one fix per 15 minutes plus every change of ignition, seat, status or moving, and each day\u2019s last fix. Never inside the weekly backfill\u2019s window plus a week, whatever this says. 0 = never thin.' },
+  { key: 'RETENTION_ALERT_DAYS', group: 'Data retention', label: 'Remove safety alerts older than (days)', secret: false,
+    hint: '0 (the default) keeps every alert for ever. FMS keeps alerts about 100 days, so ours are the only long-term record; a number below 365 is raised to 365.' },
+  { key: 'RETENTION_BATCH', group: 'Data retention', label: 'Rows removed per statement', secret: false,
+    hint: 'Each removal is its own short transaction of at most this many rows (100 to 50,000).' },
   { key: 'INCREMENTAL_DAYS', group: 'Collector', label: 'Incremental window (days)', secret: false },
   { key: 'CABMAN_CRON', group: 'Collector', label: 'CABMAN schedule (cron)', secret: false },
   { key: 'FARES_CRON', group: 'Collector', label: 'Uber fares schedule (cron, UTC)', secret: false },

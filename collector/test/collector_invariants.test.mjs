@@ -631,6 +631,89 @@ check('and a thrown bolt run still reports what had already failed',
     check('no two scheduled heavy passes share a start time',
       new Set(hours).size === hours.length, hours.join(' '));
   }
+  /* THE CHECK ABOVE SEES LITERAL "M H" SCHEDULES ONLY.
+     ───────────────────────────────────────────────────────────────────────
+     The audit of 2026-11-12 found what that costs: the payout walk (minute 20
+     of every second hour) starts at 22:20 on top of the probe and at 00:20 on Mondays on top
+     of the Uber profile pull, and the Saturday roster sweep (a config default,
+     '40 23 * * 6') lands on the 23:40 payout audit — none of it visible to a
+     regex that wants two plain numbers. So the data-retention pass
+     (src/data_retention.js, '53 19 * * *') is checked against EVERY schedule
+     in src/index.js expanded to concrete (weekday, hour, minute) starts in
+     UTC: steps, lists, ranges, the Asia/Dubai ones shifted four hours, and the
+     config- and settings-driven ones at their defaults. The pre-existing
+     collisions are printed, not failed: they are not this pass's to move.
+     REVERSION: change the retention cron to '17 18 * * *' (the timeline and
+     charging ticks) and the second check below fails. */
+  {
+    const { SETTING_DEFAULTS: SD } = await import('../src/settings.js');
+    const field = (f, lo, hi) => {
+      const out = new Set();
+      for (const part of f.split(',')) {
+        const [range, stepS] = part.split('/');
+        const step = stepS ? Number(stepS) : 1;
+        const [a, b] = range === '*' ? [lo, hi] : range.includes('-') ? range.split('-').map(Number) : [Number(range), stepS ? hi : Number(range)];
+        for (let v = a; v <= b; v += step) out.add(v);
+      }
+      return [...out];
+    };
+    const slots = (expr, dubai) => {
+      const [mi, ho, , , dw] = expr.trim().split(/\s+/);
+      const out = new Set();
+      for (const d of field(dw, 0, 6)) {
+        for (const h of field(ho, 0, 23)) {
+          for (const m of field(mi, 0, 59)) {
+            let hh = h, dd = d;
+            if (dubai) { hh = h - 4; if (hh < 0) { hh += 24; dd = (d + 6) % 7; } }
+            out.add(`${dd}@${String(hh).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+          }
+        }
+      }
+      return out;
+    };
+    const CONFIG_CRON = { cabmanCron: 'CABMAN_CRON', faresCron: 'FARES_CRON',
+      uberTimelineCron: 'UBER_TIMELINE_CRON', uberRosterCron: 'UBER_ROSTER_CRON' };
+    /* The first argument whole: a quoted string may itself hold commas
+       ('12,42 * * * *'), and get('KEY', 'default') holds one inside its
+       parentheses. */
+    const calls = [...idx.matchAll(/cron\.schedule\(\s*('[^']*'|get\([^)]*\)|[\w.]+)\s*,/g)];
+    const jobs = calls.map((m, i) => {
+      const arg = m[1].trim();
+      const body = idx.slice(m.index, calls[i + 1]?.index ?? idx.length);
+      let expr = null;
+      const lit = arg.match(/^'([^']+)'$/);
+      const cfg = arg.match(/^config\.(\w+)$/);
+      const dflt = arg.match(/^get\('\w+',\s*'([^']+)'\)$/);
+      if (lit) expr = lit[1];
+      else if (cfg && CONFIG_CRON[cfg[1]]) expr = SD[CONFIG_CRON[cfg[1]]];
+      else if (dflt) expr = dflt[1];
+      const line = idx.slice(0, m.index).split('\n').length;
+      return { line, arg, expr, dubai: /timezone:\s*'Asia\/Dubai'/.test(body.slice(0, 600)),
+        retention: /dataRetentionPass/.test(body.slice(0, 200)) };
+    });
+    const unread = jobs.filter((j) => !j.expr);
+    check('every cron in src/index.js can be expanded (literal, config default or get default)',
+      unread.length === 0, unread.map((j) => `line ${j.line}: ${j.arg}`).join('; '));
+    const ret = jobs.filter((j) => j.retention);
+    check('the data-retention pass is scheduled once, at a literal UTC minute',
+      ret.length === 1 && ret[0].expr === '53 19 * * *' && !ret[0].dubai, JSON.stringify(ret));
+    const mine = ret.length ? slots(ret[0].expr, false) : new Set();
+    const hits = jobs.filter((j) => !j.retention && j.expr)
+      .filter((j) => [...slots(j.expr, j.dubai)].some((s) => mine.has(s)));
+    check('and no other schedule — steps, lists, ranges, Dubai-clock, config defaults — starts on that minute',
+      hits.length === 0, hits.map((j) => `line ${j.line} ${j.expr}`).join('; '));
+    /* The collisions that already existed, for whoever moves them — among
+       the passes that run at most hourly. The five-minute poll and flush
+       start on every multiple of five and would make the list unreadable. */
+    const seen = new Map();
+    for (const j of jobs.filter((x) => x.expr)) {
+      const ss = slots(j.expr, j.dubai);
+      if (ss.size > 7 * 24) continue;
+      for (const s of ss) seen.set(s, [...(seen.get(s) || []), j.line]);
+    }
+    const clash = new Set([...seen.values()].filter((v) => v.length > 1).map((v) => v.join('+')));
+    console.log(`    (pre-existing start-time collisions, by src/index.js line: ${[...clash].slice(0, 12).join(', ') || 'none'})`);
+  }
   /* And the reason re-collecting is safe to do on a timer at all: every write
      is an upsert keyed on the provider's own id, so a day already correct is
      rewritten to the same values rather than duplicated. */
