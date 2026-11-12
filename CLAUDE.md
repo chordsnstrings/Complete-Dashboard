@@ -1,9 +1,9 @@
 # Fleet dashboard — read this before you touch anything
 
-A live analytics dashboard over the Ecosine and Egari fleets. Six upstream
+A live analytics dashboard over the Ecosine and Egari fleets. Seven upstream
 providers (Uber, a hotel corporate channel, Yango, Bolt, FMS/InfoTrack
-telematics, CABMAN), one Postgres, one collector worker, one read API, one
-static front end. Everything of consequence lives under `collector/`.
+telematics, CABMAN, PowerDrive charging), one Postgres, one collector worker,
+one read API, one static front end. Everything of consequence lives under `collector/`.
 
 This file exists because the same questions were being re-measured every
 session and the same traps were being re-discovered. **Read the standing notes
@@ -34,7 +34,7 @@ collector/
   api/           server.js (read API) + public/ (the front end, plain ESM)
   api/public/    one file per view; ui.js = shared components; charts.js = SVG
   sql/           schema_vNN.sql, replayed in order on every boot
-  test/          394 .test.mjs files, run with `npm test`
+  test/          427 .test.mjs files, run with `npm test` (CI: .github/workflows/ci.yml)
   bin/           audit + local-serving tools
   docs/          the standing notes above
 ```
@@ -95,7 +95,7 @@ modal filled. The production API caches — always append `&_=$RANDOM`.
 
 ```bash
 cd collector
-npm test                        # all 394 suites; ONE run at a time (see traps)
+npm test                        # all 427 suites; ONE run at a time (see traps)
 node bin/live-ui.mjs            # :8100 — working-tree UI against production data
 node bin/prod-mirror.mjs        # :8200 — production bytes, exactly as deployed
 npm run audit:pages             # every endpoint behind every view, five windows
@@ -113,12 +113,15 @@ repo. Both services are `basic-xxs` with ephemeral disk — nothing may be
 written to local disk and expected to survive.
 
 Production builds from `claude/ecosine-egari-tracking-apis-rf9ong`; nothing
-deploys on push. Send `{"force_build":true}` and poll the deployment id that
-POST returned — an app-spec update redeploys the last *built* commit
-(COVERAGE trap 25). The deploy script and token file used to live in a
-session scratchpad and were lost with that container on 2026-10-19: a
-scratchpad is not storage. `/api/health` carries no sha; HANDOFF.md §9 shows
-how to tell which commit is live from `sw.js`.
+deploys on push. `node bin/deploy.mjs` sends `{"force_build":true}` and polls
+the deployment it started to ACTIVE (the token from `DIGITALOCEAN_TOKEN` or
+`--token-file`, a file OUTSIDE the repository) — an app-spec update redeploys
+the last *built* commit (COVERAGE trap 25). The spec is recorded, redacted,
+in `deploy/app-spec.redacted.yaml`; `node bin/app-spec.mjs --check` says
+whether production still matches it. `/api/health` names the live `commit`
+and `frontend` (since 2026-11-12). The image is `node:22-slim` and installs
+with `npm ci` from the lockfile. A scratchpad is not storage: the old deploy
+script was lost with one on 2026-10-19.
 
 ## Working style here
 

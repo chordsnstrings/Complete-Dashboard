@@ -981,6 +981,15 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **`innerText` reports CSS `text-transform`, so a case-sensitive match on it fails on visible
+  text** (2026-11-12, twice in one day; FIX-STATUS INT5). Arkiv sets panel headings and the phone
+  card's date-and-channel line in mono capitals; `innerText` returns "DATA RETENTION" and
+  "NOV 12 · HOTEL". `trips_list` failed on cards that carried their channel, and a production
+  probe of `#settings` read a visible Data retention panel as missing — briefly reported as a
+  regression that did not exist. Match visible text without case (`/data retention/i`), or read
+  `textContent` when the question is "is it in the page" rather than "can it be seen". And a probe
+  that answers in 400 ms after `domcontentloaded` has read the page before its data: wait for the
+  element the claim is about.
 * **A route that checks the CALLER in its handler must not be cached by address** (2026-11-12,
   review of ONE, FIX-STATUS ONE-R1). `api/cache.js` serves a hit before any handler runs, and in
   open mode the gate lets an anonymous visitor through to it. `/api/sms/log` refused visitors in
@@ -11575,3 +11584,30 @@ the file, so the batch that found them merges without moving that list.
   and the phone has no listener. So a pull-to-refresh shows what the phone already had, and the
   fresh figures appear on the NEXT render. Do not cure it with a bare `data:refreshed` listener on
   the phone: on the mock that event fires every 300–500 ms after a navigation (the trap above).
+
+## What the deploy of 2026-11-12 measured (production, `6ccbea25`, deployment `aaed1564`)
+
+* **Uber's live per-trip feed (`POST /v1/vehicle-suppliers/transactions`) answers on the existing
+  OAuth clients.** First run 09:07Z: Ecosine 24 of 24 fifteen-minute windows, 165 transactions over
+  159 trips; Egari 24 of 24, 97 over 91. The newest transaction was 8 minutes old — the feed is
+  minutes behind, where the trip-walk fares are hours behind.
+* **Bolt's fleet-integration `getFleetOrders` matches the portal's rides one for one** — the
+  premise BFO's enrichment rests on. First pass: Egari 28 orders, 28 matched a portal row
+  ("28/28"), none inserted, none ambiguous. Ecosine 0: company 142868 is still not on the
+  fleet-integration app (the open request), so its trips still depend on the portal token that
+  expires 2026-11-14 15:06Z.
+* **The rate-limit key header is set by App Platform.** `/api/health` reports
+  `key_source_this_request: do-connecting-ip` for a request from outside; the request budget keys
+  on the reader's address, not on the proxy's.
+* **`${_self.COMMIT_HASH}` binds on a service** (the api's `/api/health` names the deployed
+  sha). On the worker the variable was accepted and nothing reads it, so its value there is not
+  observed.
+* **The app's database user can create roles.** v124's boot pass created `fleet_request` itself:
+  "row-level security in use: 54 fleet tables carry the policy and all 12 views run as the
+  reader", 137 objects, 0 failed. No administrator step was needed.
+* **`ALTER TABLE trip ADD COLUMN` waited 37.5 s for its lock** (v117, at boot, while the API's
+  warmer was reading `trip`). Catalogue-only, but a migration on `trip` holds the boot that long.
+* **The two history roll-ups build in seconds at boot** — `cash_fare_day` 39,930 rows in 6.8 s,
+  `driver_first_online` 9,001 rows in 7.8 s, covering 2024-10-01 onward — and a page opened in
+  the minutes before that showed "the roll-up has not been built yet", the true reason.
+
