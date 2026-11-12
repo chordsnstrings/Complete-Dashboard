@@ -22,6 +22,7 @@ import { cashEmailRun } from './cash_sms_email.js';
 import { lowTripsRun } from './low_trips_email.js';
 import { monthlyReportRun } from './monthly_report.js';
 import { getConfig as accessConfig } from '../api/access/service.js';
+import { dataRetentionPass } from './data_retention.js';
 
 /* The driver messages by SMS (src/driver_sms.js). Each run is safe to
    repeat — every decision is a row keyed on what it is about — so a restart
@@ -47,6 +48,17 @@ async function main() {
   if (cmd === 'incremental') return incremental();
   if (cmd === 'analyst') return analystPass();
   if (cmd === 'probe') return probePass();
+  /* `retention [dry-run]`: one data-retention pass now, in RETENTION_MODE —
+     or counting only, whatever the setting, with `dry-run`. Prints the
+     per-table record it wrote to retention_run_table. */
+  if (cmd === 'retention') {
+    const dry = process.argv[3] === 'dry-run';
+    const r = await withPinnedSettings(() => dataRetentionPass(dry
+      ? { read: (k, d) => (k === 'RETENTION_MODE' ? 'dry_run' : get(k, d)) } : {}));
+    log.info('retention', 'by hand', { run: r.run_id, mode: r.mode, status: r.status,
+      tables: r.tables.map((t) => `${t.tbl}:${t.policy} considered=${t.considered} would=${t.would_delete} deleted=${t.deleted}`) });
+    return;
+  }
   /* `timeline` and `timeline-roster`. This note used to say the scheduled tick
      "asks about drivers who drove, which cannot find a driver who was online
      all evening and never got a job", and that the full sweep was therefore a
@@ -396,6 +408,20 @@ async function main() {
       .catch((e) => log.error('scheduler', 'discovery', { err: String(e) }));
     setTimeout(discover, 10 * 60_000);
     cron.schedule('35 2 * * *', discover);
+    /* DATA RETENTION, nightly at 19:53 UTC (23:53 Dubai) — src/data_retention.js.
+       ─────────────────────────────────────────────────────────────────────
+       Chosen because nothing else starts then and nothing heavy is running:
+       not a multiple of five (CABMAN's poll and the SMS flush run on every
+       one), clear of the :12/:42 trip texts, the :15/:45 rollups and the :17
+       timeline, charging and wallet ticks; the next heavy pass is the 20:20
+       payout walk and the 21:00 catch-up, the Sunday backfill is 22:00, and
+       Dubai is asleep. test/collector_invariants.test.mjs expands EVERY cron
+       here — steps, lists, ranges, the Dubai-clock ones, the config defaults —
+       and fails if any of them lands on this minute. RETENTION_MODE is dry_run
+       unless the operator sets it to on: by default this counts and removes
+       nothing. */
+    cron.schedule('53 19 * * *', () => withPinnedSettings(() => dataRetentionPass())
+      .catch((e) => log.error('scheduler', 'retention', { err: String(e) })));
     /* Honour on-demand runs queued from the Settings page.
        One job at a time, claimed atomically. The previous version read a
        single source_state key, so two requests arriving close together meant

@@ -61,6 +61,8 @@
    and one fleet's outage is not the other's; the fleet it was measured for
    travels back on the response. */
 
+import { retentionHorizon } from './data_retention_notes.js';
+
 /* The assumption, in the words the pages print. Exported so a page quotes the
    rule rather than paraphrasing it. */
 export const ALERT_COVERED_DAY_RULE =
@@ -81,8 +83,22 @@ const spanDays = (from, to) => Math.max(0,
  *
  * @param days  ['YYYY-MM-DD', ...] — days inside [from, to] with >= 1 alert row
  */
-export function alertCoverageOf(days, from, to, { fleet = null } = {}) {
+/* `removedFrom` / `removedBefore` (Dubai days, or null): the days the
+   data-retention pass really removed alerts from, [removedFrom,
+   removedBefore), when RETENTION_ALERT_DAYS is set (src/data_retention.js;
+   api/data_retention_notes.js reads them). Days in that range are still not
+   covered (nothing is there to count) but the reason is not the feed: saying
+   "the alert feed produced nothing" of rows this product collected and then
+   deleted would be a false reason. So the basis says what happened, and each
+   gap inside the range is marked `removed`. A window that ends before
+   removedFrom lost nothing to retention and keeps the feed's own wording:
+   blaming retention for days before the first alert was ever collected
+   would be a false reason too (review of 2026-11-12). */
+export function alertCoverageOf(days, from, to, { fleet = null, removedBefore = null, removedFrom = null } = {}) {
   const windowDays = spanDays(from, to);
+  const rb = removedBefore ? String(removedBefore).slice(0, 10) : null;
+  const rf = removedFrom ? String(removedFrom).slice(0, 10) : null;
+  const removed = rb && rb > from && (!rf || rf <= to) ? rb : null;
   const covered = [...new Set((days || []).map((d) => String(d).slice(0, 10)))]
     .filter((d) => d >= from && d <= to).sort();
   const measured = covered.length > 0;
@@ -103,6 +119,9 @@ export function alertCoverageOf(days, from, to, { fleet = null } = {}) {
     else run = { from: d, to: d, days: 1 };
   }
   if (run) gaps.push(run);
+  if (removed) for (const g of gaps) if (g.from < removed && (!rf || g.to >= rf)) g.removed = true;
+  const removedNote = removed ? `; alerts before ${removed} were removed by retention (RETENTION_ALERT_DAYS), `
+    + 'so those days count as not covered for that reason, not because the feed was dark' : '';
 
   return {
     from, to, fleet,
@@ -121,11 +140,14 @@ export function alertCoverageOf(days, from, to, { fleet = null } = {}) {
        not have a rate of zero, and it does not have a silent null. */
     measured,
     rule: ALERT_COVERED_DAY_RULE,
+    removed_before: removed,
     basis: !measured
-      ? `not measured — the alert feed produced nothing in these ${windowDays} days`
+      ? (removed && to < removed && (!rf || from >= rf)
+        ? `not measured — alerts before ${removed} were removed by retention (RETENTION_ALERT_DAYS)`
+        : `not measured — the alert feed produced nothing in these ${windowDays} days${removedNote}`)
       : covered.length === windowDays
         ? `measured over all ${windowDays} day${windowDays === 1 ? '' : 's'} in this window`
-        : `measured over ${covered.length} of the ${windowDays} days in this window`,
+        : `measured over ${covered.length} of the ${windowDays} days in this window${removedNote}`,
   };
 }
 
@@ -149,7 +171,12 @@ export async function alertCoverage(q, from, to, { fleet = null } = {}) {
         AND ($3::text IS NULL OR fleet_id = $3)
       GROUP BY 1 ORDER BY 1`,
     [from, to, fleet]);
-  return alertCoverageOf(rows.map((r) => r.day), from, to, { fleet });
+  /* Read through the same cached horizon the page notes use, so the basis and
+     the banner can never disagree about where retention stopped. */
+  const horizon = await retentionHorizon(q);
+  const gone = horizon.alert?.action === 'removed' ? horizon.alert : null;
+  return alertCoverageOf(rows.map((r) => r.day), from, to,
+    { fleet, removedBefore: gone?.before ?? null, removedFrom: gone?.from ?? null });
 }
 
 /* The predicate every denominator narrows itself with. An empty day set binds

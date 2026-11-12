@@ -30,6 +30,7 @@ import { startMotion, motionView, motionEntered } from './motion.js';
    only draw what it decided — which pages open, and the true reason where
    something is not shown. */
 import { mountAssistant } from './agentchat.js';
+import { resetRetention, retentionBanner, retentionPanel } from './retention_note.js';
 import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
   WithheldError, toSignIn, signOut, roleNames, post as accessPost, installFetchGuard, inChosenLook,
   unlessWithheld, closingClass, VIEW_CAP, VIEW_CAP_WHY, fleetLabel, fleetList, fleetNames, allFleetsLabel } from './access.js';
@@ -9209,6 +9210,9 @@ V.settings = async (root) => {
      A queue nobody can see is a queue nobody can trust. */
   const jp = panel('Requested runs', 'Every on-demand run, and what became of it.');
   root.append(jp.panel);
+  /* The nightly data-retention pass: what it considered, would remove and
+     removed, and why each table is kept (api/data_retention_routes.js). */
+  root.append(retentionPanel({ panel, tableFrom, loading, empty, pill, dtStr, api }));
   const jobs = async () => {
     loading(jp.body);
     try {
@@ -9595,6 +9599,7 @@ async function render() {
      (ui.js pageFoot); the principle line is the shell's and stays. */
   clearPageFoot();
   resetWithheld();
+  resetRetention();
   accountBox();
   /* A new page starts at its top. Under the old shell that is #view: the
      title sits in the sticky topbar above it. Under the new one the title
@@ -9626,6 +9631,9 @@ async function render() {
     /* What this page's answers left out for this role, said once at the top. */
     const wb = withheldBanner();
     if (wb) root.prepend(wb);
+    /* And what retention has thinned out of the range it read. */
+    const rb = retentionBanner();
+    if (rb) root.prepend(rb);
     markShutLinks(root);
     await stampSource(root, gen);
     /* Before the animation, because it only adds a class. A table long enough

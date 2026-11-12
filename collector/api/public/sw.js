@@ -90,6 +90,9 @@ const SHELL_FILES = [
      ./access_model.js — both on the phone's path to its first screen — and
      every page links /access.css. */
   '/access.js', '/access_model.js', '/access.css',
+  /* data.js imports ./retention_note.js too (2026-11-12): the line a page
+     prints when its window reaches data the retention pass has thinned. */
+  '/retention_note.js',
   /* The phone redesign's control bar names the window and the controls a
      screen ignores in the desktop shell's own words, so m/app.js imports
      ../shell.js — a module the phone never reached before. */

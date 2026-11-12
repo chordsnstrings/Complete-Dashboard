@@ -104,6 +104,11 @@ import { performerRoutes } from './performer_routes.js';
 import { compareRoutes } from './compare_routes.js';
 import { performanceRoutes } from './performance_routes.js';
 import { statusRoutes } from './status_routes.js';
+/* Data retention: the record of the nightly pass (Settings) and the
+   "thinned by retention before <date>" header on every page that reads past
+   it (src/data_retention.js). Both used outside test/mount.mjs's slice. */
+import { dataRetentionRoutes } from './data_retention_routes.js';
+import { retentionNotes } from './data_retention_notes.js';
 import { onlineHoursRoutes } from './online_hours_routes.js';
 /* Where a car was at a moment or over a stretch, in the gazetteer's words —
    the assistant's "historical location based on time" (2026-10-13). */
@@ -301,6 +306,11 @@ app.use(requestBudget);
 const access = accessLayer({ db: pool, log });
 app.use(access.identify);
 app.use(access.gate);
+/* Before the cache, so a hit carries it too: x-fm-retention on the routes
+   that read a range the data-retention pass has thinned or removed
+   (api/data_retention_notes.js READERS). Sets nothing until a pass has run
+   with RETENTION_MODE=on. */
+app.use(retentionNotes({ read: (sql, params) => pool.query(sql, params).then((r) => r.rows) }));
 
 const cache = responseCache({
   pool,
@@ -7101,6 +7111,10 @@ performanceRoutes(app, { q, wrap });
    prefix is on api/cache.js's NEVER list, and a cached live status is a wrong
    live status. */
 statusRoutes(app, { q, wrap });
+
+/* What the nightly data-retention pass considered, would remove and removed —
+   api/data_retention_routes.js, shown on #settings beside the requested runs. */
+dataRetentionRoutes(app, { q, wrap });
 
 /* Uber online by hour, one day or a range — api/online_hours_routes.js, the
    hours kept in driver_online_hour (sql/schema_v106.sql). */

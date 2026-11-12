@@ -361,4 +361,10 @@ export const SCHEMA_FILES = [
   /* v114: charging_link's 'held' tier (a fold's contradictory decisions,
      never recomputed) and one confirmation per customer (a unique index). */
   'schema_v114.sql',
+  /* v115: data retention — the record of each nightly pass (retention_run,
+     retention_run_table), the boundary pages read to say "thinned by
+     retention before <date>" (retention_state), and the duplicate
+     (plate, captured_at DESC) index on telemetry_snapshot dropped, keeping
+     the twin the planner already uses (src/data_retention.js). */
+  'schema_v115.sql',
 ];

@@ -10880,3 +10880,82 @@ What the OPS workstream learned that is not written down above. FIX-STATUS "OPS"
   on production. None is used in src/, api/ or bin/
   today (grep, 2026-11-12). Either move the Dockerfile to Node 22 or give CI a
   Node 20 leg before relying on CI for this.
+## Data retention and restore — built 2026-11-12 (FIX-STATUS RET)
+
+**What the big tables held**, read off production `/api/coverage` at 03:36Z on 2026-11-12 (one
+request, 16.5 s):
+
+| table | rows | span | median per day |
+|---|---|---|---|
+| telemetry_snapshot, cabman | 281,758 | collected from 2026-08-21 (captured_at back to 2024-04-16: dormant units' last fixes) | 3,450 |
+| telemetry_snapshot, fms | 1,010,548 | collected from 2026-08-21 | 12,327 |
+| telemetry_snapshot, uber (status rows) | 156,574 | from 2026-08-16 | 1,992 |
+| alert | 905,818 | 2026-05-22 → now, 174 days with data | 5,136 |
+| driver_timeline_event (`timeline:uber`) | 633,225 | from 2026-08-16 | — |
+| trip | 704,884 (bolt 50,416 · fms 279,929 · hotel 4,644 · uber 367,600 · yango 2,295) | — | — |
+
+The "447,543 alert rows" earlier in this file (Two feeds nobody reads) was the whole table on
+2026-09-07, not one day's rows: the table doubled in about two months, consistent with ~5k a day.
+
+**What retention does** (src/data_retention.js; docs/BACKUP-RESTORE.md for restores): telemetry
+tracker fixes are thinned — never emptied — past max(400 days, the weekly backfill's window + 7 days);
+alerts are kept unless `RETENTION_ALERT_DAYS` opts in (floor 365); timelines, trips and the run log
+are kept. `RETENTION_MODE` is dry_run until the operator says on. With the defaults nothing collected
+is thinned before the pass of 2027-09-26 (2027-08-29 at the earliest if `RETENTION_TELEMETRY_DAYS` is
+lowered to the backfill floor); computed with `telemetryCutoff`, not estimated.
+
+### Traps this added to the list
+
+- **Anything that deletes telemetry inside BACKFILL_MONTHS rewrites the unauthorized-journey
+  record.** `reconcile()` runs at the end of EVERY collection window — the 3-day incremental, the
+  30-day catch-up and the Sunday backfill over 12 months — and `writeWindow` DELETES the window's
+  occupancy segments and re-derives them from the fixes it reads (src/reconcile.js). Thin a fix the
+  backfill still reads and next Sunday's segments come from coarser data, verdicts included. The
+  retention floor exists for this; raising `BACKFILL_MONTHS` after a thinning pass walks reconcile back
+  into thinned days, and the pass warns about it every night until it stops being true.
+- **The full rollup re-derives online hours from every timeline event, and deletes what it did not
+  recompute.** `refreshOnlineHours` / `refreshDriverDays` with `since = null` (22:40 UTC daily and at
+  every boot) read the whole of driver_timeline_event; `DELETE FROM driver_online_hour WHERE
+  computed_at < t0` has no day bound on that pass. Uber serves 31 days of timeline, so deleting old
+  events would erase the derived history the next night. Do not prune this table without first
+  bounding those two passes.
+- **Two identical indexes: the planner picked the NEWER one on a tie** (PGlite, EXPLAIN with seq and
+  bitmap scans off). The first draft of v115 assumed the older. And `pg_stat_user_indexes.idx_scan`
+  is history, not preference: telem_plate_time_idx served every scan alone until v7 created its
+  twin, so only a ZERO beside a non-zero count proves which one the planner does not use.
+- **A new route that reads telemetry fixes or alerts over a window the reader picks must be added to
+  `READERS` in api/data_retention_notes.js**, or once retention has run "on" it shows a thinned range
+  as complete. The test checks every listed path exists; it cannot find the route you forgot.
+- **The schedule-collision check used to see literal "M H" crons only**; steps and lists hid real
+  collisions (payout walk `20 */2` on the 22:20 probe and the Monday 00:20 profile pull; the Saturday
+  roster sweep on the 23:40 payout audit). test/collector_invariants.test.mjs now expands every cron
+  and prints them; it fails only on the retention minute, since the others are not this change's to
+  move.
+- **A cron expression inside a JS block comment closes it**: `20 */2 * * *` contains `*/`. The whole
+  test file then fails to parse with "Unexpected token '*'". Write "minute 20 of every second hour".
+- **`VACUUM` cannot run inside a PGlite multi-statement `exec`** — the string is one implicit
+  transaction. Give it an `exec` of its own.
+- **A restore changes DATABASE_URL; SETTINGS_KEY must not change.** src/settings.js:11-13 derives
+  the AES-GCM key from SETTINGS_KEY, falling back to DATABASE_URL. Production sets SETTINGS_KEY on
+  both components, which is the only reason a restore would not silently turn every stored
+  credential into "not configured". `bin/restore-drill.mjs` proves the key against the stored
+  secrets without printing one.
+- **The Arkiv focus pass folds any block over 15 words** (api/public/focus.js LEAD_WORDS), including
+  a panel's most important sentence. The retention panel's "dry run — removes nothing" was folded
+  into "2 notes" on its first render; facts that must be read go one short line each.
+- **A retention boundary that says only where the policy stopped lies about the range before it**
+  (review of 2026-11-12). The first draft wrote the alert boundary on any "on" pass with nothing
+  left before the cutoff — removed or not — and pages compared only the window's START with it, so a
+  window before the first row ever collected was told its rows were removed. Keep the cursor
+  (`done_before`, where the next pass resumes) apart from the claim (`[removed_from,
+  removed_before)`, written only for rows really removed) and test a window's BOTH ends against the
+  claim.
+- **A header-borne note does not survive the browser's stale-while-revalidate copy.** data.js
+  `api()` paints from `swr` before the live answer arrives, and redraws only when the BODY changed,
+  so a note sent as a response header (x-fm-retention; x-fm-withheld has the same shape) is missing
+  on every repeat visit unless it is stored with the copy. And a slow answer that lands after the
+  reader moved on notes onto the next page unless the note is tied to the render that asked
+  (`retentionGen`).
+- **Node's connection errors print the host bare.** `getaddrinfo ENOTFOUND <host>` and `connect
+  ECONNREFUSED <ip>:<port>` carry no `postgres://` and no `host "…"`, so a scrub keyed on those
+  patterns leaks the address. Redact the URL's own parts (bin/restore-drill.mjs `urlParts`).

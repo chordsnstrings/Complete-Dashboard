@@ -6,6 +6,7 @@
 import { dubaiDay } from './tz.js';
 import { swr } from './swr.js';
 import { WithheldError, noteWithheld, toSignIn } from './access.js';
+import { noteRetention, retentionGen } from './retention_note.js';
 
 /* Storage access is guarded, not assumed. A browser with site data blocked
    THROWS on the getter rather than returning null, and this module is also
@@ -204,6 +205,10 @@ const busy = (d) => {
 export const api = async (path, opts) => {
   const method = (opts?.method || 'GET').toUpperCase();
   const held = method === 'GET' && !opts ? swr.get(path) : null;
+  /* The render this request belongs to (retention_note.js): a retention note
+     that arrives after the reader has moved to another page is dropped
+     there, not printed on a page that never read that range. */
+  const rgen = retentionGen();
 
   const counted = !opts?.quiet;
   if (counted) busy(1);
@@ -214,6 +219,10 @@ export const api = async (path, opts) => {
     /* `quiet`: chrome that is not the page (the desktop's today strip) keeps
        its refusals out of the page's "not shown to your role" line. */
     if (!opts?.quiet) noteWithheld(r.headers.get('x-fm-withheld'));
+    /* And what the data-retention pass has thinned out of the range this
+       answer read — said once at the top too (retention_note.js). */
+    const retention = r.headers.get('x-fm-retention');
+    if (!opts?.quiet) noteRetention(retention, rgen);
     if (!r.ok) {
       /* Signed out, or not shown to this role: both are answers with a true
          reason, not failures, and each is told as what it is. */
@@ -232,7 +241,9 @@ export const api = async (path, opts) => {
        HR, passengers…) is never written to this browser's storage. */
     const storable = !/no-store/i.test(r.headers.get('cache-control') || '');
     if (method === 'GET' && !opts && storable) {
-      const { changed } = swr.put(path, body);
+      /* The retention note is kept WITH the answer it came on: a page
+         painted from this copy must say what this copy's answer said. */
+      const { changed } = swr.put(path, body, retention);
       /* Only when it moved. Redrawing a page that is already correct costs the
          reader their scroll position and their place in a table, which is
          worse than the wait being saved. */
@@ -251,6 +262,13 @@ export const api = async (path, opts) => {
        just because nobody is awaiting it. A failed refresh leaves the reader
        with the figures they already had, which is the right outcome. */
     live.catch(() => {});
+    /* Painted from this browser's copy, before (often long before: /api/
+       coverage takes 16-33 s) the live answer and its header arrive. The
+       first draft noted only live headers, so the second visit to a thinned
+       range rendered without its note and never redrew (the body had not
+       changed) — a smaller number shown as complete. The copy carries the
+       note its answer had. */
+    if (!opts?.quiet) noteRetention(held.ret, rgen);
     return held.body;
   }
   return live;
