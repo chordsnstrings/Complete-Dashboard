@@ -22,7 +22,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   avatar, moneyInTile, cashOnHandTile, bankDepositTile, faresTile,
   alertRateFigure, splitAlerts, standingNote,
   UBER_FARE_WHY, dialable, segSourceLabel,
-  contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, swatch, delta, sourceToken } from './ui.js';
+  contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, swatch, delta, sourceToken, chanChip } from './ui.js';
 import { CHANNEL_ORDER } from './tokens.js';
 /* personAddr/personIdOf/rewriteParam: the person id as an address, and the
    in-place rewrite that leaves the reader holding the canonical one. See the
@@ -903,20 +903,23 @@ function identityCard(p) {
      lines. The whole id is on the pill's title, and the pill is a label rather
      than a thing to copy — the address bar carries the id worth copying. */
   const shortId = (x) => (String(x || '').length > 14 ? `${String(x).slice(0, 8)}…` : String(x || ''));
-  const accountPills = pAccounts.map((a) => pill(
-    `${sourceLabel(a.platform)} ${shortId(a.ext_id)}`,
-    a.asked ? 'plat' : null,
-    `${sourceLabel(a.platform)} account ${a.ext_id}`
+  /* chanChip, not pill: each account names its channel, so under the page
+     contract it carries that channel's swatch (ui.js chanChip). The old skin
+     keeps the pill it drew — 'plat' only on the account the address named. */
+  const accountPills = pAccounts.map((a) => chanChip(a.platform, {
+    label: `${sourceLabel(a.platform)} ${shortId(a.ext_id)}`,
+    tone: a.asked ? 'plat' : null,
+    title: `${sourceLabel(a.platform)} account ${a.ext_id}`
     + (a.display_name ? ` — filed as ${a.display_name}` : '')
     + (a.basis ? ` · joined to this person by ${a.basis}` : '')
-    + (a.asked ? ' · this is the account the address named' : ''))).join('');
+    + (a.asked ? ' · this is the account the address named' : '') })).join('');
 
   wrap.innerHTML = `
     ${avatar(p.name, c.picture_url, '', c.photo_absent_reason)}
     <div class="idmeta">
       <h2>${esc(p.name || 'Unnamed driver')}</h2>
       <div class="idsub">
-        ${(p.platforms || []).map((x) => pill(sourceLabel(x), 'plat')).join('')}
+        ${(p.platforms || []).map((x) => chanChip(x)).join('')}
         ${p.span?.fleet_id ? pill(p.span.fleet_id, 'plat') : ''}
         ${c.state ? pill(c.state, c.state === 'active' ? 'ok' : 'warn') : ''}
         ${placeholder
@@ -3272,6 +3275,10 @@ async function tabTrips(root, id) {
        reader can argue with it, and href('trip', null, null) leads nowhere. */
     host.append(tableFrom(list.slice(0, DRAW), cols,
       { sortable: true, sortId: 'dtrips', defaultSort: { key: 'requested_at', dir: 'desc' },
+        /* Plan §4 #driver/trips: SPEC §4's channel row marker. A journey no
+           platform booked has no channel, so it is left unmarked — which is
+           also how it reads apart from the bookings around it. */
+        rowMark: (r) => (r.kind === 'unexplained' ? null : r.platform),
         onRow: (r) => {
           location.hash = r.kind === 'unexplained'
             ? href('segment', r.plate, r.started_at, r.source ? { source: r.source } : null)

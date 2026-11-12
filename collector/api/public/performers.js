@@ -37,7 +37,7 @@
 import { hbars, gapBars, barChart, scatter, areaChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
   fmt, empty, noneChosen, sourceLabel, dateStr, verdict, countOf,
-  UBER_FARE_WHY, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, dayStr, swatch, pct, sourceToken } from './ui.js';
+  UBER_FARE_WHY, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, dayStr, swatch, pct, sourceToken, chanChip } from './ui.js';
 import { CHANNEL_ORDER } from './tokens.js';
 import { TZ } from './tz.js';
 import { q, href, state } from './data.js';
@@ -672,7 +672,9 @@ export async function renderPerformer(root, id, week) {
       const pay = pays.find((y) => y.platform === x.platform);
       return { ...x, payout: pay ? pay.payout : null, period: pay ? `${String(pay.period_start).slice(0, 10)} → ${String(pay.period_end).slice(0, 10)}` : null };
     }), [
-      { label: 'Channel', key: 'platform', render: (r) => pill(sourceLabel(r.platform)) },
+      /* A channel chip in both skins' week table: the old skin's plain pill
+         exactly (tone null), its channel's swatch under the contract. */
+      { label: 'Channel', key: 'platform', render: (r) => chanChip(r.platform, { tone: null }) },
       { label: 'Bookings', key: 'bookings', num: true },
       { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
       { label: 'Fares', key: 'fares', num: true,

@@ -745,6 +745,22 @@
 :root[data-skin="arkiv"] .tscroll table tbody tr:hover td,
 :root[data-skin="arkiv"] .tscroll table tbody tr:hover td:first-child{background-color:var(--paper-2)}
 :root[data-skin="arkiv"] .plate{color:var(--ink-2);letter-spacing:.06em}
+/* The ROW MARKER (SPEC §4), the desktop's half of m/arkiv-m.css §14: ui.js
+   tableFrom's `rowMark` names a row's channel in data-ch, and the row's first
+   cell — the pinned one — carries a 3px rule in that channel's identity in
+   its gutter, beside the 1px rule that says the column is pinned. The words
+   stay ink and the row is not tinted (L5.6). 14px of cell padding keeps the
+   first word clear of the rule. A row that names no channel has no data-ch
+   and so no rule. At a phone width the rows are cards; the rule moves to the
+   card's own edge (below, in the 560px block). */
+:root[data-skin="arkiv"] tr[data-ch="uber"]{--mark:var(--c-uber)}
+:root[data-skin="arkiv"] tr[data-ch="bolt"]{--mark:var(--c-bolt)}
+:root[data-skin="arkiv"] tr[data-ch="yango"]{--mark:var(--c-yango)}
+:root[data-skin="arkiv"] tr[data-ch="hotel"]{--mark:var(--c-hotel)}
+:root[data-skin="arkiv"] tr[data-ch="cabman"]{--mark:var(--c-cabman)}
+:root[data-skin="arkiv"] tr[data-ch="fms"]{--mark:var(--c-fms)}
+:root[data-skin="arkiv"] .tscroll table tbody tr[data-ch]>td:first-child{
+  box-shadow:inset 3px 0 0 var(--mark),1px 0 0 var(--rule)}
 /* A verdict in a table cell. It was a coloured number with a 2px rule; the
    number is ink now and the verdict is the dot at the cell's left edge —
    hollow for a warning, solid for critical — drawn as a background layer, so
@@ -772,13 +788,26 @@
    The 99px pill becomes a 3px chip in mono capitals. A tone is a wash under
    INK text plus the dot — no semantic-coloured words (L5.6). A fact this
    window did not measure (.dim) is drawn as the absence OUTLINE, never as a
-   pale fill, which would read as a small value. .pill.plat has no channel key
-   to paint (chanChip() arrives with the page work), so it is neutral rather
-   than wearing a hue it cannot name. */
+   pale fill, which would read as a small value. A bare .pill.plat has no
+   channel key to paint, so it stays neutral rather than wearing a hue it
+   cannot name; a platform pill that knows its channel is ui.js chanChip()'s
+   .pill.plat.chan, which carries the channel's swatch before its ink word. */
 :root[data-skin="arkiv"] .pill,:root[data-skin="arkiv"] .tag{border-radius:3px;font-family:var(--mono);
   font-size:var(--t2);font-weight:600;letter-spacing:.11em;text-transform:uppercase;padding:3px 7px;
   gap:6px;line-height:1.35;background:var(--paper-2);color:var(--ink-2)}
 :root[data-skin="arkiv"] .pill.plat,:root[data-skin="arkiv"] .tag.info{background:var(--paper-2);color:var(--ink-2)}
+/* The channel chip (ui.js chanChip): the same neutral chip, its channel's
+   swatch first — 8px, so it sits inside the chip's cap height at --t2 — and
+   the word in ink. The pill is a flex box, so its 6px gap spaces the two. */
+:root[data-skin="arkiv"] .pill.chan .sw{width:8px;height:8px}
+/* #approvals' decided list (approvals.js) is a nowrap table of four columns,
+   484px wide with a typical summary: under the contract it sits in its own
+   panel, and at 390 it pushed the whole page 112px sideways. It scrolls in
+   its own box instead, as every tableFrom table does (the ARK review,
+   2026-11-12; Classic is frozen and keeps its old overflow). */
+:root[data-skin="arkiv"] .ap-done{overflow-x:auto;max-width:100%}
+:root[data-skin="arkiv"] a.pill.chan{text-decoration:none}
+:root[data-skin="arkiv"] a.pill.chan:hover{color:var(--ink);box-shadow:inset 0 0 0 1px var(--grey-2)}
 :root[data-skin="arkiv"] .pill.ok,:root[data-skin="arkiv"] .tag.ok{background:var(--w-pos);color:var(--ink)}
 :root[data-skin="arkiv"] .pill.warn,:root[data-skin="arkiv"] .tag.warn{background:var(--w-ink);color:var(--ink)}
 :root[data-skin="arkiv"] .pill.bad,:root[data-skin="arkiv"] .tag.err,
@@ -1176,6 +1205,11 @@
   :root[data-skin="arkiv"] .tcards .tscroll table td:first-child,
   :root[data-skin="arkiv"] .tcards .tscroll table th:first-child{box-shadow:none}
   :root[data-skin="arkiv"] .tcards td[class*="v-"]{padding-left:16px}
+  /* A marked row as a card: the 3px rule runs down the card's left edge and
+     the card's contents step in 11px, as the phone's rows do (arkiv-m.css §14). */
+  :root[data-skin="arkiv"] .tcards .tscroll table tbody tr[data-ch]{padding-left:11px;
+    box-shadow:inset 3px 0 0 var(--mark)}
+  :root[data-skin="arkiv"] .tcards .tscroll table tbody tr[data-ch]>td:first-child{box-shadow:none}
 }
 
 /* ── 16 · the full page (zen) and print ─────────────────────────────────────

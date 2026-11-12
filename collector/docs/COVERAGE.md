@@ -11416,3 +11416,63 @@ its first caller that takes a file from a browser, and two of its properties mat
   within a second or two (the register's "No vehicle matches" note is in the DOM and not visible);
   a browser test that reads `innerText` for a plain note passes or fails on timing. Read the
   note's `textContent` when the wording is the question, and use a warn note when it must be seen.
+### Traps this added to the list (ARK, the Arkiv leftovers, 2026-11-12)
+
+- **The first screen is at 19 of its 20 modules.** `test/lazy_pages.test.mjs` fails when
+  app.js's static import graph reaches 20 modules; at `90d76da` it was 19. A new shared helper
+  that a first-screen module must import (here: the page contract's token, wanted by the sign-in
+  page without ui.js) cannot be a new file. It went into `pagemeta.js`, which imports nothing and
+  is already on the first screen; code that is not first-screen code goes behind a dynamic
+  `import()` (themecolor.js), which the test does not count.
+- **Chromium serialises an inset box-shadow colour first**: `rgb(35, 98, 211) 3px 0px 0px 0px
+  inset`. A test matching `/inset 3px/` never matches; match both orders.
+- **A service worker that answers GETs from its cache but lets HEAD through blinds the deploy
+  check.** app.js `deployOf` asks `X-FM-Build` with `HEAD` + `cache: 'no-store'`; sw.js returned
+  early for every non-GET, so under a cache-first worker the check compared the server's build
+  with the server's build while the tab ran a cached app.js. sw.js now answers HEAD for shell
+  paths from the copy it would serve, and keeps only its own deploy's code (ARK7).
+- **`clients.claim()` fires `controllerchange` on a page no worker served.** A "reload on
+  controllerchange" policy therefore reloads every first visit a few seconds in (the phone still
+  does), and a guard read once at load ("was there a controller?") misses a later takeover in the
+  same visit — the page stays on the old code. Track it: the first change is the first claim, any
+  later one is a deploy (swreg.js, ARK5).
+- **The worker's offline answer is a 503.** data.js treated it as a slow gateway: it waited
+  1.2 s, retried, and told the reader "the server took too long", which is false — the server was
+  never reached. Detect `x-sw-cache: miss` before the gateway rule (ARK8).
+- **Absence in a service-worker cache is only evidence after a put that should happen has had its
+  chance.** The worker keeps a response after answering the page, so "not in the cache" read at
+  once passes whether or not the code would have kept it — the first draft of
+  `test/sw_desktop.test.mjs` passed with the build guard deleted. Fetch a positive control that
+  must be kept, wait for it, then look for the one that must not be.
+- **A size bound on a Cache Storage cache needs its own ledger.** `Cache.keys()` order is not
+  something to evict by, and reading every entry's headers on every write is a scan per answer.
+  sw.js keeps `[storedAt, bytes]` per address in an entry of the same cache, so it dies with the
+  cache (sign-out, scope change) and survives the worker being stopped when idle (ARK6).
+- **index.html's pre-paint script is one function full of `var`s.** `var` is function-scoped, so
+  a block that declares a name the script already uses reassigns it: the first draft of the
+  theme-colour collapse declared `var pick`, which is the phone/desktop choice a few lines up. It
+  was harmless only because nothing read `pick` after it. Give a new block its own names.
+
+#### …and what the ARK review added (2026-11-12)
+
+- **A service-worker test that never opens the page with the server gone proves nothing about
+  offline.** Every check of the first draft ran on a page already open and listening. Opened
+  offline — reload with every socket refused, `test/sw_desktop.test.mjs` §5 — the desktop showed
+  two faults no other check could see: a blank page, and kept figures with no offline line.
+- **Skipping the reload on the first claim also skips filling the cache.** A page's first-screen
+  modules load before any worker controls it, so they never pass through it; the phone's reload is
+  what sends them through, and its own modules are precached besides. A build that skips the reload
+  must send what it loaded through the worker some other way (swreg.js `warmShell`), or its first
+  offline open is index.html with no app.js — a blank white page.
+- **A worker's `postMessage` to a page with no listener is lost.** The browser holds them only
+  until the document has parsed; after that, a message with no listener is dropped. A listener in a
+  module loaded on demand misses everything said before it arrived — on an offline open, all of the
+  first page's answers. Listen while the shell boots and hand the messages over (app.js `swHeld`).
+- **A queued Cache Storage write must check whose data it is when it runs, not when the answer
+  arrived.** A keep that waits its turn can run after another reader's first answer has emptied
+  the cache for them, and open the NEW cache. Carry the scope with the keep, re-check it just
+  before the put, and name the new scope before emptying the old (sw.js `keepOne`, `startScope`).
+- **A count of "texts" from the SMS outbox must name its kinds.** The 05:00 cash run and the
+  trip-goal runs (`cash_run`, `target_run`) write their own lines into `sms_outbox` with status
+  `sent` and no text, so "status = sent" counts them as texts with no delivery report. Use the
+  server's own list: cash_deposit, trip_register, target_nudge.

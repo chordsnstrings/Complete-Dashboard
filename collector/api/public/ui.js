@@ -7,6 +7,11 @@ import { href, params } from './data.js';
 import { TZ, TZ_LABEL, dubaiDay } from './tz.js';
 import { CHANNEL_ORDER, channelKey, semanticOf } from './tokens.js';
 import { fleetLabel, isFleetId } from './access.js';
+/* The contract's token and the principle line live in pagemeta.js, which
+   imports nothing, so the sign-in page can ask the same question without
+   loading this module (see contract() there). Re-exported unchanged. */
+import { contract, PRINCIPLE } from './pagemeta.js';
+export { contract, PRINCIPLE };
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const el = (tag, cls, html) => {
@@ -223,10 +228,31 @@ function plainCell(c, r) {
    (data-key, data-key2), and a phone card labels it "A · B". A pair whose
    half was pruned as empty (`absent`) falls back to the half that is left.
    Opt-in: without `pairs` every table renders as it always did. */
+/* ROW MARKS (SPEC §4; plan §3 Components: "NEW opt-in option rowMark(r) →
+   channel draws SPEC §4's 3px gutter marker instead of a tinted row").
+   ─────────────────────────────────────────────────────────────────────────
+   The phone has drawn them since the redesign (m/ui.js rowMark()); the
+   desktop never did, so a mixed list — #trips, a driver's trip records, the
+   platform performance records — read as one channel's until the eye found
+   the Channel column. HANDOFF §4.5 lists it as not built.
+
+   `rowMark: (row) => name` names the row's channel. Under the contract the
+   <tr> carries data-ch="<key>" and arkiv.css draws a 3px rule in that
+   channel's identity at the row's left edge (the first cell's gutter, or the
+   card's edge at a phone width) — never a tinted row, never the row's words
+   in a colour (L5.6). The words stay: the Channel column is not removed.
+   A name that is not one of the six marks NOTHING (tokens.js channelKey;
+   L1: an unidentified row must look unidentified), and so does a row the
+   caller maps to null (an unexplained journey has no booking channel).
+   Under the old skin no attribute is written: the Classic DOM is frozen. */
 export function tableFrom(rows, cols, { compact = false, sortable = false,
   sortId = 't', defaultSort = null, capped = null, onRow = null,
-  cards = false, cardLead = null, pairs = null } = {}) {
+  cards = false, cardLead = null, pairs = null, rowMark = null } = {}) {
   if (!rows.length) { const d = el('div'); empty(d); return d; }
+  const markOf = typeof rowMark === 'function' && contract()
+    ? (r) => { let n = null; try { n = rowMark(r); } catch { /* an unmarked row */ } return channelKey(String(n ?? '')); }
+    : () => null;
+  const trOpen = (r) => { const k = markOf(r); return k ? `<tr data-ch="${k}">` : '<tr>'; };
   const wrap = el('div', 'tscroll');
   const t = el('table', compact ? 'compact' : null);
   /* Anything that explains the table rather than being part of it. Collected
@@ -371,7 +397,7 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
       cards && !isLead ? ` data-label="${esc(`${A.label} · ${B.label}`)}"` : ''
     }>${cards && !isLead ? `<span class="cardval">${inner}</span>` : inner}</td>`;
   };
-  const body = (list) => `<tbody>${list.map((r) => `<tr>${units.map((u) => (u.length === 2
+  const body = (list) => `<tbody>${list.map((r) => `${trOpen(r)}${units.map((u) => (u.length === 2
     ? pairCell(u, r) : u[0])).map((c) => (typeof c === 'string' ? c :
     /* `cellCls` lets a column give ONE cell a verdict — a completion rate below
        the threshold reads as bad in the cell rather than only in a tile far
@@ -873,6 +899,46 @@ export const custodyAsOf = (ref) => (ref && ref.name
    would otherwise look like a delta nobody bothered to colour. */
 export const pill = (text, tone, title = null) => `<span class="pill${tone ? ` ${tone}` : ''}"${
   title ? ` title="${esc(title)}"` : ''}>${esc(text)}</span>`;
+
+/* A CHANNEL CHIP — the platform pill under the page contract.
+   ─────────────────────────────────────────────────────────────────────────
+   docs/UI-REDESIGN-PLAN.md §3 Components: ".pill.plat becomes a channel chip
+   with a swatch, which needs the channel key: a new chanChip(key, label)".
+   It never existed, so arkiv.css drew every `pill(…, 'plat')` as a neutral
+   chip — "it has no channel key to paint" — and a driver on Uber and Bolt
+   carried two identical grey lozenges in the header, told apart only by the
+   word. HANDOFF §4.5 lists it as not built.
+
+   chanChip(key, { label, title, tone, href }):
+     · key   — the channel's name as a row carries it ('uber', 'hotel', …).
+               tokens.js channelKey() resolves it; a name that is not one of
+               the six (a fleet id, a fuel type) gets NO swatch rather than a
+               borrowed one (SPEC L1: a mislabelled feed must look
+               unidentified), and the chip is the neutral pill it always was.
+     · label — the words on the chip; sourceLabel(key) when not given. Text
+               stays ink: the identity sits BESIDE the word, as the swatch
+               (SPEC L5.6: text never wears a channel colour).
+     · title, tone, href — exactly what the caller's old pill carried, so the
+               old skin's markup is unchanged byte for byte: `tone` is the
+               class the old pill wore ('plat' by default; the driver
+               header's account pills wear it only on the account the
+               address named), and `href` makes it the <a class="pill plat">
+               the HR roster draws.
+   Under the old skin (contract() false) this IS that old pill — the Classic
+   skin is held byte-frozen (test/arkiv_classic_frozen.test.mjs). Under the
+   contract it is `pill plat chan` with the swatch first and data-ch naming
+   the channel, and arkiv.css sizes the swatch for the chip. The phone gets it
+   wherever it draws a desktop module (m/screens.js fallback() renders the
+   driver and vehicle tabs, m/app.js PAGES the account, access and fleet-name
+   pages): arkiv.css is loaded on both builds, so the token is the same. */
+export const chanChip = (key, { label = null, title = null, tone = 'plat', href: to = null } = {}) => {
+  const text = label ?? sourceLabel(key);
+  const k = contract() ? channelKey(String(key ?? '')) : null;
+  const cls = k ? 'pill plat chan' : `pill${tone ? ` ${tone}` : ''}`;
+  const attrs = `${to ? ` href="${esc(to)}"` : ''}${title ? ` title="${esc(title)}"` : ''}${k ? ` data-ch="${k}"` : ''}`;
+  const tag = to ? 'a' : 'span';
+  return `<${tag} class="${cls}"${attrs}>${k ? swatch(key) : ''}${esc(text)}</${tag}>`;
+};
 
 /* Every time and date in this product is Dubai time, stated explicitly.
    ─────────────────────────────────────────────────────────────────────────
@@ -2512,12 +2578,8 @@ export function splitAlerts(rows, { count = 'n' } = {}) {
    it is asked the same way: app.css declares --pg-contract:0 for the old
    skin, arkiv.css declares 1, and a page asks contract(). No stylesheet (a
    test harness, a detached document) answers the old skin, which is what
-   production draws. */
-export function contract() {
-  try {
-    return String(getComputedStyle(document.documentElement).getPropertyValue('--pg-contract')).trim() === '1';
-  } catch { return false; }
-}
+   production draws. contract() itself is in pagemeta.js (imported at the
+   head of this file and re-exported): the sign-in page asks it too. */
 
 /* A channel's swatch, for a word that names it. SPEC L5.6: text never wears a
    channel colour; the identity sits BESIDE the word. The .sw.ch-* rules are
@@ -2784,7 +2846,6 @@ export function absenceBand(host, cells, { idx = null, name = '† What this pag
    the shell only when that host is inside #view; anywhere else it appends
    its own footer — the same three parts, principle included — to the end of
    the host, so the basis and the principle reach the phone too. */
-export const PRINCIPLE = 'A figure that cannot be measured is shown absent, with the reason — never as zero.';
 function footShape(foot) {
   const text = el('div', 'pf-text');
   text.append(el('div', 'pf-basis'), el('p', 'pf-principle', esc(PRINCIPLE)));

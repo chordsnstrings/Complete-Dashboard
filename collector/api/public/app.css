@@ -2006,6 +2006,14 @@ td .pill,td .tag{white-space:nowrap}
    treat both as noise. */
 .note.warn{border-left-color:var(--warn);background:var(--warn-bg)}
 .note.warn{border-left-color:var(--warn);background:var(--warn-bg)}
+/* The desktop's offline line (swreg.js) sits just OUTSIDE #view, so the
+   page's own gutter does not reach it: as first written it ran from the
+   window's edge to the window's edge, its dot on the glass, 36px left of the
+   title and every panel at 1280 and 18px at 390 (the ARK review,
+   2026-11-12). It takes the same gutter #view takes — the clamp below is
+   #view's padding here and arkiv.css's --shell-x — so it stands on the
+   page's one vertical line in both skins. */
+.sw-stale{margin:12px clamp(18px,3vw,36px) 0}
 
 /* The empty state led with the generic word and whispered the useful one. */
 .empty{padding:24px 20px}

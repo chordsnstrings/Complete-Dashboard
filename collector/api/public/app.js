@@ -2697,7 +2697,10 @@ V.drivers = async (root) => {
     { label: 'Statement', key: 'earnings', num: true, render: (x) => money(x.earnings) },
     { label: 'Counted', key: 'counted', num: true, render: (x) => money(x.counted ?? x.earnings) },
   ], { sortable: true, sortId: 'perf', defaultSort: { key: 'period_start', dir: 'desc' },
-    capped: pfTot.total > pfRows.length ? `all ${fmt(pfTot.total)} records` : null }));
+    capped: pfTot.total > pfRows.length ? `all ${fmt(pfTot.total)} records` : null,
+    /* Plan §4 #drivers: "§06 performance records get a 3px channel row
+       marker in the gutter" — each record is one platform's statement. */
+    rowMark: (r) => r.platform }));
   if (pfTot.total) {
     perf.body.append(el('p', 'cap',
       `Showing 25 of ${fmt(pfTot.total)} records — ${fmt(pfTot.people)} people across `
@@ -10567,6 +10570,11 @@ function applyTheme(mode) {
     b.title = `Theme: ${mode === 'system' ? 'following your device' : mode}. `
       + `Click for ${THEME_NEXT[mode]}.`;
   }
+  /* The browser's bar follows the paper this choice resolves to
+     (themecolor.js; loaded on demand — test/lazy_pages.test.mjs keeps the
+     first screen under 20 modules, and a bar colour is not a first-screen
+     need: index.html's pre-paint script has already set a chosen theme's). */
+  import('./themecolor.js').then((m) => m.followThemeColor()).catch(() => { /* the static metas stand */ });
 }
 applyTheme(['light', 'dark'].includes(store.get('theme')) ? store.get('theme') : 'system');
 $('#themeBtn').onclick = () => {
@@ -10674,6 +10682,32 @@ if (document.documentElement.dataset.boot === 'code') document.documentElement.d
    and every "not shown to your role" depend on it. One small request, in
    parallel with the stylesheets. A signed-in person's chosen look follows
    them to any browser; sign-in required and nobody signed in goes to /signin. */
+/* THE WORKER'S WORD ON WHERE AN ANSWER CAME FROM, held until swreg.js is
+   here to read it.
+   ─────────────────────────────────────────────────────────────────────────
+   sw.js tells the page each time it answers /api/ from its kept copy (an
+   "fm-sw" message), and swreg.js turns that into the one line above #view
+   saying the figures are not live. But swreg.js loads on demand, after the
+   first render is under way, and a message nobody is listening for is
+   dropped. Measured (the ARK review, 2026-11-12, the server unreachable, the
+   worker's caches filled by two visits): a desktop opened from the cache
+   painted #overview's kept figures with NO such line in 6 opens of 6, and
+   #trips in 2 of 3 — the first page's answers had all come back before
+   swreg.js was listening, so a week-old page read as live, the one thing
+   the line exists to prevent. So the shell listens while it boots — the
+   worker's messages are held by the browser until the document has
+   finished parsing, which is after this module has run, so none is missed
+   — keeps what arrives, and hands it over when swreg.js registers
+   (registerWorker({ held })), which takes the listener away. */
+const swHeld = (() => {
+  const got = [];
+  let sw = null;
+  try { sw = navigator.serviceWorker || null; } catch { /* a browser that refuses workers */ }
+  if (!sw) return () => got.splice(0);
+  const keep = (ev) => { if (ev?.data?.type === 'fm-sw') got.push(ev); };
+  sw.addEventListener('message', keep);
+  return () => { sw.removeEventListener('message', keep); return got.splice(0); };
+})();
 installFetchGuard();
 const whoReady = loadWho().then(() => {
   if (who.mode === 'enforced' && !who.signedIn) { toSignIn('required'); return false; }
@@ -10697,5 +10731,10 @@ whoReady.then((go) => {
   /* The chat assistant's button and window (agentchat.js), on <body> so it
      outlives every view. Mounted only once sign-in is settled. */
   mountAssistant();
+  /* The service worker on the desktop build, registered once the page has
+     loaded (swreg.js, HANDOFF §4.5). Loaded on demand, like themecolor.js:
+     it is not first-screen code. It is handed what the worker has said
+     since the page began (swHeld above). */
+  import('./swreg.js').then((m) => m.registerWorker({ held: swHeld })).catch(() => { /* no worker: the page works as before */ });
 });
 setInterval(() => { if (state.view === 'live') render(); }, 60000);

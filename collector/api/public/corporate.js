@@ -321,7 +321,9 @@ async function corpProperties(host) {
     { label: 'Hourly', key: 'hourly', num: true },
     { label: 'Given away', key: 'foc', num: true },
     { label: 'Last booking', key: 'last_at', render: (r) => dateStr(r.last_at) },
-  ], { sortable: true, sortId: 'props', defaultSort: { key: 'revenue', dir: 'desc' } }));
+    /* Plan §4 corporate/properties: "Hotel row marker" — every row is the
+       hotel channel's, so every row carries its mark under the contract. */
+  ], { sortable: true, sortId: 'props', defaultSort: { key: 'revenue', dir: 'desc' }, rowMark: () => 'hotel' }));
   pp.body.append(el('p', 'cap',
     'Avg fare is revenue over the bookings that carry one, not over all of them, so Revenue ÷ Bookings '
     + 'will read slightly low wherever the two counts differ. AED/km divides the same revenue by the '

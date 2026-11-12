@@ -286,7 +286,10 @@ export async function renderDay(root, day, onDetail) {
         render: (r) => pill(r.verdict, r.verdict === 'unauthorized' ? 'err'
           : r.verdict === 'authorized' ? 'ok' : 'warn') },
       { label: 'Why', key: 'verdict_reason', render: (r) => esc(String(r.verdict_reason || '').slice(0, 120)) },
-    ]));
+      /* Plan §4 day: "a 3px channel row marker where a row is one channel". A
+         segment is one provider's reading — CABMAN, or FMS live / an FMS
+         journey (both the FMS channel) — so it carries that channel's mark. */
+    ], { rowMark: (r) => (String(r.source || '').startsWith('fms') ? 'fms' : r.source) }));
     /* A table that ends on exactly sixty rows is a table somebody cut. Without
        this, a day with 140 flagged intervals rendered identically to a day
        with 60, and the reader would take the last row as the last one there
@@ -416,7 +419,9 @@ export async function renderDay(root, day, onDetail) {
         : Number(r.median_rows) > 0 && r.rows < Number(r.median_rows) * 0.3 ? pill('far below normal', 'warn')
           : Number(r.median_rows) > 0 && r.rows > Number(r.median_rows) * 3 ? pill('far above normal', 'warn')
             : pill('normal', 'ok')) },
-  ]));
+    /* One feed per row: a channel's own feed is marked, a feed that is no
+       channel (the payout walk, the timelines) is not (ui.js tableFrom). */
+  ], { rowMark: (r) => r.source }));
   cp.body.append(el('p', 'cap',
     '"Normally" is the median row count for that source across every day it has collected. A day is '
     + 'flagged below three tenths of it or above three times it; between those the variation is '

@@ -2930,3 +2930,62 @@ change. The two defects the review fixed were not visible to a reader with every
 history refused to the Cash desk and the HR officer, and a failed load of `history.js` holding
 #online-time's tiles back (FIX-STATUS SPK15, SPK16). Now 64 checks in `history_sparklines` and 71 in
 `history_routes`.
+## ARK rendering pass — chips, row marks, theme colours, the five contract pages (2026-11-12)
+
+What was rendered: the working tree against the mock (`mockapi.mjs`) in Chromium, Arkiv, desktop
+1280 light and dark and the phone build at 390, `timezoneId` Asia/Dubai, service workers blocked
+(the worker has its own pass below). "Before" is HEAD's `api/public` served by
+`express.static` in front of the same mock (`git archive HEAD collector/api/public | tar -x -C
+<dir>`). Signed-in pages used a synthetic Owner fixture (`@example.test`).
+
+| Page | Width / theme | Found | Done |
+|---|---|---|---|
+| `#trips` | 1280 light, dark | every row a 3px rule in its channel's colour in the first cell's gutter (gold Hotel, blue Uber), beside the pinned column's 1px rule; the row untinted; the Channel words unchanged. Compact table: 10px of cell padding leaves 7px of air past the rule | ARK2 |
+| `#trips` | 390 | the table is not a card table, so the mark stays on the first cell inside the sideways scroller; no page-level sideways scroll. **None of the five tables the plan marks is a card table**, so the card-edge rule was proven on a tableFrom table built in the page itself | ARK2 |
+| `#driver/drv-0` | 1280 light, dark | the header's platforms (Uber, Yango) and both account pills carry their swatch at 8px; the fleet pill (Egari) stays neutral, no swatch; words ink in both themes | ARK1 |
+| phone `#driver/drv-0` | 390 | **the phone's own driver screen draws no platform pill**: the chips reach the phone only through a driver TAB (`#driver/drv-0/overview` and on), which m/screens.js fallback() renders from the desktop module | ARK1; noted, not a defect |
+| `#messages`, `#access`, `#approvals`, `#fleet-names` | 1280 light / dark | before: the old page (no 00, no †, no colophon; on #messages a green fill on a count and "none reported" in the charge's figure slot). After: 00 after the tab bar, panels numbered 01…, † with the true reasons, the colophon. **Two faults found in the first draft and fixed before commit**: the #messages † "Older messages" counted the 05:00 run's line with the messages (5 against the list's 4), and two band notes printed an API path to readers ("From GET /api/fleets…") | ARK10–13 |
+| `#access`, `#fleet-names` | 1280 | six tiles with the hero spanning two of the band's six columns wrap the sixth to a second row — the house grid's behaviour, as on #trips; left as it is | — |
+| `#messages` | 1280 | the focus layer folds the rules (the page's source line) behind "ⓘ 3 notes" — by design | — |
+| phone `#fleet-names` | 390 dark | 00 inside the screen, the inline footer at the deck's end, no sideways scroll | ARK13 |
+| sign-in | 1280 light, 390 dark | the footer is the contract's: basis, the principle verbatim in ink, the colophon in mono; under the card at 390 | ARK14 |
+| every page | 1280 | the bar colour: white paper (light OS), grey paper (dark OS), the chosen theme from the first paint, Classic's linen under Classic | ARK3 |
+
+Also measured for ARK4: the font request order and first-screen characters per face, preloads
+stripped (FIX-STATUS ARK4). And a finding for the phone's owner, not changed here (m/ is another
+workstream's): the phone's `rowMark` on the unexplained-occupancy list marks only CABMAN rows —
+`channelKey('fms_live')` and `('fms_trip')` are null — where the desktop's #day maps both to the FMS
+mark.
+
+To repeat: `node test/arkiv_plumbing.test.mjs` (90 checks, the mock on a free port).
+
+**The desktop service worker** (FIX-STATUS ARK5–8), rendered with service workers ALLOWED: the
+mock wrapped as `api/server.js` wraps the worker (`/sw.js` with `VERSION` rewritten to a
+fingerprint, every code response stamped `X-FM-Build`), desktop 1280, Arkiv light. Found: the page
+is claimed without a reload on first visit; a second deploy's worker takes over and reloads it
+once (the first draft never reloaded a page first claimed after load — fixed); with the server
+unreachable, a kept answer paints and one line above #view says it is a kept copy, how old in
+Dubai time, not live, and goes when the page is redrawn from live answers; a missing answer says
+the browser is offline instead of "the server took too long". To repeat: `node
+test/sw_desktop.test.mjs` (23 checks).
+
+### The ARK review's pass (2026-11-12)
+
+The mock on :8356, Chromium, Arkiv light and dark, `timezoneId` Asia/Dubai, a synthetic signed-in
+Owner (`@example.test`). Desktop build at 1280 and 390: #trips, #driver/drv-0 (and its trips and
+ledger tabs), #corporate/properties, #day/2026-08-14, #drivers, #unit/drivers, #hr-roster,
+#messages, #access, #approvals, #fleet-names, sign-in; phone build at 390: #driver/drv-0/overview,
+#fleet-names, #access, #messages, #approvals, sign-in. No page error; no NaN, `undefined` or
+`null` in any page's text; no phone touch target under 44px inside a page; chips with swatches on
+the driver header (Uber, Yango; the fleet Egari without), row marks on the five marked tables.
+
+| Page | Width / theme | Found | Done |
+|---|---|---|---|
+| the offline line | 1280, 390 | ran edge to edge outside #view, its dot on the window's edge, 36px (18px at 390) left of every panel | ARK-R6a: #view's gutter |
+| `#approvals` | 390 desktop build | sideways scroll 112px: the decided list, a nowrap table (the same 112px at `90d76da` in both skins, from the old layout) | ARK-R6b: scrolls in its own box under Arkiv |
+| `#messages`, `#approvals` | phone 390 | "Built for a bigger screen", as before — the phone has no screen for either, so no contract there | — |
+| desktop, offline after ONE online visit | 1280 | a blank white page | ARK-R1 |
+| desktop, offline after two online visits | 1280 | #overview's kept figures with no offline line, 6 opens of 6 (#trips 2 of 3) | ARK-R2 |
+
+To repeat the offline opens: `node test/sw_desktop.test.mjs` (§5: one online visit, then every
+socket refused and the page reloaded; then three rounds of an online visit and an offline open).

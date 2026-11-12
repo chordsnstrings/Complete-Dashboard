@@ -62,6 +62,9 @@ import { who, loadWho, getJson, post, signOut, ROLE } from './access.js';
    when /api/auth/methods says the Owner turned them on and the platform is
    ready — otherwise this page is exactly what it was. */
 import { signInWithPasskey, passkeySupported, ssoRefusal } from './signin_methods.js';
+/* The page contract's token and the principle line — from pagemeta.js, which
+   imports nothing, so this page still loads no module of the dashboard. */
+import { contract, PRINCIPLE } from './pagemeta.js';
 
 /* ── pure helpers (exported for test/signin_page.test.mjs) ───────────── */
 
@@ -951,7 +954,42 @@ function takeLink() {
   return l;
 }
 
+/* ── the page contract (HANDOFF §4.5) ─────────────────────────────────────
+   This page asked nothing and printed none of the contract. It has no figure
+   — no 00 band, no hero, nothing to be absent — so what the contract owes it
+   is the footer every page carries: the BASIS (what this page rests on: the
+   line it always printed, that every sign-in is recorded), the house
+   PRINCIPLE verbatim, and the COLOPHON. Built only when the token says so;
+   without it (a stylesheet that did not arrive) the old one-line footer
+   stands. */
+export function contractFoot(doc = document) {
+  const foot = doc.querySelector('.si-foot');
+  if (!foot || !contract() || foot.classList.contains('pagefoot')) return false;
+  const basis = (foot.textContent || '').trim() || 'Every sign-in is recorded in the audit log';
+  foot.classList.add('pagefoot');
+  foot.replaceChildren();
+  const text = doc.createElement('div');
+  text.className = 'pf-text';
+  const b = doc.createElement('p');
+  b.className = 'pf-p';
+  b.textContent = `${basis}.`;
+  const p = doc.createElement('p');
+  p.className = 'pf-principle';
+  p.textContent = PRINCIPLE;
+  text.append(b, p);
+  const col = doc.createElement('div');
+  col.className = 'pf-colophon';
+  for (const w of ['FleetMirror', 'Sign-in']) {
+    const s = doc.createElement('span');
+    s.textContent = w;
+    col.append(s);
+  }
+  foot.append(text, col);
+  return true;
+}
+
 export async function start() {
+  contractFoot();
   const q = new URLSearchParams(location.search);
   S.back = safeBack(q.get('back'), location.origin);
   const why = q.get('why') || '';
