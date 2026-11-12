@@ -289,6 +289,14 @@ export function focusIn(view, foot, { looseHost = true } = {}) {
   // named, so a footer INSIDE the container (the phone's) counts as itself.
   for (const m of view.querySelectorAll('[data-fx]:not([data-fx="keep"])')) hosts.add(hostOf(m, view, foot));
   if (foot?.querySelector('[data-fx="fold"]')) hosts.add(foot);
+  /* And every panel that still HOLDS A TOGGLE but no longer any mark: a body
+     redrawn inside the same panel with nothing left to fold (the phone's
+     fallback tab, and any desktop panel that keeps its element and refills
+     its body) is named by neither loop above, so its "ⓘ 1 note" stayed on,
+     opening nothing (the review of 2026-11-12; m/focus-m.js says where it
+     was found). toggleFor() takes it off. The container's own toggle — a
+     loose block's, counted over the whole container — is left as it was. */
+  for (const b of view.querySelectorAll('.fx-more')) if (b.parentElement && b.parentElement !== view) hosts.add(b.parentElement);
   for (const h of hosts) toggleFor(h, view);
 }
 

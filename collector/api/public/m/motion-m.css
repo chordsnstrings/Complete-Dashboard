@@ -119,7 +119,13 @@
    a plain statement's — is drawn by the pen as its block lands. The rule is a
    border-image over the border it replaces, exact at any pixel ratio and, at
    100%, exactly the border: when the class goes, nothing changes. A statement
-   with a tone keeps its own coloured rule (3px, semantic) undrawn. */
+   with a tone keeps its own coloured rule (3px, semantic) undrawn, and so does
+   a driver's reach card (.ak-reach, m/arkiv-m.css): its rule is the HAIRLINE,
+   not ink, and the pen — which writes in ink — drew it black for the 1.6 s of
+   the entrance and then snapped it back to grey when the class went (found by
+   the review of 2026-11-12, the one ruled block on any screen whose rule is
+   not --ink; test/phone_focus_motion.test.mjs §8 holds every drawn rule to
+   the block's own colour). */
 :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.push > *,
 :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.pop > *{animation:none}
 :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > :nth-child(2){--fx-d:45ms}
@@ -130,7 +136,7 @@
 :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > :nth-child(7){--fx-d:270ms}
 :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > :nth-child(8){--fx-d:315ms}
 :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > :nth-child(n+9){--fx-d:360ms}
-:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-card:has(> h2),
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-card:has(> h2):not(.ak-reach),
 :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-sec,
 :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .sechd,
 :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-stats,
@@ -206,7 +212,7 @@
   /* §3 the screen: blocks settle, rules are drawn. */
   :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > *{
     animation:akm-in .46s var(--ease-out) var(--fx-d,0ms) backwards}
-  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-card:has(> h2),
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-card:has(> h2):not(.ak-reach),
   :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-sec,
   :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .sechd,
   :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-stats,

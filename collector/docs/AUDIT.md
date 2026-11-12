@@ -2927,6 +2927,22 @@ the sheet, appended, never render-blocking), the shell at 90 / 94 / 110 ms and t
 189 / 185 / 204 ms (medians; before / after under automation / after with motion on). No API call is
 added; Today's 10 s on production is its live calls, untouched.
 
+**5 · The independent review's pass (same day).** Against `test/preview.mjs` on :8358 with the August
+window: every phone screen and both fallback tabs at 390×844 (coarse pointer, motion on) and eleven
+desktop pages at 1280×900 (overview, target, unauthorized, payouts, drivers, a driver, vehicles,
+online time, demand, sources, month target), light and dark. No page error, no sideways scroll, no
+NaN, undefined or null, no mark on a row, every toggle's label well formed, and 0 mutations in 2.5 s
+at rest on every page of both builds. The only targets under 44 px are in the fallback tabs' desktop
+markup ("Back to all drivers", a phone number, table headings: 15–37 px) and are the base commit's
+exactly. Two defects, both fixed (FIX-STATUS MOB17, MOB18):
+
+- **A toggle over nothing.** "Revenue, hour by hour" redrawn by the minute refresh with its
+  revenue absent kept "ⓘ 1 note" under the absence line, with 0 marks in the card — neither pass
+  ever revisited a host that had lost its last mark.
+- **The pen drew the reach card's hairline in ink.** On a driver's screen the reach card's grey rule
+  was black for the 1.6 s of the entrance, then snapped to grey: the only ruled block on any screen,
+  in either theme, whose rule is not `--ink`.
+
 **Found on the way, not changed:**
 
 - **The control sentence shifts every screen it is on, with every word shown.** m/app.js

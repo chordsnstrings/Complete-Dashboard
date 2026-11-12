@@ -192,6 +192,20 @@ export function markDeck(deck) {
     const h = hostOf(m);
     if (h) hosts.add(h);
   }
+  /* …and every section that still HOLDS A TOGGLE, mark or no mark. A section
+     whose body was redrawn with nothing left to fold or cut holds no mark, so
+     neither loop above names it, and its toggle stayed on, opening nothing:
+     Today's hour cards keep their card and replace its body every minute
+     (m/screens.js hoursCards), and a minute whose answer is absent — the
+     body becomes "Not measured." (../targetpage.js hoursNearHtml) — or whose
+     sentence is short left "ⓘ 1 note" under a card with no note in it. Found
+     by the review of 2026-11-12, by redrawing "Revenue, hour by hour" with
+     its sentence gone: 0 marks, the toggle still there. toggleFor() takes the
+     toggle off a section with no mark, and relabels one that still has some. */
+  for (const b of deck.querySelectorAll('.fx-more')) {
+    const h = b.parentElement;
+    if (h && h !== deck && !h.closest('.m-fallback')) hosts.add(h);
+  }
   for (const h of hosts) toggleFor(h, deck);
   const fb = deck.querySelector('.m-fallback');
   if (fb) focusIn(fb, fb.querySelector('.pf-inline'), { looseHost: false });

@@ -10783,19 +10783,27 @@ the file, so the batch that found them merges without moving that list.
   rule for a transition or an animation adds nothing. A computed `transitionDuration` of `1e-06s`
   under emulated reduced motion is that reset, not a fault. What it cannot reach is
   `scroll-behavior: smooth`, which is not a transition: the phone's deck scrolled smoothly for that
-  reader until MOB11.
+  reader until MOB13.
 
-* **A rule that stills an old animation can out-rank the new one on the same element** (MOB9).
+* **A rule that stills an old animation can out-rank the new one on the same element** (MOB10).
   m/motion-m.css switches off m.css's 14 px slide with `… .m-deck.push > * {animation:none}`, at
   (0,6,0); the arrival fade `… .fx-arrive` was (0,5,0), so every block of the deck that landed after
   a watched skeleton got the class and no animation. A test that only looked for the class passed.
   Assert the animation — `el.getAnimations()` on the frame the class goes on — not the class.
 
-* **The phone's deck outlives every screen** (MOB8). The desktop builds a fresh `#view` per render;
+* **The phone's deck outlives every screen** (MOB9). The desktop builds a fresh `#view` per render;
   the phone empties and refills one `.m-deck`. A class put on the deck with a timer to take it off
   (an entrance) needs that timer cleared at the next render, or the old timer strips the new
   screen's class halfway; and "content replaced a skeleton" is two mutation records (the parent
   emptied, then refilled), never one record holding both as on the desktop.
+
+* **A recount that starts from the marks never visits a host with none left** (MOB17, found by the
+  review). focus.js and m/focus-m.js gave a toggle to every host they found by walking up from a
+  mark, so a host whose body was refilled inside the same element with nothing left to fold was
+  never visited again and kept its "ⓘ 1 note" over nothing. It shows only where a renderer keeps
+  the host element and refills its body — a panel replaced whole takes its toggle with it — and the
+  phone keeps its cards and refills their bodies (Today's hour cards, every minute). Recount from the TOGGLES as well as from the marks: every host still
+  holding one.
 
 * **The phone's refresh paints this phone's copy, not the new answer** (found 2026-11-12, not
   changed). m/app.js `refresh()` re-renders, and `api()` answers from the SWR store at once while

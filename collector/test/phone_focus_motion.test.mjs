@@ -21,13 +21,16 @@
          toggle is a 44px target; opening every toggle shows every word the
          pass-off screen shows; nothing that says a figure is absent, or why,
          is ever folded away; the desktop's own pass runs on the fallback's
-         desktop tab. The old skin's phone is never marked.
+         desktop tab. The old skin's phone is never marked. A section whose
+         body is redrawn with nothing left to fold loses its toggle (Today's
+         minute refresh; the review of 2026-11-12).
      4 · NO LAYOUT SHIFT: no prose block is ever painted before it is marked
          (watched frame by frame), and the layout shift with the pass on is
          the layout shift with it off.
      5 · NO LOOP: a settled screen is still — no mutation from either layer,
          and the toggles' labels are not rewritten (the desktop's were, eight
-         times a second, until this change).
+         times a second, until this change); and a desktop panel that loses
+         its last mark loses its toggle, as the phone's sections do.
      6 · THE SWITCH, ON THE PHONE: More → This app turns the folding off and
          on again, remembered; off, nothing is hidden.
      7 · THE BOOT SHEET stands where the shell will: the mark on the
@@ -36,7 +39,8 @@
          the first screen.
      8 · A SCREEN ARRIVING gets the entrance and the old 14px slide is gone; a
          REDRAW (the refresh button) gets nothing; content after a watched
-         skeleton comes up; nothing is left behind.
+         skeleton comes up; nothing is left behind; the pen draws only rules
+         that are ink (never the reach card's hairline).
      9 · A FIGURE THAT MOVED is washed — on Today's minute refresh and on a
          redraw that brings new figures — and one that did not move is not;
          switching a segment (its lists are rows; no tile changes value on
@@ -323,6 +327,45 @@ if (run(3)) {
   check('the old skin’s phone is never marked: no mark, no toggle', o.marks === 0 && o.toggles === 0, JSON.stringify(o));
   await old.close();
 }
+if (run(3)) {
+  /* A SECTION THAT LOSES ITS LAST MARK LOSES ITS TOGGLE. Today's hour cards
+     keep their card and replace its body every minute (m/screens.js
+     hoursCards); a minute whose answer carries no revenue redraws "Revenue,
+     hour by hour" as one absence line (../targetpage.js hoursNearHtml). Until
+     the review of 2026-11-12 the pass never looked at a section with no mark,
+     so its "ⓘ 1 note" stayed on under the absence, opening nothing. The minute
+     is shortened as in §9. */
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await p.ctx.addInitScript(() => {
+    const si = window.setInterval;
+    window.setInterval = (fn, ms, ...a) => si(fn, ms === 60000 ? 1500 : ms, ...a);
+  });
+  let calls = 0;
+  await p.page.route('**/api/target/hours*', async (r) => {
+    const hit = fixture.answers[keyOf(r.request().url())];
+    if (!hit) return r.fallback();
+    calls += 1;
+    const j = JSON.parse(hit.body);
+    if (calls > 1) j.revenue = { absent: 'No revenue target is set for today.' };
+    await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(j) });
+  });
+  await p.open('today');
+  const card = (head) => p.page.evaluate((h) => {
+    const c = [...document.querySelectorAll('#m .m-card')].find((x) => x.querySelector(':scope > h2')?.textContent === h);
+    return c && { btn: c.querySelector(':scope > .fx-more')?.textContent || null,
+      marks: c.querySelectorAll('[data-fx]:not([data-fx="keep"])').length, absent: c.querySelector('.tg-absent')?.textContent || null };
+  }, head);
+  const before = await card('Revenue, hour by hour');
+  await p.page.waitForFunction(() => !!document.querySelector('#m .m-hours .tg-absent'), null, { timeout: 10000 }).catch(() => {});
+  await p.page.waitForTimeout(200);
+  const after = await card('Revenue, hour by hour');
+  const beside = await card('Trips, hour by hour');
+  check('a section redrawn with nothing left to fold loses its toggle (Today’s minute refresh, its revenue gone absent)',
+    !!before?.btn && before.marks > 0 && !!after?.absent && after.marks === 0 && after.btn === null, JSON.stringify({ before, after }));
+  check('…while the section beside it, still folded, keeps its own', !!beside?.btn && beside.marks > 0, JSON.stringify(beside));
+  check('…and nothing threw', !p.errors.length, p.errors.join(' | '));
+  await p.close();
+}
 
 console.log('\n4 · no layout shift: nothing painted before it is marked, and the shift with the pass on is the shift with it off');
 if (run(4)) {
@@ -415,6 +458,23 @@ if (run(5)) {
   }));
   check('the DESKTOP’s toggles are not rewritten at rest either (was 144 rewrites in 3 s on #target)',
     dq.toggles > 0 && dq.labels === 0, JSON.stringify(dq));
+  /* The desktop's pass (../focus.js focusIn, which the phone's fallback tab is
+     judged by) had the same blind spot as the phone's: a panel whose body
+     lost its last mark kept its toggle (the review of 2026-11-12). */
+  const lost = await d.page.evaluate(async () => {
+    const btn = [...document.querySelectorAll('#view .fx-more')].find((b) => b.parentElement !== document.getElementById('view')
+      && b.parentElement.querySelector('[data-fx]:not([data-fx="keep"])'));
+    const host = btn?.parentElement;
+    if (!host) return null;
+    for (const m of [...host.querySelectorAll('[data-fx]:not([data-fx="keep"])')]) {
+      const q = document.createElement('p');
+      q.textContent = 'A short line now.';
+      m.replaceWith(q);
+    }
+    await new Promise((ok) => setTimeout(ok, 500));
+    return { marks: host.querySelectorAll('[data-fx]:not([data-fx="keep"])').length, btn: host.querySelector(':scope > .fx-more')?.textContent || null };
+  });
+  check('…and a desktop panel whose body lost its last mark loses its toggle', !!lost && lost.marks === 0 && lost.btn === null, JSON.stringify(lost));
   await d.close();
 }
 
@@ -630,6 +690,33 @@ if (run(8)) {
   const unfold = await p.page.evaluate(() => window.__fx.splice(0));
   check('folded notes come up when opened', unfold.some((e) => e.k === 'fx-unfold'), JSON.stringify(unfold));
   check('no page error along the way', !p.errors.length, p.errors.join(' | '));
+  await p.close();
+}
+if (run(8)) {
+  /* THE PEN WRITES IN INK, so it may draw only a rule that IS ink. A driver's
+     reach card is ruled with the hairline (m/arkiv-m.css .ak-reach); drawn by
+     the pen it was black for the 1.6 s of the entrance and snapped back to
+     grey when the class went (the review of 2026-11-12). The entrance is put
+     on by hand once the arrival's own is over, so what is read is the
+     stylesheet, not a race with its timer. */
+  const p = await phonePage(browser, { skin: 'arkiv', fixture });
+  await motionOn(p, 'driver/drv-0');
+  await p.page.waitForTimeout(1700);
+  const pen = await p.page.evaluate(() => {
+    const deck = document.querySelector('#m .m-deck');
+    const probe = document.createElement('i');
+    probe.style.color = 'var(--ink)';
+    document.body.append(probe);
+    const ink = getComputedStyle(probe).color;
+    probe.remove();
+    deck.classList.add('fx-enter');
+    const drawn = [...deck.children].filter((e) => getComputedStyle(e).borderImageSource !== 'none');
+    const out = { reach: !!deck.querySelector(':scope > .m-card.ak-reach'), drawn: drawn.length,
+      off: drawn.filter((e) => getComputedStyle(e).borderTopColor !== ink).map((e) => `${e.className} ${getComputedStyle(e).borderTopColor}`) };
+    deck.classList.remove('fx-enter');
+    return out;
+  });
+  check('the pen draws only rules that are ink — never the reach card’s hairline', pen.reach && pen.drawn > 0 && !pen.off.length, JSON.stringify(pen));
   await p.close();
 }
 
