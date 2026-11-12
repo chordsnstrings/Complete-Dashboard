@@ -2874,3 +2874,286 @@ and 390, against production's own data: every row a grid, none clipped, no sidew
 
 To repeat: `node bin/prod-mirror.mjs &` then `node bin/focus-rows-audit.mjs http://127.0.0.1:8200
 /tmp/fx.json`; compare a working tree on :8100 with the same `SETTLE`.
+
+## SPK — the hero sparklines, rendered at 1280 and 390, light and dark (2026-11-12)
+
+**How.** `/api/history` is not on production yet, so `bin/live-ui.mjs` cannot show it (production
+answers the path 404, which the pages turn into "No line. The history did not load for this tile
+just now — the figure above is unaffected."). The pass ran instead against the REAL handlers
+(`test/mount.mjs`) over PGlite: `test/fixture.mjs`'s fleet, plus 40 days of synthetic Uber roster,
+timeline and trips and 95 days of cash and priced Bolt and hotel work on a named person spine, then
+the real roll-up pass (`refreshRollups`), served on :8307 from a scratch script; Chromium through
+`test/browser.mjs`, service workers blocked, `Asia/Dubai`, Arkiv. Pages: #online-time,
+#performer/‹a Bolt account›/‹last Monday›, #deposits, #cancellations — 16 renders.
+
+**What each drew.**
+
+- Every page made exactly one `/api/history` request, beside its own, and drew its line in ink
+  (rgb(10, 10, 11)) in light and near-white (rgb(240, 240, 241)) in dark. Nothing went sideways at
+  390, and no page threw.
+- #online-time: Late, 30 Oct – 12 Nov, 13 of 14 days drawn; today left out, with its reason in the
+  line's caption.
+- #performer: Money, the 12 weeks ending with the page's week, all 12 drawn, under the economics
+  delta and above the basis line.
+- #deposits: the ceiling and Drivers carrying a ceiling, 12 weeks each. The carriers' line is flat
+  where the count did not move — a true line, not a missing one.
+- #cancellations: 1 – 12 Nov, 11 of 12 days drawn (today out), on the Cancellations tile beside the
+  Dropped-a-job hero.
+
+**Found and fixed: the end mark of every glance-tile line was a dash** (FIX-STATUS SPK10). The svg
+stretches with `preserveAspectRatio="none"` and a circle's radius is geometry, not stroke, so the
+end "dot" measured 14.7 × 4.0 px on a hero tile at 1280, 13.4 × 4.0 at 390 and 6.6 × 4.0 on
+#overview's tiles. It is now a round capped stroke on every glance line — these four pages and
+#overview's, #finance's, #reconcile's, #demand's and #causes' — checked in a 3× close-up before and
+after. The phone keeps its circle.
+
+**Found, not fixed: #cancellations' chips govern nothing.** `/api/cancellations` reads the window
+alone (COVERAGE, the SPK traps); the line therefore asks for the tile's own scope.
+
+**A stale line in the audit.** "Only #overview draws one" — #demand, #finance, #reconcile and #causes
+already drew a hero line from their own payloads; they keep it, and make no extra request.
+
+To repeat the checks without a server: `node test/history_sparklines.test.mjs` (the mock, 57 checks:
+one request per draw, the runs, the end mark, the caption, 390, dark, Classic, every absence) and
+`node test/history_routes.test.mjs` (the route against `/api/online-time`, `/api/cancellations`,
+`/api/trips/daily` and #deposits' own sum, 62 checks).
+
+**The review's pass (2026-11-12).** The same four pages against `mockapi.mjs` on :8357, Chromium
+through `test/browser.mjs`, Arkiv, 1280 and 390, light and dark — 16 renders on the builder's
+head and 16 after the review's fixes, plus #deposits with its cash values withheld by the gate at
+both widths. Every render: no page error, exactly one `/api/history` request, no sideways scroll,
+no `NaN`, `undefined` or `null` in the text, no glance-band target under 44 px, the end mark round.
+The withheld render prints the gate's sentence where the line would be ("No weekly line. Not shown
+to your role: driver cash. …"), wrapping inside the tile at 390. Tile sub-lines clamped to one line
+are the focus layer's long-sub rule (`focus.js`, with the full text as its title), not this
+change. The two defects the review fixed were not visible to a reader with every class: the
+history refused to the Cash desk and the HR officer, and a failed load of `history.js` holding
+#online-time's tiles back (FIX-STATUS SPK15, SPK16). Now 64 checks in `history_sparklines` and 71 in
+`history_routes`.
+## ARK rendering pass — chips, row marks, theme colours, the five contract pages (2026-11-12)
+
+What was rendered: the working tree against the mock (`mockapi.mjs`) in Chromium, Arkiv, desktop
+1280 light and dark and the phone build at 390, `timezoneId` Asia/Dubai, service workers blocked
+(the worker has its own pass below). "Before" is HEAD's `api/public` served by
+`express.static` in front of the same mock (`git archive HEAD collector/api/public | tar -x -C
+<dir>`). Signed-in pages used a synthetic Owner fixture (`@example.test`).
+
+| Page | Width / theme | Found | Done |
+|---|---|---|---|
+| `#trips` | 1280 light, dark | every row a 3px rule in its channel's colour in the first cell's gutter (gold Hotel, blue Uber), beside the pinned column's 1px rule; the row untinted; the Channel words unchanged. Compact table: 10px of cell padding leaves 7px of air past the rule | ARK2 |
+| `#trips` | 390 | the table is not a card table, so the mark stays on the first cell inside the sideways scroller; no page-level sideways scroll. **None of the five tables the plan marks is a card table**, so the card-edge rule was proven on a tableFrom table built in the page itself | ARK2 |
+| `#driver/drv-0` | 1280 light, dark | the header's platforms (Uber, Yango) and both account pills carry their swatch at 8px; the fleet pill (Egari) stays neutral, no swatch; words ink in both themes | ARK1 |
+| phone `#driver/drv-0` | 390 | **the phone's own driver screen draws no platform pill**: the chips reach the phone only through a driver TAB (`#driver/drv-0/overview` and on), which m/screens.js fallback() renders from the desktop module | ARK1; noted, not a defect |
+| `#messages`, `#access`, `#approvals`, `#fleet-names` | 1280 light / dark | before: the old page (no 00, no †, no colophon; on #messages a green fill on a count and "none reported" in the charge's figure slot). After: 00 after the tab bar, panels numbered 01…, † with the true reasons, the colophon. **Two faults found in the first draft and fixed before commit**: the #messages † "Older messages" counted the 05:00 run's line with the messages (5 against the list's 4), and two band notes printed an API path to readers ("From GET /api/fleets…") | ARK10–13 |
+| `#access`, `#fleet-names` | 1280 | six tiles with the hero spanning two of the band's six columns wrap the sixth to a second row — the house grid's behaviour, as on #trips; left as it is | — |
+| `#messages` | 1280 | the focus layer folds the rules (the page's source line) behind "ⓘ 3 notes" — by design | — |
+| phone `#fleet-names` | 390 dark | 00 inside the screen, the inline footer at the deck's end, no sideways scroll | ARK13 |
+| sign-in | 1280 light, 390 dark | the footer is the contract's: basis, the principle verbatim in ink, the colophon in mono; under the card at 390 | ARK14 |
+| every page | 1280 | the bar colour: white paper (light OS), grey paper (dark OS), the chosen theme from the first paint, Classic's linen under Classic | ARK3 |
+
+Also measured for ARK4: the font request order and first-screen characters per face, preloads
+stripped (FIX-STATUS ARK4). And a finding for the phone's owner, not changed here (m/ is another
+workstream's): the phone's `rowMark` on the unexplained-occupancy list marks only CABMAN rows —
+`channelKey('fms_live')` and `('fms_trip')` are null — where the desktop's #day maps both to the FMS
+mark.
+
+To repeat: `node test/arkiv_plumbing.test.mjs` (90 checks, the mock on a free port).
+
+**The desktop service worker** (FIX-STATUS ARK5–8), rendered with service workers ALLOWED: the
+mock wrapped as `api/server.js` wraps the worker (`/sw.js` with `VERSION` rewritten to a
+fingerprint, every code response stamped `X-FM-Build`), desktop 1280, Arkiv light. Found: the page
+is claimed without a reload on first visit; a second deploy's worker takes over and reloads it
+once (the first draft never reloaded a page first claimed after load — fixed); with the server
+unreachable, a kept answer paints and one line above #view says it is a kept copy, how old in
+Dubai time, not live, and goes when the page is redrawn from live answers; a missing answer says
+the browser is offline instead of "the server took too long". To repeat: `node
+test/sw_desktop.test.mjs` (23 checks).
+
+### The ARK review's pass (2026-11-12)
+
+The mock on :8356, Chromium, Arkiv light and dark, `timezoneId` Asia/Dubai, a synthetic signed-in
+Owner (`@example.test`). Desktop build at 1280 and 390: #trips, #driver/drv-0 (and its trips and
+ledger tabs), #corporate/properties, #day/2026-08-14, #drivers, #unit/drivers, #hr-roster,
+#messages, #access, #approvals, #fleet-names, sign-in; phone build at 390: #driver/drv-0/overview,
+#fleet-names, #access, #messages, #approvals, sign-in. No page error; no NaN, `undefined` or
+`null` in any page's text; no phone touch target under 44px inside a page; chips with swatches on
+the driver header (Uber, Yango; the fleet Egari without), row marks on the five marked tables.
+
+| Page | Width / theme | Found | Done |
+|---|---|---|---|
+| the offline line | 1280, 390 | ran edge to edge outside #view, its dot on the window's edge, 36px (18px at 390) left of every panel | ARK-R6a: #view's gutter |
+| `#approvals` | 390 desktop build | sideways scroll 112px: the decided list, a nowrap table (the same 112px at `90d76da` in both skins, from the old layout) | ARK-R6b: scrolls in its own box under Arkiv |
+| `#messages`, `#approvals` | phone 390 | "Built for a bigger screen", as before — the phone has no screen for either, so no contract there | — |
+| desktop, offline after ONE online visit | 1280 | a blank white page | ARK-R1 |
+| desktop, offline after two online visits | 1280 | #overview's kept figures with no offline line, 6 opens of 6 (#trips 2 of 3) | ARK-R2 |
+
+To repeat the offline opens: `node test/sw_desktop.test.mjs` (§5: one online visit, then every
+socket refused and the page reloaded; then three rounds of an online visit and an offline open).
+
+## ANS — the answer line and Act-on strip, rendered (2026-11-12)
+
+The per-page half of FOCUS (FIX-STATUS ANS). How the pass was done: Chromium (`test/browser.mjs`
+launchChromium, service workers blocked, Asia/Dubai), desktop build, Arkiv, at 1280×900 and
+390×900, light and dark — first against `mockapi.mjs` (the fourteen main pages and four more), then
+against `test/preview.mjs` on :8309 (the real route handlers over the seeded fixture, August 2026),
+then the rules alone over twelve production responses piped in one at a time (FIX-STATUS ANS,
+"Checked against production's own data"). The scratch script reads each page's `#pageAnswer` and
+prints the line, the basis, every action with its address and target, `#view`'s first child and
+the page's scroll width.
+
+| measure | result |
+|---|---|
+| where the box sits | between `.topbar` and `#view` on all 18 pages; never inside `#view`, whose first child is unchanged (`cband`, `cband tp-month`, `stack lp-page`, `toolbar`, `tabs` — whatever the page drew before) |
+| absent lines | each with the server's own reason where it sent one — preview: #target and #month-target "No target is set for November 2026. The Owner sets it in Set up › Access."; #supply "This selection has no availability feed…"; #vehicles "None of the 5 plates on record carries a VIN…"; #retention the server's "Fewer than two complete months…"; #analyst "No model is configured…"; production: #analyst the model's own Token Plan error |
+| actions | at most three on every page; every address a real route; every in-page action finds its panel (`answers` §4) |
+| contrast | every text in the box at AA or better, light and dark (the test computes it against the colour each text sits on) |
+| 390 | no page widened by the box (scroll width 390 on every page the box is on, except #target on the mock, which was already 985 — finding 3 below); every action 44px or taller |
+| Classic | no box, no class: the old skin's DOM does not move |
+
+Findings — not fixed here (outside this workstream), each with what the answer does about it:
+
+1. **#live's Moving tile counts a stale car's last speed.** On the preview "0 of 5 cars reported
+   within 30 minutes" sat above a tile reading Moving 5: all five were silent over a day, and the
+   tile counts every row whose last fix had speed > 3. The verdict uses > 5 km/h, the tile > 3.
+   The answer counts only cars whose fix is under 30 minutes old ("28 of them moving", production)
+   and says so in its basis; the tile is unchanged.
+2. **#payouts on an empty register answers over the sentinel range.** `payout_routes.js`
+   `payoutRange` returns `scope:'window'` with `window:['2000-01-01','2100-01-01']` when the
+   register is empty; a sentence built from it read "between 1 Jan 2000 and 1 Jan 2100". The answer
+   treats the sentinel as the whole record ("No transfer has been collected from any platform yet").
+3. **#target and #month-target at 390 are still 985–1012 px wide** (the audit of 2026-11-12,
+   MEDIUM 3: `table.hp` in a non-scrolling `.tablewrap`). The answer box itself fits; the page does
+   not.
+4. **The preview server answers /api/auth/me with 404** on every page (one console error per
+   load): `test/preview.mjs` does not mount the access routes. Harmless to the pages; it is noise in
+   any error count taken there.
+5. **#retention on the mock**: the last month's `flow.left` (0) and `stopped_last_month` (5)
+   disagree — mockapi's two fields are independent. On production they agree (60 and 60), as the
+   route computes both from the same months.
+
+To repeat: `PORT=8309 node test/preview.mjs &`, then for each page read
+`document.getElementById('pageAnswer')` (line, basis, `.ans-act-i` hrefs and `data-to`) at 1280 and
+390 under `?ui=desktop&skin=arkiv`, in both colour schemes; `node test/answers.test.mjs` does the
+same on mockapi and asserts it. Stop the preview by its PID.
+
+### ANS — the review's rendering pass (2026-11-12)
+
+Repeated independently of the builder's: Chromium (`test/browser.mjs` launchChromium, service
+workers blocked, Asia/Dubai), `mockapi.mjs` on :8359, `?ui=desktop&skin=arkiv`, every page with a
+rule × 1280 and 390 × light and dark — 72 loads. Per load the script read `#pageAnswer` (line,
+basis, every action's height and address, the `none` sentence), the page's scroll width with the box
+shown and with it hidden, any element in the box clipped or past the viewport's edge, and any
+NaN/undefined/null in its text.
+
+| measure | result |
+|---|---|
+| page errors | none on any of the 72 |
+| the box widening a page | never: the scroll width is the same with and without the box everywhere; #target and #month-target at 390 are 985 px wide either way (finding 3 above) |
+| clipped or off-screen inside the box | nothing, including on the two over-wide pages at 390 |
+| touch targets at 390 | every action 44 px or taller, in all 34 boxes that carry actions (the other two are #unauthorized's absent line, R2) |
+| NaN / undefined / null | none |
+
+Findings — the defects behind R0 are fixed on the branch (FIX-STATUS ANS13–ANS20); R1 and R2 are not:
+
+- **R0. The pass draws only what a full-access reader sees.** The defects the review found — zeros
+  for withheld bookings on #drivers, a false no-rate reason on #unauthorized, a failed #compliance
+  read as "nothing has lapsed", "Nothing to act on" naming checks never made — do not show on
+  mockapi, which answers everything for everyone. They are proved in `answers` §1b and in two §4
+  Chromium checks that replay the server's withheld rows and header (#drivers) and fail both
+  compliance calls (#compliance).
+- **R1. #compliance's own tiles read a failed call as zero.** `V.compliance` catches each call into
+  an empty answer, and the tiles count it: "Vehicle docs expired 0", "Drivers who cannot legally
+  work 0" over two calls that never answered. The answer line now says so (ANS16); the tiles are
+  the page's and are unchanged. The same pattern holds on #drivers for a reader without bookings:
+  the toolbar reads "0 drove in this window · 330 never have" (the answer line no longer repeats it,
+  ANS13).
+- **R2. mockapi's `/api/unauthorized/summary` has no `totals.segments`** (the server always sends
+  it), so the §4 pass on #unauthorized only ever exercises an absent line. The present line is
+  proved by §1 and by production's data (FIX-STATUS ANS review).
+## Focus and motion on the phone — a rendering pass (2026-11-12, FIX-STATUS MOB)
+
+The phone build had neither Arkiv layer (HANDOFF 0.9, 0.11). After bringing both to it, four passes
+in Chromium at 390×844 with a coarse pointer, Arkiv, light and dark; nothing here touched
+production (its read budget for this batch was 30 GETs, one at a time, which a page sweep through
+`bin/live-ui.mjs` would spend on two screens).
+
+**1 · Hermetic, every phone screen** (`test/phone_focus_motion.test.mjs` on
+`test/phone_harness.mjs`: the recorded fixture, the clock fixed). 25 phone screens and the
+fallback's two desktop tabs, each with the notes folded and with every word shown:
+
+| measure | result |
+|---|---|
+| folds | 71 on 24 of 27 screens; 42 toggles, every one 44 px tall |
+| deck height, all screens | 56,657 → 51,716 px (−8.7%); no screen taller folded than whole |
+| rows | every `.m-row` exactly as tall folded as whole, on every screen; no mark on a row, a list, a tile's figure or label, a button or a link; no marked element holds a block |
+| words | the deck's text identical folded and whole; every line the whole screen shows is shown once its toggles are open |
+| absence | no `[data-absent]` value, empty state, error, stale warning, `.tg-absent` or absence-band reason folded or hidden |
+| layout shift | 198 prose blocks on Today, To the bank and Online time watched frame by frame (answers held 500 ms): none on screen for a frame before its mark; Today and To the bank 0.0003 folded and whole |
+| at rest | 0 mutations in 3 s on Today and To the bank with both layers on |
+
+**2 · The sweep tool against the real handlers** (`bin/focus-rows-audit.mjs` with `PHONE=1`, served by
+`test/preview.mjs` on :8308 from its seeded fleet): the default window (November — mostly empty
+screens, so their absence reasons) and `WINDOW=from=2026-08-01&to=2026-08-31` (the seeded month):
+
+| window | screens | faults | deck, whole → folded |
+|---|---|---|---|
+| default | 26 | 0 | 29,284 → 27,471 px |
+| August 2026 | 26 | 0 | 44,303 → 42,012 px |
+
+A fault is a mark on a row or a layout, a row cut, or a toggle under 44 px. In the August pass the
+largest saving is To the bank (1,794 → 1,408 px: its long rule captions — one per platform, 55–85
+words each in the hermetic pass — fold under their section's toggle); More and Credentials are
+unchanged (nothing on them pays for a toggle);
+Sources is 77 px shorter with no mark at all (the control sentence, which its bar's sheet carries).
+
+**3 · Motion, frame by frame.** The boot sheet with `/m/app.js` held: the mark at 16, 17.77 px,
+21.70 × 20.47 — the header wordmark's own box — in each theme's artwork; the rule at 56 px under it;
+"Opening the dashboard" after its beat; "Still opening — the dashboard's code is still arriving."
+at four seconds; "… waiting for the server to answer." with `/api/auth/me` held; "The dashboard
+stopped opening" when the module throws. An arrival 160 ms in: the 00 band's rule half drawn by the
+pen, the tiles 4 px low and fading up; at rest, every block where it stands with the layer off, to
+the pixel (Today, Money, To the bank, a driver, More). A redraw (the refresh button) replays nothing;
+content after a watched 1.8 s skeleton fades up; Today's minute refresh washes the one figure that
+moved ("Done so far").
+
+**4 · First paint, before and after.** The base tree (90d76da) and this one served side by side by
+the harness, Today opened 11 times each, interleaved: 36 → 39 static files (40 with motion on —
+the sheet, appended, never render-blocking), the shell at 90 / 94 / 110 ms and the first card at
+189 / 185 / 204 ms (medians; before / after under automation / after with motion on). No API call is
+added; Today's 10 s on production is its live calls, untouched.
+
+**5 · The independent review's pass (same day).** Against `test/preview.mjs` on :8358 with the August
+window: every phone screen and both fallback tabs at 390×844 (coarse pointer, motion on) and eleven
+desktop pages at 1280×900 (overview, target, unauthorized, payouts, drivers, a driver, vehicles,
+online time, demand, sources, month target), light and dark. No page error, no sideways scroll, no
+NaN, undefined or null, no mark on a row, every toggle's label well formed, and 0 mutations in 2.5 s
+at rest on every page of both builds. The only targets under 44 px are in the fallback tabs' desktop
+markup ("Back to all drivers", a phone number, table headings: 15–37 px) and are the base commit's
+exactly. Two defects, both fixed (FIX-STATUS MOB17, MOB18):
+
+- **A toggle over nothing.** "Revenue, hour by hour" redrawn by the minute refresh with its
+  revenue absent kept "ⓘ 1 note" under the absence line, with 0 marks in the card — neither pass
+  ever revisited a host that had lost its last mark.
+- **The pen drew the reach card's hairline in ink.** On a driver's screen the reach card's grey rule
+  was black for the 1.6 s of the entrance, then snapped to grey: the only ruled block on any screen,
+  in either theme, whose rule is not `--ink`.
+
+**Found on the way, not changed:**
+
+- **The control sentence shifts every screen it is on, with every word shown.** m/app.js
+  `akApplies()` prepends "The date range, grouping, platform and fleet do not apply here — …" once a
+  screen has drawn (the screens empty the deck after their fetch), so when the screen paints before
+  it lands, everything below moves down by its two or three lines: layout shift 0.37 on Online time
+  in one run, 0.07 in another. With the notes folded (the default) the sentence is not drawn and the
+  shift does not happen; under the old skin and with every word shown it still does.
+- **The phone's refresh shows the stored copy.** Pull-to-refresh and ⟳ re-render, and `api()`
+  answers from this phone's stored copy while the live request runs behind it; the phone has no
+  `data:refreshed` listener, so new figures appear on the NEXT render (COVERAGE, end).
+- **The desktop's focus pass never rested** — fixed here (FIX-STATUS MOB4): 144 toggle rewrites in
+  3 s on #target, before.
+
+To repeat: `node test/phone_focus_motion.test.mjs` (hermetic; `ONLY=3` for the focus sweep alone),
+and `PORT=8308 node test/preview.mjs &` then `PHONE=1 node bin/focus-rows-audit.mjs
+http://127.0.0.1:8308 /tmp/fx-phone.json`, with `WINDOW=from=2026-08-01&to=2026-08-31` for the
+seeded month. Against production data: `node bin/prod-mirror.mjs &` and the same with
+`http://127.0.0.1:8200`, within that run's read budget.

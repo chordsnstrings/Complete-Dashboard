@@ -109,14 +109,19 @@ check('…and the refusal is shown under the answer, in the gate\'s words',
   (dsp.last?.sources || []).some((s) => s.id === 'r1' && s.withheld === dspR?.withheld), JSON.stringify(dsp.last?.sources));
 
 console.log('\n2. a person whose access covers one fleet');
-/* /api/kpis combines both fleets (manifest: fleet "mixed"), so the gate
-   refuses it to an Egari-only reader with that reason — and the assistant
-   says so rather than producing a number. */
-script = [tool('fleet_totals', { from: '2026-10-01', to: '2026-10-07' }), say('Fleet totals are not open to you.')];
+/* /api/kpis is 'narrow' since 2026-11-12 (api/access/one_fleet.js): the
+   gate answers an Egari-only reader with EGARI's totals — the tool sends and
+   names that fleet — where until then it refused the route as one that
+   combines both fleets. Two completed trips, not five.
+   REVERSION: put /api/kpis back to fleet "mixed" in the manifest — the
+   totals are refused again and this fails. */
+script = [tool('fleet_totals', { from: '2026-10-01', to: '2026-10-07' }), say('{{r1.completed_trips}} completed.')];
 await chat(OPS, 'Completed trips this week?');
 const opsT = await stored(OPS, 'r1');
-check('whole-fleet totals are refused to an Egari-only manager, with the gate\'s reason',
-  /combines the records of every fleet/.test(opsT?.withheld || '') && !opsT?.values, JSON.stringify(opsT).slice(0, 300));
+check('an Egari-only manager\'s fleet totals are Egari\'s: two completed, not five',
+  !opsT?.withheld && opsT?.values?.completed_trips === 2 && opsT?.values?.all_trips === 2, JSON.stringify(opsT).slice(0, 300));
+check('…and they are labelled Egari', /Egari/.test(opsT?.definition || '') && !/both fleets/.test(opsT?.definition || ''),
+  opsT?.definition);
 /* The drivers page filters by fleet (manifest: "param"), so it answers —
    Egari's drivers only, and the result says Egari. */
 script = [tool('drivers', { from: '2026-10-01', to: '2026-10-07' }), say('{{r2.drivers}} drivers worked.')];
@@ -126,6 +131,14 @@ check('an Egari-only manager\'s drivers are Egari\'s: two, not five',
   opsR?.values?.drivers === 2 && (opsR.rows || []).every((r) => r.fleet === 'egari'), JSON.stringify(opsR?.values));
 check('…and they are LABELLED Egari, not "both fleets"', /Egari/.test(opsR?.definition || '') && !/both fleets/.test(opsR?.definition || ''),
   opsR?.definition);
+/* The revenue target is still 'mixed' — one figure set for the company — so
+   the gate refuses it to an Egari-only reader with THAT reason, and the
+   assistant passes it on rather than producing a number. */
+script = [tool('class_targets', {}), say('Targets are not open to you.')];
+await chat(OPS, 'How are we doing against the target?');
+const opsTg = await stored(OPS, 'r3');
+check('the company target is refused to an Egari-only manager, with the gate\'s reason',
+  /one figure set for the company/.test(opsTg?.withheld || '') && !opsTg?.rows, JSON.stringify(opsTg).slice(0, 300));
 
 console.log('\n3. sign-in required');
 process.env.ACCESS_MODE = 'enforced';

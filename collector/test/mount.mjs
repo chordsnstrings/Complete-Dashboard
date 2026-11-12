@@ -55,6 +55,12 @@ import { personMap } from '../api/person_map.js';
    inside the slice — so the helper is injected, real rather than stubbed: a
    stub would let the route stop reading HR with every test still green. */
 import { hrForCompliance } from '../api/hr_roster.js';
+/* The tracker roster's read side (FIXLIST C18). /api/live and /api/kpis set
+   aside the CABMAN plates the collector's roster says have departed, and both
+   routes are inside the slice — real rather than stubbed, because a stub that
+   set nothing aside would let either route stop reading the roster with every
+   test still green (test/fleet_roster_wiring.test.mjs is the one that checks). */
+import { fleetRoster, rosterFor, excludedPlates, exclusionNote } from '../api/fleet_roster.js';
 /* The provider alias tables, shared with src/probe.js. /api/schema/raw-fields
    matched raw field names against information_schema alone, so thirteen of
    Uber's fifteen fields read "not promoted to a column" while the collector
@@ -98,7 +104,22 @@ import { proposeKeys } from '../src/credmodel.js';
 import { recordSaved } from '../api/save_check.js';
 import { normaliseFiles, crossFile, silentFiles, fileReport,
   boltFollowUp } from '../src/credfiles.js';
-import { SETTING_DEFS } from '../src/settings.js';
+/* envOnlyReason: the real one — both settings save routes refuse a destination
+   key with it before writing (src/settings.js ENV_ONLY_KEYS). */
+import { SETTING_DEFS, envOnlyReason } from '../src/settings.js';
+/* server.js imports the liveness handler and the request budget from
+   api/ops.js. They are mounted ABOVE the START/END slice (they must run
+   before the access layer), so the slice does not reference them today; they
+   are imported and injected all the same, under the house rule that every
+   server.js import is here, so a later edit that moves a reference into the
+   slice meets a defined name instead of a ReferenceError before the first
+   assertion of every route test. test/ops_health_budget.test.mjs mounts them
+   for real. */
+import { makeHealth, makeRateLimiter } from '../api/ops.js';
+/* server.js imports it; the route itself is mounted by the *_routes.js
+   discovery below like every module's, and the name is injected so a slice
+   that ever calls it resolves (CLAUDE.md: a server.js import goes here too). */
+import { historyRoutes } from '../api/history_routes.js';
 
 export const START = "/* ───────────────────────── overview ───────────────────────── */";
 export const END = '/* ───────────────── per-driver detail pages ───────────────── */';
@@ -155,7 +176,7 @@ export async function mountAll(db, { serverRoutes = true, inject = {}, pre = nul
     grainOf, previousWindow, foldGrain, GRAINS, PERIODS, isPeriod, periodPartial,
     isAdmin, redactSettings, secretField, redactSampleValue, RAW_ALIASES, spanGaps,
     IDENTITY_DOCS, stripIdentity, withheldNote, photoHref, withPhotos, personMap,
-    hrForCompliance,
+    hrForCompliance, fleetRoster, rosterFor, excludedPlates, exclusionNote,
     refIds, peopleFor, attachPeople, log,
     recordImport, spanOf, tallyBatch, takeTally,
     LEDGER_CADENCE, ledgerSilence, aedText,
@@ -192,8 +213,9 @@ export async function mountAll(db, { serverRoutes = true, inject = {}, pre = nul
     /* The credential paste queue, real. A route that is mounted but throws
        ReferenceError the first time it is called is a route no test can
        reach, and /api/settings/paste was in exactly that state. */
-    recognise, unrecognised, checkAll, proposeKeys, SETTING_DEFS, recordSaved,
+    recognise, unrecognised, checkAll, proposeKeys, SETTING_DEFS, envOnlyReason, recordSaved, historyRoutes,
     normaliseFiles, crossFile, silentFiles, fileReport, boltFollowUp,
+    makeHealth, makeRateLimiter,
     /* LAST, so a test can replace any of the above.
        ─────────────────────────────────────────────────────────────────────
        Two of the paste route's dependencies call a provider over the

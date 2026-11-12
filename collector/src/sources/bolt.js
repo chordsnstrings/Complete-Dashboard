@@ -1,11 +1,15 @@
 // Bolt collector.
-//  FI API (client_credentials)  : Egari roster only — getDrivers / getVehicles. No trips/earnings.
-//                                 "Egari only" is not a design choice, it is a measured refusal:
-//                                 this OAuth client is not entitled to Ecosine's company_id 142868.
+//  FI API (client_credentials)  : the Egari roster (getDrivers) AND Egari's trips (getFleetOrders,
+//                                 src/sources/bolt_orders.js) — a second trip source on the one Bolt
+//                                 credential that never expires, so trips keep coming when the
+//                                 portal token is dead. "Egari only" is not a design choice, it is a
+//                                 measured refusal: this OAuth client is not entitled to Ecosine's
+//                                 company_id 142868 (code 503 COMPANIES_NOT_ALLOWED on both routes).
 //                                 See the fiRefusal comment below for the probe that shows it.
 //  Fleet Owner Portal (refresh) : trips + earnings for BOTH fleets — GUARDED on BOLT_REFRESH_TOKEN.
 //                                 Refresh tokens last ~7 days; when expired the portal path is skipped
-//                                 and the supervisor must re-capture one.
+//                                 and the supervisor must re-capture one. Payouts and the balance
+//                                 ledger exist only here.
 import { config, normPlate, reconcilePlate } from '../config.js';
 import { http } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
@@ -15,6 +19,7 @@ import { stateRow } from '../roster.js';
 import { get, setSetting } from '../settings.js';
 import { noteCredential, saysAuth } from '../auth_state.js';
 import { ledgerDay, ledgerRow, nextPayoutOn, LEDGER_DAYS } from './bolt_balance.js';
+import { pullFiOrders, supersedeFiRows, protectFiFills, FI_KIND, PORTAL_KIND } from './bolt_orders.js';
 
 const SRC = 'bolt';
 
@@ -717,8 +722,26 @@ export function portalRow(o, c, plates = null) {
    asking, and asking newest-first means the first refusal IS the boundary and
    every older window would be refused too, so we stop rather than spend twenty
    more requests being told the same thing. */
+/* `answered(win, {askedAt, first, last, rows, short})` is told about every
+   window the portal ANSWERED — not refused, not thrown, not the retention
+   boundary — after that window's rows are written. It is how the second Bolt
+   trip source learns which instants the portal has now answered for
+   (src/sources/bolt_orders.js supersedeFiRows): `askedAt` is the moment the
+   window's first page was requested, because an order created after that
+   cannot be in the answer; `first`/`last` are the window's earliest and
+   latest requested_at, the evidence of which clock the portal's dates are on.
+
+   A SHORT window is passed on too, with its shortfall. Withholding it looks
+   like caution and is the opposite: the portal's rows for that window are
+   written either way, so a stand-in the answer does not retire sits beside
+   the portal's own row for the same ride — a double count, for as long as no
+   later window answers in full, whenever the match rule that would otherwise
+   tidy it up fails to hold. Retiring on a short answer costs only what the
+   shortfall already costs: the few orders lost to offset paging stay held, as
+   they were lost before this feed existed. Optional, so every existing caller
+   is unaffected. */
 export async function harvestPortal({ from, to, ask, row, sink = null, warn = () => {},
-  page = PORTAL_PAGE, maxDays = PORTAL_MAX_DAYS, sleep = realSleep }) {
+  page = PORTAL_PAGE, maxDays = PORTAL_MAX_DAYS, sleep = realSleep, answered = null }) {
   const rows = [];
   /* Every refusal, not the first one. A single `refused` reported one window
      and hid the rest, which on a long backfill is the difference between "one
@@ -758,6 +781,7 @@ export async function harvestPortal({ from, to, ask, row, sink = null, warn = ()
     attempted++;
     let offset = 0, guard = 0, stop = false, before = rows.length;
     let declared = null, err = null;
+    const askedAt = Date.now();
     /* Keyed as they are collected, so a window can check itself against the
        count the portal declared for it. */
     const seen = new Set();
@@ -846,10 +870,18 @@ export async function harvestPortal({ from, to, ask, row, sink = null, warn = ()
     chunkLog.push({ from: iso(win.start), to: iso(win.end), rows: collected,
       error: err || (declared != null && seen.size < declared
         ? `collected ${seen.size} of ${declared} declared` : null) });
+    const shortBy = !err && declared != null && seen.size < declared ? declared - seen.size : 0;
+    let first = null, last = null;
+    for (let i = before; i < rows.length; i++) {
+      const t = rows[i]?.requested_at;
+      if (t && (first == null || t < first)) first = t;
+      if (t && (last == null || t > last)) last = t;
+    }
     /* Written per WINDOW, not once at the end. Everything above is about a
        throw not costing the rows already collected; handing them over as they
        are collected is what makes that true of a throw in the WRITE as well. */
     if (sink && collected) await sink(rows.splice(before, collected), win);
+    if (answered && !err && !stop) await answered(win, { askedAt, first, last, rows: collected, short: shortBy });
     if (stop) break;
   }
   /* The first refusal is what the operator is shown, with a count beside it so
@@ -908,7 +940,7 @@ async function pullPortalTrips(from, to, fails, allChunks = [], rowsByFleet = ne
       const why = String(e && e.message ? e.message : e).slice(0, 200);
       log.error(SRC, `portal ${c.fleet} failed`, { err: why });
       fails.push({ fleet: c.fleet, text: `portal ${c.fleet}: ${why}` });
-      allChunks.push({ from: iso(from), to: iso(to), rows: 0, error: why, fleet: c.fleet });
+      allChunks.push({ from: iso(from), to: iso(to), rows: 0, error: why, fleet: c.fleet, kind: PORTAL_KIND });
     }
   }
   return total;
@@ -1033,6 +1065,7 @@ async function oneFleet(c, from, to, fails, allChunks, plates) {
       log.info(SRC, `portal ${c.fleet}: access token re-minted mid-harvest`);
       return live.at;
     };
+    let utcSaid = false;
     const askOnce = async (win, offset, token) => http(url(c), {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -1047,8 +1080,41 @@ async function oneFleet(c, from, to, fails, allChunks, plates) {
       /* Written per window rather than once at the end, so a throw costs the
          window in flight and not the six months behind it. The upsert is
          idempotent on (platform, external_id), so writing early costs nothing
-         and a re-run repairs a partial harvest rather than duplicating it. */
-      sink: async (batch) => { total += await upsertMany('trip', batch, ['platform', 'external_id']); },
+         and a re-run repairs a partial harvest rather than duplicating it.
+
+         protectFiFills: a column the fleet-integration feed filled on one of
+         these rows (coordinates are never the portal's; an address, a price
+         or a plate's letter code can be) is not overwritten by the portal's
+         NULL for it. The portal's own values still win wherever it has one.
+         See src/sources/bolt_orders.js. */
+      sink: async (batch) => {
+        total += await upsertMany('trip', await protectFiFills(batch), ['platform', 'external_id']);
+      },
+      /* THE PORTAL HAS NOW ANSWERED FOR THESE INSTANTS. The second Bolt trip
+         source (getFleetOrders) stands in with rows of its own only for the
+         moments the portal has not answered for; once it has, those stand-ins
+         are removed and this feed's rows are the record, so one ride is never
+         two rows. Its own try: a failure here must not cost the harvest the
+         window it just wrote, and it is said rather than swallowed. */
+      answered: async (win, meta) => {
+        try {
+          const r = await supersedeFiRows(c, win, meta);
+          if (r.removed) {
+            log.info(SRC, `portal ${c.fleet}: ${r.removed} fleet-integration stand-in rows replaced by the portal's`,
+              { window: `${iso(win.start)}..${iso(win.end)}` });
+          }
+          if (r.evidence?.basis === 'utc' && !utcSaid) {
+            utcSaid = true;
+            log.warn(SRC, `portal ${c.fleet}: ${r.evidence.says}`);
+            fails.push({ fleet: c.fleet, text: `portal ${c.fleet}: ${r.evidence.says}` });
+          }
+        } catch (e) {
+          const why = String(e?.message || e).slice(0, 160);
+          log.warn(SRC, `portal ${c.fleet}: could not retire fleet-integration stand-ins`, { err: why });
+          fails.push({ fleet: c.fleet, text: `portal ${c.fleet}: answered ${iso(win.start)}..${iso(win.end)}`
+            + ` but its fleet-integration stand-ins were not retired: ${why}` });
+        }
+      },
       ask: async (win, offset) => {
         const first = await askOnce(win, offset, await fresh());
         if (Number(first?.code) !== STALE_TOKEN_CODE) return first;
@@ -1057,7 +1123,10 @@ async function oneFleet(c, from, to, fails, allChunks, plates) {
       },
       warn: (m, x) => log.warn(SRC, `portal ${c.fleet}: ${m}`, x),
     });
-    for (const ch of chunks) allChunks.push({ ...ch, fleet: c.fleet });
+    /* Named by the feed that served them: the run now carries windows from
+       two Bolt surfaces, and /api/status projects `kind` so a reader can see
+       which one answered for which dates. */
+    for (const ch of chunks) allChunks.push({ ...ch, fleet: c.fleet, kind: PORTAL_KIND });
     /* Reaching the end of what the portal keeps is not a fault, and must not be
        reported as one — a backfill that asks for more history than exists will
        hit this every single time it runs. Said once, as a fact about the
@@ -1427,6 +1496,51 @@ export async function collect({ from, to, mode }) {
       fails.push({ fleet: null, text: `portal: ${why}` });
     }
 
+    /* THE SECOND TRIP SOURCE, AFTER THE PORTAL AND ON ITS OWN.
+       ─────────────────────────────────────────────────────────────────────
+       getFleetOrders on the fleet-integration client — the Bolt credential
+       that never expires — over this same window (src/sources/bolt_orders.js
+       carries the measurements and the rules). After the portal, because it
+       fills the rows the portal has just written and stands in only for the
+       instants the portal has not answered for, and the portal's harvest is
+       what moves that mark. In its own try for the reason every surface here
+       has one: neither half may take the other down. */
+    let orders = null;
+    try {
+      /* No client configured is the roster's failure to report, once; a
+         second copy per fleet from this pass would say nothing new. */
+      if (config.bolt.clientId) {
+        orders = await pullFiOrders(from, to, { fails, chunks, rowsByFleet, mint: fiToken,
+          plates: await knownPlates().catch(() => null) });
+      }
+    } catch (e) {
+      const why = String(e && e.message ? e.message : e).slice(0, 200);
+      log.error(SRC, 'fleet-integration orders failed', { err: why });
+      fails.push({ fleet: null, text: `fleet-integration orders: ${why}` });
+    }
+    /* WHICH SOURCE SERVED THE WINDOW, said on the run row. When the portal
+       could not answer for a fleet, its failure is already the first thing
+       that row says — "refresh token expired" — which on its own reads as
+       "no Bolt trips", and that has stopped being true. So the same row now
+       says who did serve them. Only then: on a run where the portal answered,
+       a handful of orders newer than its answer becoming rows is the normal
+       case and is not a fault to paint amber. */
+    for (const c of config.bolt.companies) {
+      const st = orders?.get(c.fleet);
+      const mine = chunks.filter((ch) => ch.fleet === c.fleet);
+      /* The portal fell short for this fleet when none of its windows
+         answered (a dead or missing token returns before asking any) or one
+         of them failed. Read off the windows, not off the failure texts. */
+      const portalShort = !mine.some((ch) => ch.kind === PORTAL_KIND && !ch.error)
+        || mine.some((ch) => ch.kind === PORTAL_KIND && ch.error);
+      const ours = mine.filter((ch) => ch.kind === FI_KIND && !ch.error);
+      if (!st || !portalShort || st.stop || st.failed || !ours.length) continue;
+      const span = `${ours.map((ch) => ch.from).sort()[0]}..${ours.map((ch) => ch.to).sort().at(-1)}`;
+      fails.push({ fleet: c.fleet, text: `fleet-integration getFleetOrders answered ${span}:`
+        + ` ${st.inserted + st.refreshed} trip rows for instants the portal has not answered for`
+        + ` (${st.inserted} new this run), ${st.enriched} portal rows matched` });
+    }
+
     /* A THIRD SURFACE, and on its own for the same reason the first two are.
        The payout list is one GET per fleet for the whole history and takes no
        window, so it costs almost nothing — but it must not be able to take
@@ -1499,8 +1613,12 @@ export async function collect({ from, to, mode }) {
         error: mine.length ? mine.join('; ').slice(0, 500) : null });
     }
     const failedChunks = chunks.filter((c) => c.error).length;
+    const fi = orders ? [...orders.values()] : [];
     log[fails.length ? 'warn' : 'info'](SRC, 'done',
-      { roster, trips, payouts, windows: chunks.length || undefined,
+      { roster, trips, payouts,
+        fi_orders: fi.reduce((a, s) => a + s.orders, 0) || undefined,
+        fi_stand_ins: fi.reduce((a, s) => a + s.inserted + s.refreshed, 0) || undefined,
+        windows: chunks.length || undefined,
         failed_windows: failedChunks || undefined, failed: fails.length || undefined });
   } catch (e) {
     /* Both surfaces are guarded above, so nothing ordinary reaches here — this

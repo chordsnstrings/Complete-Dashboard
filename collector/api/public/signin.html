@@ -93,6 +93,11 @@
   --disp:"Fraunces",Georgia,"Times New Roman",serif;
   --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
   color-scheme:light;
+  /* The page contract's token (pagemeta.js contract()): this page always
+     draws the Arkiv look, so it always builds the contract — which, on a page
+     with no figure, is the footer: its basis, the house principle and the
+     colophon (signin.js contractFoot). */
+  --pg-contract:1;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -142,6 +147,22 @@ a:hover{text-decoration-thickness:2px}
 .si-card{width:100%;max-width:420px;min-width:0}
 .si-foot{font-family:var(--mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--grey);
   border-top:1px solid var(--hair);padding-top:12px}
+/* The footer under the page contract, as the dashboard's (arkiv.css
+   .pagefoot): an ink rule, the basis in grey, the principle in ink at
+   reading weight — words, so not in mono capitals — and the colophon in
+   mono capitals at the right, under it at a phone's width. */
+.si-foot.pagefoot{display:flex;align-items:flex-start;justify-content:space-between;gap:10px 48px;
+  border-top:1.5px solid var(--ink);text-transform:none;letter-spacing:0;font-family:var(--sans)}
+.si-foot .pf-text{max-width:560px;min-width:0}
+.si-foot .pf-p{margin:0;font-size:.82rem;line-height:1.55;color:var(--grey)}
+.si-foot .pf-principle{margin:4px 0 0;font-size:.86rem;font-weight:700;line-height:1.5;color:var(--ink)}
+.si-foot .pf-colophon{font-family:var(--mono);font-size:.62rem;letter-spacing:.15em;text-transform:uppercase;
+  color:var(--grey);text-align:right;line-height:1.95}
+.si-foot .pf-colophon span{display:block}
+@media (max-width: 480px){
+  .si-foot.pagefoot{flex-direction:column}
+  .si-foot .pf-colophon{text-align:left}
+}
 
 /* The step. */
 .si-eyebrow{margin:0 0 10px;font-family:var(--mono);font-size:.7rem;font-weight:500;letter-spacing:.16em;
@@ -216,6 +237,9 @@ a:hover{text-decoration-thickness:2px}
 .si-qr{width:min(208px,100%);padding:10px;background:#FFFFFF;border:1px solid var(--hair)}
 .si-qr svg{display:block;width:100%;height:auto}
 .si-or{margin:0;font-size:.92rem;color:var(--grey)}
+/* A passkey and single sign-on, when the Owner has turned them on, above the
+   password form (signin.js altWays). */
+.si-alt + .si-or{margin:18px 0 14px}
 .si-key{display:flex;flex-wrap:wrap;gap:4px 12px;margin:0;padding:10px 12px;background:var(--paper-2);
   font-family:var(--mono);font-size:1.02rem;font-weight:500;letter-spacing:.06em;-webkit-user-select:all;user-select:all}
 .si-key span{white-space:nowrap}

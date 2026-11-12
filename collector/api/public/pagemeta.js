@@ -82,3 +82,36 @@ export const isMonth = (m) => MONTH_RE.test(String(m || ''));
 
 /** The workbook of the month on screen. */
 export const workbookUrl = (month = null) => `/api/export/target-month.xlsx${isMonth(month) ? `?month=${month}` : ''}`;
+
+/* THE PAGE CONTRACT'S TOKEN, and the house principle.
+   ─────────────────────────────────────────────────────────────────────────
+   Which DOM a page builds — the page contract (docs/UI-REDESIGN-PLAN.md §3:
+   00 AT A GLANCE → 01 the hero → the supporting marks → † what this page
+   does not know → the footer with the principle line) or the old page — is
+   the other thing the shell knows about a page before it loads, and it is
+   asked of a token, never of the skin attribute: app.css declares
+   --pg-contract:0 for the old skin, arkiv.css 1 (test/arkiv_skin.test.mjs
+   holds every module to that). No stylesheet — a test harness, a detached
+   document, node — answers the old skin, which is what a page draws when it
+   cannot tell.
+
+   It lived in ui.js, which 56 of the 84 front-end modules import it from
+   (ui.js re-exports it from here, unchanged). The sign-in page could not ask
+   it: signin.html is its own document and loads no module of the dashboard
+   on purpose — ui.js pulls in charts.js, data.js and tokens.js, about 350 KB
+   a person who has not signed in has no use for — so it printed none of the
+   contract, not even the principle line every other page carries (HANDOFF
+   §4.5, "page-contract branches for … sign-in"). Here, in a module that
+   imports nothing and is already on every first screen, it costs the
+   sign-in page 5 KB and the first screen no extra module (test/
+   lazy_pages.test.mjs counts them). signin.html declares --pg-contract:1
+   itself, because it always draws the Arkiv look. */
+export function contract() {
+  try {
+    return String(getComputedStyle(document.documentElement).getPropertyValue('--pg-contract')).trim() === '1';
+  } catch { return false; }
+}
+
+/* The house principle, verbatim. index.html prints it in the shell footer;
+   ui.js pageFoot() and the sign-in page's footer print this constant. */
+export const PRINCIPLE = 'A figure that cannot be measured is shown absent, with the reason — never as zero.';

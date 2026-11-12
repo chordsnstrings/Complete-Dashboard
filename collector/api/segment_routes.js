@@ -21,6 +21,7 @@ import { placeEnds, RATE_SQL, forgone } from './place_sql.js';
 import { custodyNames, custodyRefs, peopleCount, personKey } from './custody_sql.js';
 import { areaOf } from './analytics_routes.js';
 import { occCountsOnce, occSourceLabel, occBySource, OCC_DEDUPE_RULE, OCC_SOURCES } from './occupancy_sql.js';
+import { onlyFleet } from './access/one_fleet.js';
 
 /* THE RECONCILER'S OWN VOCABULARY, in one place.
    ─────────────────────────────────────────────────────────────────────────
@@ -105,16 +106,34 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
     const day = /^\d{4}-\d{2}-\d{2}$/.test(req.query.day || '') ? req.query.day : null;
     const driver = req.query.driver ? String(req.query.driver) : null;
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 300));
+    /* ONE FLEET'S SEGMENTS, for a reader whose access covers one fleet
+       (api/access/one_fleet.js). This list never read the fleet chip at all
+       — the system audit of 2026-11-12 found it answering both fleets under
+       either — so a one-fleet reader was refused it outright. The gate now
+       writes the reader's fleet into `_fmfleet`, and it narrows EVERY query
+       below: the rows, the total, and each facet and per-provider count,
+       because a facet counted over both fleets beside one fleet's rows is the
+       other fleet's figure printed as yours. Null for everyone else, so an
+       unrestricted reader's answer is exactly what it was. */
+    const only = onlyFleet(req);
 
-    // $1..$2 window, $3 verdict, $4 plate, $5 day, $6 driver — all optional and
-    // all nullable, so one statement serves every filter combination rather
-    // than five near-identical ones drifting apart.
-    const p = [from, to, verdict, plate, day, driver];
+    // $1..$2 window, $3 verdict, $4 plate, $5 day, $6 driver, $7 the one
+    // fleet — all optional and all nullable, so one statement serves every
+    // filter combination rather than five near-identical ones drifting apart.
+    const p = [from, to, verdict, plate, day, driver, only];
     const WHERE = `${DAYWIN('o.started_at')}
        AND ($3::text IS NULL OR o.verdict = $3)
        AND ($4::text IS NULL OR o.plate = $4)
        AND ($5::text IS NULL OR (o.started_at AT TIME ZONE 'Asia/Dubai')::date = $5::date)
-       AND ($6::text IS NULL OR ${CUSTODY} ILIKE '%' || $6 || '%')`;
+       AND ($6::text IS NULL OR ${custodyNames('o.plate', SEG_DAY, '$7')} ILIKE '%' || $6 || '%')
+       AND ($7::text IS NULL OR o.fleet_id = $7)`;
+    /* The window alone ($1, $2), narrowed to the one fleet ($3) when there is
+       one — what the facets are counted over. */
+    const pw = [from, to, only];
+    const WIN = `${DAYWIN('o.started_at')} AND ($3::text IS NULL OR o.fleet_id = $3)`;
+    /* Who held the car, from that fleet's custody records only ($7). */
+    const CUSTODY_1 = custodyNames('o.plate', SEG_DAY, '$7');
+    const CUSTODY_IDS_1 = custodyRefs('o.plate', SEG_DAY, '$7');
 
     /* THE FACETS ARE TOTALS, SO THEY COUNT A RIDE ONCE.
        ─────────────────────────────────────────────────────────────────────
@@ -127,9 +146,9 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
        `source` facet is each provider's own count. The list's own `total` is
        a count of ROWS, because it is the size of the list. */
     const ONCE_WIN = `(SELECT o.*, ${occCountsOnce('o')} AS once FROM occupancy_segment o
-       WHERE ${DAYWIN('o.started_at')}) o`;
+       WHERE ${WIN}) o`;
     const [rows, byVerdict, byPlate, byDay, byReason, [tot], [facetN], bySource] = await Promise.all([
-      q(`SELECT ${SEG_COLS}, ${CUSTODY} AS drivers, ${CUSTODY_IDS} AS driver_refs
+      q(`SELECT ${SEG_COLS}, ${CUSTODY_1} AS drivers, ${CUSTODY_IDS_1} AS driver_refs
           FROM occupancy_segment o WHERE ${WHERE}
           ORDER BY o.started_at DESC, o.source LIMIT ${limit}`, p),
       // Facets are computed over the WINDOW, not over the current filter —
@@ -143,7 +162,7 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
                   'fms_live', count(*) FILTER (WHERE o.source='fms_live'),
                   'fms_trip', count(*) FILTER (WHERE o.source='fms_trip')) AS by_source
           FROM ${ONCE_WIN}
-          GROUP BY 1 ORDER BY n DESC`, [from, to]),
+          GROUP BY 1 ORDER BY n DESC`, pw),
       // Plate-level, so the per-segment custody subquery cannot ride along —
       // grouping by it would return one row per segment wearing a plate label.
       q(`SELECT plate AS key, count(*) FILTER (WHERE once)::int n,
@@ -151,20 +170,20 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
                 round(sum(distance_km) FILTER (WHERE verdict='unauthorized' AND once)::numeric,1) unauth_km,
                 count(*)::int segments
           FROM ${ONCE_WIN}
-          GROUP BY 1 ORDER BY unauthorized DESC, n DESC LIMIT 40`, [from, to]),
+          GROUP BY 1 ORDER BY unauthorized DESC, n DESC LIMIT 40`, pw),
       q(`SELECT to_char((o.started_at AT TIME ZONE 'Asia/Dubai')::date,'YYYY-MM-DD') AS key,
                 count(*) FILTER (WHERE o.once)::int n,
                 count(*) FILTER (WHERE o.verdict='unauthorized' AND o.once)::int unauthorized
           FROM ${ONCE_WIN}
-          GROUP BY 1 ORDER BY 1`, [from, to]),
+          GROUP BY 1 ORDER BY 1`, pw),
       // What the reconciler actually said. This is the honest version of the
       // hardcoded sentence: a reason with no rows is a reason we never give.
       q(`SELECT ${REASON_SHAPE('o.verdict_reason')} AS key, count(*)::int n,
                 min(o.verdict) AS verdict,
                 max(${SKEW('o.verdict_reason')})::int AS max_skew_min,
                 count(*) FILTER (WHERE ${SKEW('o.verdict_reason')} IS NOT NULL)::int skewed
-          FROM occupancy_segment o WHERE ${DAYWIN('o.started_at')}
-          GROUP BY 1 ORDER BY n DESC LIMIT 20`, [from, to]),
+          FROM occupancy_segment o WHERE ${WIN}
+          GROUP BY 1 ORDER BY n DESC LIMIT 20`, pw),
       q(`SELECT count(*)::int n,
                 count(*) FILTER (WHERE o.low_confidence)::int low_confidence,
                 count(*) FILTER (WHERE o.verdict_reason IS NULL)::int unreasoned
@@ -172,13 +191,13 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
       // How many facet values exist, against how many the lists above show.
       q(`SELECT count(DISTINCT o.plate)::int plates,
                 count(DISTINCT ${REASON_SHAPE('o.verdict_reason')})::int reasons
-          FROM occupancy_segment o WHERE ${DAYWIN('o.started_at')}`, [from, to]),
+          FROM occupancy_segment o WHERE ${WIN}`, pw),
       // Each provider's own figures over the window: every segment it produced.
       q(`SELECT source, count(*)::int segments,
                 count(*) FILTER (WHERE verdict='unauthorized')::int unauthorized,
                 round(sum(distance_km) FILTER (WHERE verdict='unauthorized')::numeric,1) unauth_km
-          FROM occupancy_segment o WHERE ${DAYWIN('o.started_at')}
-          GROUP BY source`, [from, to]),
+          FROM occupancy_segment o WHERE ${WIN}
+          GROUP BY source`, pw),
     ]);
 
     res.json({
@@ -191,7 +210,8 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
       facets: { verdict: byVerdict, plate: byPlate, day: byDay, reason: byReason,
         /* Every provider, whether or not it produced anything, with the true
            reason where it did not — see occBySource(). */
-        source: OCC_SOURCES.map((s) => ({ key: s, ...occBySource(bySource, { from, to })[s] })) },
+        source: OCC_SOURCES.map((s) => ({ key: s,
+          ...occBySource(bySource, only ? { from, to, fleet: only } : { from, to })[s] })) },
       /* How the facet counts relate to the rows and to each other. */
       dedupe_rule: OCC_DEDUPE_RULE,
       /* A facet list is a set of filters somebody can choose. Two of these are

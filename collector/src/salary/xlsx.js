@@ -93,10 +93,34 @@ function findEocd(buf) {
     + '(OLE2, magic D0 CF 11 E0), a CSV with the wrong extension, or corrupt.');
 }
 
-export function unzip(buf) {
+/* `maxBytes` — a ceiling on what the archive may unpack to, in total.
+   ─────────────────────────────────────────────────────────────────────────
+   Added 2026-11-12 when this reader got its first caller that takes a file
+   from a browser (POST /api/wage-sheet/preview). Deflate compresses a run of
+   one byte about a thousand to one, so a four-megabyte upload can be a
+   four-GIGABYTE workbook, and inflateRawSync with no limit allocates all of it
+   — outside the V8 heap, where no worker's heap limit can catch it — on a
+   machine with 512 MB. The limit is enforced by zlib itself
+   (maxOutputLength), member by member against what remains, so the bomb is
+   refused while it is still being unpacked rather than after. A stored member
+   is its own size and is counted the same way. Absent, nothing is capped:
+   the operator's own corpus runs (bin/salary-verify.mjs) and the HR import
+   read files the operator chose, and their behaviour is unchanged. */
+export function unzip(buf, { maxBytes = Infinity } = {}) {
   const eocd = findEocd(buf);
   const entryCount = buf.readUInt16LE(eocd + 10);
   let off = buf.readUInt32LE(eocd + 16);
+  let unpacked = 0;
+  /* The reason has to be true of every file it can be said of. It used to
+     end "because a file that compresses that far is built to exhaust the
+     memory of whatever opens it" — true of a deflate bomb, false of a big
+     honest workbook that simply holds more than the cap, which compresses no
+     further than any other. So it says what is known: the size, how far past
+     a wage sheet that is, and the two things such a file can be. */
+  const tooBig = () => new Error(`this workbook unpacks to more than ${Math.round(maxBytes / 1048576)} MB — `
+    + 'far past any wage sheet, whose tabs of a few hundred rows unpack to under one — so it was '
+    + 'refused rather than unpacked: a file that size is either not a wage sheet or built to '
+    + 'exhaust the memory of whatever opens it');
   if (off === 0xffffffff || entryCount === 0xffff) {
     throw new Error('this archive is Zip64 and this reader does not implement it. '
       + 'Zip64 appears past 65,535 entries or 4 GiB; a salary workbook that '
@@ -134,7 +158,22 @@ export function unzip(buf) {
     const lExtraLen = buf.readUInt16LE(localOff + 28);
     const start = localOff + 30 + lNameLen + lExtraLen;
     const raw = buf.subarray(start, start + compSize);
-    files.set(name, method === 0 ? Buffer.from(raw) : inflateRawSync(raw));
+    let out;
+    if (method === 0) {
+      out = Buffer.from(raw);
+    } else if (Number.isFinite(maxBytes)) {
+      const room = maxBytes - unpacked;
+      if (room <= 0) throw tooBig();
+      try { out = inflateRawSync(raw, { maxOutputLength: room }); } catch (e) {
+        if (e?.code === 'ERR_BUFFER_TOO_LARGE' || e instanceof RangeError) throw tooBig();
+        throw e;
+      }
+    } else {
+      out = inflateRawSync(raw);
+    }
+    unpacked += out.length;
+    if (unpacked > maxBytes) throw tooBig();
+    files.set(name, out);
     off += 46 + nameLen + extraLen + commentLen;
   }
   return files;
@@ -346,9 +385,9 @@ function readSheet(xml, strings, isDateStyle) {
    sheetN.xml is NOT the sheet's position — a workbook whose tabs have been
    reordered or deleted keeps the old file names, so a reader that sorts by
    filename silently reads the wrong tab. */
-export function readWorkbook(bufOrPath) {
+export function readWorkbook(bufOrPath, { maxBytes = Infinity } = {}) {
   const buf = Buffer.isBuffer(bufOrPath) ? bufOrPath : readFileSync(bufOrPath);
-  const files = unzip(buf);
+  const files = unzip(buf, { maxBytes });
   const text = (n) => (files.has(n) ? files.get(n).toString('utf8') : null);
 
   const wbXml = text('xl/workbook.xml');

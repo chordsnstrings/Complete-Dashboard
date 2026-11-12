@@ -2,6 +2,8 @@
 // Not shipped — used only to render and screenshot the dashboard during development.
 import { custodyWindows, carRuns, movementSegments, movementTotals } from './api/day_movement.js';
 import express from 'express';
+import { retentionSettings, telemetryCutoff, alertCutoff } from './src/data_retention.js';
+import { RETENTION_SCHEDULE } from './api/data_retention_routes.js';
 import { foldGrain, grainOf, previousWindow, PERIODS, dubaiDay } from './api/window.js';
 /* The HR roster's own parser and status rule — real, so the page's import
    panel is refused in the mock for exactly the reasons production refuses it,
@@ -15,6 +17,10 @@ import { deriveFleetName, platformLabel, accountLabel } from './src/fleet_names.
    moment either changes, and the browser tests that read this would then be
    certifying a shape nothing ships. */
 import { shape, windowOf, driverRecord, fleetRecord } from './api/performance_routes.js';
+/* The hero sparklines' registry and window rule — real, so /api/history's
+   fixture below answers for the same pages, series and spans the route does. */
+import { METRICS as H_METRICS, PAGES as H_PAGES, historyWindow, addDays as hAddDays,
+  mondayOf as hMondayOf } from './api/history_routes.js';
 /* The revenue target and the trips minimum are the real arithmetic over a
    made-up month, for the same reason: a fixture typed by hand would certify
    a shape the server stopped returning. */
@@ -109,6 +115,19 @@ app.get('/api/live', (_, r) => r.json(plates.map((p, i) => ({
      draws from (test/arkiv_classic_frozen.test.mjs). */
   place: i % 5 === 4 ? null : { area: ['Deira', 'Al Barsha 1', 'Dubai Marina', 'Business Bay'][i % 4], votes: 120 + i, seen: 200 + i },
 }))));
+
+/* The tracker roster's note (api/fleet_roster_routes.js, FIXLIST C18): the
+   mock's fleet has nothing set aside, which is the answer that draws nothing
+   — so the old skin's pages, held byte for byte by arkiv_classic_frozen, do
+   not move. A test that needs plates set aside overrides this with a fixture
+   (test/fleet_roster_pages.test.mjs). */
+app.get('/api/fleet/roster', (req, r) => r.json({
+  fleet: req.query.fleet || null, n: 0, held: 0, known: true, state: 'read',
+  reason: 'Every plate the tracker feed holds is one the tracker still lists.',
+  why: 'the tracker still lists every plate it holds', plates: [], truncated: false,
+  departed: 0, pending: 0, listed: 40,
+  fleets: [{ fleet: 'ecosine', polls: 900, updated_at: new Date().toISOString(), departed: 0, pending: 0, listed: 40 }],
+}));
 
 /* The replay day picker reached exactly 400 rows in production, which is what
    a cap looks like when it has bitten and nothing says so: the day a reader is
@@ -275,6 +294,12 @@ app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03,
      that have stopped answering — the mock carries some, or a page that
      renders them would never be exercised. */
   silent_vehicles: 6, tracked_vehicles: 61, alerts: 8863,
+  /* What the tracker roster set aside from those counts (FIXLIST C18):
+     nothing here, which draws nothing — see /api/fleet/roster below. */
+  tracked_set_aside: 0,
+  fleet_roster: { n: 0, held: 0, known: true, state: 'read',
+    reason: 'Every plate the tracker feed holds is one the tracker still lists.',
+    why: 'the tracker still lists every plate it holds', plates: [], truncated: false },
   /* The safety headline, and the two things that make it readable: the
      distance it was actually taken over, and which days those were. `km` above
      runs to the edge of the window and alert_km stops at the feed's covered
@@ -2417,6 +2442,8 @@ app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
   alert_days: 22, alert_window_days: 30,
   current_driver: i === 6 ? null : drivers[i],
   driver_as_of: new Date().toISOString(),
+  /* Set aside by the tracker roster (FIXLIST C18): none of the mock's cars. */
+  set_aside: null,
 }))));
 
 /* #feeds — every car Uber lists as active, green or red per feed.
@@ -3425,6 +3452,86 @@ app.get('/api/cancellations', (req, r) => {
         + 'strength of a word that does not say so.'
       : null,
   });
+});
+
+/* /api/history — the hero sparklines' series (api/history_routes.js).
+   ─────────────────────────────────────────────────────────────────────────
+   The same shape as the real route, from the real module's own registry and
+   window rule (imported, not copied, for the reason the performance import
+   above gives), over made-up values. Every kind of gap the real route sends
+   is in here, so a page that drew a null as zero, or dropped the reason, is
+   caught by the browser tests: today left out of a daily line, one day in
+   the middle not measured, a week still running, a week before any cash.
+   An unreadable start time is absent in the route's own words. */
+app.get('/api/history', (req, r) => {
+  const page = String(req.query.page || '');
+  const P = H_PAGES[page];
+  if (!P) return r.status(400).json({ error: 'page must name a page whose hero carries a history', pages: Object.keys(H_PAGES) });
+  const asked = req.query.metrics
+    ? [...new Set(String(req.query.metrics).split(',').map((s) => s.trim()).filter(Boolean))] : P.metrics;
+  const bad = asked.filter((m) => !P.metrics.includes(m));
+  if (!asked.length || bad.length) return r.status(400).json({ error: `#${page} carries no series called ${bad.join(', ')}`, metrics: P.metrics });
+  if (P.needs === 'id' && !req.query.id) return r.status(400).json({ error: `#${page} is one person's page — name the account with ?id=` });
+  const today = dubaiDay(new Date());
+  const w = historyWindow(req, P, today);
+  const meta = (m) => ({ metric: m, label: H_METRICS[m].label, unit: H_METRICS[m].unit, grain: H_METRICS[m].grain,
+    source: H_METRICS[m].source, basis: H_METRICS[m].basis, class: H_METRICS[m].cls });
+  const absent = (m, why) => ({ ...meta(m), absent: why, points: [], measured: 0, of: 0 });
+  const base = { page, grain: P.grain, from: w.from, to: w.to, today, fleet: req.query.fleet || null,
+    platform: req.query.platform || null, cut: w.cut };
+  if (w.future) return r.json({ ...base, series: Object.fromEntries(asked.map((m) => [m, absent(m, 'the window asked for begins after today, so it holds no history yet')])) });
+  const built = new Date(Date.now() - 9 * 60e3).toISOString();
+  const buckets = [];
+  if (P.grain === 'week') for (let d = hMondayOf(w.from); d <= w.to; d = hAddDays(d, 7)) buckets.push(d);
+  else for (let d = w.from; d <= w.to; d = hAddDays(d, 1)) buckets.push(d);
+  const startOk = /^([01]?\d|2[0-3]):([0-5]\d)$/.test(String(req.query.start ?? '').trim());
+  const series = {};
+  for (const m of asked) {
+    if (m === 'late' && !startOk) {
+      series[m] = absent(m, String(req.query.start ?? '').trim() === ''
+        ? 'No start time was set, so nobody is marked late or on time.'
+        : `"${String(req.query.start).trim().slice(0, 20)}" is not a time this page can read. Give it as HH:MM on a 24-hour clock — `
+          + '06:00, not 6am — and nobody is judged until it can be.');
+      continue;
+    }
+    let run = 0;
+    const points = buckets.map((d, i) => {
+      const p = { d, v: null, why: null };
+      const end = P.grain === 'week' ? hAddDays(d, 6) : d;
+      if (P.grain === 'day' && d >= today) { p.why = 'today is still being collected, so it is not drawn as a finished day'; return p; }
+      if (m === 'money' && end >= today) { p.why = 'this week is still running — 4 of its 7 days so far'; return p; }
+      if (m === 'cash_ceiling' || m === 'cash_carriers') {
+        p.as_of = end < today ? end : today;
+        if (i === 0) { p.why = `no valued cash fare is on record for anyone here by ${p.as_of}`; return p; }
+        run += 4200 + ((i * 611) % 2300);
+        p.v = m === 'cash_ceiling' ? Math.round(run * 100) / 100 : 180 + i * 3;
+        return p;
+      }
+      if (i === 3) {
+        p.why = m === 'late' ? 'no Uber account has an online event on this day — the timeline did not reach it, so nobody can be judged late or on time'
+          : m === 'money' ? 'bookings this week, and no statement or priced fare covers them yet'
+            : 'no booking channel reported anything on this day';
+        /* The count rides beside the sentence, as the route sends it. */
+        if (m === 'money') p.bookings = 6;
+        return p;
+      }
+      p.v = m === 'late' ? 4 + ((i * 7) % 9)
+        : m === 'money' ? Math.round((1650 + ((i * 317) % 900)) * 100) / 100
+          : m === 'cancelled' ? 38 + ((i * 13) % 25)
+            : m === 'km' ? 14000 + ((i * 977) % 3000)
+              : m === 'revenue' ? 41000 + ((i * 1733) % 9000)
+                : m === 'completed' ? 690 + ((i * 29) % 80) : 740 + ((i * 31) % 90);
+      if (m === 'late') p.reported = 60 + i;
+      if (m === 'money') { p.money_days = 6; p.sources = ['statement']; }
+      return p;
+    });
+    series[m] = { ...meta(m), absent: null,
+      ...(m === 'late' ? { expected_start: String(req.query.start).trim().padStart(5, '0') } : {}),
+      ...(m.startsWith('cash_') ? { as_of: built } : {}),
+      built: { [H_METRICS[m].source]: built },
+      points, measured: points.filter((p) => p.v != null).length, of: points.length };
+  }
+  r.json({ ...base, series });
 });
 
 app.get('/api/tesla/status', (_, r) => r.json({
@@ -7526,6 +7633,25 @@ app.get('/api/admin-mode', (req, r) => r.json({
   detail: 'ADMIN_TOKEN is not set on this service, so write endpoints accept a request without '
     + 'one. Reads stay redacted either way.',
 }));
+
+/* The Settings page's Data retention panel (api/data_retention_routes.js), in
+   the state production is in from the deploy until the first nightly pass:
+   the policy that would apply, computed by the real helpers from their
+   defaults, and no run yet — said, not left blank. route_smoke demands a
+   fixture for every route the UI calls (integration, 2026-11-12). */
+app.get('/api/settings/retention', (_, r) => {
+  const settings = retentionSettings((_k, d) => d);
+  const tele = telemetryCutoff(settings);
+  const alert = alertCutoff(settings);
+  r.json({
+    next: { ...settings, schedule: RETENTION_SCHEDULE,
+      telemetry_cutoff: tele ? { day: tele.day, asked: tele.asked, floor: tele.floor, floored: tele.floored } : null,
+      alert_cutoff: alert ? { day: alert.day } : null },
+    last: null, history: [], state: [],
+    absent: `no retention pass has run yet; the first is at ${RETENTION_SCHEDULE.utc} UTC `
+      + `(${RETENTION_SCHEDULE.dubai} Dubai), or by hand with \`node src/index.js retention dry-run\``,
+  });
+});
 
 app.get('/api/settings', (_, r) => r.json([
   /* Unset in the API's own environment but held by the collector — the case

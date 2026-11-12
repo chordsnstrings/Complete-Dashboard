@@ -10,6 +10,8 @@ import { empty, fmt, areaChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity,
   countOf, plural, sourceLabel, signed, verdict, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, delta, foldRows } from './ui.js';
 import { q, href } from './data.js';
+/* ANS: the page's answer line and Act-on strip (answers.js). */
+import { answer } from './answers.js';
 
 /* "Aug 25" is how every other page in this product writes a DATE — the 25th of
    August — and this page used the same form to mean August 2025. On a screen
@@ -102,6 +104,7 @@ export async function renderRetention(root) {
   loading(root);
   const d = await q('/api/retention');
   root.innerHTML = '';
+  answer(root, 'retention', d);
 
   if (!d.ok) return empty(root, d.reason || 'Not enough history to follow a cohort.');
 

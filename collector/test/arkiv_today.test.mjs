@@ -479,17 +479,23 @@ console.log('\n#action');
   const s = await shape(page);
   const hero = await page.evaluate(() => ({ sw: !!document.querySelector('#view .kpis.glance .is-hero .n .sw-proj'),
     title: document.querySelector('#viewTitle')?.textContent || '' }));
-  check('00, what we found and what to do side by side, †', JSON.stringify(s.heads)
-    === JSON.stringify(['At a glance', 'What we found', 'What to do', '† What this page does not know']), JSON.stringify(s.heads));
+  /* "Who is on it" (REV, 2026-11-12): the finding-owner panel sits between
+     the actions and the † band; a visitor is told it is for signed-in people. */
+  check('00, what we found and what to do side by side, who is on it, †', JSON.stringify(s.heads)
+    === JSON.stringify(['At a glance', 'What we found', 'What to do', 'Who is on it', '† What this page does not know']), JSON.stringify(s.heads));
   check('a modelled size is the hero, with the hatch swatch and its label', s.hero === 'Sized at'
     && s.values['Sized at'] === 'AED 1,680.00' && hero.sw && /modelled holding cost/.test(s.subs['Sized at']), JSON.stringify(s.values));
   check('the figure the rule fired on says what it is, per rule', s.subs['Measured at'] === 'bookings in the last 14 days',
     s.subs['Measured at']);
   check('a tile for the same rule elsewhere, zero said as such', s.values['The same rule elsewhere'] === '0'
     && /no other open finding/.test(s.subs['The same rule elsewhere']), JSON.stringify(s.subs));
-  check('the † band: parked on purpose, where the AED comes from, whether anyone acted, what the figure is not',
+  /* "Whether anyone acted — not recorded" stopped being true when findings
+     gained owners (REV): who took one and how it closed is now recorded, under
+     Who is on it. What is still unknown is whether the fix WORKED. */
+  check('the † band: parked on purpose, where the AED comes from, whether the fix worked, what the figure is not',
     JSON.stringify(s.abs.map((c) => c.label)) === JSON.stringify(['Whether the car is parked on purpose', 'Where the AED comes from',
-      'Whether anyone acted', 'What the figure is not']) && s.abs[1].fig === 'An assumption', JSON.stringify(s.abs));
+      'Whether the fix worked', 'What the figure is not']) && s.abs[1].fig === 'An assumption'
+      && /recorded under Who is on it/.test(s.abs[2].why || ''), JSON.stringify(s.abs));
   check('the page is still titled by the finding', /L46207 is reporting but has not earned/.test(hero.title), hero.title);
   await ctx.close();
 }

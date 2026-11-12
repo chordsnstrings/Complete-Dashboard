@@ -58,6 +58,13 @@
    itself) — the page says so and why, and offers what still works, rather
    than drawing a guess. */
 import { who, loadWho, getJson, post, signOut, ROLE } from './access.js';
+/* Passkeys and single sign-on (api/public/signin_methods.js): offered only
+   when /api/auth/methods says the Owner turned them on and the platform is
+   ready — otherwise this page is exactly what it was. */
+import { signInWithPasskey, passkeySupported, ssoRefusal } from './signin_methods.js';
+/* The page contract's token and the principle line — from pagemeta.js, which
+   imports nothing, so this page still loads no module of the dashboard. */
+import { contract, PRINCIPLE } from './pagemeta.js';
 
 /* ── pure helpers (exported for test/signin_page.test.mjs) ───────────── */
 
@@ -134,6 +141,7 @@ const root = () => document.getElementById('signin');
 const S = {
   back: '/', why: '', email: '', notice: null, ticket: null, meError: '',
   acts: {},      // what each data-act button in the current step does
+  methods: null, // /api/auth/methods: { passkeys, sso: { name } | null }
 };
 
 /* Every field this page draws. The hint is tied to its input with
@@ -315,13 +323,54 @@ function signedInAs() {
 }
 const signOutAct = { signout: () => signOut() };
 
-/* ── 1. sign in ───────────────────────────────────────────────────────── */
+/* ── 1. sign in ─────────────────────────────────────────────────────────
+   A passkey and the company's single sign-on come FIRST when they are on
+   (ULM-DESIGN §10.1: the passkey is the primary way in), the password form
+   under them. A passkey needs no email typed: the browser offers the
+   passkeys it holds for this site. The single sign-on button is a plain
+   link — the server sends the browser on to the provider and back. */
+function altWays() {
+  const m = S.methods || {};
+  const pk = m.passkeys && passkeySupported();
+  const sso = m.sso && m.sso.name;
+  if (!pk && !sso) return '';
+  const href = `/api/auth/sso/start${S.back && S.back !== '/' ? `?back=${encodeURIComponent(S.back)}` : ''}`;
+  return `
+    <div class="si-actions si-alt">
+      ${pk ? '<button class="si-btn" type="button" data-act="passkey">Continue with passkey</button>' : ''}
+      ${sso ? `<a class="si-btn ghost" href="${esc(href)}" data-sso="1">Continue with ${esc(sso)}</a>` : ''}
+      <p class="si-err" id="si-alt-err" role="alert" hidden></p>
+    </div>
+    <p class="si-or">Or with your email and password:</p>`;
+}
+
+/* The passkey ceremony, from a button on any step. The answer is the
+   server's sentence; closing the browser's passkey sheet is said as that,
+   not as an error (signin_methods.js passkeyFailure). */
+async function passkeyIn(btn) {
+  const err = root().querySelector('#si-alt-err');
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Waiting for your passkey…';
+  if (err) err.hidden = true;
+  try {
+    const r = await signInWithPasskey(post);
+    if (r?.ok) { await forgetPreviousReader(); await afterSignIn(); return; }
+    if (err) { err.textContent = 'The server did not confirm the sign-in. Try again.'; err.hidden = false; }
+  } catch (e) {
+    if (err) { err.textContent = says(e); err.hidden = false; }
+  } finally {
+    if (btn.isConnected) { btn.disabled = false; btn.textContent = was; }
+  }
+}
+
 function stepLogin() {
   const open = Boolean(who.now) && who.mode === 'open' && !who.signedIn;
   const box = paint(`
     <p class="si-eyebrow">Sign in</p>
     <h1 tabindex="-1">Sign in to FleetMirror</h1>
     ${notice()}
+    ${altWays()}
     <form class="si-form" id="si-login" novalidate>
       ${field({ id: 'si-email', label: 'Email', type: 'email', value: S.email, auto: 'username',
     extra: 'inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false" required' })}
@@ -333,7 +382,7 @@ function stepLogin() {
       <p>Forgot your password? <button type="button" class="si-link" data-act="forgot">Get a reset code by text message</button>
         — it goes to the mobile you confirmed on your account page. Without one, ask the Owner or an Access admin to send you a reset link.</p>
       ${open ? `<p class="si-open">Signing in is optional for now — you can also <a href="${esc(S.back)}">continue without an account</a>.</p>` : ''}
-    </div>`, { title: 'Sign in', focus: S.email ? '#si-password' : 'input', acts: { forgot: () => stepForgot() } });
+    </div>`, { title: 'Sign in', focus: S.email ? '#si-password' : 'input', acts: { forgot: () => stepForgot(), passkey: (b) => passkeyIn(b) } });
 
   const form = box.querySelector('form');
   form.addEventListener('submit', (e) => {
@@ -478,6 +527,52 @@ function stepCode({ recovery = false } = {}) {
   });
 }
 
+/* ── 1c. the code still owed after single sign-on ──────────────────────
+   The provider signed the person in but did not say it used a second
+   factor, and this person has two-step on: the code, exactly as after a
+   password. The ticket is an HttpOnly cookie the return trip left
+   (/api/auth/sso/callback), never in the address, so this form sends only
+   the code. */
+function stepSsoCode({ recovery = false } = {}) {
+  const box = paint(`
+    <p class="si-eyebrow">Two-step sign-in</p>
+    <h1 tabindex="-1">Enter your code</h1>
+    <p class="si-lede">${esc(S.methods?.sso?.name || 'Your company\u2019s sign-in')} signed you in. Your account also asks for the code from your authenticator app.</p>
+    ${notice()}
+    <form class="si-form" id="si-ssocode" novalidate>
+      ${field({ id: 'si-scode', label: recovery ? 'Recovery code' : 'Code', auto: 'one-time-code', cls: 'code',
+    extra: recovery ? 'inputmode="text" autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="16"' : 'inputmode="numeric" maxlength="16"',
+    hint: 'The six digits your authenticator app shows for FleetMirror — or, without your phone, one of your recovery codes (xxxxx-xxxxx).' })}
+      ${errLine}
+      <div class="si-actions"><button class="si-btn" type="submit">Continue</button></div>
+    </form>
+    <div class="si-quiet">
+      <p><button type="button" class="si-link" data-act="toggle">${recovery ? 'Use the code from your app instead' : 'Use a recovery code instead'}</button></p>
+      <p><button type="button" class="si-link" data-act="restart">Start again</button></p>
+    </div>`, {
+    title: 'Enter your code',
+    acts: { toggle: () => stepSsoCode({ recovery: !recovery }), restart: () => stepLogin() },
+  });
+  const form = box.querySelector('form');
+  const input = form.querySelector('#si-scode');
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const n = normaliseCode(input.value);
+    if (!n) { showErr(form, 'Enter the six digits from your app, or a recovery code of ten letters and digits (xxxxx-xxxxx).'); return; }
+    submitting(form, 'Checking…', async () => {
+      try {
+        const r = await post('/api/auth/sso/code', { code: n.code }, { retry: false });
+        if (r?.ok) { await forgetPreviousReader(); await afterSignIn(); return; }
+        showErr(form, 'The server did not confirm the code. Try again.');
+      } catch (err) {
+        if (['expired', 'slow_down'].includes(err.body?.error)) { S.notice = { tone: 'bad', text: says(err) }; stepLogin(); return; }
+        showErr(form, says(err));
+        input.select();
+      }
+    });
+  });
+}
+
 /* A session whose person has two-step on but which never gave a code (one
    that predates the code being turned on, where the server did not end it).
    Only a fresh sign-in can prove the second factor, so end this one. */
@@ -546,6 +641,21 @@ async function drawQr(text) {
   return q.createSvgTag({ cellSize: 4, margin: 16, scalable: true });
 }
 
+/* A passkey counts as two-step on its own (ULM-DESIGN §5.1; middleware.js
+   identify): a person held here after a PASSWORD sign-in, whose account has a
+   passkey, need not set up an app at all. The page cannot know before sign-in
+   whether this account has one, so it says "if" — and the way there is to
+   end this password session and sign in with the passkey. */
+const passkeyInstead = () => (S.methods?.passkeys && passkeySupported()
+  ? `<div class="si-quiet"><p>A passkey counts as two-step sign-in by itself. If this account has one,
+      <button type="button" class="si-link" data-act="usepasskey">sign out and use your passkey instead</button>.</p></div>` : '');
+async function usePasskeyInstead() {
+  try { await post('/api/auth/logout', {}, { retry: false }); } catch { /* ended either way */ }
+  await refreshWho();
+  S.notice = { tone: '', text: 'Choose “Continue with passkey” to sign in with your passkey.' };
+  stepLogin();
+}
+
 const TOTP_HEAD = `
     <p class="si-eyebrow">Two-step sign-in</p>
     <h1 tabindex="-1">Set up two-step sign-in</h1>
@@ -604,12 +714,14 @@ async function stepTotp() {
         </form>
       </li>
     </ol>
+    ${passkeyInstead()}
     ${signedInAs()}`, {
     title: 'Set up two-step sign-in',
     focus: 'h1',
     acts: {
       ...signOutAct,
       copykey: (btn) => copy(groups.join(''), btn.parentElement.querySelector('.si-status'), 'Key copied.'),
+      usepasskey: () => usePasskeyInstead(),
     },
   });
 
@@ -842,11 +954,55 @@ function takeLink() {
   return l;
 }
 
+/* ── the page contract (HANDOFF §4.5) ─────────────────────────────────────
+   This page asked nothing and printed none of the contract. It has no figure
+   — no 00 band, no hero, nothing to be absent — so what the contract owes it
+   is the footer every page carries: the BASIS (what this page rests on: the
+   line it always printed, that every sign-in is recorded), the house
+   PRINCIPLE verbatim, and the COLOPHON. Built only when the token says so;
+   without it (a stylesheet that did not arrive) the old one-line footer
+   stands. */
+export function contractFoot(doc = document) {
+  const foot = doc.querySelector('.si-foot');
+  if (!foot || !contract() || foot.classList.contains('pagefoot')) return false;
+  const basis = (foot.textContent || '').trim() || 'Every sign-in is recorded in the audit log';
+  foot.classList.add('pagefoot');
+  foot.replaceChildren();
+  const text = doc.createElement('div');
+  text.className = 'pf-text';
+  const b = doc.createElement('p');
+  b.className = 'pf-p';
+  b.textContent = `${basis}.`;
+  const p = doc.createElement('p');
+  p.className = 'pf-principle';
+  p.textContent = PRINCIPLE;
+  text.append(b, p);
+  const col = doc.createElement('div');
+  col.className = 'pf-colophon';
+  for (const w of ['FleetMirror', 'Sign-in']) {
+    const s = doc.createElement('span');
+    s.textContent = w;
+    col.append(s);
+  }
+  foot.append(text, col);
+  return true;
+}
+
 export async function start() {
+  contractFoot();
   const q = new URLSearchParams(location.search);
   S.back = safeBack(q.get('back'), location.origin);
   const why = q.get('why') || '';
   S.why = Object.prototype.hasOwnProperty.call(WHY, why) ? why : '';
+  /* ?sso= is where the single sign-on return trip lands: done, code (two-step
+     owed), or a refusal's CODE — looked up here, never a sentence from the
+     address (signin_methods.js says why). Taken out of the address at once,
+     so a reload does not replay it. */
+  const sso = (q.get('sso') || '').replace(/[^a-z_]/g, '').slice(0, 40);
+  if (q.has('sso')) {
+    try { history.replaceState(history.state, '', `${location.pathname}${S.back !== '/' ? `?back=${encodeURIComponent(S.back)}` : ''}`); } catch { /* the address keeps it */ }
+  }
+  const methods = getJson('/api/auth/methods').then((m) => { S.methods = m; }).catch(() => { S.methods = null; });
   root().dataset.ready = '1';
   root().addEventListener('click', onClick);
   window.addEventListener('hashchange', () => {
@@ -859,7 +1015,11 @@ export async function start() {
      waits. Twelve seconds, then the form, saying why. */
   const answered = await Promise.race([refreshWho().then(() => true), new Promise((r) => { setTimeout(() => r(false), 12_000); })]);
   if (!answered) S.meError = 'no answer after 12 seconds';
+  await Promise.race([methods, new Promise((r) => { setTimeout(r, 3000); })]);
   if (link) return openLink(link);
+  if (sso === 'done') { await forgetPreviousReader(); return afterSignIn(); }
+  if (sso === 'code') return stepSsoCode();
+  if (sso) S.notice = { tone: 'bad', text: ssoRefusal(sso) };
   return route();
 }
 

@@ -46,6 +46,8 @@ import { downloadFile, classesHtml } from './target.js';
 /* In pagemeta.js: the shell's Excel button points at the month's workbook
    before this module has loaded. Still exported from here, as it was. */
 import { isMonth, workbookUrl } from './pagemeta.js';
+/* ANS: the page's answer line and Act-on strip (answers.js 'month-target'). */
+import { answer } from './answers.js';
 export { workbookUrl };
 
 /* The operator's number, and the server's (api/target_month.js SHOW_BEHIND). */
@@ -582,6 +584,7 @@ export async function monthTargetPage(root, param = null) {
   const draw = async () => {
     const v = await monthTargetLive(month).catch((e) => ({ _err: e }));
     if (!alive(gen)) return false;
+    answer(root, 'month-target', v);
     if (v._err) {
       const msg = `<p class="tg-absent">${esc(`The month could not be read: ${v._err.message || 'no answer'}`)}</p>`;
       head.innerHTML = msg; cls.body.innerHTML = msg; days.body.innerHTML = msg; path.body.innerHTML = msg; drv.body.innerHTML = msg;

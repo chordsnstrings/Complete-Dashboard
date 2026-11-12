@@ -981,6 +981,22 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A route that checks the CALLER in its handler must not be cached by address** (2026-11-12,
+  review of ONE, FIX-STATUS ONE-R1). `api/cache.js` serves a hit before any handler runs, and in
+  open mode the gate lets an anonymous visitor through to it. `/api/sms/log` refused visitors in
+  its handler only (`signedIn()`), so once anyone signed in had opened Messages, an anonymous GET
+  of the same address was handed the log — mobile numbers and texts. Third time for this class,
+  after `/api/compliance/drivers` (2026-09-05) and `/api/driver/profile` (2026-09-28): a handler
+  that reads `req.fm`, `isAdmin()` or any other fact about the caller goes on `NEVER` in
+  `api/cache.js` or `VARIES_BY_CALLER` in `api/server.js` in the same commit. A narrowed answer
+  (`_fmfleet`) is keyed by the gate and safe; a handler-side check is not.
+* **A new `/api` route is three declarations, not one** (2026-11-12, FIX-STATUS UTX13–14). The
+  handler; an entry in `api/access/manifest.json` (the gate denies by default: undeclared, it is
+  served to anonymous visitors in open mode and refused to EVERY signed-in reader with 403
+  "undeclared"); and a page that calls it or a reasoned entry in `test/endpoint_coverage.test.mjs`
+  EXEMPT. The UTX branch shipped the first alone, with its own 82 checks green, while
+  `access_manifest` and `endpoint_coverage` were red. Run both whenever a route is added.
+
 * **Under Arkiv, focus.js decides what a row IS from its loose text** (2026-11-11, FIX-STATUS
   UBJ1). Text with no prose block around it (`p`, `.cap`, `.note`, `.why`…) is judged by the
   nearest div, so a list row whose only loose text was its "open ↗" link was judged as one
@@ -10691,3 +10707,871 @@ the alert. FIX-STATUS NTFY has what is sent, at which priority, and why.
   that.
 * Reachable from this sandbox through the proxy (`GET https://ntfy.sh/v1/health`
   → `{"healthy":true}`, 2026-10-20).
+
+## What the system audit of 2026-11-12 measured: providers, platform, load
+
+Measured 01:20–02:20Z on 2026-11-12 against production `52cbf9d`. The
+report and its priorities are in HANDOFF 0.16. This section records only what
+is new here, or what contradicts a line above, so that nobody has to measure
+it again.
+
+**Providers**
+
+- **Bolt's `getCompanyEarnings` does not exist.**
+  - The gateway answers `404 "Route POST:/fleetIntegration/v1/getCompanyEarnings not found"`.
+  - The nightly probe asks for it (`src/probe.js:581`) and files the answer as "the money this channel has never delivered". The route is absent, not empty.
+- **Bolt's portal `getFleetBalanceDetails` rate-limits.** It returned HTTP 429, retried once after 1 s, 15 times in four hours of worker log.
+- **FMS `GetAlertData` answers HTTP 400 for some windows, with an IIS HTML error page.**
+  - This happened 22 times in four hours of worker log.
+  - Over the same hours the collector's alert count kept rising (Ecosine 18,296 → 21,842).
+  - This is separate from H96's "Authentication failed" for windows past retention.
+- **Every driver's Uber profile was refused on 11-09.**
+  - 119 of 119 for Ecosine and 46 of 46 for Egari (`/api/status`). The last rating stored is from 10-26.
+  - Meanwhile `/api/auth` reads the credential `ok`, and `/api/probe/uber/driver` answers.
+  - The probe leaves out the personal-data fields the collector asks for (`src/sources/uber_profile.js:84-87`), so a green probe does not prove the collector's query.
+  - The cause is unverified. The next run is 11-16 00:20Z.
+- **YoCharge has a rate limit.**
+  - It answered 429 on `/open/v1/users/` during the wallet refresh at 11-11 23:18Z, and 0 rows were stored.
+  - The client retries only on 502–504 (`src/sources/yocharge.js:115`).
+  - The YoCharge section above says no rate-limit headers were seen; the limit exists all the same.
+- **The analyst's model plan is exhausted.**
+  - It answered "The Token Plan usage limit has been reached" (HTTP 402) at 11-11 23:10Z.
+  - The desktop #analyst page says so. The phone says "has not run yet" (`api/public/m/screens.js:2360`).
+- **GDELT throttles most runs, with HTTP 429.**
+- **The Hijri cross-check times out on every run, with an AbortError.**
+
+**Platform** (DigitalOcean API, read-only)
+
+- **The live commit.** `active_deployment.services[].source_commit_hash` names it; see HANDOFF §9.
+- **The build.** Both components build from `collector/Dockerfile`, which:
+  - uses `node:20-slim` (`node:22-slim` from the 2026-11-12 batch);
+  - copies `package.json` only, with no lockfile (the lockfile and `npm ci` from the same batch);
+  - has no `.dockerignore`.
+- **Alerts and logs.**
+  - There are no app alerts, no uptime checks and no `log_destinations`.
+  - Run logs cover only the current container. The worker restarted at 21:44Z on 11-02 and on 11-09 with no deploy, and nothing records why.
+- **The database, `fleet-dashboard-db`.**
+  - PG 16, `db-s-2vcpu-4gb`, one node, 60 GiB, 8 daily backups (the newest 5.95 GB).
+  - **No trusted sources**: it accepts connections from any address that has the password.
+  - DigitalOcean's default CPU, memory and disk alerts are on.
+- **Memory over 14 days.** The API peaked at 81.9% of 512 MB and did not restart. The worker peaked at 34.8%.
+- **October cost of this app's resources: $74.90 before VAT.**
+  - Database $48, plus $12.90 for its disk.
+  - Two basic-xxs containers, $10.
+  - The `fleet-egress` droplet, $4. Nothing in the code or the git history references it.
+
+**Load** (19 hours of API log, 11-11 07:00Z → 11-12 01:44Z)
+
+- 4,502 queries ran at or over `SLOW_QUERY_MS` (2,500 ms): median 4.6 s, p90 12.7 s, max 71 s.
+  - 720 of them took 10 s or more, and 36 took 30 s or more.
+- The most frequent slow queries:
+  - the per-person day roll-up (245);
+  - the per-source percentile (176);
+  - platform bookings (167);
+  - the five dataset-coverage counts (154 each). These are one per `/api/coverage` computation, roughly every 7.4 min.
+- `/api/coverage` measured 16.9 s, 19.3 s and 32.7 s cold.
+
+## Operations basics — health, client address, deploy, CI (2026-11-12, branch fix/ops)
+
+What the OPS workstream learned that is not written down above. FIX-STATUS "OPS" has the rows.
+
+### Traps this added to the list
+
+* **A memory-only route is only as fast as the middleware in front of it.**
+  `/api/health` never touched the database, yet it waited on it: it was
+  registered below `app.use(access.identify)`, and identify() runs
+  `svc.getConfig(db)` for every `/api` path before any route. Anything that
+  must answer while the pool is full (the platform's probe above all) has to
+  be registered ABOVE the access layer — it now is, in api/server.js — and a
+  test of it must stand a stuck identify() behind it
+  (test/ops_health_budget.test.mjs), because a test with a fast database
+  cannot tell the two orders apart.
+* **On production `req.ip` is not the reader.** Responses carry
+  `server: cloudflare` and `cf-ray` (measured 2026-11-12), so a request passes
+  Cloudflare and then App Platform's router before it reaches the container,
+  and `trust proxy` 1 makes `req.ip` the address the nearest proxy reported —
+  possibly a Cloudflare edge shared by unrelated readers. The request budget
+  keys on `do-connecting-ip`, then `cf-connecting-ip`, then `req.ip`.
+  **Assumed, not verified:** that App Platform sets `do-connecting-ip` to the
+  reader's address and overwrites a client-sent one. Nothing reachable from
+  the sandbox echoes request headers. `/api/health`'s `rate_limit` block
+  reports, by header NAME only, which source keyed the last request
+  (`key_source_last`), this one (`key_source_this_request`) and every request
+  since boot (`key_sources_since_boot`): after the deploy, read it through the
+  public URL. A stream of `req.ip` means neither header arrives.
+* **Express routes case-insensitively and ignores one trailing slash,** so
+  anything that classifies a request by its path (a budget, a gate) must
+  lower-case it and drop the slash first: `/api/Probe/uber/rest/` reaches the
+  probe handler. The access gate refuses a capitalised `/API` prefix and a
+  trailing slash, but not capitals after the prefix.
+* **The live spec now has a record and a check.**
+  `collector/deploy/app-spec.redacted.yaml` is the spec as measured on
+  2026-11-12, with every value replaced by `<set in DigitalOcean>`; it cannot
+  be applied as it stands (it would blank every variable). `node
+  bin/app-spec.mjs --check` (DO_APP_ID + DIGITALOCEAN_TOKEN, or `--token-file`
+  outside the repo) says whether production still matches it. Until
+  `COMMIT_SHA` is added in DigitalOcean the check reports that drift on each
+  component — plus anything the audit brief got wrong (`source_dir` and
+  `dockerfile_path` were stated by it, not read from a raw spec dump).
+* **`/api/health`'s `commit` needs `COMMIT_SHA = ${_self.COMMIT_HASH}`.**
+  `_self` is the component the variable sits on; `COMMIT_HASH` is the commit
+  DigitalOcean built it from. A reference that is not resolved can reach the
+  process as its literal text (not observed here; assumed, defensively), so
+  the API refuses any value containing `${` and says so (`commit_reason`)
+  rather than print it as a commit. Adding the
+  variable is a spec change, so it redeploys the last BUILT commit (trap 25):
+  add it, then `node bin/deploy.mjs`.
+* **`process.exit()` straight after a burst of `console.log` truncates output
+  read through a pipe.** stdout to a pipe is asynchronous in Node here: the
+  runner's `--list` printed 300 lines and exited, and a reader on the other end
+  of a pipe got 8,806 bytes — half the list, differently cut on every run.
+  CI reads every log through a pipe. Write long output in one piece and wait
+  for it to drain (`process.stdout.write('', cb)`) before exiting; the runner
+  now does so for `--list` and for its final summary.
+* **A test can need a browser without importing one.**
+  `numbers_audit_identity` imports nothing of playwright; it spawns
+  `bin/numbers-audit.mjs`, which launches Chromium through `test/browser.mjs`.
+  Any rule for "which tests need a browser" must follow spawned bin/ scripts
+  as well as imports (test/run_all_lib.mjs does). 88 of 397 files need one.
+* **CI on GitHub: what it can and cannot run.** `.github/workflows/ci.yml`
+  runs on pull requests into the production branch and by hand. A manual run
+  (`workflow_dispatch`) is only offered once the workflow file is on the
+  repository's DEFAULT branch — GitHub's rule, not this file's. The runner's
+  default parallelism is CPUs − 1, which is ONE on a two-CPU runner (GitHub's
+  standard runner for a private repository), so CI passes `--jobs=2` and splits the
+  suite in four shards. Not allow-listed, and liable to fail CI at certain
+  hours for reasons of the clock rather than the code: `payout_scope` (20:00–
+  24:00 UTC) and `forecast_yoy` (a month boundary) — system audit 2026-11-12.
+* **`trust proxy` is still 1 with Cloudflare in front.** api/server.js's own
+  comment says the hop count must be counted, never guessed, if a CDN is put in
+  front. Cloudflare now is (above). Whether App Platform's router already
+  folds Cloudflare's hop into the one it reports is not measured, so the count
+  was left alone: `req.ip` feeds the sign-in throttle and the ledger's audit
+  column, and a wrong count there is a forgeable address recorded as fact.
+  The request budget does not depend on it unless neither connecting-ip
+  header arrives.
+* **Production's `/api/health` before this branch** (GET, 2026-11-12 04:2xZ,
+  production `52cbf9d`): `{"ok":true,"migrating":false}` and nothing else —
+  no commit, no front end — served `cache-control: private` through
+  Cloudflare (`server: cloudflare`, a `cf-ray`). `/sw.js` served
+  `const VERSION = 'fleet-714b035d76ad'`: `fleet-` + 12 hex, the string the
+  new `frontend` field reports from the same `shellHash`. After the deploy,
+  health should carry `commit`, `frontend`, `started_at`, `uptime_s` and
+  `rate_limit`, with `cache-control: no-store`.
+  Re-measured by the review, 2026-11-12 ~05:40Z: the same two answers
+  (`{"ok":true,"migrating":false}`, `cache-control: private`, and
+  `fleet-714b035d76ad`).
+
+### What the review of fix/ops added (2026-11-12)
+
+* **A loopback caller is not necessarily "the system".** The assistant's
+  tool calls (`api/agent_routes.js`, `fetchApi`) come from 127.0.0.1 carrying
+  the ASKER's cookie and no internal token, so a budget that exempts only
+  token-bearing loopback calls (isInternal) puts every conversation on the
+  server under one `127.0.0.1` key, and — worse for the deploy check —
+  counts every tool call as `req.ip`, the source whose presence means "the
+  platform sends neither connecting-ip header". `selfCall()` in api/ops.js
+  (a loopback socket and none of X-Forwarded-For, Forwarded, X-Real-IP,
+  do-/cf-connecting-ip) is the rule; health counts self-calls apart, as
+  `self_calls_since_boot`. Anything that classifies callers by address has to
+  know about this path: a per-asker loopback fetch is not a reader and not
+  the warmer either.
+* **The house's own tools reach production from ONE address, and after this
+  deploy they share one budget.** `bin/live-ui.mjs`, `bin/prod-mirror.mjs`,
+  `bin/page-audit.mjs` and `bin/live-audit.mjs` all fetch production from the
+  sandbox's egress address, so together they get 600 reads a minute. A full
+  render audit through live-ui is "something over a thousand upstream
+  requests" (its own header); run sequentially that has stayed well under the
+  budget, but parallel browser contexts can pass it, and the page then shows
+  the 429's reason ("too many requests from this address — try again in N
+  seconds") — a refusal, not a product defect. Run audits one context at a
+  time, or set `RATE_LIMIT_READS_PER_MIN` higher for the pass (a spec change:
+  it redeploys the last built commit, trap 25).
+* **Production runs Node 20; CI and this sandbox run Node 22.**
+  `collector/Dockerfile` is `FROM node:20-slim`; `.github/workflows/ci.yml`
+  uses Node 22 (as its brief specified) and the sandbox has v22.22.0. A green
+  run therefore does not prove the code runs on production's runtime: an API
+  that exists only from Node 21/22 (`Object.groupBy`, `Promise.withResolvers`,
+  the new `Set` methods) passes `node --check` and every test here and throws
+  on production. None is used in src/, api/ or bin/
+  today (grep, 2026-11-12). Either move the Dockerfile to Node 22 or give CI a
+  Node 20 leg before relying on CI for this.
+  **Resolved at integration (2026-11-12):** the Dockerfile is now
+  `FROM node:22-slim` and installs with `npm ci --omit=dev` from the committed
+  lockfile, so production, CI and the sandbox run one major version and one
+  dependency tree. Node 20 had left support on 2026-04-30.
+## Data retention and restore — built 2026-11-12 (FIX-STATUS RET)
+
+**What the big tables held**, read off production `/api/coverage` at 03:36Z on 2026-11-12 (one
+request, 16.5 s):
+
+| table | rows | span | median per day |
+|---|---|---|---|
+| telemetry_snapshot, cabman | 281,758 | collected from 2026-08-21 (captured_at back to 2024-04-16: dormant units' last fixes) | 3,450 |
+| telemetry_snapshot, fms | 1,010,548 | collected from 2026-08-21 | 12,327 |
+| telemetry_snapshot, uber (status rows) | 156,574 | from 2026-08-16 | 1,992 |
+| alert | 905,818 | 2026-05-22 → now, 174 days with data | 5,136 |
+| driver_timeline_event (`timeline:uber`) | 633,225 | from 2026-08-16 | — |
+| trip | 704,884 (bolt 50,416 · fms 279,929 · hotel 4,644 · uber 367,600 · yango 2,295) | — | — |
+
+The "447,543 alert rows" earlier in this file (Two feeds nobody reads) was the whole table on
+2026-09-07, not one day's rows: the table doubled in about two months, consistent with ~5k a day.
+
+**What retention does** (src/data_retention.js; docs/BACKUP-RESTORE.md for restores): telemetry
+tracker fixes are thinned — never emptied — past max(400 days, the weekly backfill's window + 7 days);
+alerts are kept unless `RETENTION_ALERT_DAYS` opts in (floor 365); timelines, trips and the run log
+are kept. `RETENTION_MODE` is dry_run until the operator says on. With the defaults nothing collected
+is thinned before the pass of 2027-09-26 (2027-08-29 at the earliest if `RETENTION_TELEMETRY_DAYS` is
+lowered to the backfill floor); computed with `telemetryCutoff`, not estimated.
+
+### Traps this added to the list
+
+- **Anything that deletes telemetry inside BACKFILL_MONTHS rewrites the unauthorized-journey
+  record.** `reconcile()` runs at the end of EVERY collection window — the 3-day incremental, the
+  30-day catch-up and the Sunday backfill over 12 months — and `writeWindow` DELETES the window's
+  occupancy segments and re-derives them from the fixes it reads (src/reconcile.js). Thin a fix the
+  backfill still reads and next Sunday's segments come from coarser data, verdicts included. The
+  retention floor exists for this; raising `BACKFILL_MONTHS` after a thinning pass walks reconcile back
+  into thinned days, and the pass warns about it every night until it stops being true.
+- **The full rollup re-derives online hours from every timeline event, and deletes what it did not
+  recompute.** `refreshOnlineHours` / `refreshDriverDays` with `since = null` (22:40 UTC daily and at
+  every boot) read the whole of driver_timeline_event; `DELETE FROM driver_online_hour WHERE
+  computed_at < t0` has no day bound on that pass. Uber serves 31 days of timeline, so deleting old
+  events would erase the derived history the next night. Do not prune this table without first
+  bounding those two passes.
+- **Two identical indexes: the planner picked the NEWER one on a tie** (PGlite, EXPLAIN with seq and
+  bitmap scans off). The first draft of v115 assumed the older. And `pg_stat_user_indexes.idx_scan`
+  is history, not preference: telem_plate_time_idx served every scan alone until v7 created its
+  twin, so only a ZERO beside a non-zero count proves which one the planner does not use.
+- **A new route that reads telemetry fixes or alerts over a window the reader picks must be added to
+  `READERS` in api/data_retention_notes.js**, or once retention has run "on" it shows a thinned range
+  as complete. The test checks every listed path exists; it cannot find the route you forgot.
+- **The schedule-collision check used to see literal "M H" crons only**; steps and lists hid real
+  collisions (payout walk `20 */2` on the 22:20 probe and the Monday 00:20 profile pull; the Saturday
+  roster sweep on the 23:40 payout audit). test/collector_invariants.test.mjs now expands every cron
+  and prints them; it fails only on the retention minute, since the others are not this change's to
+  move.
+- **A cron expression inside a JS block comment closes it**: `20 */2 * * *` contains `*/`. The whole
+  test file then fails to parse with "Unexpected token '*'". Write "minute 20 of every second hour".
+- **`VACUUM` cannot run inside a PGlite multi-statement `exec`** — the string is one implicit
+  transaction. Give it an `exec` of its own.
+- **A restore changes DATABASE_URL; SETTINGS_KEY must not change.** src/settings.js:11-13 derives
+  the AES-GCM key from SETTINGS_KEY, falling back to DATABASE_URL. Production sets SETTINGS_KEY on
+  both components, which is the only reason a restore would not silently turn every stored
+  credential into "not configured". `bin/restore-drill.mjs` proves the key against the stored
+  secrets without printing one.
+- **The Arkiv focus pass folds any block over 15 words** (api/public/focus.js LEAD_WORDS), including
+  a panel's most important sentence. The retention panel's "dry run — removes nothing" was folded
+  into "2 notes" on its first render; facts that must be read go one short line each.
+- **A retention boundary that says only where the policy stopped lies about the range before it**
+  (review of 2026-11-12). The first draft wrote the alert boundary on any "on" pass with nothing
+  left before the cutoff — removed or not — and pages compared only the window's START with it, so a
+  window before the first row ever collected was told its rows were removed. Keep the cursor
+  (`done_before`, where the next pass resumes) apart from the claim (`[removed_from,
+  removed_before)`, written only for rows really removed) and test a window's BOTH ends against the
+  claim.
+- **A header-borne note does not survive the browser's stale-while-revalidate copy.** data.js
+  `api()` paints from `swr` before the live answer arrives, and redraws only when the BODY changed,
+  so a note sent as a response header (x-fm-retention; x-fm-withheld has the same shape) is missing
+  on every repeat visit unless it is stored with the copy. And a slow answer that lands after the
+  reader moved on notes onto the next page unless the note is tied to the render that asked
+  (`retentionGen`).
+- **Node's connection errors print the host bare.** `getaddrinfo ENOTFOUND <host>` and `connect
+  ECONNREFUSED <ip>:<port>` carry no `postgres://` and no `host "…"`, so a scrub keyed on those
+  patterns leaks the address. Redact the URL's own parts (bin/restore-drill.mjs `urlParts`).
+## Passkeys and single sign-on — built 2026-11-12 (PKY)
+
+Not a provider feed: two more ways to sign in (docs/FIX-STATUS.md section PKY, ULM-DESIGN "As built,
+2026-11-12"). Both are off until the Owner turns them on. The single sign-on provider is configured
+from the environment only (`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, optional
+`OIDC_NAME`), and passkeys and the return address follow `PUBLIC_URL`, also from the environment.
+
+### Traps this added to the list
+
+* **`Buffer.from(s, 'base64url')` skips characters outside the alphabet without a word.** Measured:
+  `'ab$$cd'` decodes as `'abcd'`. Two different strings then name the same credential, or a value
+  that is not base64url at all passes as one. Check the alphabet first (api/access/webauthn.js
+  fromB64url).
+* **WebAuthn will not use an IP address as the RP id.** A harness on `http://127.0.0.1:…` cannot
+  make or use a passkey; `http://localhost:…` can (a secure context, and a valid RP id). The browser
+  test runs on `http://localhost:8310` for that reason, and `PUBLIC_URL` on the platform must be the
+  site's https host, never an address.
+* **Three two-step codes per person per thirty seconds, in tests.** The server accepts the step
+  either side of now and refuses a step it has already seen (the replay rule), so a test that signs
+  a person in and re-confirms several times in a few seconds runs out of codes and fails with "that
+  code is not right" — a test fault that looks like a server fault. Track the last step per person,
+  and re-confirm only when the session's own ten minutes have run out
+  (test/access_passkey_sso.test.mjs `code`, `freshStepUp`).
+* **A passkey removed on the server stays on the device.** The authenticator keeps offering it, and
+  with no email typed it may offer it first; the server then refuses it as not registered (and now
+  says it may have been removed, and to delete it from the device too). The browser test deletes it
+  from its virtual authenticator, as a person would: before that, 2 runs in 3 failed a later passkey
+  sign-in. (WebAuthn L3's `signalUnknownCredential` could tell the device; not used yet.)
+* **A harness page that renders one module must load `who` first.** app.js loads it at boot; the
+  "confirm it is you" dialog reads `who.user.totp` to ask for a code or a password, and without it
+  asked an Owner with two-step for a password.
+* **Unlinking single sign-on re-opens the account to the next holder of its address** (review,
+  2026-11-12). The provider's subject decides only while a link exists; with none, the first verified
+  sign-on for an address links by the address. So for a mailbox the company gave to somebody else the
+  link is the protection (the new holder is refused, `other_identity`) and the right action is to
+  offboard the old account; unlinking is for the provider ACCOUNT changing hands. The same holds for
+  anyone who never used single sign-on at all: offboard people whose mailbox is reassigned.
+* **A new refusal code must also go on api/public/data.js's withheld list.** The page shows a 403 as
+  "not shown to your role" with the server's reason only for the codes listed there; any other code
+  is "Could not load this view", and every `unlessWithheld()` panel throws. `no_access` (PKY9) was
+  missed and found in review (PKY23).
+* **`password_changed_at` is not "finished setting up" any more.** An account single sign-on opened
+  never has a password; `reinstate` sent such accounts back to `invited` until review (PKY22). Ask
+  `otherWayIn` (api/access/signin_methods.js) as well.
+* **A passkey counter regression is seen by the SECOND copy to sign in**, so the session the first
+  one opened may be the attacker's: disabling the credential alone leaves it signed in. Every session
+  of the person ends (PKY20).
+## Bolt's fleet-integration orders (getFleetOrders) — collected from 2026-11-12 (BFO)
+
+Bolt's trips now come from two surfaces: the portal's orderHistory (seven-day refresh token, both
+fleets) and the fleet-integration client's `getFleetOrders` (no expiry, Egari only). The code is
+`src/sources/bolt_orders.js`; what each order became is in `bolt_fi_order` (`sql/schema_v116.sql`);
+FIX-STATUS BFO has the rows. This section is what was learned about the provider.
+
+**Bolt's own spec.** `https://apidocs.bolt.eu/fleetIntegration/fleetIntegrationGatewayAuth/open-api.json`
+is public (no credential; 40.6 KB, read 2026-11-12). It is the authority for this gateway:
+
+- Six paths: `test`, `getFleetOrders`, `getFleetStateLogs`, `getDrivers`, `getVehicles` (POST) and
+  `getCompanies` (**GET**). There is no `getCompanyEarnings` — the audit's 404 is a route that
+  does not exist, not an empty one.
+- `getFleetOrders` takes `company_ids` (required, an ARRAY), `company_id` (optional), `offset`,
+  `limit` (1–1000), `start_ts`/`end_ts` (unix seconds) and `time_range_filter_type` (`created`, the
+  default, or `price_review` — filter by when the fare was finalised). It answers
+  `{code, message, data: {company_id, company_name, total_orders, orders[]}}`, sorted by creation
+  time. Its own refusals: **498805** INVALID_START_DATE (before what Bolt keeps), **498806**
+  INVALID_DATE_RANGE (getDrivers words it "maximum allowed date range is 31 days"), **498809**
+  COMPANY_NOT_ACTIVE, **498810** COMPANY_NOT_ALLOWED.
+- An order: `order_reference` (Bolt's order id — the portal sends none), `driver_uuid` and
+  `partner_uuid` (the roster's ids, not the portal's numeric driver id), `driver_name`,
+  `driver_phone`, `vehicle_license_plate`, `vehicle_model`, `pickup_address`,
+  `destination_address`, `order_stops[]` (`type` pickup|dropoff|waypoint|change_point, `address`,
+  `lat`/`lng`, nullable `real_lat`/`real_lng`), `order_status` (the portal's own vocabulary:
+  finished, client_cancelled, driver_did_not_respond, driver_rejected, client_did_not_show,
+  driver_cancelled_after_accept, the in-progress states …), eight timestamps (created, accepted,
+  pickup, drop_off, finished, payment_confirmed, cancelled, no_show), `ride_distance`,
+  `predicted_ride_distance`, `road_distance_at_matching`, `order_price` (`ride_price`,
+  `booking_fee`, `toll_fee`, `cancellation_fee`, `tip`, `net_earnings`, `cash_discount`,
+  `in_app_discount`, `commission` — all nullable), `is_scheduled`, `is_optional`,
+  `category_info` (`name`, `seats`, `vehicle_type`).
+- `getFleetStateLogs` (not collected) gives each driver's state (inactive / waiting_orders /
+  has_order / busy) with a position and the active order — Bolt's online hours, which nothing
+  collected from Bolt supplies today.
+- `getCompanies` is a **GET** returning the `company_ids` the client may read. The table above
+  ("`getCompanies` answers 404") is what a POST gets; untested here (no credential reaches Bolt
+  from this sandbox), but it is the one call that would say which companies the client is entitled
+  to without a refusal.
+
+**What production returned.** The nightly probe (2026-11-11 22:20Z, a three-day window): Egari 24
+orders — statuses finished, driver_cancelled_after_accept, client_cancelled, driver_did_not_respond;
+payment in_app and cash; categories Comfort and Bolt; `order_price.*`, `ride_distance` and
+`order_finished_timestamp` filled on 50% (the finished rides), `order_stops` on every order.
+Timestamps are unix seconds (the narrow sample shows `order_cancelled_timestamp` 1794370437 =
+2026-11-10). Ecosine: `503 NOT_AUTHORIZED, error_hint COMPANIES_NOT_ALLOWED` — the same refusal
+`getDrivers` gets; the client is not entitled to company 142868 for orders either.
+
+**Traps:**
+
+* **The two Bolt trip feeds share no key.** The portal sends no order id, so its trip key is
+  synthesised as `<numeric driver id>|<created>`; this feed's driver id is a uuid. The same ride is
+  recognised by what both carry: the same fleet, the same creation second, and the same car (plate
+  digits — the portal drops the letter code) or the same driver (`partner_identifier` against
+  `partner_uuid`/`driver_uuid`, or a portal id learned from an earlier match). One candidate
+  exactly, or nothing: a missed match costs an empty column, a wrong one writes one ride's
+  coordinates onto another. A second-level key on any new feed has to say how it meets the
+  portal's.
+* **"No match" is not "a new ride".** An order the portal answered for and did not return could be
+  a duplicate the rule failed to see, so it is HELD (in `bolt_fi_order`, not in `trip`). Only an
+  order created after the portal last answered for the fleet (`source_state`
+  `portal_answered_through`, moved by the portal harvest on every window it answers) becomes a row
+  of its own, and the portal's next answer for that day retires it. A source that inserts
+  everything it cannot match doubles a fleet's trips the day its match rule stops holding.
+* **A short answer is still an answer, for retiring stand-ins.** The first draft retired them
+  only on windows the portal answered in full (no shortfall against `total_rows`), which reads
+  as caution. It is the opposite: the portal's rows for a short window are written anyway, so
+  a stand-in it does not retire sits beside the portal's own row for the same ride — two rows,
+  for as long as no later window answers in full, whenever the match rule is not there to tidy
+  up (`bolt_fi_orders_db` G proves it: `fi:ref-g` beside `900001|…`). Retiring on a short
+  answer costs only what the shortfall already costs. When deciding which of two feeds stands,
+  ask which failure is a double count.
+* **The portal is not asked for Dubai's today between 20:00Z and 24:00Z.** `harvestPortal` ends
+  its windows at the UTC date of the scheduler's Date (`midnight()` reads `iso()`), clamped to
+  Dubai's today; from 20:00Z the UTC date is Dubai's yesterday, so rides created 00:00–04:00 Dubai
+  are not fetched until the 00:00Z run. Measured on production `/api/status` (2026-11-12): the
+  catch-up that finished 21:30Z (01:30 Dubai on the 12th) had its newest window ending
+  2026-11-11. `getFleetOrders` is asked up to now, so it stands in for those hours. The portal
+  harvest itself is unchanged.
+* **The portal's date clock is not established — and cannot be from outside.** For the same
+  reason, the portal is never handed a date that is in the future on one clock and not the other.
+  The retirement of stand-ins assumes Dubai days, and every answered window is checked: a row
+  created after the window's last Dubai day ended is evidence of UTC days, and the run says so
+  (`portalDayEvidence`).
+* **`ride_distance` has no unit in the spec.** The portal's `distance` is kilometres (10.7 on a
+  48-dirham ride in `test/fixtures/bolt_order_table.json`). The unit is decided per batch: against
+  the portal's kilometres on matched rides, else from the magnitude of finished rides (a median of
+  12,000 is metres, of 12 kilometres); undecided is a NULL distance with the value in raw.
+* **Null and zero mean different things on the two feeds.** This feed writes NULL for money a ride
+  did not carry (50% fill, finished rides only) — a stated 0 commission is a real zero. The portal
+  writes 0 for "did not happen" (`portalRow`'s `money()`), and that 0 must become NULL. Read each
+  feed's absence in its own convention.
+* **jsonb hands keys back in its own order** (shorter keys first), so comparing a stored jsonb
+  object with a JS object by `JSON.stringify` reads every row as changed and rewrites it on every
+  pass. Compare key-order-free (`canon` in `src/sources/bolt_orders.js`).
+* **A stand-in row is told apart by `raw ? 'created'`.** Every portal row's raw carries `created`
+  (its key is built from it); a stand-in's raw carries only `fleet_integration`. Nothing may write
+  a top-level `created` into a stand-in's raw.
+* **A cancelled order still carries a pick-up and a drop-off stamp** (independent review,
+  2026-11-12). The probe's fill rates on the 24 Egari orders: `order_drop_off_timestamp` 71%,
+  `order_pickup_timestamp` 75%, `order_accepted_timestamp` 71%, against `order_finished_timestamp`,
+  `payment_confirmed_timestamp`, `order_price.*` and `ride_distance` at 50% — the finished rides.
+  So the orders accepted and then not finished (driver_cancelled_after_accept is among the four
+  statuses seen) carry both stamps. Read as an end, that gave a cancelled portal row (the portal
+  writes no end for one) an `ended_at` and a `duration_s`, and reconcile's `bookingWindow()` reads
+  `ended_at` before it asks whether the booking was cancelled. An end or a duration is now taken
+  only from `finished` / `arrived_to_destination` (`RAN_STATUSES`). A test that cancels an order by
+  nulling its stamps first tests a shape production does not send — build fixtures from the
+  probe's fill rates, not from what a field's name suggests.
+* **`total_orders` has no stated meaning.** The spec types it as a number; whether it counts the
+  window or the page is not measured, and the probe's 24-order window cannot tell the two apart.
+  Stopping the page walk when offset reaches it cuts every window at one full page on the second
+  reading, with the shortfall check reading "1,000 of 1,000" — silent. A short page ends a window on
+  either reading; `total_orders` only feeds the shortfall report (FIX-STATUS BFO12).
+* **A verdict computed per batch is gone exactly when a lapse needs it.** The ride_price agreement
+  check needs matched rides, and a batch has none when the portal token is dead. The verdict of
+  the last batch that could measure (≥5 matched rides priced on both feeds) is kept in
+  `source_state` (`bolt`, fleet, `fi_price_agreement`), used by thinner batches with its date, and
+  replaced only by a measurement over newer rides (FIX-STATUS BFO13). Any check that compares the
+  two feeds has the same shape: decide what it falls back to when one feed is dark.
+
+**Open — to measure once deployed** (no credential reaches Bolt from this sandbox):
+
+- Whether the two APIs stamp the same creation second — the match rule's premise. Every run logs
+  `fleet-integration orders egari … matched_of_answered: N/M`, and the run row says so when fewer
+  than half of at least ten match.
+- Whether `partner_identifier` is the order's `partner_uuid` or its `driver_uuid` (both are
+  accepted), and what `real_lat`/`real_lng` are (read as where the stop happened; each row records
+  `pickup_basis` real or requested).
+- The gateway's rate limit and how far back it keeps orders: 429 is waited out; the walk logs
+  `too_old_from` the first time Bolt refuses a start date.
+- What `total_orders` counts (the window or the page), and what Bolt means by a pick-up and a
+  drop-off stamp on an order that did not finish. Neither changes what is written now.
+- After the tokens lapse (2026-11-14 15:06Z): `/api/status` bolt/egari should read `partial` with
+  "fleet-integration getFleetOrders answered …" and its windows `kind: fleet-integration`, and
+  Egari's Bolt trips keep arriving; Ecosine's stop, and its row says it is not entitled.
+## Uber's live per-trip feed, collected — 2026-11-12 (FIX-STATUS UTX)
+
+`POST /v1/vehicle-suppliers/transactions` is now collected (`src/sources/uber_transactions.js`)
+and asked by all three probes with POST. The "Uber's live per-trip feed WORKS" section above still
+holds; the table above it that says "all three of our probes issued it as a GET" is history now.
+
+**Re-measured on production 2026-11-12 04:33Z** through `/api/probe/uber/realtime`, structure
+only (nothing personal printed): 1 of 7 shapes answered — POST, `timeRange`,
+`FILTER_OPERATOR_IN_RANGE`, epoch milliseconds as strings. Seconds, ISO and RFC3339 still draw
+`invalid start time`; no filters still draws `No Time Range provided in request`; the GET control
+still draws `404 page not found`. Two months on, nothing about the shape had moved.
+
+**What a row carries, measured:**
+
+```
+driverInfo      { driverUuid, firstName, lastName }          ← names: not stored
+transactionInfo { transactionUuid, tripUuid, processedAt (ISO, 24 chars),
+                  description: "TRIP",
+                  breakDowns: [ { categoryName, categoryLabel,
+                                  amount: { amountE5: <integer NUMBER>, currencyCode: "AED" },
+                                  children: [ ... ] | null } ] }
+```
+
+`amountE5` arrives as a JSON **number**, not a string (the collector reads both). A leaf's
+`children` is `null`, not `[]`. The tree in the sampled row:
+
+```
+paid_to_you
+├── your_earnings
+│   ├── fare                ← the BRANCH: trip.price
+│   │   ├── little_fare
+│   │   └── wait_time
+│   ├── service_fee
+│   └── taxes_earnings
+│       └── tax_on_service_fee
+└── trip_balance
+    └── refunds
+        └── toll
+```
+
+The response's top level held two keys of 12 and 16 characters — read as `transactions` and
+`paginationResult`, the envelope Uber's other REST surfaces here use. The inner cursor key is
+inferred (`nextPageToken`, as `drivers/actions` answers), not seen: a 14-minute window has not been
+observed above 50 rows. The collector stops on a repeated page and reports it if the page was full.
+`cash_collected`'s path (`trip_balance > payouts > cash_collected`) is inferred from the payments
+report's column; the sampled row was not a cash trip.
+
+**How it is collected.** Every quarter hour at 7, 22, 37 and 52 past; per fleet, the 15-minute
+windows of the last 6 hours (`UBER_TXN_HOURS`, capped at 24), aligned to the quarter hour, each
+15 min − 1 ms, ending at least 6 minutes ago, newest first, every page, one request per 1.1 s. That
+is 24 requests per fleet per run, about 53 seconds of paced requests for both fleets, ~4,600 a day.
+Re-asking six hours every pass is what makes a restart, a throttled tick or a late-processed
+transaction cost nothing. It cannot backfill: nothing older than 24 hours is reachable.
+
+**How it fills.** `trip.price` (the rider fare, the same node the payments report states) where the
+price is NULL or the feed's own; `trip.price_source` says `uber_live`. The fare walk now stamps
+`uber_payments` when it states a fare and replaces the provisional figure. `GET /api/status/uber-live-money`
+measures, on trips both have priced, whether the two agree — the check that the feed is reading the
+node this product thinks it is.
+
+### Traps this added to the list
+
+- **A 429 handed to `authFailure` reads as an expired session.** `authFailure` (src/auth_state.js)
+  files a text body as "answered with text, not JSON" — kind `expired` — and a rate limit's body is
+  often plain text ("Too Many Requests"). Passed through `noteUberRest`, every throttle would turn
+  the Uber credential banner red. Note the credential from a 2xx or a 401/403 only, never a 429 or
+  a 5xx.
+- **A collector of Uber money must not log under source `uber`.** The banner's run clock
+  (`api/auth_routes.js`) and the ntfy watcher's "observed again" (`api/alerts.js`) key Uber's
+  freshness on `source` alone: a quarter-hourly run under `uber` would read as Uber collecting while
+  the trip export was dead. Its own source (`uber_transactions`) and a `SOURCE_LABEL` entry, so
+  `#sources` never prints the database key.
+- **A tick every quarter hour must not move the response-cache version.** `api/cache.js` moves every
+  cached answer on any `collection_run` finish except mode `realtime`; CABMAN's five-minute tick was
+  most of the database's load until it was excluded (2026-09-29). This feed logs `realtime` too, and a
+  rollup or incremental starts eight minutes after each of its runs to carry the price to cached
+  pages (pinned in `test/uber_transactions.test.mjs`).
+- **A NULL `price_source` means "not the live feed", not "unknown, overwrite me".** It is every price
+  written before v117 (the payments walk) and every channel's own price. The live fill writes only a
+  NULL price or its own; do not backfill the column — the rule needs no backfill and the rewrite would
+  double `trip`'s heap.
+- **The fare walk must stamp `uber_payments`, or the live feed undoes it.** The feed may correct its
+  own provisional price; without the stamp the row kept reading `uber_live` under the statement's
+  figure and the next live pass put the provisional one back (shown by reverting it in the test:
+  47.50 → 46.94).
+- **An empty window may come back as `{}`.** proto3 JSON omits an empty repeated field, so "no
+  `transactions` key" is an empty quarter hour, not a shape change. A non-empty answer that yields
+  no readable row is the shape change, and fails the run.
+- **A probe that starts answering starts storing what it describes.** `describe()` (src/probe.js)
+  prints a field's values whenever it has a dozen or fewer, and the nightly probe keeps that in
+  `provider_probe.fields`. While this surface 404'd it stored nothing; answering, a quiet quarter
+  hour's two or three drivers' first and last names would have been kept every night. Fixing a
+  probe's verb is also deciding what its answer may leave behind — `withholdNames` keeps the keys
+  and drops the values.
+
+### Traps the independent review added (2026-11-12, FIX-STATUS UTX15–16)
+
+- **"Nothing stored" is a zero only if somebody got an answer.** The live feed's table holds no
+  transaction for a fleet after a quiet day AND after a day of refused runs (a 403 on the org, an
+  expired client, a throttle on every pass). `/api/status/uber-live-money` printed `0` and "Uber
+  reported no transaction" for both. Ask `collection_run` whether any run in the window got an
+  answer (`ok`/`partial`: for this source every asked window refused is `error`) before calling an
+  empty table a measurement.
+- **Detecting an ignored cursor is not detecting an unread one.** A page repeated for the next
+  cursor catches a token we SEND that Uber ignores. A token Uber SENDS under a key we do not read
+  ends the loop after page one with the window marked answered — silent truncation. With the cursor
+  key still inferred, a FULL page and no cursor read is examined: a cursor-like key carrying a value
+  fails the window and names the key; an empty `paginationResult` is the last page.
+## The history endpoint's two roll-ups — built 2026-11-12 (SPK)
+
+`/api/history` (`api/history_routes.js`) draws the hero sparklines from roll-ups only. Two series
+had none, so `sql/schema_v119.sql` adds them, built by `src/history_rollup.js` inside the ordinary
+rollup pass: `driver_first_online` (each Uber account's first ONLINE event per Dubai day) and
+`cash_fare_day` (cash fares by account, channel and day, from the `trip_cash` view).
+
+### Traps this added to the list
+
+* **driver_online_hour's first hour is not when somebody came online.** Its spans merge ONLINE
+  heartbeats with job spans (`api/online_span_sql.js`), so its first minute can be a trip's start.
+  `/api/online-time` judges Late on the first ONLINE *status event* only. A Late line built from
+  the hours would disagree with the Late tile above it; that is why `driver_first_online` exists.
+* **A Late line must use the page's people, not every account with an event.** The page judges
+  the roster's Uber accounts plus whoever drove Uber that day, folded to the person: one person
+  with two accounts is judged on the earlier, and an account that came online but is on neither
+  list is on no call list. Counted per account, 5 Oct in the test fixture reads 3 late where the
+  page says 1.
+* **A day's Late is final only when every fleet's timeline has been read past it.** Uber's
+  timeline is fetched every three hours, two days at a time; the evening of the last day can still
+  be arriving. The line takes the earliest fleet's last read before the roll-up ran.
+* **`cash_fare_day` can trail the live ceiling by up to a day.** Uber's weekly payments report
+  re-prices cash trips weeks or months after the fact, which changes `trip_cash.cash_amount`; the
+  quarter-hourly pass rebuilds only the last 14 days, and the nightly full pass catches the rest.
+  The ceiling line's last point is "as of the last build" and says so (`as_of`).
+* **A running total from a part-built table is wrong at every point, not just the early ones.**
+  The ceiling and carrier lines are drawn only once `history_rollup_build.built_from` is
+  1900-01-01 — after the first full pass (boot, or 22:40).
+* **`/api/cancellations` ignores `platform` and `fleet`.** The #cancellations page shows the
+  channel chips and sends them, and the route reads the window alone (`api/cancellation_routes.js:16`),
+  so the page's figures do not move with the chips. The page's sparkline therefore asks
+  `/api/history` for the same scope as its tile (the window, no chips) so the two agree; the
+  endpoint itself honours both chips for any caller that sends them. Not fixed here — it is the
+  route's defect, and a fix changes every figure on the page.
+* **A glance tile whose value is a bare dash keeps nothing but its label and reason.**
+  `bandTiles()` (`api/public/ui.js`) rebuilds such a tile as `{label, na}` (plus key and hero), so a
+  `spark`, a `delta` or a `sub` attached to it is dropped without a word. That is what keeps a line
+  off a Late that cannot be judged — and it is why a line, or a delta, put on a tile that might be
+  bare must not be relied on to appear.
+* **A sparkline's end mark is not round unless it is a stroke.** `spark()` stretches a 100-unit
+  box to its host (`preserveAspectRatio="none"`); a `<circle>` stretches with it — 14.7 × 4.0 px on
+  a hero tile. The glance tiles ask for `dot: 'cap'`, a zero-length path with a round,
+  non-scaling cap. The phone's lines keep the circle, held byte for byte by
+  `test/page_contract.test.mjs` §3b.
+* **A route that serves several pages needs a subject every one of those pages' readers holds.**
+  The gate refuses a route outright to a role without its `subject`, so `/api/history` as built
+  (subject BK) was refused to the Cash desk (`ID CASH SYS`) on #deposits, its own page, and to the
+  HR officer on #online-time and #cancellations — and each page said its line "did not load".
+  Subject SYS, with each series masked by its own class in `fields`, is the shape that works;
+  `test/history_routes.test.mjs` §6 checks every role template against every line's page subject
+  (`api/public/access.js` VIEW_SUBJECT) so a new series or a new role cannot reopen it (review of
+  SPK, 2026-11-12).
+* **A withheld value arrives as `null`, which is also what an unmeasured one looks like.** The gate
+  names the class in `_withheld`; a page that does not read it captions the nulls with whatever
+  real reason is left over ("No weekly line. No valued cash fare is on record…"). Each history
+  series carries its `class` so `api/public/history.js` can ask first. And a sentence is nobody's
+  class: a count inside a `why` reaches every reader of the route, so one person's weekly booking
+  count is its own field (`series.money.points[].bookings`, BK).
+## The CABMAN roster, read by the API — measured 2026-11-12 (WIRE)
+
+What production served that morning, before `api/fleet_roster.js` was wired in (GET, counts only):
+
+- `/api/live`: 268 rows — 177 CABMAN, 76 FMS, 15 Uber. The CABMAN `polled_at` takes five values:
+  45 plates on the current poll, 43 at 2026-11-10 23:20Z, 65 at 10-14 12:35Z, 2 at 09-04 and 22 at
+  08-30. 132 CABMAN plates have a last poll more than a day old; 153 of the 177 are stale.
+  - CABMAN now answers for two fleets: 172 rows carry `fleet_id` ecosine and 5 egari.
+  - Moving (speed > 3 km/h) 60, of which 29 are those 132 plates; Engaged 36 → 14 without them.
+- `/api/kpis?days=30`: tracked_vehicles 268, silent_vehicles 162, live_vehicles 92.
+- `/api/vehicles/directory?days=30`: 273 rows, 110 with a booking. All 132 plates are in it, and
+  not one has a trip in the window or ever, a VIN, a make, a document or another tracker — the
+  predicate the register now sets aside on (they all have `fleet_id` null there, too).
+- The 43 plates last polled 11-10 23:20Z are newer than the cohorts FIXLIST C18 measured in
+  September: the provider's list keeps changing, which is what the roster is for.
+
+### Traps this added to the list
+
+* **`plate = ANY($1)` with a NULL list is NULL, not false.** `excludedPlates()` returns null when
+  nothing is set aside, and `NOT (source = 'cabman' AND plate = ANY(NULL))` is NULL for every CABMAN
+  row — the plain form would have dropped the whole CABMAN fleet the day the roster was empty or
+  missing. `ROSTER_KEEP` (api/telemetry_sql.js) coalesces the comparison to false;
+  `fleet_roster_wiring` §5 and §7 hold it.
+* **`/api/live` and `/api/vehicles/directory` must stay bare arrays.** The access manifest shapes
+  them by path (`[].lat`, `[].lng`, `[].place` withheld from a role without locations; rows
+  filtered by `[]`.fleet_id for a one-fleet reader). Wrapping either in `{rows, note}` to carry a
+  sentence would have handed every role every position. A sentence that belongs beside a bare
+  array goes on its own route (`/api/fleet/roster`).
+* **A clause on a verdict's sub-line is not on the page under the contract.** focus.js folds a
+  long `.vdct-sub` out of sight; a `.note.warn` is flagged (one line on the face). An exclusion
+  that must be read goes in a warn note.
+* **The Classic skin is byte-frozen against the mock.** A page change that draws nothing for the
+  mock's answer leaves `arkiv_classic_frozen` green; one that changes what the mock's data draws
+  (for example "Moving" requiring a fresh fix: the mock's stale row 7 moves at 35 km/h) needs a
+  re-record and a sentence in the commit.
+
+## The wage-sheet reader as an upload path — measured 2026-11-12 (WIRE)
+
+`src/salary/xlsx.js` was written for files the operator chose. `POST /api/wage-sheet/preview` is
+its first caller that takes a file from a browser, and two of its properties matter there:
+
+- **Its cell pattern is quadratic over unclosed tags.** The pattern is lazy and correct (trap 7 in
+  the file's own header), but from every `<c` it scans forward for a `>` or `</c>`. A sheet of
+  repeated `<c r="A1" ` with nothing closing them: 5,000 / 10,000 / 20,000 repeats (50 / 100 /
+  200 KB of XML, under 1.2 KB zipped) took 85 / 348 / 1,545 ms; 40,000 took about 6 s. Linear
+  input, quadratic time — in the API's thread that is every page waiting.
+- **`unzip` inflated with no limit.** Deflate packs a run of one byte about a thousand to one, so
+  a 4 MB body could unpack to gigabytes, allocated outside the V8 heap where a worker's heap limit
+  cannot see it. `maxBytes` (zlib's `maxOutputLength`, member by member) refuses it mid-way: a
+  31 KB file of 30 MB of zeros is refused at the 24 MB cap.
+
+### Traps this added to the list
+
+* **A worker thread does not bound Buffer memory.** `resourceLimits` caps the worker's V8 heap;
+  `inflateRawSync` output is external memory. Bound the inflation itself (`maxOutputLength`).
+* **A same-process test cannot see a blocked event loop from inside it.** The client and the
+  server share the loop, so a ping sent after a timer is never late — the timer itself waits. Time
+  the ping from the START of the slow request (`wage_sheet_preview` §3 does).
+* **`/api/hr-roster/preview` and `/commit` have both properties today**: `src/hr_roster.js:332`
+  calls `readWorkbook(bytes)` in-thread with no cap, behind an admin gate that is open while
+  `ADMIN_TOKEN` is unset. Recorded in FIX-STATUS WIRE as found, not fixed.
+* **The classifier reads an explicit range as `kind: 'range'`**, even when it is the first half of
+  a month ("01 November 2025 to 15 November 2025"); `first-half`/`second-half` come only from the
+  half-month spellings after "Salary Sheet -" or "month of" ("Salary Sheet - April 1-15, 2025",
+  "for the month of January Dated 16 to 31, 2025"), and a bare "April 1-15, 2025" is refused as
+  not understood. A page or import that files by `kind` must allow all three.
+
+### The review of WIRE — traps it added (2026-11-12)
+
+* **`a + b.toLowerCase().includes(t)` is a string plus a boolean.** A member call binds tighter
+  than `+`, so `` `${plate} ${model} ` + `${driver}`.toLowerCase().includes(t) `` is
+  `"L45235 Tesla Y false"` — truthy for every row and every term. The #vehicles search box kept
+  the whole register for every search from 2026-08-21 to this review, and nothing failed: a filter
+  that never filters looks like a filter on every row that should match. Join the haystack first,
+  search it once, and test a term that must match NOTHING.
+* **A worker thread's heap is the API's memory.** `resourceLimits` bounds the worker, not the
+  container: the worker lives in the API's process, on a basic-xxs whose API alone peaked at 81.9%
+  of 512 MB (93 MB left). Size the worker against that headroom, never against 512 MB — the first
+  draft of the wage-sheet preview allowed ~210 MB, enough to OOM-kill the whole API on one upload.
+  Measured: a real wage tab (500 × 30) costs the worker +23 MB; 5,000 rows +45 MB.
+* **A count printed beside a list must be the list's own drop.** `/api/fleet/roster` first said
+  "132 plates set aside" above `/api/live` while some of the 132 were still on it (a departed
+  CABMAN plate keeps its FMS fix; a pending plate was never written). `n` is now what the list
+  lost — the same predicate as `/api/kpis` `tracked_set_aside`; `held` is the roster's own count.
+* **Under the contract a plain `.note` can leave the face after render.** The focus pass folds it
+  within a second or two (the register's "No vehicle matches" note is in the DOM and not visible);
+  a browser test that reads `innerText` for a plain note passes or fails on timing. Read the
+  note's `textContent` when the wording is the question, and use a warn note when it must be seen.
+### Traps this added to the list (ARK, the Arkiv leftovers, 2026-11-12)
+
+- **The first screen is at 19 of its 20 modules.** `test/lazy_pages.test.mjs` fails when
+  app.js's static import graph reaches 20 modules; at `90d76da` it was 19. A new shared helper
+  that a first-screen module must import (here: the page contract's token, wanted by the sign-in
+  page without ui.js) cannot be a new file. It went into `pagemeta.js`, which imports nothing and
+  is already on the first screen; code that is not first-screen code goes behind a dynamic
+  `import()` (themecolor.js), which the test does not count.
+- **Chromium serialises an inset box-shadow colour first**: `rgb(35, 98, 211) 3px 0px 0px 0px
+  inset`. A test matching `/inset 3px/` never matches; match both orders.
+- **A service worker that answers GETs from its cache but lets HEAD through blinds the deploy
+  check.** app.js `deployOf` asks `X-FM-Build` with `HEAD` + `cache: 'no-store'`; sw.js returned
+  early for every non-GET, so under a cache-first worker the check compared the server's build
+  with the server's build while the tab ran a cached app.js. sw.js now answers HEAD for shell
+  paths from the copy it would serve, and keeps only its own deploy's code (ARK7).
+- **`clients.claim()` fires `controllerchange` on a page no worker served.** A "reload on
+  controllerchange" policy therefore reloads every first visit a few seconds in (the phone still
+  does), and a guard read once at load ("was there a controller?") misses a later takeover in the
+  same visit — the page stays on the old code. Track it: the first change is the first claim, any
+  later one is a deploy (swreg.js, ARK5).
+- **The worker's offline answer is a 503.** data.js treated it as a slow gateway: it waited
+  1.2 s, retried, and told the reader "the server took too long", which is false — the server was
+  never reached. Detect `x-sw-cache: miss` before the gateway rule (ARK8).
+- **Absence in a service-worker cache is only evidence after a put that should happen has had its
+  chance.** The worker keeps a response after answering the page, so "not in the cache" read at
+  once passes whether or not the code would have kept it — the first draft of
+  `test/sw_desktop.test.mjs` passed with the build guard deleted. Fetch a positive control that
+  must be kept, wait for it, then look for the one that must not be.
+- **A size bound on a Cache Storage cache needs its own ledger.** `Cache.keys()` order is not
+  something to evict by, and reading every entry's headers on every write is a scan per answer.
+  sw.js keeps `[storedAt, bytes]` per address in an entry of the same cache, so it dies with the
+  cache (sign-out, scope change) and survives the worker being stopped when idle (ARK6).
+- **index.html's pre-paint script is one function full of `var`s.** `var` is function-scoped, so
+  a block that declares a name the script already uses reassigns it: the first draft of the
+  theme-colour collapse declared `var pick`, which is the phone/desktop choice a few lines up. It
+  was harmless only because nothing read `pick` after it. Give a new block its own names.
+
+#### …and what the ARK review added (2026-11-12)
+
+- **A service-worker test that never opens the page with the server gone proves nothing about
+  offline.** Every check of the first draft ran on a page already open and listening. Opened
+  offline — reload with every socket refused, `test/sw_desktop.test.mjs` §5 — the desktop showed
+  two faults no other check could see: a blank page, and kept figures with no offline line.
+- **Skipping the reload on the first claim also skips filling the cache.** A page's first-screen
+  modules load before any worker controls it, so they never pass through it; the phone's reload is
+  what sends them through, and its own modules are precached besides. A build that skips the reload
+  must send what it loaded through the worker some other way (swreg.js `warmShell`), or its first
+  offline open is index.html with no app.js — a blank white page.
+- **A worker's `postMessage` to a page with no listener is lost.** The browser holds them only
+  until the document has parsed; after that, a message with no listener is dropped. A listener in a
+  module loaded on demand misses everything said before it arrived — on an offline open, all of the
+  first page's answers. Listen while the shell boots and hand the messages over (app.js `swHeld`).
+- **A queued Cache Storage write must check whose data it is when it runs, not when the answer
+  arrived.** A keep that waits its turn can run after another reader's first answer has emptied
+  the cache for them, and open the NEW cache. Carry the scope with the keep, re-check it just
+  before the put, and name the new scope before emptying the old (sw.js `keepOne`, `startScope`).
+- **A count of "texts" from the SMS outbox must name its kinds.** The 05:00 cash run and the
+  trip-goal runs (`cash_run`, `target_run`) write their own lines into `sms_outbox` with status
+  `sent` and no text, so "status = sent" counts them as texts with no delivery report. Use the
+  server's own list: cash_deposit, trip_register, target_nudge.
+
+## ANS — traps found building the answer line (2026-11-12)
+
+* **`ui.js panel(title, cap, key)` stamps `key` as `data-panel`, not as a class.** A selector
+  `.payout-diff` finds nothing; `[data-panel="payout-diff"]` finds the panel. Hand-built bands
+  (`section.cband.tp-month`, `.lp-head`) DO carry their key as a class. The first in-page actions
+  of the answer strip used the class form and scrolled nowhere on every page;
+  `answerline.js findTarget()` now tries `data-panel` first, then the class, and a heading by its
+  opening words.
+* **A module on the phone's static import graph cannot statically import a new module** without
+  that module joining `sw.js`'s precache list (`test/tokens.test.mjs` §8 walks the graph from
+  `/m/app.js`). `targetpage.js` and `lowperf.js` are on it (m/screens.js imports them for the Today
+  card and the low-performer screens), so their answer hooks load `answers.js` with `import()`,
+  which the walker does not follow and the phone never runs.
+* **Anything placed between `.topbar` and `#view` changes `arkiv_shell` §3's main-column order**
+  — it names every child of `.main` in order. The answer host is there by design; that check now
+  includes `pageAnswer`. Anything placed INSIDE `#view` before the page's first band breaks
+  `page_contract` §7, `arkiv_pages` and `arkiv_money`, which read `#view.firstElementChild`.
+* **`ui.js`'s formatters print an unread figure as "—"** — right in a table cell, wrong in a
+  sentence, and no pattern can tell it from the house's punctuation dash. Sentences built from
+  `fmt`/`money`/`countOf`/`pct` need a strict wrapper that refuses a non-number (answers.js `F`,
+  `M`, `C`, `P`); `Math.abs(null)` is 0, so an absolute value needs the same guard.
+* **`payout_routes.js` answers an empty register over 2000-01-01 → 2100-01-01** with
+  `scope:'window'`. Any sentence that prints the response's `window` must treat that range as "the
+  whole record".
+* **`pkill -f test/preview.mjs` matches every worktree's preview server**, not only one's own — on
+  a machine shared by several builders, stop a server by the PID it started with.
+* **A field withheld from the reader's role arrives as null, and a page that counts rows by it
+  counts zero.** `api/access/shape.js` nulls a withheld value (and masks an `M` one: a number
+  becomes "•••", a boolean null); `#drivers` then counted "0 drove … 330 never have" for a reader
+  without bookings. Ask before counting: an OBJECT body carries `_withheld` ({ class: level }); an
+  ARRAY body cannot, and only the `x-fm-withheld` header says it — gathered per render by data.js
+  `api()` into `access.js withheldNow()`. **But `api()` hands back a stale-while-revalidate copy
+  without reading that header** (it notes the header only when the live answer lands), so on a
+  revisit `withheldNow()` can be empty for a storable route. A route carrying a NO_STORE class
+  (CT, DOC, CASH, HR, MRG, PAX, AUDIT, RAW, CRED — `access/middleware.js`) is never stored, so its
+  header is always read first; for any other route, rely on the body's own `_withheld`.
+* **A "nothing to act on" sentence is a claim.** Built as a constant, it names checks whether or
+  not their data arrived: #payouts said "every transfer is checked" under its own "the comparison
+  … did not load". Build it from the checks made and passed (answers.js `noneOf()`).
+* **A page that catches a failed call into an empty answer** (`.catch(() => ({ rows: [] }))`) turns
+  the failure into a zero for everything downstream of it. Keep the failure beside the empty answer
+  (`_err`) so a sentence can tell "no rows" from "no answer" (`V.compliance`, ANS16).
+## Traps found bringing focus and motion to the phone (2026-11-12, FIX-STATUS MOB)
+
+These belong with "Traps that have cost time more than once"; they are written here, at the end of
+the file, so the batch that found them merges without moving that list.
+
+* **Assigning `textContent` is a mutation even when the words do not change** (MOB4). The setter
+  replaces the element's text node every time, and inside a subtree a MutationObserver watches that
+  is a childList record. focus.js relabelled every "ⓘ notes" toggle on every pass, so its observer
+  scheduled the next pass 120 ms later, for as long as a page was open: 144 rewrites of six toggles
+  in 3 s on the desktop's #target at rest, on every page with a toggle since FOCUS went live
+  (2026-10-22). On the phone, whose pass runs inside the observer callback, the same write was an
+  endless microtask loop — the first browser probe never returned. Compare before writing
+  (`if (el.textContent !== t) el.textContent = t`), and in an observer that writes into the subtree
+  it watches, skip the records its own writes made.
+
+* **Headless Chromium in a touch context never applies `:active`.** Neither `page.mouse.down()` nor a
+  held CDP `Input.dispatchTouchEvent` touchStart made a phone button match `:active` (read at 50,
+  200 and 600 ms). To test a pressed style, force the state — CDP
+  `CSS.forcePseudoState({ nodeId, forcedPseudoClasses: ['active'] })`, as
+  test/phone_focus_motion.test.mjs §11 does. On a real iOS Safari `:active` needs a touch listener on
+  the element or an ancestor; m/motion-m.js registers one, passive, on the document.
+
+* **app.css already stills every transition and animation for reduced motion.** Its global reset
+  (`*,*::before,*::after{animation-duration:.001ms !important;…;transition-duration:.001ms
+  !important}`) wins over any rule and over an inline `style.transition`, so a new reduced-motion
+  rule for a transition or an animation adds nothing. A computed `transitionDuration` of `1e-06s`
+  under emulated reduced motion is that reset, not a fault. What it cannot reach is
+  `scroll-behavior: smooth`, which is not a transition: the phone's deck scrolled smoothly for that
+  reader until MOB13.
+
+* **A rule that stills an old animation can out-rank the new one on the same element** (MOB10).
+  m/motion-m.css switches off m.css's 14 px slide with `… .m-deck.push > * {animation:none}`, at
+  (0,6,0); the arrival fade `… .fx-arrive` was (0,5,0), so every block of the deck that landed after
+  a watched skeleton got the class and no animation. A test that only looked for the class passed.
+  Assert the animation — `el.getAnimations()` on the frame the class goes on — not the class.
+
+* **The phone's deck outlives every screen** (MOB9). The desktop builds a fresh `#view` per render;
+  the phone empties and refills one `.m-deck`. A class put on the deck with a timer to take it off
+  (an entrance) needs that timer cleared at the next render, or the old timer strips the new
+  screen's class halfway; and "content replaced a skeleton" is two mutation records (the parent
+  emptied, then refilled), never one record holding both as on the desktop.
+
+* **A recount that starts from the marks never visits a host with none left** (MOB17, found by the
+  review). focus.js and m/focus-m.js gave a toggle to every host they found by walking up from a
+  mark, so a host whose body was refilled inside the same element with nothing left to fold was
+  never visited again and kept its "ⓘ 1 note" over nothing. It shows only where a renderer keeps
+  the host element and refills its body — a panel replaced whole takes its toggle with it — and the
+  phone keeps its cards and refills their bodies (Today's hour cards, every minute). Recount from the TOGGLES as well as from the marks: every host still
+  holding one.
+
+* **The phone's refresh paints this phone's copy, not the new answer** (found 2026-11-12, not
+  changed). m/app.js `refresh()` re-renders, and `api()` answers from the SWR store at once while
+  the live request runs behind; the desktop redraws on `data:refreshed` when that answer differs,
+  and the phone has no listener. So a pull-to-refresh shows what the phone already had, and the
+  fresh figures appear on the NEXT render. Do not cure it with a bare `data:refreshed` listener on
+  the phone: on the mock that event fires every 300–500 ms after a navigation (the trap above).

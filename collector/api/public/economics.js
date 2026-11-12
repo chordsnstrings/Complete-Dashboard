@@ -40,7 +40,7 @@
 import { areaChart, hbars, scatter, barChart, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, entity,
   dayStr, money, pct, sourceLabel, sourceToken, countOf, plural, verdict,
-  alertRateFigure, contract, glance, secHead, absenceBand, pageFoot, highlight } from './ui.js';
+  alertRateFigure, contract, glance, secHead, absenceBand, pageFoot, highlight, chanChip } from './ui.js';
 import { q, href, state, currentGen, alive, windowLabel } from './data.js';
 import { makeMap, fitTo } from './map.js';
 /* In pagemeta.js: the header names the tab before this module has loaded. */
@@ -1014,7 +1014,7 @@ async function driversTab(root, { contract: ak = false } = {}) {
       render: (r) => entity('driver', r.driver_ext_id, r.driver_name)
         + (r.accounts > 1 ? ` <span class="dim">${r.accounts} accounts</span>` : '') },
     { label: 'Channels', key: 'platforms', nosort: true,
-      render: (r) => (r.platforms.length ? r.platforms.map((p) => pill(sourceLabel(p), 'plat')).join(' ')
+      render: (r) => (r.platforms.length ? r.platforms.map((p) => chanChip(p)).join(' ')
         : absent('no platform record for this person in this range')) },
     { label: 'Money in', key: 'money', num: true,
       render: (r) => (r.money == null

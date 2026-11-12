@@ -126,6 +126,7 @@ function applyDictionary(body, levels, seen, depth = 0) {
      levels   the caller's effective levels for this request
      fleets   the fleets the caller may see rows of (null = no row filter)
    Returns { body, withheld: { CLASS: level } }. */
+const ROW_FILTERED = new Set(['rows', 'narrow']);
 export function shapeBody(body, entry, levels, { fleets = null } = {}) {
   const withheld = {};
   if (body == null || typeof body !== 'object') return { body, withheld };
@@ -144,7 +145,10 @@ export function shapeBody(body, entry, levels, { fleets = null } = {}) {
     if (touched) withheld[f.class] = l;
   }
   body = applyDictionary(body, levels, withheld);
-  if (fleets && entry.fleet === 'rows' && (entry.fleetRows || []).length) {
+  /* 'narrow' too (api/access/one_fleet.js): its handler already answers for
+     the one fleet, and where its rows carry the fleet this drops any row of
+     another fleet all the same — a second line, not the first. */
+  if (fleets && ROW_FILTERED.has(entry.fleet) && (entry.fleetRows || []).length) {
     const key = entry.fleetKey || 'fleet';
     const allowed = new Set(fleets);
     let dropped = 0;
@@ -173,7 +177,7 @@ export function shapeBody(body, entry, levels, { fleets = null } = {}) {
 export function needsShaping(entry, levels, { fleets = null } = {}) {
   for (const f of entry.fields || []) if ((levels[f.class] || '') !== 'F') return true;
   for (const cls of Object.keys(DICT)) if ((levels[cls] || '') !== 'F') return true;
-  if (fleets && entry.fleet === 'rows') return true;
+  if (fleets && ROW_FILTERED.has(entry.fleet)) return true;
   return false;
 }
 

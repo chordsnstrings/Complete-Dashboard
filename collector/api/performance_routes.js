@@ -35,6 +35,7 @@ import {
 } from './performance_sql.js';
 import { OFFER_CHANNELS } from './cancellation_sql.js';
 import { dubaiIso } from '../src/util.js';
+import { currentFleetScope, outsideFleetScope } from '../src/fleet_scope.js';
 
 /* Thirteen weeks is a quarter and a bit — long enough to hold four baseline
    periods behind every period the page draws an arrow on, which is the real
@@ -198,7 +199,7 @@ export function shape(rows, { grain, show, today = dubaiIso() } = {}) {
    objects. An in-flight map beside it so that two readers arriving together on
    a cold key run ONE nineteen-second query rather than two: this database is
    shared with the collector, and a basic-xxs feels the difference. */
-const CTX = new Map();            // grain|show|fleet|today -> { version, ctx }
+const CTX = new Map();            // [rls:<fleets>|]grain|show|fleet|today -> { version, ctx }
 const CTX_INFLIGHT = new Map();   // the same key -> the promise already running
 
 /* The version, read the same way api/cache.js and api/warm.js read it. On any
@@ -234,8 +235,36 @@ async function load(q, { grain, show, fleet }) {
      So the map is keyed on the QUESTION and carries the version as data. A
      stale entry is dropped when it is found stale, and entries for other
      questions are left alone. */
-  const key = `${grain}|${show}|${fleet || ''}|${w.today}`;
-  const version = await dataVersion(q);
+  /* ONE READER'S ROW-LEVEL SECURITY MUST NOT REACH THIS MAP FOR ANYONE ELSE
+     (independent review of fix/rls, 2026-11-12).
+     ─────────────────────────────────────────────────────────────────────
+     Both routes here are 'param', so a one-fleet reader's request runs every
+     statement under row-level security (src/fleet_scope.js) — and this map
+     is the process's, shared by every caller. Two things went wrong there:
+
+       · The VERSION was read inside the reader's scope. collection_run
+         carries a fleet, so the reader's max(finished_at) is their fleet's
+         latest run, not the company's — a different string whenever the
+         other fleet ran last. The store above then dropped every entry "for
+         another version": the Owner's contexts. The Owner's next chip found
+         its entry stale, paid the nineteen-to-twenty-eight seconds again and
+         evicted the reader's in turn. Reproduced with a fake q on
+         2026-11-12: Owner, Owner (hit), Egari reader, Owner — the fourth
+         call re-ran periodsSql. A one-fleet reader made the Owner's page
+         slow, which row-level security must never do to another caller.
+       · The KEY did not say whose rows it held. When the two versions did
+         coincide, the reader was handed the Owner's context — computed with
+         no scope, so the database's backstop never saw that request — and
+         the Owner could be handed one computed under the reader's role.
+
+     So the version is read outside any scope — the company's, the same
+     string the response cache keys on (api/cache.js reads it before the
+     scope opens) — and a scoped context is filed under its fleets, never
+     where an unscoped caller looks. At most twice the entries, a few
+     thousand rows each. test/rls_scope.test.mjs section 10. */
+  const scope = currentFleetScope();
+  const key = `${scope ? `rls:${scope.fleets.join(',')}|` : ''}${grain}|${show}|${fleet || ''}|${w.today}`;
+  const version = await outsideFleetScope(() => dataVersion(q));
   const held = CTX.get(key);
   if (held && held.version === version) return held.ctx;
   const running = CTX_INFLIGHT.get(key);

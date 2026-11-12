@@ -17,7 +17,29 @@ import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
-  applyWindow, MONTH_SHORT, dayLabel } from './data.js';
+  applyWindow, MONTH_SHORT, dayLabel, resetRetention, retentionNow } from './data.js';
+/* The answer line (answers.js, answerline.js) loads with the first page that
+   draws one, not with the first screen: test/lazy_pages.test.mjs holds the
+   first screen under 20 modules and 1.3 MB, and the batch of 2026-11-12 had
+   put both there, beside retention_note.js — 22 modules, 1,326 KB. A late
+   load never paints one page's answer on the next: the render that asked
+   must still be current (alive), and answers.js reads that page's state when
+   it runs. A failed load draws no box and is retried with the next page
+   (the page itself is unaffected).
+   Clearing removes the box itself, by answerline.js's HOST_ID: lowperf.js and
+   targetpage.js load answers.js on their own (they are on the phone's static
+   graph), so a box can stand on the page when this loader never ran — the
+   first version asked the loaded module to clear it, and #low-performers'
+   box stayed on #settings (test/answers.test.mjs pins the id to HOST_ID). */
+let answerMods = null;
+const ANSWER_HOST = 'pageAnswer';
+const loadAnswer = () => (answerMods ||= Promise.all([import('./answers.js'), import('./answerline.js')])
+  .catch((e) => { answerMods = null; throw e; }));
+const answer = (view, page, data) => {
+  const g = currentGen();
+  loadAnswer().then(([a]) => { if (alive(g)) a.answer(view, page, data); }).catch(() => {});
+};
+const clearAnswer = () => document.getElementById(ANSWER_HOST)?.remove();
 import { volatilePath } from './swr.js';
 import { rangePanel } from './daterange.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
@@ -26,6 +48,9 @@ import { startFocus } from './focus.js';
 /* MOTION (motion.js): the Arkiv skin's movement — inert unless index.html
    stamped data-motion="on" (Arkiv, desktop, not under automation). */
 import { startMotion, motionView, motionEntered } from './motion.js';
+/* ANS (answers.js, answerline.js): each page's answer line and Act-on strip,
+   above #view under the Arkiv skin — the rules in answers.js, the box in
+   answerline.js, emptied by render() on every navigation. */
 /* Sign-in and access (collector/docs/ULM-DESIGN.md). The server decides; these
    only draw what it decided — which pages open, and the true reason where
    something is not shown. */
@@ -1371,6 +1396,7 @@ async function overviewContract(root) {
 
   /* ── 00 · the statement, then the tiles ──────────────────────────────── */
   verdict(vHost, overviewVerdict(k, daily, byPlat, cmp));
+  answer(root, 'overview', { k, daily, byPlat, cmp });
   const base = Object.fromEntries(overviewTiles(k).map((t) => [t.label, t]));
   const trips = { ...base.Trips, hero: true, channel: ch, hl: ch || 'ink', spark: series('trips'), delta: dl('trips') };
   /* Telematics journeys are the trackers', not a channel's: under a channel
@@ -1650,7 +1676,10 @@ function overviewTiles(k) {
     ['Safety alerts', fmt(k.alerts),
       state.platform
         ? `harsh-driving events · not filtered by ${esc(state.platform)} — these come from the tracker, not a channel`
-        : `harsh-driving events${k.tracked_vehicles ? ` across ${fmt(k.tracked_vehicles)} tracked vehicles` : ''}`],
+        : `harsh-driving events${k.tracked_vehicles ? ` across ${fmt(k.tracked_vehicles)} tracked vehicles` : ''}`
+          /* The tracked count leaves out the plates the tracker has stopped
+             listing (FIXLIST C18); said, so the smaller number is not a mystery. */
+          + (k.fleet_roster?.n ? ` · ${fmt(k.fleet_roster.n)} the tracker has stopped listing are left out` : '')],
   ].map(([l, n, d]) => ({ label: l, html: n, sub: d, to: GO[l] || null, who: false }));
 
 }
@@ -2693,7 +2722,10 @@ V.drivers = async (root) => {
     { label: 'Statement', key: 'earnings', num: true, render: (x) => money(x.earnings) },
     { label: 'Counted', key: 'counted', num: true, render: (x) => money(x.counted ?? x.earnings) },
   ], { sortable: true, sortId: 'perf', defaultSort: { key: 'period_start', dir: 'desc' },
-    capped: pfTot.total > pfRows.length ? `all ${fmt(pfTot.total)} records` : null }));
+    capped: pfTot.total > pfRows.length ? `all ${fmt(pfTot.total)} records` : null,
+    /* Plan §4 #drivers: "§06 performance records get a 3px channel row
+       marker in the gutter" — each record is one platform's statement. */
+    rowMark: (r) => r.platform }));
   if (pfTot.total) {
     perf.body.append(el('p', 'cap',
       `Showing 25 of ${fmt(pfTot.total)} records — ${fmt(pfTot.people)} people across `
@@ -2981,6 +3013,12 @@ async function actionContract(root) {
   const act = panel('What to do', 'The smallest useful next step.', 'act-do');
   act.body.innerHTML = `<p style="margin:0">${esc(r.action || '')}</p>`;
   g.append(why.panel, act.panel);
+  /* Who is on it — take, give, close, reopen (ULM §8 finding.own;
+     api/public/findingowner.js). Its own module, loaded beside the page:
+     a failed load leaves the page as it was rather than breaking it. */
+  const ownerSlot = el('div');
+  root.append(ownerSlot);
+  import('/findingowner.js').then((m) => ownerSlot.replaceWith(m.ownerPanel(r))).catch(() => {});
   const who = actionPeople(r, 'act-people');
   if (who) root.append(who.panel);
   if (view && r.entity_id) {
@@ -3028,9 +3066,12 @@ async function actionContract(root) {
           : INSIGHT_COST_BASIS[r.code] ? `${sentence(INSIGHT_COST_BASIS[r.code])}.` : 'As the rule computes it; see What we found.' }
       : { label: 'What it would cost', fig: null, none: 'Not priced',
         why: 'This rule does not size its findings in money, and the page never invents a number to rank it by.' },
-    { label: 'Whether anyone acted', fig: null, none: 'Not recorded',
-      why: 'A finding carries no acknowledgement and no owner. It leaves the list when its rule stops finding it — '
-        + 'nothing records whether a person acted or the fact simply changed.' },
+    /* Who took and closed it is recorded now (Who is on it, above; ULM §8
+       finding.own, 2026-11-12) — what still is not, is whether the fact
+       itself changed because of it. */
+    { label: 'Whether the fix worked', fig: null, none: 'Not recorded',
+      why: 'Who took this finding and how they closed it is recorded under Who is on it, for signed-in people. '
+        + 'Whether the fact itself changed is read only from the rule: the finding leaves the list when its rule stops finding it.' },
     r.metric != null
       ? { label: 'What the figure is not', fig: null, none: metric ? sentence(metric[0]) : 'The rule\'s figure',
         why: ACTION_NOT[r.code] || 'The figure the rule fired on, as it computed it — not a measure of what the finding costs.' }
@@ -3164,6 +3205,7 @@ V.vehicles = async (root) => {
   const tierP2 = q('/api/product/by-vehicle').catch(() => []);
   const rows = (await dirP) || [];
   if (!alive(gen)) return;
+  answer(root, 'vehicles', { rows });
   const spread = panel('Fleet spread', 'How trips are spread across the fleet. A long tail means cars carrying no work.');
   root.append(spread.panel); loading(spread.body);
   const tierP = panel('Which assets serve which tier',
@@ -4850,6 +4892,14 @@ V.safety = async (root) => {
           : ' A rate is only comparable per 100 km, which is what the table below ranks on.')
         + ' These come from the telematics box, so no channel filter narrows them.',
     });
+    /* The tracked count this rate is divided by leaves out the plates the
+       tracker has stopped listing (FIXLIST C18) — it was 268 on production
+       2026-11-12 with 132 of them frozen CABMAN listings, which halved the
+       rate. The server's sentence names how many this figure dropped. Its own
+       warn note rather than a clause on the verdict's sub-line, which the
+       focus pass folds out of sight under the contract (focus.js decide()). */
+    const asideS = rosterSentence(fleetK?.fleet_roster);
+    if (asideS) (ak ? AKB.vHost : host).append(note(`Tracked vehicles: ${asideS}`, 'warn'));
   }
   /* A tracker losing power is a hardware fault, not a driving style. Charted
      together they were one number under a heading about harsh driving. */
@@ -5296,6 +5346,8 @@ V.unauthorized = async (root) => {
   const deadPads = flagged.filter((f) => f.verdict === 'never triggers').length;
   const deadLive = fmsLiveRows.filter((r) => r.dead).length;
   const deadTrip = fmsTripRows.filter((r) => r.dead).length;
+  answer(root, 'unauthorized', { sum, vehicles: vehRows.length,
+    stuck: +t.sensor_suspect || 0, dead: deadPads + deadLive + deadTrip });
   /* Five tiles accounted for 299 of 382 segments. `stationary` and
      `unverifiable` were in the donut beside them and had no tile, so the
      numbers on the page did not add up to the page — and `needs_a_human`, a
@@ -5685,6 +5737,24 @@ function areaCell(r) {
    tiles that count that flag can name the rule that produced it. */
 const FIX_FRESH_MIN = 30;
 
+/* THE PLATES THE TRACKER HAS STOPPED LISTING, said where they stopped
+   counting (FIXLIST C18, wired 2026-11-12).
+   /api/live leaves out the CABMAN fixes of every plate the collector's roster
+   has set aside — 132 of 177 CABMAN plates on production that morning, frozen
+   at a last fix days old, 29 of them counted as Moving. The route is a bare
+   array (the access manifest shapes it by path), so the sentence comes from
+   GET /api/fleet/roster beside it, in the server's own words. Nothing is
+   printed when the roster was read and set nothing aside; the server's
+   sentence when it set plates aside or cannot yet say; and the failure,
+   named, when it could not be asked — never silence that reads as "none". */
+function rosterSentence(r) {
+  if (!r) return null;
+  if (r.failed) return `Whether any tracker plate was set aside could not be read: ${r.failed}`;
+  if (r.known && !r.n) return null;
+  return r.reason || null;
+}
+const rosterRead = () => api('/api/fleet/roster').catch((e) => ({ failed: String(e?.message || e) }));
+
 V.live = async (root) => {
   /* Under the page contract (plan §4 #live): the verdict as the 00 statement
      — its figure, the cars not reporting, is not repeated as a tile (ruling
@@ -5708,12 +5778,15 @@ V.live = async (root) => {
   [kh, p.body].forEach(loading);
   const gen = currentGen();
   let rows;
+  const rosterP = rosterRead();
   try { rows = await api('/api/live'); } catch (e) {
     if (!alive(gen)) return;
     kh.innerHTML = ''; p.body.innerHTML = '';
     p.body.append(note(`The live feed could not be read: ${e.message}`, 'err'));
+    answer(root, 'live', { err: e });
     return;
   }
+  const aside = rosterSentence(await rosterP);
   if (!alive(gen)) return;
   const fresh = rows.filter((r) => !r.stale).length;
   const moving = rows.filter((r) => +r.speed > 3).length;
@@ -5739,6 +5812,7 @@ V.live = async (root) => {
   const engaged = rows.filter((r) => r.seat_occupied === true || /engag/i.test(r.status || '')).length;
   const located = rows.filter(hasFix);
   const noLock = rows.length - located.length;
+  answer(root, 'live', { rows, fixed: located.length });
   const feeds = [...new Set(rows.map((r) => r.source).filter(Boolean))];
   /* "Fresh 80 of 130" invites the reading that the other fifty are a few
      minutes behind. Measured live, 23 of them last reported more than a DAY
@@ -5770,6 +5844,9 @@ V.live = async (root) => {
   ];
   if (!ak) kh.innerHTML = LIVE_TILES.map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
   p.body.innerHTML = '';
+  /* Above the table and before the empty state: every tile above counts the
+     rows the roster left, so the sentence is about all of them. */
+  if (aside) p.body.append(note(aside, 'warn'));
   if (!rows.length) { empty(p.body, 'Positions appear once a tracker feed — CABMAN or FMS — has credentials saved in Settings'); return; }
   if (feeds.length) {
     /* Two seat readings now, from two providers: CABMAN DT's pad (every five
@@ -6055,6 +6132,9 @@ V.map = async (root) => {
     clear();
     marks.innerHTML = '';
     let rows;
+    /* The plates the tracker has stopped listing are not drawn — /api/live
+       leaves them out (FIXLIST C18) — and the legend says so below. */
+    const rosterP = rosterRead();
     /* One slow endpoint must not take the page. A 504 here replaced the whole
        of #map — map, controls, legend — with an error box, because this fetch
        had no catch and the throw reached render(). */
@@ -6065,6 +6145,7 @@ V.map = async (root) => {
       b.onclick = () => showLive(); stat.append(b);
       return;
     }
+    const aside = rosterSentence(await rosterP);
     const withGps = rows.filter(hasFix);
     const noLock = rows.length - withGps.length;
     const sensed = withGps.filter((r) => r.seat_occupied != null);
@@ -6107,6 +6188,7 @@ V.map = async (root) => {
         + `${plural(noLock, 'is', 'are')} reporting 0,0 — no satellite lock — and ${
           plural(noLock, 'is', 'are')} not drawn.</span>`;
     }
+    if (aside) legend.innerHTML += `<span class="dim">${esc(aside)}</span>`;
     /* Set the plate BEFORE asking for the replay. `.click()` synchronously ran
        the replay handler, whose first statement reads the select — so it
        fetched whichever vehicle was previously chosen and drew that one's day
@@ -6969,9 +7051,12 @@ async function insightsContract(root) {
       why: pricedN == null ? 'This server does not count how many open findings carry a cost.'
         : 'The rest are real and unpriced: no cost model exists for their kinds, so the list is ranked by '
           + 'severity and never by a number invented to sort on.' },
+    /* A person's taking and closing is recorded on each finding's own page
+       since 2026-11-12 (ULM §8 finding.own); the rule's own clearing — what
+       this count is — still names nobody. */
     { label: cleared ? `Who cleared the ${fmt(cleared)}` : 'Who clears a finding', fig: null, none: 'Not recorded',
-      why: 'The payload carries no actor and no acknowledgement. A finding leaves the list when its rule stops '
-        + 'finding it at the next run — nothing records whether a person acted or the fact simply changed.' },
+      why: 'A finding leaves the list when its rule stops finding it at the next run, and that names nobody. '
+        + 'A person who takes and closes a finding is recorded on the finding\'s own page, under Who is on it, for signed-in people.' },
     { label: 'Which feed raised a compliance item', fig: null, none: 'None',
       why: 'A compliance item is raised by a date passing, not by a feed: the dates come from the roster and the '
         + 'vehicle documents, so such an item names no channel.' },
@@ -7019,9 +7104,12 @@ V.compliance = async (root) => {
   const dueAk = (n) => (n < 0
     ? `<span style="color:var(--sem-neg);white-space:nowrap" title="expired ${fmt(Math.abs(n))} days ago">expired · −${fmt(Math.abs(n))} d</span>`
     : n <= 45 ? `<b style="white-space:nowrap">${fmt(n)} d</b>` : `<span class="dim">${fmt(n)} d</span>`);
+  /* Each failure is kept (`_err`) beside the empty answer the page draws
+     from: the answer line must not read a call that never answered as a
+     record with nothing in it (answers.js compliance; review, 2026-11-12). */
   const [vehPage, drvPage] = await Promise.all([
-    api('/api/compliance/vehicles').catch(() => ({ rows: [], totals: {} })),
-    api('/api/compliance/drivers').catch(() => ({ drivers: [], totals: {} })),
+    api('/api/compliance/vehicles').catch((e) => ({ rows: [], totals: {}, _err: e })),
+    api('/api/compliance/drivers').catch((e) => ({ drivers: [], totals: {}, _err: e })),
   ]);
   const veh = vehPage.rows || [];
   const drv = drvPage.drivers || [];
@@ -7158,6 +7246,8 @@ V.compliance = async (root) => {
     });
   }
 
+  answer(root, 'compliance', { vExpired, vWeek, dExpired, dWeek: dt.within_7 || 0, byPerson, dNoDate, pConflict,
+    vErr: vehPage._err || null, dErr: drvPage._err || null });
   const COMP_TILES = [
     ['Vehicle docs expired', fmt(vExpired), 'cannot legally work', vExpired ? 'err' : 'ok'],
     ['Expiring in 7 days', fmt(vWeek), 'renew now', vWeek ? 'err' : 'ok'],
@@ -7955,6 +8045,7 @@ V.sources = async (root) => {
         : null,
     });
     if (ak) sourcesGlance(AKB, { rows, bad, partial, quietOk, oldest, ageH, coverage, status });
+    answer(root, 'sources', { rows, bad, partial, quietOk, blank, oldest, ageH, debt: collectionDebt(status) });
   }
   if (ak) sourcesWhy(whyP.body, whenP.body, status);
 
@@ -9090,9 +9181,17 @@ V.settings = async (root) => {
        against a provider's own documentation and wants to copy; the hint is a
        sentence telling them where to get it. They are not the same kind of
        thing and they no longer share a line or a typeface. */
+    /* A destination (UBER_TOKEN_URL, AGENT_BASE_URL…) is read-only here, with
+       the server's own sentence: the save routes refuse it and get() ignores
+       a stored copy (src/settings.js ENV_ONLY_KEYS, system audit 2026-11-12).
+       No data-k, so the save below never collects it. */
+    const box = d.env_only
+      ? `<input readonly aria-readonly="true" value="${esc(d.value)}" title="${esc(d.env_only_reason || '')}">`
+      : `<input data-k="${esc(d.key)}" data-orig="${d.secret ? '' : esc(d.value)}" type="${d.secret ? 'password' : 'text'}" placeholder="${d.configured ? esc(d.value) : 'not set'}" ${d.secret ? '' : `value="${esc(d.value)}"`}>`;
     row.innerHTML = `<div class="lab">${esc(d.label)}<small>${esc(d.key)}</small>${
-      d.hint ? `<span class="labhint">${esc(d.hint)}</span>` : ''}</div>
-      <div><input data-k="${esc(d.key)}" data-orig="${d.secret ? '' : esc(d.value)}" type="${d.secret ? 'password' : 'text'}" placeholder="${d.configured ? esc(d.value) : 'not set'}" ${d.secret ? '' : `value="${esc(d.value)}"`}></div>
+      d.hint ? `<span class="labhint">${esc(d.hint)}</span>` : ''}${
+      d.env_only ? `<span class="labhint">${esc(d.env_only_reason || '')}</span>` : ''}</div>
+      <div>${box}</div>
       <div>${sourceTag(d)}${expiryTag(d)}</div>`;
     (groupEl || wrap).append(row);
   });
@@ -9209,6 +9308,17 @@ V.settings = async (root) => {
      A queue nobody can see is a queue nobody can trust. */
   const jp = panel('Requested runs', 'Every on-demand run, and what became of it.');
   root.append(jp.panel);
+  /* The nightly data-retention pass: what it considered, would remove and
+     removed, and why each table is kept (api/data_retention_routes.js). */
+  /* The Data retention panel, from retention_note.js — loaded with this page,
+     not the first screen. Its place is held so the panels keep their order;
+     a failed load says so there rather than leaving a gap. */
+  const retHold = document.createElement('div');
+  root.append(retHold);
+  import('./retention_note.js')
+    .then(({ retentionPanel }) => retHold.replaceWith(retentionPanel({ panel, tableFrom, loading, empty, pill, dtStr, api })))
+    .catch(() => retHold.replaceWith(panel('Data retention',
+      'This panel’s code could not be loaded, so nothing is shown here; reload the page to try again.').panel));
   const jobs = async () => {
     loading(jp.body);
     try {
@@ -9594,7 +9704,12 @@ async function render() {
   /* The shell footer's basis and colophon belong to the page that wrote them
      (ui.js pageFoot); the principle line is the shell's and stays. */
   clearPageFoot();
+  /* …and so does the answer line above it (answerline.js): the arriving page
+     draws its own, and a page with no rule, a closed page or a failed one
+     shows none rather than the last page's. */
+  clearAnswer();
   resetWithheld();
+  resetRetention();
   accountBox();
   /* A new page starts at its top. Under the old shell that is #view: the
      title sits in the sticky topbar above it. Under the new one the title
@@ -9626,6 +9741,15 @@ async function render() {
     /* What this page's answers left out for this role, said once at the top. */
     const wb = withheldBanner();
     if (wb) root.prepend(wb);
+    /* And what retention has thinned out of the range it read — drawn by
+       retention_note.js, loaded only when an answer said so (the capture is
+       data.js's; see the answer line's note above for the budget). */
+    if (retentionNow().length) {
+      const { retentionBanner } = await import('./retention_note.js');
+      if (!alive(gen)) return;
+      const rb = retentionBanner();
+      if (rb) root.prepend(rb);
+    }
     markShutLinks(root);
     await stampSource(root, gen);
     /* Before the animation, because it only adds a class. A table long enough
@@ -10490,7 +10614,7 @@ tzNote();
    dark → system, and the label names the state it is in now. */
 const THEME_LABEL = { light: '☀ light', dark: '☾ dark', system: '◐ system' };
 const THEME_NEXT = { system: 'light', light: 'dark', dark: 'system' };
-function applyTheme(mode) {
+function applyTheme(mode, { boot = false } = {}) {
   const r = document.documentElement;
   if (mode === 'system') { r.removeAttribute('data-theme'); store.set('theme', ''); }
   else { r.setAttribute('data-theme', mode); store.set('theme', mode); }
@@ -10500,8 +10624,29 @@ function applyTheme(mode) {
     b.title = `Theme: ${mode === 'system' ? 'following your device' : mode}. `
       + `Click for ${THEME_NEXT[mode]}.`;
   }
+  /* The browser's bar follows the paper this choice resolves to
+     (themecolor.js; loaded on demand — test/lazy_pages.test.mjs keeps the
+     first screen under 20 modules, and a bar colour is not a first-screen
+     need: index.html's pre-paint script has already set a chosen theme's).
+     At boot it is not loaded at all unless the bar is wrong (themeBarWrong,
+     after the first render): for the default reader — Arkiv, following the
+     device — the static metas already carry the paper for each scheme, and
+     the browser switches them itself (integration, 2026-11-12: #overview
+     fetched 23 modules against the test's 22). */
+  if (!boot) import('./themecolor.js').then((m) => m.followThemeColor()).catch(() => { /* the static metas stand */ });
 }
-applyTheme(['light', 'dark'].includes(store.get('theme')) ? store.get('theme') : 'system');
+/* Does the bar the browser shows differ from the paper the page is drawn on?
+   Read once the stylesheets are in (the first render waits for them): the
+   Classic skin's linen, or a chosen theme the OS scheme does not match. */
+const themeBarWrong = () => {
+  try {
+    const paper = String(getComputedStyle(document.documentElement).getPropertyValue('--paper')).trim().toLowerCase();
+    const shown = [...document.querySelectorAll('meta[name="theme-color"]')]
+      .find((m) => !m.media || matchMedia(m.media).matches)?.getAttribute('content')?.trim().toLowerCase();
+    return Boolean(paper && shown && paper !== shown);
+  } catch { return true; }
+};
+applyTheme(['light', 'dark'].includes(store.get('theme')) ? store.get('theme') : 'system', { boot: true });
 $('#themeBtn').onclick = () => {
   const cur = document.documentElement.getAttribute('data-theme') || 'system';
   applyTheme(THEME_NEXT[cur] || 'system');
@@ -10607,6 +10752,32 @@ if (document.documentElement.dataset.boot === 'code') document.documentElement.d
    and every "not shown to your role" depend on it. One small request, in
    parallel with the stylesheets. A signed-in person's chosen look follows
    them to any browser; sign-in required and nobody signed in goes to /signin. */
+/* THE WORKER'S WORD ON WHERE AN ANSWER CAME FROM, held until swreg.js is
+   here to read it.
+   ─────────────────────────────────────────────────────────────────────────
+   sw.js tells the page each time it answers /api/ from its kept copy (an
+   "fm-sw" message), and swreg.js turns that into the one line above #view
+   saying the figures are not live. But swreg.js loads on demand, after the
+   first render is under way, and a message nobody is listening for is
+   dropped. Measured (the ARK review, 2026-11-12, the server unreachable, the
+   worker's caches filled by two visits): a desktop opened from the cache
+   painted #overview's kept figures with NO such line in 6 opens of 6, and
+   #trips in 2 of 3 — the first page's answers had all come back before
+   swreg.js was listening, so a week-old page read as live, the one thing
+   the line exists to prevent. So the shell listens while it boots — the
+   worker's messages are held by the browser until the document has
+   finished parsing, which is after this module has run, so none is missed
+   — keeps what arrives, and hands it over when swreg.js registers
+   (registerWorker({ held })), which takes the listener away. */
+const swHeld = (() => {
+  const got = [];
+  let sw = null;
+  try { sw = navigator.serviceWorker || null; } catch { /* a browser that refuses workers */ }
+  if (!sw) return () => got.splice(0);
+  const keep = (ev) => { if (ev?.data?.type === 'fm-sw') got.push(ev); };
+  sw.addEventListener('message', keep);
+  return () => { sw.removeEventListener('message', keep); return got.splice(0); };
+})();
 installFetchGuard();
 const whoReady = loadWho().then(() => {
   if (who.mode === 'enforced' && !who.signedIn) { toSignIn('required'); return false; }
@@ -10626,9 +10797,25 @@ const whoReady = loadWho().then(() => {
 });
 whoReady.then((go) => {
   if (!go) return;
-  whenStyled(4000, render).then(render);
+  /* whenStyled resolves when the sheets are in; the first render is the
+     .then — `first` settles when that page is drawn. */
+  const first = whenStyled(4000, render).then(render);
   /* The chat assistant's button and window (agentchat.js), on <body> so it
      outlives every view. Mounted only once sign-in is settled. */
   mountAssistant();
+  /* After the first page is drawn, and not before (integration, 2026-11-12):
+     the bar colour, only if it is wrong (themeBarWrong above); and the
+     service worker on the desktop build (swreg.js, HANDOFF §4.5), loaded on
+     demand like themecolor.js, two seconds after the first render. Neither
+     is first-screen work — an installed worker controls the page from the
+     navigation, whenever register() is called, and what it says before then
+     is held (swHeld above) — and fetching both while the page and its data
+     load put #overview at 23 modules against test/lazy_pages.test.mjs's 22. */
+  first.finally(() => {
+    if (themeBarWrong()) import('./themecolor.js').then((m) => m.followThemeColor()).catch(() => { /* the static metas stand */ });
+    setTimeout(() => {
+      import('./swreg.js').then((m) => m.registerWorker({ held: swHeld })).catch(() => { /* no worker: the page works as before */ });
+    }, 2000);
+  });
 });
 setInterval(() => { if (state.view === 'live') render(); }, 60000);

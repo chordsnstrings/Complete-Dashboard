@@ -42,7 +42,7 @@ import { proposeKeys } from '../src/credmodel.js';
    suite dies with a ReferenceError before its first assertion. */
 import { normaliseFiles, crossFile, silentFiles, fileReport,
   boltFollowUp } from '../src/credfiles.js';
-import { SETTING_DEFS } from '../src/settings.js';
+import { SETTING_DEFS, envOnlyReason } from '../src/settings.js';
 /* The one definition of a cancellation and of who caused it — see
    api/cancellation_sql.js, which carries the measurements. */
 import { CANCEL_CASE, DROPPED_SQL, DECLINED_SQL } from './cancellation_sql.js';
@@ -53,6 +53,8 @@ import { responseCache } from './cache.js';
 import { platformFares, platformPayouts, platformStatements, payoutPeople, fleetIncome } from './income_sql.js';
 import { resolveOpenFill, applyFillToPlatforms } from './statement_fill_sql.js';
 import { teslaRoutes } from './tesla_routes.js';
+import { fleetRosterRoutes } from './fleet_roster_routes.js';
+import { wageSheetRoutes } from './wage_sheet_routes.js';
 import { cancellationRoutes } from './cancellation_routes.js';
 import { startWarmer } from './warm.js';
 import { startAlerts } from './alerts.js';
@@ -104,7 +106,14 @@ import { performerRoutes } from './performer_routes.js';
 import { compareRoutes } from './compare_routes.js';
 import { performanceRoutes } from './performance_routes.js';
 import { statusRoutes } from './status_routes.js';
+/* Data retention: the record of the nightly pass (Settings) and the
+   "thinned by retention before <date>" header on every page that reads past
+   it (src/data_retention.js). Both used outside test/mount.mjs's slice. */
+import { dataRetentionRoutes } from './data_retention_routes.js';
+import { retentionNotes } from './data_retention_notes.js';
 import { onlineHoursRoutes } from './online_hours_routes.js';
+/* The series behind a page's hero tile, in one request (the sparklines). */
+import { historyRoutes } from './history_routes.js';
 /* Where a car was at a moment or over a stretch, in the gazetteer's words —
    the assistant's "historical location based on time" (2026-10-13). */
 import { whereRoutes } from './where_routes.js';
@@ -112,6 +121,7 @@ import { samePersonRoutes } from './sameperson_routes.js';
 /* Charging from PowerDrive: wallets, the links to our people, sessions by car
    (api/charging_routes.js over src/sources/yocharge.js). */
 import { chargingRoutes } from './charging_routes.js';
+import { uberLiveMoneyRoutes } from './uber_live_money_routes.js';
 import { registerRoutes } from './register_routes.js';
 /* Folding two people into one, and moving the money with them — the operation
    src/persons.js refuses to do by itself the moment either carries an entry. */
@@ -157,8 +167,14 @@ import { RAW_ALIASES } from '../src/probe.js';
    run for a cached answer. collector/docs/ULM-DESIGN.md is the design. */
 import { accessLayer } from './access/middleware.js';
 import { accessRoutes, housekeeping as accessHousekeeping } from './access/routes.js';
+/* Passkeys and single sign-on, off until the Owner turns them on (ULM-DESIGN
+   §5.1, §14 decision 3): api/access/signin_methods.js. */
+import { signinMethodRoutes } from './access/signin_methods.js';
 import { bootstrapOwner } from './access/service.js';
 import { INTERNAL_TOKEN } from './access/internal.js';
+/* Liveness and the per-client request budget, both mounted before the caller
+   is identified — api/ops.js. */
+import { makeHealth, makeRateLimiter } from './ops.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
 
@@ -256,6 +272,37 @@ app.use((req, res, next) => {
   return res.status(503).json({ error: 'starting', detail: 'migrations are still applying — retry shortly' });
 });
 
+/* LIVENESS, THEN THE REQUEST BUDGET — both before the caller is identified.
+   ─────────────────────────────────────────────────────────────────────────
+   Liveness: the process is up and the event loop is turning. Nothing more —
+   a liveness probe that touches the database restarts a healthy container
+   every time the database hiccups. The route was always memory-only, but it
+   was registered below `app.use(access.identify)`, and identify() queries
+   access_config for every /api path first; with the pool full of slow reads
+   the platform's probe queued behind them, timed out, and the restart emptied
+   the cache (the loop /api/ready's comment describes). Registered here it
+   answers before identify(), the budget and the cache, and also says which
+   commit and which front end this process serves — api/ops.js has the fields
+   and the measurements.
+
+   The budget (api/ops.js): 600 reads and 60 changes a minute, 20 assistant
+   questions per 10 minutes and 10 provider-calling actions an hour per client,
+   429 with Retry-After beyond that. Before identify() too, so a client over
+   budget costs no access_config query. The process's own warmer and refresh
+   are exempt by the same isInternal() rule identify() uses for kind 'system',
+   and so is every other self-call — the assistant's tool calls above all,
+   which come over loopback with the asker's cookie (api/ops.js, selfCall()).
+
+   `shellHash` is read through a getter: it is computed far below, with the
+   static files, and is initialised long before anything can connect. */
+const requestBudget = makeRateLimiter({ log });
+app.get('/api/health', makeHealth({
+  migrating: () => !migrationsDone,
+  frontend: () => shellHash,
+  limiter: requestBudget,
+}));
+app.use(requestBudget);
+
 /* Read responses are cached against a data version, not a clock — see
    api/cache.js. Registered before the routes so a hit never reaches one, and
    after the body parser so a POST is still parsed normally on its way past.
@@ -267,6 +314,11 @@ app.use((req, res, next) => {
 const access = accessLayer({ db: pool, log });
 app.use(access.identify);
 app.use(access.gate);
+/* Before the cache, so a hit carries it too: x-fm-retention on the routes
+   that read a range the data-retention pass has thinned or removed
+   (api/data_retention_notes.js READERS). Sets nothing until a pass has run
+   with RETENTION_MODE=on. */
+app.use(retentionNotes({ read: (sql, params) => pool.query(sql, params).then((r) => r.rows) }));
 
 const cache = responseCache({
   pool,
@@ -308,6 +360,9 @@ app.use('/api', (req, res, next) => (
   VARIES_BY_CALLER.some((p) => req.originalUrl.split('?')[0].startsWith(p))
     ? next()
     : cache(req, res, next)));
+/* A narrowed reader's statements run under row-level security from here on
+   (src/fleet_scope.js) — after the cache, so its own queries stay unscoped. */
+app.use(access.rlsScope);
 
 /* A slow query is the most common reason a panel renders as a skeleton, and
    until now nothing on the server said WHICH one. bin/render-audit.mjs can see
@@ -354,7 +409,12 @@ function logPlan(text, params, ms) {
    quote. The real fix for this class of bug is test/route_smoke.test.mjs,
    which executes every route rather than grepping for it. */
 import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount, peopleCountStored, personKeyStored, NAMED, JOIN_TRIP, personFold, custodyRefs, custodyNames } from './custody_sql.js';
-import { TELEMETRY_PLATES, LATEST_FIX, REAL_FIX } from './telemetry_sql.js';
+import { TELEMETRY_PLATES, LATEST_FIX, REAL_FIX, ROSTER_KEEP } from './telemetry_sql.js';
+/* The tracker roster's read side (FIXLIST C18): which CABMAN plates the
+   collector has set aside, and the sentence a page prints about it. Also in
+   test/mount.mjs's injected list — the harness evaluates this file's routes
+   as a function body, and a name it omits is a ReferenceError there. */
+import { fleetRoster, rosterFor, excludedPlates, exclusionNote } from './fleet_roster.js';
 import { spanGaps } from './coverage_gaps.js';
 /* The one place the alerts-per-distance rule lives. Every page that prints a
    safety rate reads it from here, so the fleet headline and the per-vehicle
@@ -492,10 +552,9 @@ const CANON = personFold;
 // them counts it twice. See sql/schema_v7.sql.
 const FB = `${F} AND is_booking`;
 
-/* Liveness: the process is up and the event loop is turning. Nothing more —
-   a liveness probe that touches the database restarts a healthy container
-   every time the database hiccups. */
-app.get('/api/health', (_, res) => res.json({ ok: true, migrating: !migrationsDone }));
+/* Liveness (/api/health) is registered near the top of this file, above the
+   access layer, so that it never waits on the pool — see "LIVENESS, THEN THE
+   REQUEST BUDGET" and api/ops.js. */
 
 /* Readiness: can this instance actually answer? A green health check in front
    of a missing view is worse than a red one, because it routes users to it. */
@@ -724,17 +783,49 @@ app.get('/api/kpis', wrap(async (req, res) => {
      couple of cycles behind; reporting is what is being measured, not
      punctuality. The silent count is returned beside them so a page can say
      which vehicles have gone quiet instead of quietly dropping them. */
+  /* ONE FLEET'S TRACKERS, for a reader whose access covers one fleet
+     (api/access/one_fleet.js). Every other figure on this answer already
+     follows the fleet the gate writes into ?fleet=; this one never read it,
+     so an Egari reader's "vehicles reporting" counted Ecosine's trackers too.
+     Narrowed ($1), a plate counts when that fleet filed a fix for it, and its
+     newest fix is that fleet's newest. Everyone else: the statement as it was. */
+  const onlyTrk = typeof req.query._fmfleet === 'string' && req.query._fmfleet ? req.query._fmfleet : null;
+  /* AND ONLY THE PLATES THE TRACKER STILL LISTS (FIXLIST C18, 2026-11-12).
+     Measured on production that morning: tracked_vehicles 268 and
+     silent_vehicles 162, with 132 CABMAN plates whose last poll was more
+     than a day old — plates the provider stopped listing, frozen at their
+     last fix and counted as fleet. The Alerts page divides its events by this
+     tracked count, so its per-vehicle rate was about half what it is.
+     A set-aside plate's CABMAN fixes no longer count (api/telemetry_sql.js
+     ROSTER_KEEP); a plate whose every fix was CABMAN's is left with no fix and
+     falls out of all three counts, and `tracked_set_aside` counts exactly
+     those, so the note printed beside the figure names the plates taken out
+     of THIS figure and not the roster's whole list. count(captured_at) rather
+     than count(*): with nothing set aside no plate's captured_at is null and
+     the two are the same number. */
+  /* Integration of ONE and WIRE (2026-11-12): both rewrote this statement.
+     Narrowed, the roster is the reader's fleet's own (rosterFor), so the
+     note printed beside the count names only their plates, and a plate is
+     counted when that fleet filed ANY fix for it (`filed`) — a plate whose
+     only fixes in that fleet are set aside is then `tracked_set_aside`, not
+     silently "the other fleet's". The exclusion stays $1; the fleet is $2. */
+  const roster = rosterFor(await fleetRoster(q), onlyTrk);
   const [v] = await q(`WITH RECURSIVE ${TELEMETRY_PLATES}
       SELECT
         count(*) FILTER (WHERE now() - captured_at < ${FIX_FRESH})::int live_vehicles,
         count(*) FILTER (WHERE now() - captured_at < ${FIX_FRESH})::int fresh,
         count(*) FILTER (WHERE now() - captured_at >= interval '1 day')::int silent_vehicles,
-        count(*)::int tracked_vehicles
+        count(captured_at)::int tracked_vehicles,
+        count(*) FILTER (WHERE captured_at IS NULL)::int tracked_set_aside
       /* Each plate's newest captured_at, future included — what the
          DISTINCT ON this replaced kept. See api/telemetry_sql.js. */
       FROM (SELECT p.plate,
-                   (SELECT max(t.captured_at) FROM telemetry_snapshot t WHERE t.plate = p.plate) AS captured_at
-              FROM plates p WHERE p.plate IS NOT NULL) s`);
+                   (SELECT max(t.captured_at) FROM telemetry_snapshot t WHERE t.plate = p.plate
+                       AND ${ROSTER_KEEP('t.')}${onlyTrk ? ' AND t.fleet_id = $2' : ''}) AS captured_at${
+                     onlyTrk ? `,
+                   EXISTS (SELECT 1 FROM telemetry_snapshot t WHERE t.plate = p.plate AND t.fleet_id = $2) AS filed` : ''}
+              FROM plates p WHERE p.plate IS NOT NULL) s${onlyTrk ? ' WHERE s.filed' : ''}`,
+  onlyTrk ? [excludedPlates(roster), onlyTrk] : [excludedPlates(roster)]);
   /* Alerts, and the distance they are allowed to be divided by.
      ─────────────────────────────────────────────────────────────────────────
      Alerts take the same fleet filter as the trips beside them; without it a
@@ -901,6 +992,10 @@ app.get('/api/kpis', wrap(async (req, res) => {
   const workedDays = Math.max(0, ...fareRows.map((r) => r.booking_days || 0));
   res.json({
     ...t, ...v, ...a, ...ak,
+    /* What the three tracker counts above left out, and why, in the words a
+       page prints beside them (api/fleet_roster.js). `n` is the plates this
+       figure dropped (tracked_set_aside), `held` the roster's whole list. */
+    fleet_roster: exclusionNote(roster, { removed: v.tracked_set_aside }),
     /* The safety headline, computed here rather than left for a page to divide
        `alerts` by `km` — which is how it came to be wrong: those two columns
        describe different sets of days whenever the feed has a hole, and every
@@ -1275,6 +1370,20 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
 
      `to` in the past means the live half matches nothing and costs nothing. */
   const TODAY = "(now() AT TIME ZONE 'Asia/Dubai')::date";
+  /* ONE FLEET, for a reader whose access covers one fleet (api/access/
+     one_fleet.js). The day figures already follow the fleet the gate writes
+     into ?fleet= (the rollup is kept per fleet). The SILENT-SOURCE columns did
+     not: source_day_coverage counts each channel's rows over both fleets, so
+     an Egari reader would be told "every source reported" on a day only
+     Ecosine's channels did — the other fleet's collection standing in for
+     theirs. Narrowed, each channel's daily rows are counted from that fleet's
+     trips alone ($5), by the same definition the view uses (sql/schema_v9.sql).
+     Everyone else reads the view, as before. */
+  const only = typeof req.query._fmfleet === 'string' && req.query._fmfleet ? req.query._fmfleet : null;
+  const SRC = only
+    ? `(SELECT platform AS source, (requested_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int AS rows
+          FROM trip WHERE requested_at IS NOT NULL AND fleet_id = $5 GROUP BY 1, 2)`
+    : 'source_day_coverage';
   /* Served at the precision it is stored at, not rounded again here. A page
      that sums thirty daily buckets was summing thirty roundings: the overview
      said 157,709 km and its own chart said 157,712, which is a rounding
@@ -1347,7 +1456,7 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
      norm AS (
        SELECT source, percentile_cont(0.5) WITHIN GROUP (ORDER BY rows) AS median_rows,
               min(day) AS first_day, max(day) AS last_day
-       FROM source_day_coverage GROUP BY source
+       FROM ${SRC} GROUP BY source
      ),
      silent AS (
        SELECT cal.d,
@@ -1356,7 +1465,7 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
               array_agg(n.source ORDER BY n.source) FILTER (WHERE coalesce(c.rows, 0) = 0) AS silent_sources
        FROM cal
        JOIN norm n ON cal.d BETWEEN n.first_day AND n.last_day AND n.median_rows > 0
-       LEFT JOIN source_day_coverage c ON c.source = n.source AND c.day = cal.d
+       LEFT JOIN ${SRC} c ON c.source = n.source AND c.day = cal.d
        GROUP BY cal.d
      )
      SELECT to_char(cal.d, 'YYYY-MM-DD') AS d,
@@ -1375,7 +1484,7 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
      FROM cal
      LEFT JOIN agg ON agg.d = cal.d
      LEFT JOIN silent ON silent.d = cal.d
-     ORDER BY cal.d`, p);
+     ORDER BY cal.d`, only ? [...p, only] : p);
   /* Bucketed at the END, not by grouping the query differently.
      ─────────────────────────────────────────────────────────────────────────
      The rows above are a COMPLETE calendar: every day in the window, with the
@@ -1916,6 +2025,20 @@ app.get('/api/vehicles', wrap(async (req, res) => {
     truncated: (t?.vehicles ?? 0) > rows.length });
 }));
 
+/* NOT THE PLATES THE TRACKER HAS STOPPED LISTING (FIXLIST C18, 2026-11-12).
+   Measured on production that morning: 268 rows, 177 of them CABMAN, and 132
+   of those with a last poll more than a day old — plates the provider stopped
+   listing, frozen at their last fix and position. 29 of the 60 rows the page
+   called Moving were among them, moving at a speed recorded days before.
+   ROSTER_KEEP takes a set-aside plate's CABMAN fixes out of the candidates
+   for its newest fix: a plate another feed still reports shows that feed's
+   fix, and one only CABMAN ever reported has none left and drops out.
+   STILL A BARE ARRAY, deliberately. The access manifest shapes this route by
+   path — '[].lat', '[].lng', '[].place' are withheld from a role without
+   locations, and rows are narrowed by '[]'.fleet_id for a one-fleet reader —
+   so wrapping it in an object would have handed every role every position.
+   The sentence saying what was set aside is GET /api/fleet/roster, which the
+   Live and Map pages read beside this one (api/fleet_roster_routes.js). */
 app.get('/api/live', wrap(async (_, res) => res.json(await q(
   `WITH RECURSIVE ${TELEMETRY_PLATES}
    SELECT s.plate, s.fleet_id, s.source, s.captured_at, s.polled_at, s.lat, s.lng, s.speed, s.status,
@@ -1985,10 +2108,10 @@ app.get('/api/live', wrap(async (_, res) => res.json(await q(
       polled_at breaks the remaining ties, so the result is deterministic.
       One plate at a time through the index — see api/telemetry_sql.js. */
    FROM plates p
-   CROSS JOIN LATERAL ${LATEST_FIX('p.plate')} s
+   CROSS JOIN LATERAL ${LATEST_FIX('p.plate', ROSTER_KEEP('t.'))} s
    LEFT JOIN vehicle_current_driver cd ON cd.plate = s.plate
    WHERE p.plate IS NOT NULL
-   ORDER BY s.plate`))));
+   ORDER BY s.plate`, [excludedPlates(await fleetRoster(q))]))));
 
 // Breadcrumb trail. Only GPS-bearing sources: Uber writes driver-status rows into
 // the same table with no coordinates, and those would otherwise punch holes in a path.
@@ -3744,9 +3867,16 @@ app.get('/api/status', wrap(async (_, res) => res.json((await q(
     detail: undefined,
     cadence,
     silence: say ? say(r) : null,
+    /* `kind` names the surface that served (or failed) the window, where the
+       source collects more than one: Bolt's trips now come from the portal
+       AND from fleet-integration getFleetOrders, and "which source served
+       this window" is the question a dead portal token raises. logRun has
+       always stored it (src/db.js); this is where it stopped. Omitted where
+       the source never sets it, so every other row is unchanged. */
     failed_windows: (detail || []).filter((c) => c.error)
-      .map((c) => ({ from: c.from, to: c.to, error: c.error })),
-    windows: (detail || []).map((c) => ({ from: c.from, to: c.to, rows: c.rows, ok: !c.error })),
+      .map((c) => ({ from: c.from, to: c.to, error: c.error, ...(c.kind ? { kind: c.kind } : {}) })),
+    windows: (detail || []).map((c) => ({ from: c.from, to: c.to, rows: c.rows, ok: !c.error,
+      ...(c.kind ? { kind: c.kind } : {}) })),
   };
 }))));
 
@@ -4059,6 +4189,15 @@ app.get('/api/settings', wrap(async (req, res) => {
 
 app.put('/api/settings', requireAdmin, wrap(async (req, res) => {
   const updates = req.body && typeof req.body === 'object' ? req.body : {};
+  /* A destination (UBER_TOKEN_URL, AGENT_BASE_URL…) is refused before
+     anything is written, the whole save with it, and says why — see
+     src/settings.js ENV_ONLY_KEYS (system audit 2026-11-12, CRIT 1). A save
+     that stored the other keys and dropped this one would leave the operator
+     believing it had gone through. */
+  const refused = Object.keys(updates).map(envOnlyReason).filter(Boolean);
+  if (refused.length) {
+    return res.status(400).json({ ok: false, error: 'env_only', detail: refused.join(' '), updated: [] });
+  }
   const done = [];
   for (const [k, v] of Object.entries(updates)) {
     if (v === null || v === '') { await deleteSetting(k); done.push(`${k}:cleared`); }
@@ -4214,6 +4353,10 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
            authenticates as nothing and looks exactly like the credential
            having been wrong. Checked before the first write rather than
            recovered from after it. */
+        /* A destination is refused here exactly like an unknown key: nothing of
+           the pair is written (src/settings.js ENV_ONLY_KEYS). */
+        const fixed = Object.keys(t.keys).map(envOnlyReason).filter(Boolean);
+        if (fixed.length) { t.verdict = 'fail'; t.detail = `${t.detail || ''} — ${fixed.join(' ')} Nothing was written.`; continue; }
         const bad = Object.keys(t.keys).filter((k) => !SETTING_DEFS.some((d) => d.key === k));
         if (bad.length) {
           t.verdict = 'fail';
@@ -4229,6 +4372,7 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
         continue;
       }
       if (!t.key) continue;
+      if (envOnlyReason(t.key)) { t.verdict = 'fail'; t.detail = `${t.detail || ''} — ${envOnlyReason(t.key)} Nothing was written.`; continue; }
       await setSetting(t.key, t.value);
       applied.push(t.key);
       admitted.push(t);
@@ -4545,7 +4689,15 @@ app.get('/api/rollups', wrap(async (_req, res) => res.json(await rollupState()))
    day. Never cached itself, for the same reason /api/rollups is not. */
 app.get('/api/cache-stats', wrap(async (_req, res) => res.json(cache.stats())));
 
-app.get('/api/settings/jobs', wrap(async (_req, res) => {
+app.get('/api/settings/jobs', wrap(async (req, res) => {
+  /* ONE FLEET'S JOBS, for a reader whose access covers one fleet (api/access/
+     one_fleet.js): collector_job records the fleet a job was queued for, and
+     a narrowed reader is shown those jobs, their total and their queued and
+     running counts — never a job queued for every fleet (fleet unset), which
+     acts on the other fleet's accounts too. The fleet comes back on each job
+     so the shaper can check it. Everyone else: the statements as they were. */
+  const only = typeof req.query._fmfleet === 'string' && req.query._fmfleet ? req.query._fmfleet : null;
+  const ONE = only ? ' WHERE fleet = $1' : '';
   const jobs = await q(
     /* attempts and progress are both here for the same reason: a job that says
        'running' tells you nothing. attempts counts how many times a container
@@ -4563,8 +4715,8 @@ app.get('/api/settings/jobs', wrap(async (_req, res) => {
             /* The true size of the set, carried on the rows the cap let
                through. A window over the ordered query counts every job
                without a second scan. */
-            count(*) OVER ()::int AS _total
-     FROM collector_job ORDER BY requested_at DESC LIMIT 40`);
+            count(*) OVER ()::int AS _total${only ? ', fleet' : ''}
+     FROM collector_job${ONE} ORDER BY requested_at DESC LIMIT 40`, only ? [only] : []);
   /* The cap said nothing, and this is the page an operator opens to find out
      whether a job ran. bin/cap-audit.mjs found it returning exactly 40 of a
      larger set with no disclosure — the last silent cap in 49 handlers, the
@@ -4581,7 +4733,7 @@ app.get('/api/settings/jobs', wrap(async (_req, res) => {
   const [counts] = await q(
     `SELECT count(*) FILTER (WHERE status = 'queued')::int AS pending,
             count(*) FILTER (WHERE status = 'running')::int AS running
-       FROM collector_job`);
+       FROM collector_job${ONE}`, only ? [only] : []);
   res.json({
     jobs,
     total, shown: jobs.length, truncated: total > jobs.length,
@@ -6220,14 +6372,22 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
    the list IS the population and the sentence over it cannot be truncated.
    History is still in the table for anyone who wants it; this endpoint answers
    "what are we being asked for now". */
-app.get('/api/recommendations', wrap(async (_, res) => {
+app.get('/api/recommendations', wrap(async (req, res) => {
+  /* ONE FLEET'S RECOMMENDATIONS, for a reader whose access covers one fleet
+     (api/access/one_fleet.js): platform_recommendation files each one under
+     the fleet whose platform account it came from, so the newest per
+     platform and type is that fleet's newest, the history count is that
+     fleet's, and each row says its fleet so the shaper can check it ($1).
+     Everyone else: the statements as they were. */
+  const only = typeof req.query._fmfleet === 'string' && req.query._fmfleet ? req.query._fmfleet : null;
   const rows = await q(
     `SELECT DISTINCT ON (platform, rec_type)
             platform, rec_type, period_start, period_end, org_value, target_value,
-            flagged_count, flagged, updated_at
-     FROM platform_recommendation
-     ORDER BY platform, rec_type, period_end DESC NULLS LAST`);
-  const [n] = await q('SELECT count(*)::int history FROM platform_recommendation');
+            flagged_count, flagged, updated_at${only ? ', fleet_id' : ''}
+     FROM platform_recommendation${only ? ' WHERE fleet_id = $1' : ''}
+     ORDER BY platform, rec_type, period_end DESC NULLS LAST`, only ? [only] : []);
+  const [n] = await q(`SELECT count(*)::int history FROM platform_recommendation${only ? ' WHERE fleet_id = $1' : ''}`,
+    only ? [only] : []);
   res.json({ rows, shown: rows.length, truncated: false, history: n?.history ?? rows.length });
 }));
 
@@ -6863,11 +7023,16 @@ dayRoutes(app, { q, wrap });
 onlineRoutes(app, { q, wrap });
 cancellationRoutes(app, { q, wrap });
 teslaRoutes(app, { q, wrap });
+/* What the tracker roster set aside, in words (FIXLIST C18) — and the
+   wage-sheet classifier's write-free preview. See each file's header. */
+fleetRosterRoutes(app, { q, wrap });
+wageSheetRoutes(app, { wrap });
 /* One booking as an address — reached from every trip table in the product. */
 tripRoutes(app, { q, wrap });
 authRoutes(app, { q, wrap });
 /* Sign-in, the account page and Set up → Access (api/access/routes.js). */
 accessRoutes(app, { db: pool, layer: access, wrap, log });
+signinMethodRoutes(app, { db: pool, layer: access, wrap, log });
 /* Fleets named from the platforms (ULM-DESIGN §3): the names each platform
    gives, the accounts behind them, and the changes waiting for an Owner. */
 fleetNameRoutes(app, { q, wrap, db: pool, tx: pgTx(pool), log });
@@ -7069,9 +7234,18 @@ performanceRoutes(app, { q, wrap });
    live status. */
 statusRoutes(app, { q, wrap });
 
+/* What the nightly data-retention pass considered, would remove and removed —
+   api/data_retention_routes.js, shown on #settings beside the requested runs. */
+dataRetentionRoutes(app, { q, wrap });
+
 /* Uber online by hour, one day or a range — api/online_hours_routes.js, the
    hours kept in driver_online_hour (sql/schema_v106.sql). */
 onlineHoursRoutes(app, { q, wrap });
+
+/* The daily or weekly series behind a page's hero tile — #online-time's
+   Late, #performer's money, #deposits' ceiling, #cancellations — read from
+   the roll-ups only, one request per page (api/history_routes.js). */
+historyRoutes(app, { q, wrap });
 
 /* Where a car was, when — api/where_routes.js. */
 whereRoutes(app, { q, wrap });
@@ -7081,6 +7255,10 @@ whereRoutes(app, { q, wrap });
    proposal and folds nothing until somebody answers it. */
 samePersonRoutes(app, { q, wrap });
 chargingRoutes(app, { q, wrap });
+/* Uber's live per-trip money: what the feed holds and whether its fares agree
+   with the payments report's (api/uber_live_money_routes.js). Outside the
+   slice test/mount.mjs evaluates; its mountAll discovers *_routes.js itself. */
+uberLiveMoneyRoutes(app, { q, wrap });
 /* The per-person transaction register — GET /api/driver/register. winDays and
    not win: every line in it is dated on a Dubai CALENDAR DAY (a trip's local
    day, a ledger entry's effective_on), so an endOfDay timestamp would compare

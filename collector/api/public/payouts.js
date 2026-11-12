@@ -91,6 +91,8 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, sourceLabel, money,
 import { fmt, empty, barChart, gapBars, hbars } from './charts.js';
 import { channelKey } from './tokens.js';
 import { q, qChan, currentGen, alive } from './data.js';
+/* ANS: the page's answer line and Act-on strip (answers.js). */
+import { answer } from './answers.js';
 
 /* A transfer is money ARRIVING, so it is shown positive whatever sign the
    provider files it under. Uber signs a payout negative because from the
@@ -178,6 +180,7 @@ export async function renderPayouts(root) {
     qChan('/api/finance/payouts/reconcile').catch((e) => ({ __error: String(e && e.message ? e.message : e) })),
   ]);
   if (!alive(gen)) return;
+  answer(root, 'payouts', { d, rec });
   root.innerHTML = '';
   if (!d) {
     empty(root, 'The payout register did not answer',

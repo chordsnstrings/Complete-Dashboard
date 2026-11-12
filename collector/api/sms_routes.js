@@ -15,6 +15,7 @@
    driver's number beside the words texted to them. */
 import { HOLD_WHY, cashDepositRun, tripRegisterRun } from '../src/driver_sms.js';
 import { targetNudgeRun } from '../src/target_sms.js';
+import { onlyFleet } from './access/one_fleet.js';
 
 export function smsRoutes(app, { q, wrap, access }) {
   const signedIn = (req, res) => {
@@ -32,6 +33,13 @@ export function smsRoutes(app, { q, wrap, access }) {
       ? String(req.query.kind) : null;
     const status = ['sent', 'queued', 'held', 'failed'].includes(String(req.query.status)) ? String(req.query.status) : null;
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+    /* ONE FLEET'S MESSAGES, for a reader whose access covers one fleet
+       (api/access/one_fleet.js): sms_outbox files each message under the
+       fleet of the driver it went to, so the rows and the seven-day counts
+       are that fleet's ($3 / $1). A message filed under no fleet — a staff
+       sign-in code — is not one fleet's and is left out. The switches are
+       company settings, not records. Null for everyone else: as before. */
+    const only = onlyFleet(req);
     const rows = await q(
       `SELECT m.id, m.kind, m.status, m.hold_reason, m.person_id, d.full_name AS person_name,
               m.user_id, u.email AS user_email, m.fleet_id, m.destination, m.sender, m.message_text,
@@ -40,15 +48,16 @@ export function smsRoutes(app, { q, wrap, access }) {
          FROM sms_outbox m
          LEFT JOIN driver d ON d.id = m.person_id
          LEFT JOIN access_user u ON u.id = m.user_id
-        WHERE ($1::text IS NULL OR m.kind = $1) AND ($2::text IS NULL OR m.status = $2)
-        ORDER BY m.created_at DESC, m.id DESC LIMIT ${limit}`, [kind, status]);
+        WHERE ($1::text IS NULL OR m.kind = $1) AND ($2::text IS NULL OR m.status = $2)${only ? ' AND m.fleet_id = $3' : ''}
+        ORDER BY m.created_at DESC, m.id DESC LIMIT ${limit}`, only ? [kind, status, only] : [kind, status]);
     const [counts] = await q(
       `SELECT count(*) FILTER (WHERE status = 'sent' AND kind IN ('cash_deposit', 'trip_register', 'target_nudge'))::int AS sent,
               count(*) FILTER (WHERE status = 'held' AND kind IN ('cash_deposit', 'trip_register', 'target_nudge'))::int AS held,
               count(*) FILTER (WHERE status = 'queued')::int AS queued,
               count(*) FILTER (WHERE status = 'failed' AND coalesce(error, '') <> 'sending')::int AS failed,
               coalesce(sum(cost) FILTER (WHERE status = 'sent'), 0)::float AS cost
-         FROM sms_outbox WHERE created_at > now() - interval '7 days'`);
+         FROM sms_outbox WHERE created_at > now() - interval '7 days'${only ? ' AND fleet_id = $1' : ''}`,
+    only ? [only] : []);
     const cfg = await access.getConfig();
     res.json({
       rows: rows.map((r) => ({ ...r, id: Number(r.id), person_id: r.person_id == null ? null : Number(r.person_id),

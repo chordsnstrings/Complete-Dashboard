@@ -1539,7 +1539,25 @@ export function stackedBar(host, data, opts = {}) {
    `zeroBased: false` is there for a series where the zero is not meaningful —
    a rating between 4.9 and 5.0 would be a flat line at the top of a zero-based
    axis. Nothing passes it today; a caller that needs it has to ask. */
-export const spark = (values, { h = 34, tone = 'var(--accent)', fill = true,
+/* THE END-DOT WAS A DASH ON A WIDE TILE (SPK, 2026-11-12).
+   ──────────────────────────────────────────────────────────────────────────
+   The svg is a 100-unit box stretched to its host with
+   preserveAspectRatio="none", which is what lets one line fit a stat card and
+   a full-width card alike — and it stretches a <circle> with it. The line
+   survives because its stroke is non-scaling; a circle's radius is geometry,
+   not stroke, so it does not. Measured in Chromium on the glance tiles: a
+   14.7 × 4.0 px ellipse on a hero tile at 1280 (13.4 × 4.0 at 390) and 6.6 ×
+   4.0 on #overview's narrower tiles — an end mark reading as a dash.
+
+   `dot: 'cap'` draws the end mark as a zero-length path with a round,
+   non-scaling cap instead: a stroke, so it is round at any stretch. Opt-in,
+   and only the glance tiles ask for it: the phone's callers keep the circle,
+   byte for byte, because test/page_contract.test.mjs §3b holds the phone's
+   lines to the old function's exact output and the phone is not this
+   change's to restyle. Its stroke width is set inline because arkiv.css's
+   `.tspark path{stroke-width:2}` would otherwise shrink the mark to the
+   line's own width. */
+export const spark = (values, { h = 34, tone = 'var(--accent)', fill = true, dot: endMark = 'circle',
   zeroBased = true, cls = null } = {}) => {
   /* A HOLE IS A GAP, NOT A ZERO, AND NOT A DAY THAT NEVER HAPPENED (STEP 3).
      ────────────────────────────────────────────────────────────────────────
@@ -1596,6 +1614,17 @@ export const spark = (values, { h = 34, tone = 'var(--accent)', fill = true,
   svg.append(p);
   const lastI = at.map((n, i) => (n == null ? -1 : i)).filter((i) => i >= 0).pop();
   const [cx, cy] = pt(at[lastI], lastI);
+  if (endMark === 'cap') {
+    const end = document.createElementNS(ns, 'path');
+    end.setAttribute('d', `M${cx.toFixed(2)} ${cy.toFixed(2)}h0.01`);
+    end.setAttribute('class', 'sp-end');
+    end.setAttribute('fill', 'none'); end.setAttribute('stroke', tone);
+    end.setAttribute('stroke-linecap', 'round');
+    end.setAttribute('vector-effect', 'non-scaling-stroke');
+    end.setAttribute('style', 'stroke-width:5px');
+    svg.append(end);
+    return svg;
+  }
   const dot = document.createElementNS(ns, 'circle');
   dot.setAttribute('cx', cx); dot.setAttribute('cy', cy); dot.setAttribute('r', '2');
   dot.setAttribute('fill', tone);

@@ -38,7 +38,7 @@
 
    EMPTY IS A SENTENCE. Every list that can be empty says what would appear
    in it and how it gets there. */
-import { el, esc, panel, note, tableFrom, tabBar, dtStr, pill, entity } from './ui.js';
+import { el, esc, panel, note, tableFrom, tabBar, dtStr, pill, entity, contract, glance, glanceBand, absenceBand, pageFoot } from './ui.js';
 import { who, loadWho, getJson, post, closedBlock, toSignIn } from './access.js';
 
 const TABS = [
@@ -113,7 +113,13 @@ export async function fleetsPage(root, param, sub) {
   const status = h('div', { 'data-fnx': 'discovery' });
   const flash = h('div', { class: 'acx-flash', 'data-fnx': 'flash' });
   const host = h('div', { class: 'acx-tab', 'data-fnx-tab': tabId });
-  root.append(bar, status, flash, host);
+  /* Under the page contract: 00 after the tabs, † and the colophon after the
+     tab's own content, both redrawn on every reload (see fleetsContract). */
+  const ak = contract();
+  const band = ak ? h('div', { 'data-fnx': 'glance' }) : null;
+  const tail = ak ? h('div', { 'data-fnx': 'absence' }) : null;
+  if (ak) root.append(bar, band, status, flash, host, tail);
+  else root.append(bar, status, flash, host);
 
   const ctx = { flash, host, canRead, signedUser, tabId, sub };
   let pending = null; let reloading = false;
@@ -145,6 +151,7 @@ export async function fleetsPage(root, param, sub) {
       else if (ctx.accErr) host.append(note(`The platform accounts could not be read: ${ctx.accErr.message}`, 'err'));
       else if (tabId === 'accounts') accountsTab(host, ctx);
       else changesTab(host, ctx);
+      if (ak) fleetsContract(band, tail, root, ctx);
     } finally {
       reloading = false;
       paint();
@@ -152,6 +159,62 @@ export async function fleetsPage(root, param, sub) {
   };
   await ctx.reload();
   return { title: 'Fleet names', sub: TAB[tabId].sub };
+}
+
+/* ── the page contract (HANDOFF §4.5) ─────────────────────────────────────
+   #fleet-names made no contract() call: under Arkiv it drew the old page —
+   tabs, a sentence about the last read, the panels — with no 00 band, no †
+   and no colophon. Under the contract:
+     00  how many fleets, how many accounts are linked to them, how many are
+         named from the platforms' own words (the hero is the fleets), when
+         the names were last read; and for a reader who may see the platform
+         accounts, the new accounts and the links waiting for an Owner — for
+         anyone else those two are ABSENT with the server's own reason (the
+         accounts are the platform logins' class, CRED), never a 0;
+     01… the tab's panels, numbered by arkiv.css;
+     †   what the page cannot know: an account no platform has reported, a
+         rename between two nightly reads, an account whose platform sends no
+         name;
+     the colophon. The old skin draws exactly what it drew before. */
+function fleetsContract(band, tail, root, ctx) {
+  const fleets = ctx.names?.fleets || [];
+  const linked = fleets.flatMap((f) => f.linked || []);
+  const named = fleets.filter((f) => f.basis === 'brand' || f.basis === 'chosen').length;
+  const d = ctx.names?.discovery;
+  const closedWhy = !ctx.signedUser ? 'sign in as the Connections admin or the Owner to see the platform accounts'
+    : 'the platform accounts are part of the platform logins, which your role does not hold';
+  const accWhy = ctx.accErr ? `the platform accounts could not be read: ${ctx.accErr.message}` : closedWhy;
+  const accounts = ctx.acc?.accounts || [];
+  const pending = (ctx.acc?.changes || []).filter((c) => c.status === 'pending').length;
+  band.replaceChildren();
+  glance(glanceBand(band, 'What the platforms call each fleet — the names are for everyone').tilesHost, [
+    { label: 'Fleets', value: String(fleets.length), hero: true,
+      sub: fleets.map((f) => f.name || f.id).join(' · ') || 'none yet — a fleet is started from a platform account' },
+    { label: 'Accounts linked to them', value: String(linked.length), sub: 'the platform logins each fleet’s rows come from' },
+    { label: 'Named from the platforms', value: `${named} of ${fleets.length}`,
+      sub: 'the brand the platforms’ own names share, or a run of their words an admin chose' },
+    d?.lastRun ? { label: 'Names last read', value: dtStr(d.lastRun), sub: 'read again every night' }
+      : { label: 'Names last read', na: d?.reason || 'the platforms have not been asked for their names yet' },
+    ctx.acc ? { label: 'New accounts', value: String(accounts.filter((a) => a.status === 'new').length),
+      sub: 'reported by a platform and linked to no fleet yet' }
+      : { label: 'New accounts', na: accWhy },
+    ctx.acc ? { label: 'Links waiting for an Owner', value: String(pending), sub: 'each changes who can see which rows' }
+      : { label: 'Links waiting for an Owner', na: accWhy },
+  ]);
+  tail.replaceChildren();
+  const noName = linked.filter((a) => !a.reported_name);
+  absenceBand(tail, [
+    { label: 'An account no platform has reported', fig: null, none: 'Not listed',
+      why: 'An account appears here once a platform’s own answer names it. One that no answer mentions cannot be listed, linked or counted.' },
+    { label: 'A rename between two reads', fig: null, none: 'Not seen until the next read',
+      why: 'The platforms are asked for their names every night, so a name changed on a platform today shows here after tonight’s read.' },
+    { label: 'Linked accounts that send no name', hl: noName.length > 0,
+      fig: noName.length ? `${noName.length} of ${linked.length}` : null, none: linked.length ? 'None' : 'No account linked',
+      why: noName.length ? (noName.find((a) => a.name_reason)?.name_reason || 'Their platform’s answer carries no name for the account.')
+        : 'Every linked account reports a name.' },
+  ]);
+  pageFoot({ colophon: ['Fleet names', `${fleets.length} ${fleets.length === 1 ? 'fleet' : 'fleets'}`,
+    d?.lastRun ? `names read ${dtStr(d.lastRun)}` : 'names never read'] }, root);
 }
 
 /* When the platforms were last asked, and what each said — the page's

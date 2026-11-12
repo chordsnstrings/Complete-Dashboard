@@ -33,11 +33,13 @@
 import { barChart, gapBars, drawnAs, drawnNoun } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
   fmt, empty, dayStr, plural, countOf, sourceLabel, verdict, signed, andList, sentence,
-  UBER_FARE_WHY, swatch, contract, glance, secHead, absenceBand, pageFoot,
+  UBER_FARE_WHY, swatch, contract, glance, secHead, absenceBand, pageFoot, chanChip,
   delta as uiDelta } from './ui.js';
 import { q, href, parseHash, state, qChan, currentGen, alive } from './data.js';
 import { dubaiDay, TZ } from './tz.js';
 import { withheldSentence } from './access_model.js';
+/* ANS: the page's answer line and Act-on strip (answers.js). */
+import { answer } from './answers.js';
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -126,7 +128,11 @@ function driverCols(dl) {
     { label: 'Cancelled', key: 'cancelled', num: true,
       render: (r) => `${fmt(r.a.cancelled)} <span class="dim">vs ${fmt(r.b.cancelled)}</span>` },
     { label: 'Channels', key: 'platforms',
-      render: (r) => (r.platforms || []).map((x) => pill(sourceLabel(x))).join(' ') || '—' },
+      /* A channel chip (ui.js chanChip): this column is drawn by both skins
+         (compareContract passes driverCols too), and under the contract a
+         platform pill carries its channel's swatch. tone null keeps the old
+         skin's plain pill exactly (the ARK review, 2026-11-12). */
+      render: (r) => (r.platforms || []).map((x) => chanChip(x, { tone: null })).join(' ') || '—' },
     /* A driver who changed car between the two days is one of the few
        explanations this data can offer for a drop, so the plate is in the
        row rather than one click away. */
@@ -705,6 +711,7 @@ async function compareContract(root, aParam, bParam) {
 
   const p = await qChan('/api/compare', { a, b, cut });
   if (!alive(gen)) return;
+  answer(root, 'compare', { p, a, b });
   const A = p.totals.a, B = p.totals.b;
   const partial = p.cut_minutes < 1440;
   head.querySelector('.sechd-note').textContent = partial

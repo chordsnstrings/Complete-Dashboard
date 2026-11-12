@@ -26,6 +26,15 @@ import { dubaiDay } from './tz.js';
 import { empty, fmt, hbars } from './charts.js';
 import { CHANNEL_ORDER } from './tokens.js';
 import { api, qAll, href } from './data.js';
+/* ./history.js is NOT imported here statically, on purpose. m/screens.js
+   imports this module (for GREY), so everything it imports statically is on
+   the phone's offline path and must be in sw.js's SHELL_FILES
+   (test/tokens.test.mjs walks that graph). The line is the desktop page's
+   alone, so the module is loaded when the desktop page first draws one. */
+const historyLib = () => import('./history.js');
+/* The first of the fourteen days ending on `d` — noon-anchored, the
+   codebase's way of doing date arithmetic on a bare day (test/timezone). */
+const lineFrom = (d) => new Date(Date.parse(`${d}T12:00:00Z`) - 13 * 864e5).toISOString().slice(0, 10);
 
 /* Remembered per reader, because the expected start is a property of how this
    fleet runs and not of the page load. localStorage rather than the URL: it is
@@ -170,6 +179,18 @@ export async function renderOnlineTime(root) {
   const draw = async () => {
     const mine = ++gen;
     loading(tiles); loading(list.body);
+    /* THE LATE LINE (plan §4 #online-time: "needs one /api/online-time
+       request per day … or a history endpoint"): the fourteen days ending on
+       the chosen day, judged against the same start, in ONE request beside
+       this one and only under the contract (api/history_routes.js counts Late
+       the way this endpoint does). A failure is remembered as one, with its
+       error, so the tile says the line did not load rather than that there
+       is none — or, when the access gate refused it, says that (history.js
+       historyFailed, written out here because that module loads lazily). */
+    const histP = ak
+      ? api(`/api/history?page=online-time&from=${lineFrom(day)}&to=${encodeURIComponent(day)}`
+        + `&start=${encodeURIComponent(start)}`).catch((error) => ({ failed: true, error }))
+      : null;
     let d;
     try {
       d = await api(`/api/online-time?day=${encodeURIComponent(day)}&start=${encodeURIComponent(start)}`);
@@ -252,8 +273,31 @@ export async function renderOnlineTime(root) {
             ? ` · ${fmt((t.worked ?? t.drove) - t.drove)} of them on another channel only` : '') },
     ];
     if (ak) {
+      /* Awaited with the day's own answer, the way #performer awaits its
+         economics row: the two requests run side by side, and the history
+         reads a few small roll-up tables where /api/online-time reads the
+         timeline itself, so it is the faster of the two. A failure never
+         holds the figure back — it becomes the line's reason. A newer draw
+         that started meanwhile wins. With no start to judge against, the
+         tile carries its own reason and no line: bandTiles() rebuilds a
+         tile whose value is a bare dash as {label, na} and nothing else,
+         so the line goes with the figure (test/history_sparklines pins it). */
+      const hist = histP ? await histP : null;
+      /* THE MODULE ITSELF CAN FAIL TO LOAD (review of SPK, 2026-11-12). This
+         awaited the import bare, so a history.js that did not arrive — a
+         dropped connection, a deploy that replaced the file between the page
+         and its import — threw out of draw() here, before a single tile was
+         drawn: the page sat on its skeleton for want of a decoration, the
+         opposite of "a failure never holds the figure back" above. Caught, it
+         becomes the line's reason like any other failure; the sentence is
+         history.js's own, written out because that module is what failed. */
+      const lib = hist ? await historyLib().catch(() => null) : null;
+      if (mine !== gen) return;
+      const line = !hist ? {}
+        : lib ? lib.lineFor(hist, 'late')
+          : { spark: 'No line. The history did not load for this tile just now — the figure above is unaffected.' };
       AKB.tilesHost.innerHTML = '';
-      glance(AKB.tilesHost, bandTiles([...OT_TILES.map((x, i) => (i === 0 ? { ...x, hero: true } : x)), otWaitTile(d.rows)],
+      glance(AKB.tilesHost, bandTiles([...OT_TILES.map((x, i) => (i === 0 ? { ...x, hero: true, ...line } : x)), otWaitTile(d.rows)],
         { reasons: { Late: d.start_why || 'no start time to judge against', 'On time': d.start_why || 'no start time to judge against' } }).tiles);
       otWait(wait.body, d.rows); otChannels(chan.body, d.rows);
       absHost.innerHTML = ''; otAbsence(absHost, { ...d, day }, root);

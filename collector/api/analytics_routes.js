@@ -22,6 +22,7 @@
 import { dubaiDay } from './window.js';
 import { custodyOverWindow, custodyCountOverWindow, peopleCount, personKey, personKeyStored, NAMED } from './custody_sql.js';
 import { spanGaps } from './coverage_gaps.js';
+import { onlyFleet } from './access/one_fleet.js';
 
 /* A number that lives in a JSON blob is a number a provider can change into a
    word without telling us. Every numeric read out of `raw` is guarded, because
@@ -1091,6 +1092,13 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      one — a tier table with invented money would be worse than none. */
   app.get('/api/tiers/by-vehicle', wrap(async (req, res) => {
     const p = range(req);
+    /* ONE FLEET, for a reader whose access covers one fleet (api/access/
+       one_fleet.js). The trips, the per-model figures and the vehicle count
+       follow the fleet the gate writes into ?fleet= ($4). Who held each car
+       did not: custody is read by plate, and an account filed under the other
+       fleet that drove one of these cars would have been named beside it.
+       Narrowed ($5), only that fleet's custody records are read. */
+    const only = onlyFleet(req);
     const rows = await q(
       `WITH agg AS (
        SELECT t.plate,
@@ -1168,7 +1176,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
            FROM vehicle_driver_day v
           WHERE v.plate IN (SELECT plate FROM agg)
             AND v.day BETWEEN $1::date AND $2::date
-            AND ${NAMED('v')}
+            AND ${NAMED('v')}${only ? ' AND v.fleet_id = $5' : ''}
           GROUP BY v.plate, ${personKeyStored('v')}),
        ranked AS (
          SELECT h.*, row_number() OVER (PARTITION BY h.plate
@@ -1199,7 +1207,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        SELECT a.*, p2.driver_refs, coalesce(p2.driver_n, 0) AS driver_n,
               coalesce(p2.driver_accounts, 0) AS driver_accounts
          FROM agg a LEFT JOIN per_plate p2 ON p2.plate = a.plate
-        ORDER BY a.trips DESC`, p);
+        ORDER BY a.trips DESC`, only ? [...p, only] : p);
     const fleetPremium = rows.reduce((a, r) => a + r.premium, 0);
     const fleetTrips = rows.reduce((a, r) => a + r.trips, 0);
     const fleetPct = share(fleetPremium, fleetTrips);
@@ -1595,14 +1603,21 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        all: GetDriver returns one current number, so the history starts the day
        we first asked and can never reach back. Stated here, from the tables
        themselves, so the page says it with dates rather than adjectives. */
+    /* ONE FLEET, for a reader whose access covers one fleet (api/access/
+       one_fleet.js). The windows and every total below already follow the
+       fleet the gate writes into ?fleet=; the two horizons counted both
+       fleets' money days and rating readings beside one fleet's windows.
+       Narrowed ($1), they count that fleet's rows alone. */
+    const only = onlyFleet(req);
+    const ONE = only ? ' AND fleet_id = $1' : '';
     const [money] = await q(
       `SELECT to_char(min(day), 'YYYY-MM-DD') AS from_day,
               to_char(max(day), 'YYYY-MM-DD') AS to_day, count(*)::int AS rows
-         FROM driver_payout_day WHERE platform = 'uber'`);
+         FROM driver_payout_day WHERE platform = 'uber'${ONE}`, only ? [only] : []);
     const [rating] = await q(
       `SELECT to_char(min(observed_on), 'YYYY-MM-DD') AS from_day,
               to_char(max(observed_on), 'YYYY-MM-DD') AS to_day, count(*)::int AS rows
-         FROM driver_rating_history WHERE platform = 'uber'`);
+         FROM driver_rating_history WHERE platform = 'uber'${ONE}`, only ? [only] : []);
     const rows = await q(
       `SELECT fleet_id, kind, to_char(window_from, 'YYYY-MM-DD') AS window_from,
               to_char(window_to, 'YYYY-MM-DD') AS window_to, verified_at,
@@ -2000,6 +2015,13 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      on this page was structurally `—` on every visible row for ever. */
   app.get('/api/funnel/drivers', wrap(async (req, res) => {
     const [from, to] = range(req);
+    /* ONE FLEET'S FUNNEL, for a reader whose access covers one fleet
+       (api/access/one_fleet.js): driver_performance files each platform
+       period under the fleet whose account reported it, so the candidates —
+       and with them the rows, the total and every per-row rate — are that
+       fleet's alone ($3). Null for everyone else: the statement as it was. */
+    const only = onlyFleet(req);
+    const fp = only ? [from, to, only] : [from, to];
     const metrics = `${J('count_orders_all')}              offered,
               ${J('count_orders_accepted')}         accepted,
               ${J('count_orders_completed')}        completed,
@@ -2019,7 +2041,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                     FROM driver_performance
                    WHERE period_start <= $2::date AND period_end >= $1::date
                      AND raw IS NOT NULL
-                     AND raw ->> 'count_orders_all' IS NOT NULL`;
+                     AND raw ->> 'count_orders_all' IS NOT NULL${only ? ' AND fleet_id = $3' : ''}`;
     const [rows, [t]] = await Promise.all([
       q(`WITH cand AS (${CAND}),
               counted AS (SELECT platform, person_key, count(*)::int periods_seen
@@ -2032,13 +2054,13 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
            LEFT JOIN driver_platform_state s
              ON s.platform = b.platform AND s.driver_ext_id = b.driver_ext_id
           WHERE b.offered IS NOT NULL
-          ORDER BY b.offered DESC NULLS LAST LIMIT 200`, [from, to]),
+          ORDER BY b.offered DESC NULLS LAST LIMIT 200`, fp),
       /* The list was LIMIT 200 and returned exactly 200 — a cap that has
          already bitten, reported as a complete funnel. */
       q(`WITH cand AS (${CAND}),
               best AS (SELECT DISTINCT ON (platform, person_key) * FROM cand
                         ORDER BY platform, person_key, period_days DESC, period_start DESC)
-         SELECT count(*)::int drivers FROM best WHERE offered IS NOT NULL`, [from, to]),
+         SELECT count(*)::int drivers FROM best WHERE offered IS NOT NULL`, fp),
     ]);
     res.json({ rows: rows.map((r) => ({
       ...r,
@@ -2200,8 +2222,12 @@ export function analystRoutes(app, { q, wrap, range }) {
     /* The route's own connection, not the collector's module-level pool: this
        process may not have one, and a 500 reading "ENOTFOUND db" is a worse
        answer than the brief. */
+    /* coverageFleet: the one fleet a narrowed reader's brief is counted for
+       (api/access/one_fleet.js) — its trip figures follow ?fleet=, which the
+       gate rewrote; its per-source coverage follows this. */
     res.json(await buildBrief([from, to, fleet || null],
-      { db: { query: (text, params) => q(text, params).then((rows) => ({ rows })) } }));
+      { db: { query: (text, params) => q(text, params).then((rows) => ({ rows })) },
+        coverageFleet: onlyFleet(req) }));
   }));
 
   app.get('/api/analyst/rules', wrap(async (_req, res) => {

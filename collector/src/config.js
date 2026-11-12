@@ -145,14 +145,26 @@ export const config = {
       idKey: get(`UBER_CLIENT_ID${suffix}`) ? `UBER_CLIENT_ID${suffix}` : 'UBER_CLIENT_ID',
       secretKey: get(`UBER_CLIENT_SECRET${suffix}`) ? `UBER_CLIENT_SECRET${suffix}` : 'UBER_CLIENT_SECRET',
     });
-    const orgs = [
+    const every = [
       { fleet: 'ecosine', orgUuid: get('UBER_ORG_UUID'), org: get('UBER_ORG_ENCRYPTED'),
         webCookie: get('UBER_WEB_COOKIE'), oauth: oauthFor('') },
       { fleet: 'egari', orgUuid: get('UBER_ORG_UUID_EGARI'), org: get('UBER_ORG_ENCRYPTED_EGARI'),
         webCookie: get('UBER_WEB_COOKIE_EGARI'), oauth: oauthFor('_EGARI') },
-    ].filter((o) => o.orgUuid && o.webCookie);
+    ];
+    const orgs = every.filter((o) => o.orgUuid && o.webCookie);
     return {
       orgs,
+      /* THE ORGS AN OAUTH-ONLY SURFACE CAN ASK ABOUT, which is not `orgs`.
+         ───────────────────────────────────────────────────────────────────
+         `orgs` drops a fleet without a supplier web session, which is right
+         for every surface that needs one — the reports and the GraphQL. The
+         live transactions feed (src/sources/uber_transactions.js) needs none
+         of that: it is an OAuth REST call keyed on the ENCRYPTED org id, so
+         gating it on a cookie would stop a fleet's live money for want of a
+         credential the feed never sends. Same rule as `orgs`, applied to the
+         credentials this surface does use: a fleet missing its encrypted org
+         id or an OAuth client is not collected at all. */
+      oauthOrgs: every.filter((o) => o.org && o.oauth.clientId && o.oauth.clientSecret),
       org: get('UBER_ORG_ENCRYPTED'),
       orgUuid: get('UBER_ORG_UUID'),
       oauth: {

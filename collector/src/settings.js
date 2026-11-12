@@ -122,6 +122,15 @@ export const SETTING_DEFAULTS = {
   ANALYST_MODEL: 'MiniMax-M3',
   BACKFILL_MONTHS: '12',
   INCREMENTAL_DAYS: '3',
+  /* Data retention (src/data_retention.js). dry_run counts what a pass would
+     remove and removes nothing; only "on" removes. Telemetry is thinned past
+     400 days and never inside the weekly backfill's window whatever this
+     says; alerts are kept for ever unless a number of days (at least 365) is
+     set — FMS keeps them ~100 days, so ours are the only long-term record. */
+  RETENTION_MODE: 'dry_run',
+  RETENTION_TELEMETRY_DAYS: '400',
+  RETENTION_ALERT_DAYS: '0',
+  RETENTION_BATCH: '5000',
   /* The two sites the operator named. Written as they appear in the address
      text, because that is the only handle the trip data gives — there is no
      geofence to match against. */
@@ -376,6 +385,16 @@ export const SETTING_DEFS = [
     hint: 'One request per car per run — Tesla bills per call and a sleeping car must not be woken' },
 
   { key: 'BACKFILL_MONTHS', group: 'Collector', label: 'Backfill months', secret: false },
+  /* Data retention — the nightly pass at 19:53 UTC (src/data_retention.js).
+     Its record is on the Settings page under "Data retention". */
+  { key: 'RETENTION_MODE', group: 'Data retention', label: 'Retention mode', secret: false,
+    hint: 'dry_run (the default) counts what the nightly pass would remove and removes nothing; on removes it; off skips the pass.' },
+  { key: 'RETENTION_TELEMETRY_DAYS', group: 'Data retention', label: 'Thin positions older than (days)', secret: false,
+    hint: 'Past this age a car keeps one fix per 15 minutes plus every change of ignition, seat, status or moving, and each day\u2019s last fix. Never inside the weekly backfill\u2019s window plus a week, whatever this says. 0 = never thin.' },
+  { key: 'RETENTION_ALERT_DAYS', group: 'Data retention', label: 'Remove safety alerts older than (days)', secret: false,
+    hint: '0 (the default) keeps every alert for ever. FMS keeps alerts about 100 days, so ours are the only long-term record; a number below 365 is raised to 365.' },
+  { key: 'RETENTION_BATCH', group: 'Data retention', label: 'Rows removed per statement', secret: false,
+    hint: 'Each removal is its own short transaction of at most this many rows (100 to 50,000).' },
   { key: 'INCREMENTAL_DAYS', group: 'Collector', label: 'Incremental window (days)', secret: false },
   { key: 'CABMAN_CRON', group: 'Collector', label: 'CABMAN schedule (cron)', secret: false },
   { key: 'FARES_CRON', group: 'Collector', label: 'Uber fares schedule (cron, UTC)', secret: false },
@@ -451,6 +470,36 @@ export const SETTING_DEFS = [
 ];
 const DEF_BY_KEY = Object.fromEntries(SETTING_DEFS.map((d) => [d.key, d]));
 
+/* WHERE A REQUEST GOES IS NOT A PAGE SETTING (system audit 2026-11-12, CRIT 1).
+   ─────────────────────────────────────────────────────────────────────────
+   UBER_TOKEN_URL, AGENT_BASE_URL and eight more were ordinary settings: PUT
+   /api/settings stored any value, get() preferred the stored value to the
+   environment, and the code then sent the credential to whatever it said —
+   auth/uber.js POSTs the fleet's client id and secret to UBER_TOKEN_URL,
+   agent_model.js sends the model key as a bearer to AGENT_BASE_URL, the SMS,
+   hotel, charging, Tesla and ntfy clients likewise. With sign-in optional and
+   ADMIN_TOKEN unset (admin_gate.js passes everyone), anyone who could reach
+   the site could point the Uber token request at their own host and wait for
+   the next refresh. Measured on production the same day: none of the ten was
+   stored in the database (all default, or HOTEL_BASE from the environment),
+   so nobody had ever needed to change one from the page.
+
+   So a destination lives only in the environment, which a web page cannot
+   rewrite: get() never reads a stored value for one, setSetting() refuses one,
+   both save routes refuse one with this sentence before writing anything, and
+   the Settings page shows it read-only with the same reason. The set is a RULE
+   (a key named _URL/_HOST/_BASE/_ENDPOINT, or one whose default is an http(s)
+   address), not a list, so a destination added later is covered the day it
+   arrives; test/settings_env_only.test.mjs pins the ten it covers today. */
+const DESTINATION_KEY = /(_URL|_HOST|_BASE|_ENDPOINT)$/;
+export const ENV_ONLY_KEYS = new Set(SETTING_DEFS
+  .filter((d) => DESTINATION_KEY.test(d.key) || /^https?:\/\//i.test(String(SETTING_DEFAULTS[d.key] ?? '')))
+  .map((d) => d.key));
+export const envOnlyReason = (key) => (ENV_ONLY_KEYS.has(key)
+  ? `${key} says where this dashboard sends a request, and a credential or a driver's details go with it, `
+    + 'so it is set in DigitalOcean as an environment variable on the app, not from this page.'
+  : null);
+
 let cache = {}; let loadedAt = 0;
 /* WHICH saved value each key holds in this process, beside the value itself.
    ─────────────────────────────────────────────────────────────────────────
@@ -525,7 +574,7 @@ export async function withPinnedSettings(fn, { force = false, db = pool } = {}) 
 const current = () => pinned.getStore() || { cache, versions };
 
 // Synchronous read of the last loaded snapshot, falling back to env.
-export const get = (key, dflt) => (current().cache[key] ?? process.env[key] ?? dflt);
+export const get = (key, dflt) => ((ENV_ONLY_KEYS.has(key) ? undefined : current().cache[key]) ?? process.env[key] ?? dflt);
 
 /** The version of the value get(key) returns here: the stored row's
     updated_at in whole microseconds, or null when the value is not from the
@@ -548,6 +597,7 @@ const repin = (key) => {
 };
 
 export async function setSetting(key, value, db = pool) {
+  if (ENV_ONLY_KEYS.has(key)) { const e = new Error(envOnlyReason(key)); e.code = 'env_only'; throw e; }
   const def = DEF_BY_KEY[key];
   if (!def) throw new Error(`unknown setting: ${key}`);
   const stored = def.secret ? enc(value) : String(value);
@@ -622,14 +672,17 @@ export async function describeSettings() {
     for (const v of vis) (elsewhere[v.key] ||= []).push(v);
   } catch { elsewhere = {}; }
   return SETTING_DEFS.map((d) => {
-    const fromDb = cache[d.key] != null && updated[d.key] != null;
+    const envOnly = ENV_ONLY_KEYS.has(d.key);
+    /* A stored value for a destination is ignored by get(), so it is not the
+       source and not the value — saying so would describe a request nobody makes. */
+    const fromDb = !envOnly && cache[d.key] != null && updated[d.key] != null;
     /* A code default is a THIRD source, and it was being reported as no source
        at all. get() resolves settings > environment > default, so a key with a
        default is configured whether or not anyone has typed it in; saying
        "unset" about a username FMS is authenticating with right now sends an
        operator to fix something that works. */
     const dflt = SETTING_DEFAULTS[d.key];
-    const val = cache[d.key] ?? process.env[d.key] ?? dflt ?? '';
+    const val = (envOnly ? undefined : cache[d.key]) ?? process.env[d.key] ?? dflt ?? '';
     /* Held by SOME component, not necessarily this one.
        ─────────────────────────────────────────────────────────────────────
        seen_by below was added because a key scoped to the collector is not a
@@ -647,6 +700,7 @@ export async function describeSettings() {
     const held = (elsewhere[d.key] || []).some((v) => v.configured);
     return {
       key: d.key, group: d.group, label: d.label, hint: d.hint || null, secret: !!d.secret,
+      env_only: envOnly, env_only_reason: envOnlyReason(d.key),
       source: fromDb ? 'settings' : process.env[d.key] ? 'environment'
         : dflt != null ? 'default' : held ? 'elsewhere' : 'unset',
       /* What the code would fall back to, so a reader can tell an operator's

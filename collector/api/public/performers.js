@@ -37,10 +37,12 @@
 import { hbars, gapBars, barChart, scatter, areaChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
   fmt, empty, noneChosen, sourceLabel, dateStr, verdict, countOf,
-  UBER_FARE_WHY, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, dayStr, swatch, pct, sourceToken } from './ui.js';
+  UBER_FARE_WHY, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, dayStr, swatch, pct, sourceToken, chanChip } from './ui.js';
 import { CHANNEL_ORDER } from './tokens.js';
 import { TZ } from './tz.js';
 import { q, href, state } from './data.js';
+import { lineFor, historyFailed, shiftDay, mondayOf } from './history.js';
+import { dubaiDay } from './tz.js';
 /* In pagemeta.js, with why only a Monday is a week: the header checks it
    before this module has loaded. */
 import { isWeek } from './pagemeta.js';
@@ -670,7 +672,9 @@ export async function renderPerformer(root, id, week) {
       const pay = pays.find((y) => y.platform === x.platform);
       return { ...x, payout: pay ? pay.payout : null, period: pay ? `${String(pay.period_start).slice(0, 10)} → ${String(pay.period_end).slice(0, 10)}` : null };
     }), [
-      { label: 'Channel', key: 'platform', render: (r) => pill(sourceLabel(r.platform)) },
+      /* A channel chip in both skins' week table: the old skin's plain pill
+         exactly (tone null), its channel's swatch under the contract. */
+      { label: 'Channel', key: 'platform', render: (r) => chanChip(r.platform, { tone: null }) },
       { label: 'Bookings', key: 'bookings', num: true },
       { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
       { label: 'Fares', key: 'fares', num: true,
@@ -740,13 +744,26 @@ const meanOf = (xs) => (xs.length ? xs.reduce((a, x) => a + x, 0) / xs.length : 
 async function performerGlance(AKB, tiles, p, id) {
   const wk = (p.week || [])[0];
   let d = null;
+  /* THE WEEKLY-MONEY LINE (plan §4 #performer: "needs one economics request
+     per past week and there is no history endpoint"): the twelve weeks ending
+     with this one, from the driver-day record, in ONE request beside the
+     economics row and under the same chips (api/history_routes.js). Always
+     an explicit span — q() would otherwise carry the shell's period onto a
+     page whose subject is one week. The series names its own basis, which
+     can part company with the economics ledger's choice above it, and the
+     tile's caption says so. */
+  const w0 = wk ? String(wk).slice(0, 10) : mondayOf(dubaiDay());
+  const histP = q('/api/history', { page: 'performer', id, from: shiftDay(w0, -77), to: weekEnd(w0) })
+    .catch(historyFailed);
   try { d = await q('/api/economics/drivers', wk ? { from: String(wk).slice(0, 10), to: weekEnd(wk) } : {}); } catch { d = null; }
+  const hist = await histP;
   const rows = (d?.rows || []);
   const me = rows.find((r) => r.driver_ext_id === id || (r.ids || []).includes(id)) || null;
   const earners = rows.filter((r) => Number(r.money) > 0);
   const mean = meanOf(earners.map((r) => Number(r.money)));
   const moneyTile = me && me.money != null
     ? { label: 'Money', value: money(me.money), hero: true,
+      ...lineFor(hist, 'money'),
       sub: me.money_basis ? `basis ${String(me.money_basis)}` : 'this week',
       ...(mean != null ? { delta: { value: Number(me.money) - mean, kind: 'gap', d: 2,
         of: `against ${money(mean)}, the mean of the ${fmt(earners.length)} who earned` } } : {}) }

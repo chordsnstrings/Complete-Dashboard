@@ -10,6 +10,7 @@ import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
 import { recordCredentialVisibility, withPinnedSettings, get } from './settings.js';
 import { runDiscovery } from './sources/discovery.js';
+import { liveMoneyTick } from './sources/uber_transactions.js';
 import { backfill, incremental, catchUp, fareRefresh, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk, payoutAudit, chargingTick, walletsTick } from './run.js';
 import { clearCheckpoint } from './checkpoint.js';
 import { config } from './config.js';
@@ -22,6 +23,7 @@ import { cashEmailRun } from './cash_sms_email.js';
 import { lowTripsRun } from './low_trips_email.js';
 import { monthlyReportRun } from './monthly_report.js';
 import { getConfig as accessConfig } from '../api/access/service.js';
+import { dataRetentionPass } from './data_retention.js';
 
 /* The driver messages by SMS (src/driver_sms.js). Each run is safe to
    repeat — every decision is a row keyed on what it is about — so a restart
@@ -47,6 +49,17 @@ async function main() {
   if (cmd === 'incremental') return incremental();
   if (cmd === 'analyst') return analystPass();
   if (cmd === 'probe') return probePass();
+  /* `retention [dry-run]`: one data-retention pass now, in RETENTION_MODE —
+     or counting only, whatever the setting, with `dry-run`. Prints the
+     per-table record it wrote to retention_run_table. */
+  if (cmd === 'retention') {
+    const dry = process.argv[3] === 'dry-run';
+    const r = await withPinnedSettings(() => dataRetentionPass(dry
+      ? { read: (k, d) => (k === 'RETENTION_MODE' ? 'dry_run' : get(k, d)) } : {}));
+    log.info('retention', 'by hand', { run: r.run_id, mode: r.mode, status: r.status,
+      tables: r.tables.map((t) => `${t.tbl}:${t.policy} considered=${t.considered} would=${t.would_delete} deleted=${t.deleted}`) });
+    return;
+  }
   /* `timeline` and `timeline-roster`. This note used to say the scheduled tick
      "asks about drivers who drove, which cannot find a driver who was online
      all evening and never got a job", and that the full sweep was therefore a
@@ -64,6 +77,9 @@ async function main() {
      cron because the first thing anyone wants after wiring a new surface is to
      run it once and look. */
   if (cmd === 'profile') return uberProfileTick();
+  /* `live-money`: one pass of Uber's live per-trip money feed, both fleets —
+     the quarter-hourly tick, by hand. */
+  if (cmd === 'live-money') return liveMoneyTick();
   if (cmd === 'charging') return chargingTick();
   if (cmd === 'charging-wallets') return walletsTick();
   if (cmd === 'audit') return uberAuditTick();
@@ -285,6 +301,22 @@ async function main() {
        lands here. The 05:00 Dubai cash texts and the 07:00 report read it. */
     cron.schedule(config.faresCron, () => fareRefresh(2)
       .catch((e) => log.error('scheduler', 'fare refresh', { err: String(e) })));
+    /* UBER'S LIVE PER-TRIP MONEY, every quarter hour — the freshness tier the
+       hourly fare walk above cannot be, because it waits on Uber's report and
+       Uber publishes a ride's fare hours after it. src/sources/uber_
+       transactions.js asks Uber's transactions feed for the last six hours of
+       15-minute windows and prices a trip only where nothing better exists.
+
+       AT 7, 22, 37 AND 52 PAST, which collides with nothing here at any hour:
+       every other job starts on a multiple of five (CABMAN, the SMS flush,
+       the rollups, the incrementals, the fares) or at 12, 17 or 42 — and
+       test/uber_transactions.test.mjs expands every schedule in this file to
+       its minutes and holds the four apart from all of them. Seven past is
+       also the first minute the window that closed on the quarter hour is
+       legal to ask for: Uber refuses a range that is not five minutes old,
+       and the collector waits six. */
+    cron.schedule('7,22,37,52 * * * *', () => liveMoneyTick()
+      .catch((e) => log.error('scheduler', 'uber live money', { err: String(e) })));
     cron.schedule('0 22 * * 0', () => backfill()
       .catch((e) => log.error('scheduler', 'weekly backfill', { err: String(e) })));
 
@@ -396,6 +428,20 @@ async function main() {
       .catch((e) => log.error('scheduler', 'discovery', { err: String(e) }));
     setTimeout(discover, 10 * 60_000);
     cron.schedule('35 2 * * *', discover);
+    /* DATA RETENTION, nightly at 19:53 UTC (23:53 Dubai) — src/data_retention.js.
+       ─────────────────────────────────────────────────────────────────────
+       Chosen because nothing else starts then and nothing heavy is running:
+       not a multiple of five (CABMAN's poll and the SMS flush run on every
+       one), clear of the :12/:42 trip texts, the :15/:45 rollups and the :17
+       timeline, charging and wallet ticks; the next heavy pass is the 20:20
+       payout walk and the 21:00 catch-up, the Sunday backfill is 22:00, and
+       Dubai is asleep. test/collector_invariants.test.mjs expands EVERY cron
+       here — steps, lists, ranges, the Dubai-clock ones, the config defaults —
+       and fails if any of them lands on this minute. RETENTION_MODE is dry_run
+       unless the operator sets it to on: by default this counts and removes
+       nothing. */
+    cron.schedule('53 19 * * *', () => withPinnedSettings(() => dataRetentionPass())
+      .catch((e) => log.error('scheduler', 'retention', { err: String(e) })));
     /* Honour on-demand runs queued from the Settings page.
        One job at a time, claimed atomically. The previous version read a
        single source_state key, so two requests arriving close together meant

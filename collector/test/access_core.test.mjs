@@ -670,12 +670,20 @@ console.log('\n9c. masked values, and showing them in full');
   check('the reveal is in the audit log', logged.rows[0].n === 1);
 }
 
+/* The exact code the Owner re-confirms with in section 10, kept for the
+   replay check in section 11. That check used to rebuild it as
+   hotp(secret, totpStep() + 1) — and when the 30-second step rolled over
+   between the two sections it built the NEXT step's code instead: a fresh,
+   valid code the server rightly accepted, failing the check (CI shard 1 on
+   950fff5, 2026-11-12, 1 run in 8). The same string is now sent twice. */
+let ownerUsedCode = null;
 console.log('\n10. sign-in required');
 {
   const anon = browser();
   const open = await anon.get('/api/t/people');
   check('while sign-in is not yet required, a visitor sees what visitors always saw', open.status === 200 && open.json[0].balance === 10);
-  const s = await owner.post('/api/auth/stepup', { code: hotp(owner.secret, totpStep() + 1) });
+  ownerUsedCode = hotp(owner.secret, totpStep() + 1);
+  const s = await owner.post('/api/auth/stepup', { code: ownerUsedCode });
   check('the Owner re-confirms with a two-step code', s.status === 200, JSON.stringify(s.json));
   const m = await owner.post('/api/access/config', { mode: 'enforced' });
   check('the Owner turns sign-in on', m.status === 200 && m.json.config.mode === 'enforced');
@@ -811,7 +819,7 @@ console.log('\n12. sessions end when they should');
      written did) — this fails. */
   const s = await owner.post('/api/auth/stepup', { password: OWNERPASS });
   check('an Owner with two-step on cannot re-confirm with the password alone', s.status === 401);
-  const reused = await owner.post('/api/auth/stepup', { code: hotp(owner.secret, totpStep() + 1) });
+  const reused = await owner.post('/api/auth/stepup', { code: ownerUsedCode });
   check('…nor with a code already used', reused.status === 401);
   const off = await owner.post(`/api/access/users/${people.DSP.id}`, { action: 'suspend', reason: 'left' });
   check('an Owner suspends someone', off.status === 200, JSON.stringify(off.json));

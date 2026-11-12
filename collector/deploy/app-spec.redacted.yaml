@@ -1,0 +1,304 @@
+# The DigitalOcean App Platform spec of the fleet dashboard — REDACTED.
+# ─────────────────────────────────────────────────────────────────────────────
+# What production is, written down: until 2026-11-12 it existed only inside
+# DigitalOcean, so nothing in the repository could notice it change. Measured
+# from the live app on 2026-11-12 (the system audit; HANDOFF 0.16) and checked
+# against it with:
+#
+#     node bin/app-spec.mjs --check      exit 1 if the live spec has drifted
+#     node bin/app-spec.mjs --print      the live spec, redacted, as YAML
+#
+# EVERY ENVIRONMENT VALUE IS REDACTED. Each one reads "<set in DigitalOcean>":
+# the real values — tokens, passwords, keys, recipients — live in the app's
+# settings and never in this repository (CLAUDE.md). The keys, and which are
+# encrypted (type: SECRET), are real and are what --check compares. A variable
+# without a type is GENERAL, DigitalOcean's default. This file therefore cannot
+# be applied as it stands (`doctl apps update --spec` would blank every value);
+# it is a record and a check, not a deploy input.
+#
+# THE ONE VALUE THAT IS NOT REDACTED is COMMIT_SHA on both components. It is a
+# bindable variable, not a secret: ${_self.COMMIT_HASH} is the commit
+# DigitalOcean built that component from, substituted at deploy, and
+# /api/health reports it as "commit" (api/ops.js). Until COMMIT_SHA is added
+# in DigitalOcean, /api/health says commit: null and names why, and --check
+# reports it as drift. Add it on BOTH components with scope RUN_TIME — then
+# force a build (bin/deploy.mjs): saving variables redeploys the last BUILT
+# commit, it does not build the branch (COVERAGE trap 25).
+#
+# Two values were stated by the 2026-11-12 audit brief rather than read from a
+# raw spec dump: source_dir (/collector) and dockerfile_path
+# (collector/Dockerfile, relative to the repository root as App Platform
+# defines it). The first --check against production confirms or corrects them.
+#
+# Not recorded here (and not compared): ingress rules, domains (none), app
+# alerts (none on 2026-11-12), features.
+
+name: fleet-dashboard
+region: fra
+
+services:
+  - name: api
+    github:
+      repo: chordsnstrings/Complete-Dashboard
+      branch: claude/ecosine-egari-tracking-apis-rf9ong
+      deploy_on_push: false
+    source_dir: /collector
+    dockerfile_path: collector/Dockerfile
+    run_command: node api/server.js
+    http_port: 8080
+    instance_size_slug: basic-xxs
+    instance_count: 1
+    # The platform's liveness probe. /api/health answers from memory, before
+    # the access layer touches the database (api/server.js, api/ops.js), and
+    # says 200 with migrating: true while migrations run — a slow migration
+    # must not read as a failed deploy. No timeout_seconds is set, so the
+    # platform's own default decides how long a probe may wait — one more
+    # reason the route must never wait on the pool.
+    health_check:
+      http_path: /api/health
+      initial_delay_seconds: 30
+      period_seconds: 15
+    envs:
+      # Bound by DigitalOcean at deploy: the commit this component was built
+      # from. Read by /api/health ("commit").
+      - key: COMMIT_SHA
+        scope: RUN_TIME
+        value: "${_self.COMMIT_HASH}"
+      - key: DATABASE_URL
+        value: "<set in DigitalOcean>"
+      - key: DATABASE_SSL
+        value: "<set in DigitalOcean>"
+      - key: PORT
+        value: "<set in DigitalOcean>"
+      - key: FMS_ECOSINE_PASS
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: FMS_EGARI_PASS
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: CABMAN_ECOSINE_ID
+        value: "<set in DigitalOcean>"
+      - key: CABMAN_ECOSINE_USER
+        value: "<set in DigitalOcean>"
+      - key: CABMAN_ECOSINE_PASS
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: UBER_CLIENT_ID
+        value: "<set in DigitalOcean>"
+      - key: UBER_CLIENT_SECRET
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: UBER_ORG_UUID
+        value: "<set in DigitalOcean>"
+      - key: UBER_ORG_ENCRYPTED
+        value: "<set in DigitalOcean>"
+      - key: YANGO_PARK_ID
+        value: "<set in DigitalOcean>"
+      - key: YANGO_API_KEY
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: BOLT_CLIENT_ID
+        value: "<set in DigitalOcean>"
+      - key: BOLT_CLIENT_SECRET
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: HOTEL_BASE
+        value: "<set in DigitalOcean>"
+      - key: HOTEL_DOMAIN
+        value: "<set in DigitalOcean>"
+      - key: HOTEL_TOKEN
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: SETTINGS_KEY
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: ARK_API_KEY
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: ANALYST_API_KEY
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: ANALYST_BASE_URL
+        value: "<set in DigitalOcean>"
+      - key: ANALYST_MODEL
+        value: "<set in DigitalOcean>"
+      - key: UBER_CLIENT_ID_EGARI
+        value: "<set in DigitalOcean>"
+      - key: UBER_ORG_ENCRYPTED_EGARI
+        value: "<set in DigitalOcean>"
+      - key: BOLT_REFRESH_TOKEN_ECOSINE
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: BOLT_REFRESH_TOKEN_EGARI
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: BOOTSTRAP_OWNER_EMAIL
+        value: "<set in DigitalOcean>"
+      - key: BOOTSTRAP_OWNER_PASSWORD_HASH
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: RESEND_API_KEY
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: REPORT_MODEL_API_KEY
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: REPORT_RECIPIENTS
+        value: "<set in DigitalOcean>"
+      - key: PUBLIC_URL
+        value: "<set in DigitalOcean>"
+      - key: CASH_REPORT_RECIPIENTS
+        value: "<set in DigitalOcean>"
+      - key: LOW_TRIPS_RECIPIENTS
+        value: "<set in DigitalOcean>"
+      - key: MONTHLY_REPORT_RECIPIENTS
+        value: "<set in DigitalOcean>"
+      - key: SMSALA_API_TOKEN
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: TARGET_SEED
+        value: "<set in DigitalOcean>"
+      - key: HOTEL_EGARI_TOKEN
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: HOTEL_EGARI_DOMAIN
+        value: "<set in DigitalOcean>"
+      - key: CABMAN_EGARI_PASS
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: NTFY_TOPIC
+        type: SECRET
+        value: "<set in DigitalOcean>"
+workers:
+  - name: collector
+    github:
+      repo: chordsnstrings/Complete-Dashboard
+      branch: claude/ecosine-egari-tracking-apis-rf9ong
+      deploy_on_push: false
+    source_dir: /collector
+    dockerfile_path: collector/Dockerfile
+    run_command: node src/index.js schedule
+    instance_size_slug: basic-xxs
+    instance_count: 1
+    envs:
+      # Bound by DigitalOcean at deploy: the commit this component was built
+      # from, so the worker's environment names its own build too.
+      - key: COMMIT_SHA
+        scope: RUN_TIME
+        value: "${_self.COMMIT_HASH}"
+      - key: DATABASE_URL
+        value: "<set in DigitalOcean>"
+      - key: DATABASE_SSL
+        value: "<set in DigitalOcean>"
+      - key: BACKFILL_MONTHS
+        value: "<set in DigitalOcean>"
+      - key: INCREMENTAL_DAYS
+        value: "<set in DigitalOcean>"
+      - key: CABMAN_CRON
+        value: "<set in DigitalOcean>"
+      - key: FMS_ECOSINE_PASS
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: FMS_EGARI_PASS
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: CABMAN_ECOSINE_ID
+        value: "<set in DigitalOcean>"
+      - key: CABMAN_ECOSINE_USER
+        value: "<set in DigitalOcean>"
+      - key: CABMAN_ECOSINE_PASS
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: UBER_CLIENT_ID
+        value: "<set in DigitalOcean>"
+      - key: UBER_CLIENT_SECRET
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: UBER_ORG_UUID
+        value: "<set in DigitalOcean>"
+      - key: UBER_ORG_ENCRYPTED
+        value: "<set in DigitalOcean>"
+      - key: YANGO_PARK_ID
+        value: "<set in DigitalOcean>"
+      - key: YANGO_API_KEY
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: BOLT_CLIENT_ID
+        value: "<set in DigitalOcean>"
+      - key: BOLT_CLIENT_SECRET
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: HOTEL_BASE
+        value: "<set in DigitalOcean>"
+      - key: HOTEL_DOMAIN
+        value: "<set in DigitalOcean>"
+      - key: HOTEL_TOKEN
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: SETTINGS_KEY
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: YANGO_COOKIE
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: UBER_WEB_COOKIE
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: ARK_API_KEY
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: ANALYST_API_KEY
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: ANALYST_BASE_URL
+        value: "<set in DigitalOcean>"
+      - key: ANALYST_MODEL
+        value: "<set in DigitalOcean>"
+      - key: UBER_CLIENT_ID_EGARI
+        value: "<set in DigitalOcean>"
+      - key: UBER_CLIENT_SECRET_EGARI
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: UBER_ORG_ENCRYPTED_EGARI
+        value: "<set in DigitalOcean>"
+      - key: BOLT_REFRESH_TOKEN_ECOSINE
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: BOLT_REFRESH_TOKEN_EGARI
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: RESEND_API_KEY
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: REPORT_MODEL_API_KEY
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: REPORT_RECIPIENTS
+        value: "<set in DigitalOcean>"
+      - key: PUBLIC_URL
+        value: "<set in DigitalOcean>"
+      - key: CASH_REPORT_RECIPIENTS
+        value: "<set in DigitalOcean>"
+      - key: LOW_TRIPS_RECIPIENTS
+        value: "<set in DigitalOcean>"
+      - key: MONTHLY_REPORT_RECIPIENTS
+        value: "<set in DigitalOcean>"
+      - key: MONTHLY_REPORT_TEST
+        value: "<set in DigitalOcean>"
+      - key: SMSALA_API_TOKEN
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: HOTEL_EGARI_TOKEN
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: HOTEL_EGARI_DOMAIN
+        value: "<set in DigitalOcean>"
+      - key: CABMAN_EGARI_PASS
+        type: SECRET
+        value: "<set in DigitalOcean>"
+databases:
+  # The managed cluster both components reach through DATABASE_URL.
+  - name: db
+    engine: PG
+    production: true
+    cluster_name: fleet-dashboard-db

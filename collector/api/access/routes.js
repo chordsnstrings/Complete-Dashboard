@@ -23,6 +23,15 @@ import {
   ROLES, ROLE, CLASSES, CLASS_CODES, CAPS, CAP_CODES, roleIsSensitive, rank,
 } from '../public/access_model.js';
 import { sendSms, uaeMobile, maskPhone } from '../../src/smsala.js';
+/* Passkeys and single sign-on (api/access/signin_methods.js): their switches
+   are company settings below, and taking them off a person is an account
+   action below, so both keep this file's Owner, step-up, ceiling and audit
+   rules instead of a second copy of them. */
+import { signinMethodChanges, removePasskeys, unlinkSso, otherWayIn, usablePasskeys } from './signin_methods.js';
+/* ULM Phase 4 (2026-11-12): reviews as a cycle, dormant suspension, finding
+   ownership — each its own module, mounted below. */
+import { reviewRoutes, reviewSweep, dormantSweep, markReinstated, inactiveDetail } from './reviews.js';
+import { findingRoutes } from './findings.js';
 
 const MIN_REASON = 3;
 
@@ -189,9 +198,10 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     }
     if (user.status !== 'active') {
       await audit(req, 'auth.login_refused', 'user', user.id, { status: user.status });
-      return fail(res, 403, 'inactive', user.status === 'suspended'
-        ? 'This account is suspended. Ask the Owner or an Access admin.'
-        : 'This account is not active. Use the link you were sent, or ask an admin for a new one.');
+      /* Why, since when, and the way back — for an account the dormancy
+         sweep suspended (api/access/reviews.js inactiveDetail). Reached only
+         after the right password, so only the holder is told. */
+      return fail(res, 403, 'inactive', await inactiveDetail(db, user));
     }
     if (user.totp_enabled) {
       const ticket = newToken(24);
@@ -416,6 +426,9 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     const fm = me(req, res, { allowRestricted: true, write: true });
     if (!fm) return undefined;
     const u = await svc.getUserSecrets(db, fm.user.id);
+    /* An account opened by single sign-on has no password here, and "your
+       current password is not right" would not be the reason. */
+    if (!u.password_hash) return fail(res, 409, 'no_password', 'This account has no password here: it signs in with single sign-on or a passkey.');
     if (!verifyPassword(String(req.body?.current || ''), u.password_hash)) {
       await audit(req, 'auth.password_change_failed', 'user', fm.user.id, {});
       return fail(res, 401, 'bad_credentials', 'Your current password is not right.');
@@ -443,6 +456,18 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       const code = String(req.body?.code || '').trim();
       const step = code ? verifyTotp(unseal(u.totp_secret), code, { lastStep: u.totp_last_step }) : null;
       if (step != null) { ok = true; await db.query('UPDATE access_user SET totp_last_step = $2 WHERE id = $1', [u.id, step]); }
+    } else if (!u.password_hash) {
+      /* No code and no password (an account single sign-on opened): neither
+         can confirm it, and "that password is not right" would not be why.
+         What CAN confirm it is said exactly (review, 2026-11-12): the person's
+         passkey if they have one that works; otherwise two-step, first —
+         adding a passkey needs this very confirmation, so "use your passkey"
+         to somebody with none pointed at a door that does not open. */
+      const keys = await usablePasskeys(db, fm.user.id, { cfg: await svc.getConfig(db) });
+      return fail(res, 409, 'no_method', keys
+        ? 'Your account has no password or two-step code to confirm with: confirm with your passkey (“Use a passkey”).'
+        : 'Your account has no password or two-step code to confirm with, and no passkey that can be used. '
+          + 'Turn on two-step sign-in on your account page first.');
     } else if (req.body?.password) {
       ok = verifyPassword(String(req.body.password), u.password_hash);
     }
@@ -747,7 +772,16 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       await svc.updateUser(db, id, { status: 'suspended', suspended_reason: reason });
       await svc.revokeUserSessions(db, id, 'suspended');
     } else if (action === 'reinstate') {
-      await svc.updateUser(db, id, { status: target.password_changed_at ? 'active' : 'invited', suspended_reason: null });
+      /* Back to active if they had finished setting up: a password, or — for
+         an account single sign-on opened, which has none — a link or a
+         passkey still in place (review, 2026-11-12: it went back to
+         'invited', and then nothing could open it). Offboarding removes
+         both, so a rehire still starts from an invitation. */
+      const done = Boolean(target.password_changed_at) || await otherWayIn(db, id);
+      await svc.updateUser(db, id, { status: done ? 'active' : 'invited', suspended_reason: null });
+      /* …and restarts the 60-day clock: without this the hourly dormancy
+         sweep suspended a reinstated person again within the hour (REV). */
+      await markReinstated(db, id);
     } else if (action === 'offboard') {
       if (reason.length < MIN_REASON) return fail(res, 400, 'reason', 'Say why.');
       await svc.updateUser(db, id, { status: 'offboarded', offboarded_at: new Date().toISOString(), suspended_reason: reason });
@@ -755,6 +789,9 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       for (const g of await svc.listGrants(db, { userId: id })) await svc.endGrant(db, g.id, fm.user.id);
       for (const t of await svc.teamsOf(db, id)) await svc.setMember(db, t.id, id, false);
       await db.query(`UPDATE access_link SET used_at = now() WHERE user_id = $1 AND used_at IS NULL`, [id]);
+      /* Every way in goes, not only the sessions: a rehire starts afresh. */
+      await removePasskeys(db, id);
+      await unlinkSso(db, id);
     } else if (action === 'reset') {
       if (target.status === 'offboarded') return fail(res, 409, 'offboarded', 'This person has been offboarded.');
       const token = await svc.createLink(db, id, target.status === 'invited' ? 'invite' : 'reset', fm.user.id,
@@ -768,6 +805,20 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     } else if (action === 'reset_mfa') {
       await db.query(`UPDATE access_user SET totp_enabled = false, totp_secret = NULL, recovery_codes = '{}' WHERE id = $1`, [id]);
       await svc.revokeUserSessions(db, id, 'two-step reset by admin');
+    } else if (action === 'remove_passkeys') {
+      /* A lost or stolen phone: its passkeys and the sessions they opened. */
+      await removePasskeys(db, id);
+      await svc.revokeUserSessions(db, id, 'passkeys removed by admin');
+    } else if (action === 'unlink_sso') {
+      /* The provider's ACCOUNT is no longer this person's (handed to somebody
+         else, or replaced by a new one for them): the link goes, and so does
+         every session, since a sign-on may have opened one. NOT for a mailbox
+         given to somebody else: the link is what refuses the address's new
+         holder, and once it is gone the next verified sign-on for the address
+         links afresh to this account — offboard instead (review, 2026-11-12;
+         signin_methods_admin.js says so on the page). */
+      await unlinkSso(db, id);
+      await svc.revokeUserSessions(db, id, 'single sign-on unlinked by admin');
     } else {
       return fail(res, 400, 'bad_action', 'Unknown action.');
     }
@@ -1039,6 +1090,11 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       if (!['on', 'dry', 'off'].includes(req.body.sms_target)) return fail(res, 400, 'bad_switch', 'Choose on, dry run or off.');
       changes.sms_target = req.body.sms_target;
     }
+    /* Passkeys and single sign-on, and the domains it accepts: refused with
+       the true reason while the platform is not ready for them. */
+    const sm = signinMethodChanges(req.body, { cfg: await svc.getConfig(db, { fresh: true }) });
+    if (sm.error) return fail(res, sm.error === 'not_ready' ? 409 : 400, sm.error, sm.detail);
+    Object.assign(changes, sm.changes);
     for (const [k, v] of Object.entries(changes)) await svc.setConfig(db, k, v, fm.user.id);
     await svc.getConfig(db, { fresh: true });
     layer.cache.clear();
@@ -1269,51 +1325,15 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     return res.type('html').send(html);
   }));
 
-  app.get('/api/access/reviews', wrap(async (req, res) => {
-    const fm = me(req, res);
-    if (!fm) return undefined;
-    noStore(res);
-    const { rows } = await db.query(
-      `SELECT r.*, t.name AS team_name, t.lead_user_id FROM access_review r JOIN access_team t ON t.id = r.team_id
-        ORDER BY r.opened_at DESC LIMIT 200`);
-    const mine = rows.filter((r) => fm.access.caps.includes('access.manage') || Number(r.lead_user_id) === fm.user.id);
-    return res.json({ reviews: mine.map((r) => ({ ...r, id: Number(r.id), team_id: Number(r.team_id) })) });
-  }));
-  app.post('/api/access/reviews/open', wrap(async (req, res) => {
-    const fm = manager(req, res, { write: true });
-    if (!fm) return undefined;
-    const d = new Date();
-    const period = `${d.getUTCFullYear()}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
-    const { rowCount } = await db.query(
-      `INSERT INTO access_review (team_id, period, due_at)
-       SELECT id, $1, now() + interval '14 days' FROM access_team WHERE archived_at IS NULL
-       ON CONFLICT (team_id, period) DO NOTHING`, [period]);
-    await audit(req, 'access.review_opened', 'review', period, { teams: rowCount });
-    return res.json({ ok: true, period, opened: rowCount });
-  }));
-  app.post('/api/access/reviews/:id/attest', wrap(async (req, res) => {
-    const fm = me(req, res, { write: true });
-    if (!fm) return undefined;
-    const id = Number(req.params.id);
-    const { rows } = await db.query(
-      `SELECT r.*, t.lead_user_id FROM access_review r JOIN access_team t ON t.id = r.team_id WHERE r.id = $1`, [id]);
-    const r = rows[0];
-    if (!r || r.closed_at) return fail(res, 404, 'not_found', 'No open review with that number.');
-    if (Number(r.lead_user_id) !== fm.user.id && !fm.access.caps.includes('access.manage')) {
-      return fail(res, 403, 'not_allowed', 'Only the team lead or an admin attests this team.');
-    }
-    const decisions = Array.isArray(req.body?.decisions) ? req.body.decisions : [];
-    for (const dcs of decisions) {
-      if (dcs.keep === false && dcs.userId) {
-        await svc.setMember(db, Number(r.team_id), Number(dcs.userId), false, fm.user.id);
-      }
-    }
-    await db.query(`UPDATE access_review SET closed_at = now(), attested_by = $2, decisions = $3 WHERE id = $1`,
-      [id, fm.user.id, JSON.stringify(decisions)]);
-    layer.cache.clear();
-    await audit(req, 'access.review_attested', 'review', id, { removed: decisions.filter((x) => x.keep === false).length });
-    return res.json({ ok: true });
-  }));
+  /* ── reviews (ULM §11.3) and who is on a finding (§8 finding.own) ─────
+     Reviews were three routes here over one row per team per quarter; they
+     are now a cycle — every grant and team place, each with its reviewer and
+     a state, opened by the schedule or an admin, closed with unattested
+     access ending 14 days later (api/access/reviews.js, sql/schema_v122.sql).
+     Both modules decide exactly as these routes do, with these helpers. */
+  const helpers = { me, manager, fail, audit, noStore, isOwner, stepupFresh };
+  reviewRoutes(app, { db, layer, wrap, h: helpers });
+  findingRoutes(app, { db, wrap, h: helpers });
 
   /* ── four-eyes proposals (api/access/middleware.js propose/takeProposal) ── */
   /* A stored proposal is the payload of a route that combines every fleet
@@ -1369,22 +1389,30 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
   }));
 }
 
-/* Suspends people who have not signed in for 60 days, and ends grants whose
-   end date passed (they already confer nothing; this marks them so the
-   Access page stops listing them as current). Run by the API's scheduler. */
-export async function housekeeping(db, { log = { info() {} } } = {}) {
-  const dormant = await db.query(
-    `UPDATE access_user u SET status = 'suspended', suspended_reason = 'no sign-in for 60 days'
-      WHERE status = 'active' AND COALESCE(last_login_at, created_at) < now() - interval '60 days'
-        AND NOT EXISTS (SELECT 1 FROM access_grant g WHERE g.user_id = u.id AND g.role_code = 'OWN' AND g.status = 'active')
-      RETURNING id`);
+/* The API's hourly housekeeping (api/server.js). Three things:
+     · dormant accounts suspended — no sign-in for 60 days (§11.2), counted
+       from the latest of the last sign-in, the account's creation, its last
+       reinstatement and a password set from a link, and never the last
+       active Owner (api/access/reviews.js dormantSweep; each one audited);
+     · grants whose end date passed marked ended (they already confer
+       nothing; this stops the Access page listing them as current);
+     · the review cycle: the schedule's review opened once sign-in is
+       required, reviews past their due date closed, and access nobody
+       attested ended 14 days after the close (reviewSweep). */
+export async function housekeeping(db, { log = { info() {} }, now = new Date() } = {}) {
+  /* A failed dormancy pass is logged and does not stop the other two. */
+  const dormant = await dormantSweep(db, { now }).catch((e) => {
+    log.warn?.('access', 'dormancy sweep failed', { err: String(e).slice(0, 160) });
+    return [];
+  });
   const ended = await db.query(
     `UPDATE access_grant SET status = 'revoked', revoked_at = now()
       WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= now() RETURNING id`);
-  if (dormant.rowCount || ended.rowCount) {
+  if (dormant.length || ended.rowCount) {
     svc.bumpAccess();
     await appendAudit(db, { actorLabel: 'system:housekeeping', action: 'access.housekeeping', subjectType: 'system',
-      detail: { suspended: dormant.rows.map((r) => Number(r.id)), grants_ended: ended.rows.map((r) => Number(r.id)) } });
-    log.info('access', 'housekeeping', { suspended: dormant.rowCount, grants_ended: ended.rowCount });
+      detail: { suspended: dormant, grants_ended: ended.rows.map((r) => Number(r.id)) } });
+    log.info('access', 'housekeeping', { suspended: dormant.length, grants_ended: ended.rowCount });
   }
+  return { suspended: dormant, grants_ended: ended.rows.map((r) => Number(r.id)), reviews: await reviewSweep(db, { now, log }) };
 }

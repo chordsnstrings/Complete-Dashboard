@@ -1,4 +1,5 @@
 import { internalHeaders, isInternal } from './access/internal.js';
+import { parseRlsCacheKey } from '../src/fleet_scope.js';
 import { dubaiIso } from '../src/util.js';
 import { createHash } from 'node:crypto';
 /* Response cache for read endpoints.
@@ -52,6 +53,13 @@ import { createHash } from 'node:crypto';
    the rule the other two feeds were already on. Every answer still carries
    x-data-version and, when stale, x-cache-age. A collection or rollup that
    writes trips or money moves the version exactly as before.
+   ONE EXCEPTION, deliberate (2026-11-12, FIX-STATUS UTX): Uber's live money
+   feed (src/sources/uber_transactions.js) also logs 'realtime', and it DOES
+   write money — trip.price, provisionally. Four runs an hour moving the
+   version would put the warmer back where CABMAN had it; as 'realtime' a
+   price it fills reaches cached answers with the next rollup or incremental,
+   which starts eight minutes after each of its runs. Do not read 'realtime'
+   here as "writes no money"; that file says why at its MODE.
    Shared with api/warm.js, so the warmer and the cache agree on when the data
    moved. test/cache.test.mjs "a realtime tick does not move the version". */
 export const VERSION_SQL =
@@ -151,7 +159,19 @@ const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/t
      import would look as though it had written nothing, and the next move is
      to upload the same file again (which the duplicate check then refuses,
      confirming the wrong story). A few hundred rows; nothing worth caching. */
-  '/api/hr-roster'];
+  '/api/hr-roster',
+  /* THE MESSAGES, which answer only a signed-in person (api/sms_routes.js
+     signedIn(): "they carry drivers' mobile numbers and what was texted to
+     them"). That check lives in the HANDLER, and a hit here is served
+     before the handler runs — so once anyone signed in had opened the
+     Messages page, an anonymous visitor in open mode asking the same address
+     was handed the cached log, mobile numbers and texts, without the check
+     ever running. One-fleet narrowing (2026-11-12) made the address of a
+     one-fleet reader's log predictable too (`?fleet=…&_fmfleet=…`). Found in
+     review, 2026-11-12, and proven in test/access_one_fleet.test.mjs §15.
+     LIMIT 200 over one indexed table; the preview is a dry run of the next
+     batch, which a cached copy would freeze. Neither is worth a cache. */
+  '/api/sms/'];
 
 /* ONE DAY OF ONE DRIVER, WHEN THE DAY IS TODAY (2026-10-13).
    /api/driver/day for a past day only changes when a collection lands, which
@@ -244,7 +264,14 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port, refre
     while (active < refreshConcurrency && queue.length) {
       const key = queue.shift();
       active++;
-      fetch(`http://127.0.0.1:${selfPort()}${key}`, { headers: internalHeaders() })
+      /* A narrowed reader's key (rls:<fleets>|<url>, src/fleet_scope.js) is
+         not a URL: fetch the address inside it, and name the fleets so the
+         gate recomputes under the same row-level security and files the
+         answer under this same key. Every other key is fetched as before. */
+      const scoped = parseRlsCacheKey(key);
+      const url = scoped ? scoped.url : key;
+      const headers = scoped ? { ...internalHeaders(), 'x-fm-rls': scoped.fleets.join(',') } : internalHeaders();
+      fetch(`http://127.0.0.1:${selfPort()}${url}`, { headers })
         .then((r) => r.arrayBuffer())
         .catch(() => {})
         .finally(() => { refreshing.delete(key); active--; pump(); });

@@ -566,3 +566,42 @@
    strip is unchanged. */
 :root[data-skin="arkiv"][data-ui="phone"] .m-fallback .tabs a{min-height:44px;min-width:44px;box-sizing:border-box;
   justify-content:center}
+
+/* ── 22 · FOCUS on the phone (m/focus-m.js) ──────────────────────────────────
+   The desktop's fold, on the phone's sections: a long explanation is marked
+   and arkiv.css hides it until its section's "ⓘ N notes" opens it in place;
+   a section's first caption, a warning, an absence and a long tile line stay
+   on the face cut to one line. What is the phone's to own is the TOGGLE: on
+   the desktop a 20px line of grey text, here a 44px target (the house's
+   floor for a thumb, test/phone_arkiv §9), with no hover colour — a :hover
+   on a touch screen sticks to the last thing tapped, and the toggle would
+   stay ink after every tap. In the tile band it spans the row under the
+   tiles, inset past the column rule the band is pulled out by (§5); in the
+   footer it sits under the colophon, as the desktop's sits under #pageFoot.
+
+   And the control bar's sentence. The desktop folds the sentence naming the
+   controls a page ignores into the control bar's tooltip (FIX-STATUS FOCUS3,
+   #fApplies); a phone has no tooltip, and the control bar itself is where
+   the sentence lives in full — the sheet it opens heads with it (m/app.js
+   openSheet), under a bar that already says, in grey, which controls do not
+   apply. So with the notes folded it leaves the top of the deck, as the
+   desktop's leaves its bar; with every word shown it is back. */
+:root[data-skin="arkiv"][data-ui="phone"] .fx-more{min-height:44px;margin:12px 0 0;padding:0;font-size:var(--t5);
+  color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .fx-more:hover{color:var(--grey)}
+:root[data-skin="arkiv"][data-ui="phone"] .m-stats>.fx-more{grid-column:1 / -1;width:auto;margin:0 0 0 13px;
+  border-top:0}
+:root[data-skin="arkiv"][data-ui="phone"] .pf-inline>.fx-more{margin-top:0;border-top:0}
+:root[data-skin="arkiv"][data-ui="phone"][data-focus="on"] .m-deck>.ak-applies{display:none}
+
+/* ── 23 · the one movement the reduced-motion reset cannot reach ────────────
+   app.css cuts every transition and animation in the product to .001ms for
+   a reader whose system asks for reduced motion (its global !important
+   reset) — the sheet sliding up, the deck's slide, the pull-to-refresh
+   spring included. A SMOOTH SCROLL is neither: the deck's scroll-behavior
+   (m.css) still carried that reader's screen up from wherever it was, at the
+   browser's own pace, every time the lit tab was tapped again. Under the
+   skin it jumps instead — whether or not the motion layer is on. */
+@media (prefers-reduced-motion:reduce){
+  :root[data-skin="arkiv"][data-ui="phone"] .m-deck{scroll-behavior:auto}
+}

@@ -20,6 +20,8 @@ import { empty, fmt, hbars, barChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, pct, dtStr, dayStr, countOf,
   sentence, sourceLabel, sourceToken, swatch, contract, glance, secHead, absenceBand, pageFoot, money } from './ui.js';
 import { q, api, href, state, currentGen, alive, windowLabel } from './data.js';
+/* ANS: the page's answer line and Act-on strip (answers.js). */
+import { answer } from './answers.js';
 
 export const ANALYST_TABS = [
   { id: 'confirmed', label: 'Survived the check', ic: '✓' },
@@ -353,6 +355,7 @@ async function analystContract(root) {
     tab === 'immaterial' ? api('/api/analyst/rules').catch(() => null) : Promise.resolve(null),
   ]);
   if (!alive(gen)) return;
+  answer(root, 'analyst', d);
   host.innerHTML = '';
   const groups = groupClaims(d.findings || []);
   const TILE_OF = { confirmed: 'Survived the check', refuted: 'Contradicted by the data',

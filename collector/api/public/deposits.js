@@ -30,6 +30,7 @@ import { ledgerBand, ceiling, ceilingWho, ceilingCol, lastCashCol, ceilingRanked
   firstReason, booksRecorded } from './ledger_ak.js';
 import { entryForm } from './entry_form.js';
 import { aed, loadPeople } from './deposit_core.js';
+import { lineFor, historyFailed } from './history.js';
 
 /* One type, and it needs a photograph: money physically changed hands. The
    form itself is ./entry_form.js, shared with #advances and the driver tab —
@@ -58,6 +59,13 @@ export async function renderDeposits(root) {
     + 'never a balance. The twenty largest; the drivers with none as one count.', 'deposit-top') : null;
   const after = ak ? el('div') : null;
   const handP = ak ? api('/api/ledger/entries?type_code=cash_deposit').catch(() => null) : null;
+  /* The ceiling and its carriers, cut at each of the last twelve weeks' ends
+     (api/history_routes.js) — the one request this page adds, made beside the
+     handover count and only under the contract. No window and no chips: the
+     page's subject is the whole record, and the endpoint's default span is
+     the line's. A failure is remembered as one, so the tile can say the line
+     did not load rather than that there is no history. */
+  const histP = ak ? api('/api/history?page=deposits').catch(historyFailed) : null;
   if (ak) { root.append(AK.band, head.panel, top.panel, listPanel.panel, after); loading(AK.tiles); }
   else root.append(head.panel, listPanel.panel);
   loading(listPanel.body);
@@ -72,7 +80,7 @@ export async function renderDeposits(root) {
     listPanel.body.innerHTML = '';
     if (!d.ok) { listPanel.body.append(note(esc(d.error), 'bad')); return; }
     const people = (d.people || []).filter((p) => p.name);
-    if (ak) depositsContract(AK, top, after, root, people, d, await handP);
+    if (ak) depositsContract(AK, top, after, root, people, d, await handP, await histP);
 
     if (!head.body.querySelector('.depform')) {
       entryForm(head.body, { types: TYPES, people, settlesVia: 'cash', onSaved: refresh });
@@ -139,22 +147,30 @@ export async function renderDeposits(root) {
    the ceilings in round bands, the month each driver's last cash fare was
    taken (is cash still coming in), and how concentrated the ceiling is.
    † what each driver holds, what each owes, the line, the window.
-   NOT ADOPTED: the mockup's absence of the form and the table; a sparkline
-   on "drivers carrying a ceiling" (the payload holds no series for it). */
-function depositsContract(AK, top, after, root, people, d, hand) {
+   NOT ADOPTED: the mockup's absence of the form and the table.
+   ADOPTED SINCE (SPK, 2026-11-12): the sparkline on "drivers carrying a
+   ceiling", which the payload holds no series for — and the hero's own,
+   the ceiling cut at each week's end — from /api/history, which reads them
+   from cash_fare_day (sql/schema_v119.sql) over the same people this sum
+   is made over. A running total: it only rises, and how steeply is how
+   much cash came in. A tile with no figure carries no line; its own reason
+   says enough. */
+function depositsContract(AK, top, after, root, people, d, hand, hist) {
   const n = people.length;
   const c = ceiling(people);
   const known = people.filter((p) => p.owes?.cash != null).length;
   const handed = hand?.totals ? hand.totals.rows : null;
   glance(AK.tiles, [
     c.n ? { label: 'Ceiling on cash outstanding', value: aed(c.sum), hero: true,
-      sub: `every cash fare on record, not a balance · ${ceilingWho(c)} · ${fmt(c.trips)} cash trips, ${c.from} to ${c.to}` }
+      sub: `every cash fare on record, not a balance · ${ceilingWho(c)} · ${fmt(c.trips)} cash trips, ${c.from} to ${c.to}`,
+      ...(hist ? lineFor(hist, 'cash_ceiling') : {}) }
       : { label: 'Ceiling on cash outstanding', hero: true, na: 'no cash-marked trip is on record for anyone here' },
     known ? { label: 'Cash actually in hand', value: `${fmt(known)} of ${fmt(n)} known`,
       sub: 'from a stated position plus what came in since' }
       : { label: 'Cash actually in hand', na: `unknown for all ${fmt(n)} — no opening cash position has been stated, and it is not derivable` },
     { label: 'Drivers carrying a ceiling', value: fmt(c.n), sub: [c.none ? `${fmt(c.none)} no cash fare` : null,
-      c.unmeasured ? `${fmt(c.unmeasured)} not on the exposure read` : null].filter(Boolean).join(' · ') || `of ${fmt(n)}` },
+      c.unmeasured ? `${fmt(c.unmeasured)} not on the exposure read` : null].filter(Boolean).join(' · ') || `of ${fmt(n)}`,
+      ...(hist && c.n ? lineFor(hist, 'cash_carriers') : {}) },
     c.trips ? { label: 'Cash trips behind it', value: fmt(c.trips), sub: `a mean of ${aed(c.sum / c.trips)} a trip — derived` }
       : { label: 'Cash trips behind it', na: 'no cash-marked trip is on record' },
     handed != null ? { label: 'Handovers recorded', value: fmt(handed), sub: handed ? 'cash handed in, on the ledger' : 'none yet — the form below records the first' }

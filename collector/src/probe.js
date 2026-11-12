@@ -40,6 +40,7 @@ import { fiToken } from './sources/bolt.js';
 import { dotDate, iso, daysAgo } from './util.js';
 import { log } from './log.js';
 import { probeEarnerWindow } from './sources/uber.js';
+import { probeTransactions, TXN_COLS, TXN_ALIASES } from './sources/uber_transactions.js';
 import { YANGO_SURFACES, consoleGate } from './sources/yango.js';
 /* Whether a FIELD NAME is one whose values must not be sampled. api/redact.js
    is the single authority on that line and on why phone and email stay the
@@ -264,6 +265,25 @@ const BOLT_DRIVER_ALIASES = {
   driver_uuid: 'driver_ext_id', first_name: 'full_name', last_name: 'full_name',
   phone: 'phone', state: 'state',
 };
+/* Bolt's fleet-integration getFleetOrders, mapped the way src/sources/bolt_orders.js
+   does in orderFacts, orderTripRow and fiOrderRow. Matched on the LEAF name, so
+   `order_price.ride_price` is found by `ride_price`. order_stops is an array
+   the shape sampler does not descend into; its pickup/dropoff coordinates are
+   what fill pickup_lat … dropoff_lng. driver_phone is deliberately absent —
+   the collector drops it before storing anything. */
+const BOLT_ORDER_ALIASES = {
+  order_reference: 'order_reference', order_created_timestamp: 'requested_at',
+  driver_uuid: 'driver_ext_id', partner_uuid: 'partner_uuid', driver_name: 'driver_name',
+  vehicle_license_plate: 'plate', pickup_address: 'pickup_addr', destination_address: 'dropoff_addr',
+  order_stops: 'pickup_lat', order_status: 'status', payment_method: 'payment_type',
+  'category_info.name': 'product', ride_distance: 'distance_km', is_scheduled: 'is_scheduled',
+  order_drop_off_timestamp: 'ended_at', order_finished_timestamp: 'ended_at',
+  order_pickup_timestamp: 'duration_s', ride_price: 'price',
+  commission: 'commission', net_earnings: 'net_earnings',
+};
+/* bolt_fi_order's own columns (sql/schema_v116.sql): where the per-ride money
+   and Bolt's order id are kept, which no trip column holds. */
+const BOLT_FI_ORDER_COLS = ['order_reference', 'partner_uuid', 'ride_price', 'commission', 'net_earnings'];
 /* Uber's trip export names every column in English prose, so norm() — which
    strips non-alphanumerics and compares against information_schema — can never
    match "Trip request time" to requested_at. /api/schema/raw-fields did
@@ -330,14 +350,12 @@ export function surfaces({ from, to }) {
       drivers: (org) => `https://api.uber.com/v1/vehicle-suppliers/drivers?org_id=${encodeURIComponent(org)}&limit=50`,
       'driver-actions': (org) => `https://api.uber.com/v1/vehicle-suppliers/drivers/actions?org_id=${encodeURIComponent(org)}&limit=50`,
       vehicles: (org) => `https://api.uber.com/v1/vehicle-suppliers/vehicles?org_id=${encodeURIComponent(org)}&limit=50`,
-      transactions: (org) => `https://api.uber.com/v1/vehicle-suppliers/transactions?${qs({ org_id: org, limit: 50,
-        start_time: new Date(from).getTime(), end_time: new Date(to).getTime() })}`,
       // The one surface that might carry the money the trip export omits.
       'earner-payments': (org) => `https://api.uber.com/v1/vehicle-suppliers/earners/payments?${qs({ org_id: org,
         start_time: new Date(from).getTime(), end_time: new Date(to).getTime(), page_size: 50 })}`,
     };
     const cols = { drivers: DRIVER_COLS, 'driver-actions': DRIVER_COLS, vehicles: VEHICLE_COLS,
-      transactions: TRIP_COLS, 'earner-payments': ['category', 'amount', 'parent', 'driver_ext_id'] };
+      'earner-payments': ['category', 'amount', 'parent', 'driver_ext_id'] };
     for (const [name, url] of Object.entries(rest)) {
       add('uber', name, cols[name], 'OAuth REST', async () => {
         const token = await uberOAuthToken();
@@ -346,6 +364,31 @@ export function surfaces({ from, to }) {
         return { data, status };
       });
     }
+
+    /* THE LIVE TRANSACTIONS FEED, ASKED THE WAY IT ANSWERS.
+       ─────────────────────────────────────────────────────────────────────
+       This sat in `rest` above and was asked with GET, like its neighbours —
+       but Uber documents it as POST, and a GET draws `404 page not found`. So
+       every night this row recorded {http_status: 404, record_count: 0}, and
+       for months the product's record of the surface was "the provider has
+       nothing here" about a feed that serves per-trip money at sub-minute
+       freshness: docs/COVERAGE.md, "Uber's live per-trip feed WORKS".
+
+       Asked now through src/sources/uber_transactions.js — the collector's
+       own request builder, so the probe and the collector describe one
+       request: POST, the snake_case envelope, timeRange IN_RANGE over epoch
+       milliseconds as strings, the newest legal 15-minute window, ending at
+       least six minutes ago. Not the probe's three-day window, which this
+       surface cannot serve: it answers 15 minutes at a time from the last 24
+       hours. The surface keeps its name, so its provider_probe row is
+       corrected in place rather than joined by a second one. Its fields are
+       measured against the columns they land in, uber_live_transaction. */
+    add('uber', 'transactions', TXN_COLS,
+      'OAuth REST — POST, the newest legal 15-minute window; the feed serves only the last 24 h',
+      async () => {
+        const { data, status } = await probeTransactions({ org: config.uber.org });
+        return { data, status };
+      }, TXN_ALIASES);
 
     /* Does the provider still hold what we are missing?
        ─────────────────────────────────────────────────────────────────────
@@ -576,8 +619,20 @@ export function surfaces({ from, to }) {
          commission and net_earnings as well. It has never been called
          correctly. The `...body` spread in boltCall runs last, so this
          overrides the shared field. */
-      add('bolt', `${company.fleet}:getFleetOrders`, TRIP_COLS, 'the trips this channel has never delivered',
-        boltCall('getFleetOrders', company, { company_ids: [company?.companyId], offset: 0, limit: 50 }));
+      /* COLLECTED NOW (src/sources/bolt_orders.js, 2026-11-12): every run, over
+         the portal harvest's own windows, onto the same trip rows — filling
+         what the portal leaves empty and standing in for the instants the
+         portal has not answered for. The note said "the trips this channel
+         has never delivered" for as long as the route was only probed; a
+         probe that keeps saying that about a collected surface sends the
+         next reader to build it again. The aliases name the columns the
+         collector writes each field to — trip, and bolt_fi_order for the
+         money — so "unmapped" lists only what is really kept in raw alone. */
+      add('bolt', `${company.fleet}:getFleetOrders`, [...TRIP_COLS, ...BOLT_FI_ORDER_COLS],
+        'trips and per-ride money — collected every run by src/sources/bolt_orders.js beside the portal'
+          + ' (a company the client is not entitled to answers COMPANIES_NOT_ALLOWED)',
+        boltCall('getFleetOrders', company, { company_ids: [company?.companyId], offset: 0, limit: 50 }),
+        BOLT_ORDER_ALIASES);
       add('bolt', `${company.fleet}:getCompanyEarnings`,
         ['platform', 'driver_ext_id', 'period_start', 'period_end', 'earnings', 'cash_earnings'],
         'the money this channel has never delivered',

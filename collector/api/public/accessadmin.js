@@ -33,7 +33,7 @@
    ── EMPTY IS A SENTENCE ──────────────────────────────────────────────────
    Every list that can be empty says what would appear in it and how it gets
    there. "No requests" alone reads the same as "requests are broken". */
-import { el, esc, panel, note, tableFrom, tabBar, dtStr, dateStr, kpiRow, money } from './ui.js';
+import { el, esc, panel, note, tableFrom, tabBar, dtStr, dateStr, kpiRow, money, contract, glance, glanceBand, absenceBand, pageFoot } from './ui.js';
 import { who, loadWho, getJson, post, closedBlock, toSignIn } from './access.js';
 import { dubaiDay } from './tz.js';
 import { ROLE, CLASS, CLASSES, CAPS, CAP, LEVEL_NAME, rank, roleIsSensitive } from './access_model.js';
@@ -41,6 +41,8 @@ import {
   h, field, msgLine, act, oneTimeLink, roleSelect, fleetPicker, endOfDay, roleName, rememberRoles,
   fleetsText, plural, requestWhat, uid, explain,
 } from './account.js';
+/* Passkeys and single sign-on: the Owner's switches and a person's methods. */
+import { signinMethodsPanel, personSigninMethods } from './signin_methods_admin.js';
 
 const TABS = [
   { id: 'people', label: 'People', sub: 'Everyone with an account: their roles, fleets, teams and sign-in' },
@@ -48,7 +50,7 @@ const TABS = [
   { id: 'roles', label: 'Roles', sub: 'What each role sees, class by class, and what it can do' },
   { id: 'requests', label: 'Requests', sub: 'Access people asked for from a page that was not open to them' },
   { id: 'approvals', label: 'Approvals', sub: 'Sensitive grants waiting for an Owner' },
-  { id: 'reviews', label: 'Reviews', sub: 'Each quarter, every team’s access kept or removed person by person' },
+  { id: 'reviews', label: 'Reviews', sub: 'Every quarter, and monthly for sensitive access: each role and team place kept or taken out, line by line' },
   { id: 'screens', label: 'Screens', sub: 'Wall displays: signed in with a screen link, no person behind them' },
   { id: 'audit', label: 'Audit', sub: 'Who did what, when — append-only, each entry chained to the one before' },
   { id: 'settings', label: 'Settings', sub: 'Whether sign-in is required, and the company-wide sign-in rules' },
@@ -92,7 +94,13 @@ export async function accessPage(root, param, sub) {
   const bar = h('div');
   const flash = h('div', { class: 'acx-flash', 'data-acx': 'flash' });
   const host = h('div', { class: 'acx-tab', 'data-acx-tab': param === 'person' ? 'person' : tabId });
-  root.append(bar, flash, host);
+  /* Under the page contract: 00 after the tabs, † and the colophon after the
+     tab, both redrawn on every reload from the same overview (accessContract). */
+  const ak = contract();
+  const band = ak ? h('div', { 'data-acx': 'glance' }) : null;
+  const tail = ak ? h('div', { 'data-acx': 'absence' }) : null;
+  if (ak) root.append(bar, band, flash, host, tail);
+  else root.append(bar, flash, host);
 
   const ctx = { flash, host, sub, param };
   /* What a change reports is painted once the tab has been redrawn from the
@@ -115,6 +123,7 @@ export async function accessPage(root, param, sub) {
         (id) => (id === 'people' ? '#access' : `#access/${id}`)));
       host.replaceChildren();
       await (param === 'person' ? personTab : RENDER[tabId])(host, ctx);
+      if (ak) accessContract(band, tail, root, ctx);
     } finally {
       reloading = false;
       paint();
@@ -126,6 +135,53 @@ export async function accessPage(root, param, sub) {
     return { title: u ? (u.name || u.email) : 'Access', sub: u ? `${u.email} — their access, teams and sign-in` : 'No such person' };
   }
   return { title: 'Access', sub: TAB[tabId].sub };
+}
+
+/* ── the page contract (HANDOFF §4.5) ─────────────────────────────────────
+   #access made no contract() call: under Arkiv it drew the old page — the
+   tabs and the tab — with no 00 band, no † and no colophon. Under the
+   contract, from the one overview answer every tab already reads:
+     00  who has an account (the hero, its sub the People tab's status
+         counts, whose tile row it replaces), two-step on the active accounts,
+         the sensitive grants waiting for an Owner, the requests waiting, the
+         wall screens, and whether sign-in is required — all counted from
+         GET /api/access/overview, nothing derived;
+     01… the tab's panels, numbered by arkiv.css;
+     †   what this page cannot know: who reads without an account while
+         sign-in is optional, who stands in front of a wall screen, and the
+         platforms' own portal logins, which are not this product's accounts;
+     the colophon. The old skin draws exactly what it drew before. */
+function accessContract(band, tail, root, ctx) {
+  const users = ctx.users || [];
+  const count = (s) => users.filter((u) => u.status === s).length;
+  const active = users.filter((u) => u.status === 'active');
+  const screens = (ctx.devices || []).filter((d) => !d.revoked_at).length;
+  const pending = (ctx.grants || []).filter((g) => g.status === 'pending').length;
+  const required = ctx.config?.mode === 'enforced';
+  band.replaceChildren();
+  glance(glanceBand(band, 'As the server answered when this page opened').tilesHost, [
+    { label: 'People with an account', value: String(users.length), hero: true,
+      sub: [`${count('active')} active`, `${count('invited')} invited`, `${count('suspended')} suspended`,
+        count('offboarded') ? `${count('offboarded')} offboarded` : null].filter(Boolean).join(' · ') },
+    { label: 'Two-step on', value: `${active.filter((u) => u.totp_enabled).length} of ${active.length}`, sub: 'of the active accounts' },
+    { label: 'Waiting for an Owner', value: String(pending), sub: 'sensitive grants, which an Owner approves' },
+    { label: 'Requests', value: String((ctx.requests || []).length), sub: 'asked for from a page that was not open to them' },
+    { label: 'Wall screens', value: String(screens), sub: 'signed in with a screen link, no person behind them' },
+    { label: 'Sign-in', value: required ? 'Required' : 'Optional',
+      sub: required ? 'every page needs an account' : 'pages open without an account; managing access does not' },
+  ]);
+  tail.replaceChildren();
+  absenceBand(tail, [
+    { label: 'Who reads without an account', fig: null, none: required ? 'Nobody' : 'No name',
+      why: required ? 'Sign-in is required, so every reader has an account and a name.'
+        : 'Sign-in is optional, so a visitor without an account still opens the product, and what they read carries no name.' },
+    { label: 'Who stands at a wall screen', fig: null, none: 'Not known',
+      why: 'A screen signs in with its own link and has no person behind it, so who reads it is not recorded.' },
+    { label: 'The platforms’ own logins', fig: null, none: 'Not managed here',
+      why: 'The Uber, Bolt and Yango portals have their own accounts, kept on each platform; this page neither sees nor changes them.' },
+  ]);
+  pageFoot({ colophon: ['Access', `${users.length} ${users.length === 1 ? 'person' : 'people'}`,
+    required ? 'sign-in required' : 'sign-in optional'] }, root);
 }
 
 function tabLabel(t, ctx) {
@@ -244,7 +300,9 @@ function peopleTab(host, ctx) {
   const users = ctx.users;
   const n = (s) => users.filter((u) => u.status === s).length;
   const active = users.filter((u) => u.status === 'active');
-  host.append(kpiRow([
+  /* Under the page contract these counts are 00's (accessContract): printed
+     here as well they would be the same figures twice, one band apart. */
+  if (!contract()) host.append(kpiRow([
     { key: 'acx-people', label: 'People', value: String(users.length), sub: 'with an account, ever' },
     { key: 'acx-active', label: 'Can sign in', value: String(active.length), sub: 'active accounts' },
     { key: 'acx-invited', label: 'Invited', value: String(n('invited')), sub: 'have not used their link yet' },
@@ -552,6 +610,7 @@ function actionsPanel(u, ctx, { self, isOwner }) {
       + 'If their role requires it they will be asked to set it up again the next time they sign in.',
     [], armedBtn('Reset two-step', 'Press again to reset', run('reset_mfa', {}, () => ctx.say(`Two-step sign-in reset for ${who2}.`)), 'reset-mfa'));
   }
+  p.body.append(personSigninMethods(u, ctx));
 
   if (self) {
     p.body.append(note('This is you. You cannot suspend or offboard yourself; another Owner or Access admin can.', 'warn'));
@@ -939,81 +998,89 @@ function approvalsTab(host, ctx) {
 }
 
 /* ═════════════════════════ Reviews ═════════════════════════ */
-function quarterNow() {
-  const d = new Date();
-  return `${d.getUTCFullYear()}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
-}
+/* A review is a CYCLE since 2026-11-12 (ULM-DESIGN §11.3; the server is
+   api/access/reviews.js, the cards api/public/reviews_ui.js): every role
+   given directly and every place in a team that holds a role, each line
+   with whoever decides it — the team's lead, or an Access admin or the
+   Owner — and what became of it. It closes 14 days after it opens; a line
+   nobody decided ends 14 days after that unless someone attests it first. */
 async function reviewsTab(host, ctx) {
-  const period = quarterNow();
-  const top = panel(`This quarter (${period})`, 'Every quarter each team’s lead — or an admin — looks at who is in the team and keeps or removes '
-    + 'each person. Removing someone takes the team’s roles away from them at once.', 'acx-review-open');
-  const msg = msgLine();
-  const openBtn = h('button', { type: 'button', class: 'btn primary', 'data-acx': 'review-open' }, 'Open this quarter’s review for every team');
-  openBtn.addEventListener('click', async () => {
-    const r = await act(openBtn, msg, () => post('/api/access/reviews/open', {}));
-    if (!r) return;
-    ctx.say(r.opened ? `Opened ${r.period} for ${plural(r.opened, 'team', 'teams')}; each is due in 14 days.`
-      : `Every team already has a ${r.period} review${ctx.teams.length ? '' : ' — and there are no teams to review'}.`, r.opened ? 'ok' : 'warn');
-    await ctx.reload();
-  });
-  top.body.append(ctx.teams.length ? h('div', { class: 'acx-actions' }, openBtn, msg)
-    : empty('There are no teams, so there is nothing to review: reviews are per team. Make teams under Teams.'));
-  host.append(top.panel);
-
   let d;
   try { d = await getJson('/api/access/reviews'); } catch (e) { host.append(note(`The reviews could not be read: ${e.message}`, 'err')); return; }
-  const reviews = d.reviews || [];
-  const open = reviews.filter((r) => !r.closed_at);
-  const closed = reviews.filter((r) => r.closed_at);
+  const { reviewCards, KIND_WORD } = await import('./reviews_ui.js');
+  const cycles = d.cycles || [];
+  const items = d.items || [];
+  const open = cycles.filter((c) => !c.closed_at);
+  const closed = cycles.filter((c) => c.closed_at);
+  const sched = d.schedule || {};
+
+  const top = panel(`This month: the ${sched.thisMonth?.period || ''} ${KIND_WORD[sched.thisMonth?.kind] || 'review'}`, sched.why || null, 'acx-review-open');
+  const msg = msgLine();
+  const opener = (kind, label) => {
+    const b = h('button', { type: 'button', class: kind === 'quarterly' ? 'btn primary' : 'btn', 'data-acx': kind === 'quarterly' ? 'review-open' : `review-open-${kind}` }, label);
+    b.addEventListener('click', async () => {
+      const r = await act(b, msg, () => post('/api/access/reviews/open', { kind }));
+      if (!r) return;
+      ctx.say(`Opened the ${r.period} ${KIND_WORD[kind]}: ${plural(r.items, 'line', 'lines')} to attest `
+        + `(${plural(r.grants, 'role given directly', 'roles given directly')}, ${plural(r.memberships, 'team place', 'team places')}), due ${dateStr(r.due_at)}.`);
+      await ctx.reload();
+    });
+    return b;
+  };
+  top.body.append(h('div', { class: 'acx-actions' },
+    opener('quarterly', 'Open this quarter’s review'), opener('monthly', 'Open this month’s sensitive-access review'),
+    opener('adhoc', 'Open an extra review now'), msg));
+  top.body.append(h('p', { class: 'acx-p acx-dim' }, `A review is due ${d.rules?.openDays ?? 14} days after it opens. A line nobody decided by then `
+    + `ends ${d.rules?.unattestedDays ?? 14} days later unless someone attests it first. Nobody attests their own access; an Owner’s is attested by another Owner, `
+    + 'and the only Owner is never ended by a review.'));
+  host.append(top.panel);
 
   const op = panel('Open reviews', null, 'acx-reviews');
-  if (!open.length) op.body.append(empty('No review is open. Open this quarter’s above; each team then appears here with its members.'));
-  for (const r of open) op.body.append(reviewCard(r, ctx));
+  if (!open.length) op.body.append(empty('No review is open. Open one above; each line then appears here with whoever decides it.'));
+  for (const c of open) {
+    const n = c.counts || {};
+    const head = h('p', { class: 'acx-p', html: `<b>${esc(c.period)} ${esc(KIND_WORD[c.kind] || '')}</b> · opened ${esc(dtStr(c.opened_at))} by ${esc(c.opened_by ? ctx.nameOf(c.opened_by) : 'the schedule')}`
+      + ` · ${esc(plural(n.pending || 0, 'line waits', 'lines wait'))}, ${esc(String(n.kept || 0))} kept, ${esc(String(n.revoked || 0))} taken out` });
+    const cmsg = msgLine();
+    const close = h('button', { type: 'button', class: 'btn', 'data-acx': 'review-close' }, 'Close it now');
+    close.addEventListener('click', async () => {
+      const r = await act(close, cmsg, () => post(`/api/access/reviews/${c.id}/close`, {}));
+      if (!r) return;
+      ctx.say(`Closed ${c.period}: ${plural(r.unattested, 'line was', 'lines were')} not attested and end ${dateStr(r.expires_at)} unless attested first`
+        + `${r.keptOwner ? `; the only Owner’s access was kept` : ''}.`, r.unattested ? 'warn' : 'ok');
+      await ctx.reload();
+    });
+    op.body.append(head, h('div', { class: 'acx-actions' }, close, cmsg));
+    const mine = items.filter((i) => i.cycle_id === c.id && i.state === 'pending');
+    for (const el2 of reviewCards(mine, { cycle: c, fleets: ctx.fleets, say: ctx.say, reload: ctx.reload })) op.body.append(el2);
+  }
   host.append(op.panel);
+
+  const ending = items.filter((i) => i.state === 'unattested');
+  if (ending.length) {
+    const ep = panel('Not attested — ending', 'These were in a review that closed with nobody deciding them. Each ends on the date shown unless someone attests it first.', 'acx-reviews-ending');
+    for (const c of closed) {
+      const mine = ending.filter((i) => i.cycle_id === c.id);
+      if (mine.length) for (const el2 of reviewCards(mine, { cycle: c, fleets: ctx.fleets, say: ctx.say, reload: ctx.reload })) ep.body.append(el2);
+    }
+    host.append(ep.panel);
+  }
 
   const cp = panel('Finished reviews', null, 'acx-reviews-done');
   if (!closed.length) cp.body.append(empty('No review has been finished yet.'));
   else {
     cp.body.append(tableFrom(closed, [
-      { label: 'Team', key: 'team_name', render: (r) => esc(r.team_name) },
-      { label: 'Quarter', key: 'period', render: (r) => esc(r.period) },
-      { label: 'Attested', key: 'closed_at', render: (r) => `${esc(dtStr(r.closed_at))}<div class="acx-sub">by ${esc(ctx.nameOf(r.attested_by))}</div>` },
-      { label: 'Taken out', key: 'decisions', render: (r) => {
-        const out = (r.decisions || []).filter((x) => x.keep === false).map((x) => ctx.nameOf(x.userId));
-        return out.length ? esc(out.join(', ')) : '<span class="dim">nobody</span>';
+      { label: 'Review', key: 'period', render: (c) => `<b>${esc(c.period)}</b><div class="acx-sub">${esc(KIND_WORD[c.kind] || '')}</div>` },
+      { label: 'Opened', key: 'opened_at', render: (c) => `${esc(dtStr(c.opened_at))}<div class="acx-sub">by ${esc(c.opened_by ? ctx.nameOf(c.opened_by) : 'the schedule')}</div>` },
+      { label: 'Closed', key: 'closed_at', render: (c) => `${esc(dtStr(c.closed_at))}<div class="acx-sub">by ${esc(c.closed_by ? ctx.nameOf(c.closed_by) : 'the schedule, on its due date')}</div>` },
+      { label: 'What became of each line', key: 'counts', render: (c) => {
+        const n = c.counts || {};
+        return esc([`${n.kept || 0} kept`, `${n.revoked || 0} taken out`, n.unattested ? `${n.unattested} ending` : null,
+          n.expired ? `${n.expired} ended unattested` : null, n.gone ? `${n.gone} already gone` : null].filter(Boolean).join(' · '));
       } },
-    ], { compact: true, cards: true, cardLead: 'team_name' }));
+    ], { compact: true, cards: true, cardLead: 'period' }));
   }
   host.append(cp.panel);
-}
-
-function reviewCard(r, ctx) {
-  const t = ctx.teamById.get(r.team_id);
-  const overdue = new Date(r.due_at).getTime() < Date.now();
-  const card = h('div', { class: 'acx-card', 'data-review': String(r.id) },
-    h('p', { class: 'acx-p', html: `<b>${esc(r.team_name)}</b> · ${esc(r.period)} · due ${esc(dateStr(r.due_at))} ${overdue ? '<span class="pill bad">overdue</span>' : ''}` }));
-  const members = (t?.members || []).map((id) => ctx.byId.get(id)).filter(Boolean);
-  if (!members.length) card.append(empty('Nobody is in this team, so attesting it records only that.'));
-  const choices = members.map((u) => {
-    const name = `acx-rv-${r.id}-${u.id}`;
-    const keep = h('input', { type: 'radio', name, value: 'keep', checked: true, id: uid() });
-    const drop = h('input', { type: 'radio', name, value: 'remove', id: uid() });
-    card.append(h('div', { class: 'acx-rv' }, h('span', { class: 'acx-rv-who' }, u.name || u.email, h('span', { class: 'dim' }, ` · ${u.status}`)),
-      h('label', { class: 'acx-check', for: keep.id }, keep, 'Keep'), h('label', { class: 'acx-check', for: drop.id }, drop, 'Take out')));
-    return { u, keep };
-  });
-  const msg = msgLine();
-  const btn = h('button', { type: 'button', class: 'btn primary', 'data-acx': 'attest' }, 'Attest this team');
-  btn.addEventListener('click', async () => {
-    const decisions = choices.map(({ u, keep }) => ({ userId: u.id, keep: keep.checked }));
-    const res = await act(btn, msg, () => post(`/api/access/reviews/${r.id}/attest`, { decisions }));
-    if (!res) return;
-    const out = decisions.filter((x) => !x.keep).length;
-    ctx.say(`${r.team_name} attested for ${r.period}${out ? `; ${plural(out, 'person', 'people')} taken out` : '; everyone kept'}.`);
-    await ctx.reload();
-  });
-  card.append(h('div', { class: 'acx-actions' }, btn, msg));
-  return card;
 }
 
 /* ═════════════════════════ Screens ═════════════════════════ */
@@ -1087,6 +1154,11 @@ const ACTION_WORDS = {
   'access.role_created': 'made a role', 'access.requested': 'asked for access', 'access.request_approved': 'approved a request',
   'access.request_declined': 'declined a request', 'access.device_created': 'set up a screen', 'access.device_revoked': 'switched off a screen',
   'access.config_changed': 'changed the sign-in settings', 'access.review_opened': 'opened a review', 'access.review_attested': 'attested a team',
+  'access.review_kept': 'kept a line of a review', 'access.review_revoked': 'took out a line of a review',
+  'access.review_gone': 'decided a review line that had already ended', 'access.review_closed': 'closed a review',
+  'access.review_expired': 'ended access nobody attested', 'access.user_dormant': 'suspended an account nobody had signed in to for 60 days',
+  'finding.taken': 'took a finding', 'finding.assigned': 'gave a finding to someone', 'finding.closed': 'closed a finding',
+  'finding.reopened': 'reopened a finding',
   'access.preview_started': 'started previewing a role', 'access.preview_ended': 'ended a preview', 'access.housekeeping': 'daily tidy-up',
   'proposal.declined': 'declined a proposal', 'proposal.withdrawn': 'withdrew a proposal',
 };
@@ -1283,6 +1355,7 @@ function settingsTab(host, ctx) {
   const mfaHint = h('span', null, MFA_WORDS[mfa.value]);
   mfa.addEventListener('change', () => { mfaHint.textContent = MFA_WORDS[mfa.value]; });
   one('Who must use two-step sign-in', 'mfa', mfa, mfaHint, () => mfa.value, (v) => `Two-step policy saved: ${MFA_WORDS[v] || v}`, 'Must use it');
+  signinMethodsPanel(host, ctx);
 
   const cash = h('input', { type: 'number', min: '0', step: '100', class: 'depinput acx-in acx-num', value: String(cfg.cash_stepup_aed ?? ''), 'data-acx': 'cash' });
   const cmsg = one('Re-confirming a large cash entry', 'cash_stepup_aed', cash,

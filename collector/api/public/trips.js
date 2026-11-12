@@ -191,7 +191,10 @@ export async function renderTrips(root) {
           render: (r) => (r.external_id && r.is_booking !== false
             ? `<a class="lnk" href="${href('trip', r.platform, r.external_id)}">open →</a>` : '<span class="dim">—</span>') },
       ] : []),
-    ], { compact: true }));
+      /* SPEC §4's row marker (plan §4 trips): each row is one channel's
+         booking, so its channel's 3px rule sits in the gutter under the
+         contract; the Channel column's words stay (ui.js tableFrom rowMark). */
+    ], { compact: true, rowMark: (r) => r.platform }));
 
     /* Paging, stated in rows rather than page numbers: a reader wants to know
        how much of the window they are looking at, not which page they are on. */

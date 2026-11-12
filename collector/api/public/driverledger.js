@@ -35,7 +35,7 @@
    Retention is twelve months and the entry is permanent, so collapsing those
    makes an expired photograph read as an entry nobody ever documented. */
 import { el, esc, panel, note, loading, tableFrom, kpiRow, empty, countOf,
-  contract, glance, bandTiles, pageFoot, dtStr, fmt } from './ui.js';
+  contract, glance, bandTiles, pageFoot, dtStr, fmt, chanChip } from './ui.js';
 import { api, qAll, windowLabel } from './data.js';
 import { aed } from './deposit_core.js';
 
@@ -478,7 +478,7 @@ export async function renderDriverLedger(root, id, prof) {
         { label: 'When', key: 'on', render: (l) => esc(String(l.on || '').slice(0, 10)) },
         { label: 'What', key: 'detail',
           render: (l) => (l.kind === 'trip'
-            ? `<span class="pill plat">${esc(l.platform || '')}</span> ${esc(l.plate || '')}`
+            ? `${chanChip(l.platform, { label: l.platform || '' })} ${esc(l.plate || '')}`
               + ` <span class="dim">${esc(l.detail || '')}</span>`
             : esc(l.detail || ''))
             + (l.verification ? ' <span class="pill warn">verification</span>' : '') },

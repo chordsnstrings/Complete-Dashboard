@@ -28,16 +28,44 @@ export const TELEMETRY_PLATES = `plates(plate) AS (
     UNION ALL
     SELECT (SELECT t.plate FROM telemetry_snapshot t WHERE t.plate > p.plate ORDER BY t.plate LIMIT 1)
       FROM plates p WHERE p.plate IS NOT NULL)`;
-export const LATEST_FIX = (plateExpr) => `(
+/* `keep` (optional): a predicate over `t.` that a fix must pass to be a
+   candidate at all — ROSTER_KEEP below. Absent, the fragment is byte for byte
+   what test/live_fix.test.mjs compares with the DISTINCT ON it replaced. */
+export const LATEST_FIX = (plateExpr, keep = null) => `(
     SELECT f.* FROM (
       (SELECT 0 AS fix_rank, t.* FROM telemetry_snapshot t
-        WHERE t.plate = ${plateExpr} AND t.captured_at <= now()
+        WHERE t.plate = ${plateExpr} AND t.captured_at <= now()${keep ? ` AND ${keep}` : ''}
         ORDER BY t.captured_at DESC, t.polled_at DESC LIMIT 1)
       UNION ALL
       (SELECT 1 AS fix_rank, t.* FROM telemetry_snapshot t
-        WHERE t.plate = ${plateExpr} AND t.captured_at > now()
+        WHERE t.plate = ${plateExpr} AND t.captured_at > now()${keep ? ` AND ${keep}` : ''}
         ORDER BY t.captured_at DESC, t.polled_at DESC LIMIT 1)
     ) f ORDER BY f.fix_rank LIMIT 1)`;
+
+/* A FIX FROM A PLATE THE TRACKER HAS STOPPED LISTING IS NOT A LIVE FIX
+   (FIXLIST C18, wired 2026-11-12).
+   ─────────────────────────────────────────────────────────────────────────
+   CABMAN's collector keeps a roster (src/sources/cabman.js): a plate departs
+   once it has been missing from 288 consecutive polls. Its rows stay in this
+   table for ever, frozen at their last fix, and every count that reads the
+   table went on counting them — measured on production 2026-11-12, 132 of the
+   177 CABMAN plates /api/live returned had a last poll more than a day old,
+   and 29 of the 60 rows the Live page called Moving were among them.
+
+   This is the predicate that sets them aside, and it is narrower than "drop
+   the plate" on purpose: it drops only the CABMAN fixes of a plate the roster
+   set aside (api/fleet_roster.js excludedPlates). A plate FMS also reports
+   keeps its FMS fixes, so a car whose CABMAN listing ended but whose FMS box
+   still answers is still a tracked car; a plate only CABMAN ever reported has
+   no candidate fix left and drops out of the count.
+
+   NULL-SAFE, and it has to be: excludedPlates returns null when nothing is set
+   aside, and `plate = ANY(NULL)` is NULL, not false — `NOT (cabman AND NULL)`
+   is NULL too, so the plain form would have dropped EVERY CABMAN row the day
+   the roster was empty. coalesce makes "no list" mean "keep everything".
+   `a` is the table alias with its dot; `param` the placeholder of the list. */
+export const ROSTER_KEEP = (a = '', param = '$1') => `NOT (${a}source = 'cabman'
+        AND coalesce(${a}plate = ANY(${param}::text[]), false))`;
 
 /* THE DAYS A CABMAN CAR WAS SEEN MOVING (FIXLIST V3, 2026-10-14).
    ───────────────────────────────────────────────────────────────────────

@@ -15,7 +15,8 @@
      Teams      make a team → add them to it
      Roles      the fourteen built-in roles in the matrix; a custom one made
      Requests   the cash-desk person asks for access (API) → the Owner approves
-     Reviews    this quarter's review opened → the team attested
+     Reviews    this quarter's review opened → the roles given directly
+                attested (a review is a cycle of lines since 2026-11-12)
      Screens    a wall display made (its link shown once) → switched off
      Audit      rows listed; the hash chain checked and intact
      Settings   sign-in required → and back to optional, each confirmed
@@ -357,18 +358,25 @@ await section('7', async () => {
   noErrorsSoFar('Requests');
 });
 
-console.log('\n8 · Reviews: open this quarter, attest the team');
+/* A review is a cycle of LINES since 2026-11-12 (api/access/reviews.js):
+   one per role given directly and one per place in a team that holds a role.
+   Cash office holds no role, so this review is the roles given directly —
+   the Owner's own (theirs to leave to another Owner) and the cash-desk
+   person's. */
+console.log('\n8 · Reviews: open this quarter, attest the roles given directly');
 await section('8', async () => {
   await ensureStepup();
   await go('access/reviews');
   await page.locator('[data-acx="review-open"]').click();
   const f = await waitFlash(/Opened|already/);
-  check('this quarter’s review is opened for the team', /Opened \d{4}-Q\d for 1 team/.test(f), f);
-  const card = page.locator('[data-review]').first();
-  check('…listing its member', (await card.innerText().catch(() => '')).includes('Test Cash Desk'));
+  check('this quarter’s review is opened, line by line', /Opened the \d{4}-Q\d quarterly review: \d+ lines? to attest/.test(f), f);
+  const card = page.locator('[data-review-group="direct"]').first();
+  const t = await card.innerText().catch(() => '');
+  check('…listing the roles given directly, the cash-desk person’s among them', t.includes('Test Cash Desk'), t.slice(0, 200));
+  check('…and the Owner’s own line, which they cannot attest', /cannot attest your own access/.test(t), t.slice(0, 200));
   await card.locator('[data-acx="attest"]').click();
   const f2 = await waitFlash(/attested/);
-  check('the team is attested, everyone kept', /Cash office attested for .*everyone kept/.test(f2), f2);
+  check('the lines are attested, everyone kept', /Roles given directly attested for \d{4}-Q\d: everyone kept/.test(f2), f2);
   noErrorsSoFar('Reviews');
 });
 

@@ -499,7 +499,10 @@ const ALIAS = Object.freeze({
      keys, so a chart coloured BY NAME from a label a reader sees finds its
      channel. 'FMS telematics' is the label every FMS series carries, and
      uber_fleet is Uber's fleet feed (SOURCE_TOKEN maps it to --c-uber). */
-  'fms telematics':'fms', 'uber fleet':'uber', uber_fleet:'uber'
+  'fms telematics':'fms', 'uber fleet':'uber', uber_fleet:'uber',
+  /* ADDED (2026-11-12): Uber's live per-trip money feed, by the label
+     ui.js SOURCE_LABEL prints and the key SOURCE_TOKEN maps to --c-uber. */
+  'uber live money':'uber', uber_transactions:'uber'
 });
 
 /** Normalise a feed name to a channel key, or null if it is not one of the six. */

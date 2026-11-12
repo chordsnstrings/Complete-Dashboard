@@ -134,6 +134,42 @@ export const GRAINS = ['auto', 'day', 'week', 'month'];
    import it without importing the shell back. */
 let renderGen = 0;
 export const newRender = () => ++renderGen;
+/* ── retention: what each answer's x-fm-retention header said ─────────────
+   Moved here from retention_note.js (2026-11-12) with its words unchanged:
+   api() below notes every answer's header, so the capture has to be on the
+   first screen, and the module that draws it (retention_note.js) no longer
+   needs to be (test/lazy_pages.test.mjs). */
+/* table;action;first-whole-day;bucket-minutes, comma separated. Anything
+   malformed is dropped rather than printed half-understood. */
+export function parseRetentionHeader(h) {
+  return String(h || '').split(',').map((part) => {
+    const [table, action, before, bucket] = part.trim().split(';');
+    if (!table || !/^(thinned|removed)$/.test(action || '') || !/^\d{4}-\d{2}-\d{2}$/.test(before || '')) return null;
+    const b = Number(bucket);
+    return { table, action, before, bucket_min: Number.isFinite(b) && b > 0 ? b : null };
+  }).filter(Boolean);
+}
+
+/* What this render's answers said, gathered by api(); one entry per table.
+   TIED TO THE RENDER THAT ASKED (review of 2026-11-12). /api/coverage takes
+   16-33 s, and a reader who leaves #coverage before it answers would have
+   had its note land on whatever page they opened next: a claim about a range
+   that page never read. resetRetention() starts a new generation, api()
+   stamps each request with the generation it was made in, and a note from
+   an older one is dropped. */
+const seen = new Map();
+let gen = 0;
+export const retentionGen = () => gen;
+export function noteRetention(header, g = gen) {
+  if (g !== gen) return;
+  for (const n of parseRetentionHeader(header)) {
+    const had = seen.get(n.table);
+    if (!had || n.before > had.before) seen.set(n.table, n);
+  }
+}
+export const resetRetention = () => { seen.clear(); gen += 1; };
+export const retentionNow = () => [...seen.values()];
+
 export const currentGen = () => renderGen;
 export const alive = (g) => g === renderGen;
 
@@ -161,9 +197,17 @@ export const alive = (g) => g === renderGen;
    Only for GETs without options: a POST is not safe to repeat, and this must
    never turn one collection trigger into two. */
 const GATEWAY = new Set([502, 503, 504]);
+/* The service worker's own "offline" answer (sw.js: a 503 stamped
+   x-sw-cache: miss when the network failed and it holds no copy). The desktop
+   registers the worker too since 2026-11-12 (swreg.js), and a 503 here is
+   NOT a slow gateway: retrying it waits 1.2 s for the same answer, and
+   failure() below would tell the reader the server "took too long" when the
+   server was never reached — a false reason, which this product does not
+   print. */
+const swOffline = (r) => r.status === 503 && r.headers?.get?.('x-sw-cache') === 'miss';
 async function fetchWithRetry(path, opts) {
   const r = await fetch(path, opts);
-  if (r.ok || opts || !GATEWAY.has(r.status)) return r;
+  if (r.ok || opts || !GATEWAY.has(r.status) || swOffline(r)) return r;
   await new Promise((res) => setTimeout(res, 1200));
   return fetch(path, opts);
 }
@@ -174,6 +218,10 @@ async function fetchWithRetry(path, opts) {
    sentence belonged — the reader learns nothing and cannot tell a slow query
    from a broken one. */
 async function failure(r) {
+  if (swOffline(r)) {
+    return 'This browser is offline, or the server cannot be reached, and it has kept no copy of these '
+      + 'figures to show. They load once the connection is back.';
+  }
   const text = await r.text().catch(() => '');
   if (GATEWAY.has(r.status) || /^\s*<(!doctype|html)/i.test(text)) {
     return `${r.status} — the server took too long to answer. It is usually still `
@@ -204,6 +252,10 @@ const busy = (d) => {
 export const api = async (path, opts) => {
   const method = (opts?.method || 'GET').toUpperCase();
   const held = method === 'GET' && !opts ? swr.get(path) : null;
+  /* The render this request belongs to (retention_note.js): a retention note
+     that arrives after the reader has moved to another page is dropped
+     there, not printed on a page that never read that range. */
+  const rgen = retentionGen();
 
   const counted = !opts?.quiet;
   if (counted) busy(1);
@@ -214,6 +266,10 @@ export const api = async (path, opts) => {
     /* `quiet`: chrome that is not the page (the desktop's today strip) keeps
        its refusals out of the page's "not shown to your role" line. */
     if (!opts?.quiet) noteWithheld(r.headers.get('x-fm-withheld'));
+    /* And what the data-retention pass has thinned out of the range this
+       answer read — said once at the top too (retention_note.js). */
+    const retention = r.headers.get('x-fm-retention');
+    if (!opts?.quiet) noteRetention(retention, rgen);
     if (!r.ok) {
       /* Signed out, or not shown to this role: both are answers with a true
          reason, not failures, and each is told as what it is. */
@@ -222,8 +278,13 @@ export const api = async (path, opts) => {
         try { j = await r.clone().json(); } catch { /* not json */ }
         if (j?.error === 'signin') { toSignIn('expired'); }
         if (j?.error === 'restricted') { toSignIn('setup'); }
+        /* 'no_access' (api/access/middleware.js gate, PKY9): an account that
+           holds no role at all. Before it had its own code it was sent
+           'withheld' or 'fleet_scope'; off this list it became "Could not
+           load this view" and broke every unlessWithheld() panel (review,
+           2026-11-12). */
         if (r.status === 403 && j && ['withheld', 'fleet_scope', 'bad_fleet', 'undeclared', 'not_allowed',
-          'preview', 'no_action'].includes(j.error)) throw new WithheldError(j, r.status);
+          'preview', 'no_action', 'no_access'].includes(j.error)) throw new WithheldError(j, r.status);
       }
       throw new Error(await failure(r));
     }
@@ -232,7 +293,9 @@ export const api = async (path, opts) => {
        HR, passengers…) is never written to this browser's storage. */
     const storable = !/no-store/i.test(r.headers.get('cache-control') || '');
     if (method === 'GET' && !opts && storable) {
-      const { changed } = swr.put(path, body);
+      /* The retention note is kept WITH the answer it came on: a page
+         painted from this copy must say what this copy's answer said. */
+      const { changed } = swr.put(path, body, retention);
       /* Only when it moved. Redrawing a page that is already correct costs the
          reader their scroll position and their place in a table, which is
          worse than the wait being saved. */
@@ -251,6 +314,13 @@ export const api = async (path, opts) => {
        just because nobody is awaiting it. A failed refresh leaves the reader
        with the figures they already had, which is the right outcome. */
     live.catch(() => {});
+    /* Painted from this browser's copy, before (often long before: /api/
+       coverage takes 16-33 s) the live answer and its header arrive. The
+       first draft noted only live headers, so the second visit to a thinned
+       range rendered without its note and never redrew (the body had not
+       changed) — a smaller number shown as complete. The copy carries the
+       note its answer had. */
+    if (!opts?.quiet) noteRetention(held.ret, rgen);
     return held.body;
   }
   return live;

@@ -18,6 +18,8 @@ import { el, esc, panel, loading, note, tableFrom, fmt, empty, verdict, foldRows
   plural, countOf, dayStr, sourceLabel, contract, glance, secHead, absenceBand, pageFoot } from './ui.js';
 import { gapBars } from './charts.js';
 import { q, href, windowLabel } from './data.js';
+/* ANS: the page's answer line and Act-on strip (answers.js). */
+import { answer } from './answers.js';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const hh = (h) => `${String(h).padStart(2, '0')}:00`;
@@ -120,6 +122,7 @@ export async function renderSupply(root) {
     q('/api/supply/balance'),
     q('/api/supply/areas').catch(() => ({ areas: [] })),
   ]);
+  answer(root, 'supply', { bal, areas });
 
   /* ── two different nothings, and they need two different sentences ──────
      This note used to say one thing whatever the reason: that Uber serves the

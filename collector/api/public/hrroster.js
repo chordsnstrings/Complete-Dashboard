@@ -20,7 +20,7 @@
    with no date is "missing", with the reason, and sorts last; it is never
    "ok" and never "expired". */
 import { el, esc, panel, note, loading, kpiRow, tableFrom, entity, pill, sourceLabel,
-  dateStr, fmt, foldRows, countOf, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
+  dateStr, fmt, foldRows, countOf, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, chanChip } from './ui.js';
 import { api, state, href } from './data.js';
 import { fleetLabel, fleetList, allFleetsLabel, closedBlock } from './access.js';
 
@@ -81,11 +81,12 @@ function whoCell(p) {
 function accountsCell(p) {
   const held = p.accounts.map((a) => {
     const target = a.person_id != null ? `p${a.person_id}` : a.ext_id;
-    const label = `${esc(sourceLabel(a.platform))}${a.via === 'phone' ? ' · phone' : ''}`;
-    const title = esc(`${sourceLabel(a.platform)} account ${a.ext_id} — matched ${a.via === 'phone' ? 'by phone' : 'by the id HR filed'}`);
-    return target
-      ? `<a class="pill plat" href="${href('driver', target)}" title="${title}">${label}</a>`
-      : `<span class="pill plat" title="${title}">${label}</span>`;
+    /* A channel chip (ui.js chanChip): the same <a>/<span class="pill plat">
+       under the old skin, and the channel's swatch beside the word under the
+       page contract. Label and title go in raw; chanChip escapes them once. */
+    const label = `${sourceLabel(a.platform)}${a.via === 'phone' ? ' · phone' : ''}`;
+    const title = `${sourceLabel(a.platform)} account ${a.ext_id} — matched ${a.via === 'phone' ? 'by phone' : 'by the id HR filed'}`;
+    return chanChip(a.platform, { label, title, href: target ? href('driver', target) : null });
   }).join(' ');
   const not = p.unmatched_ids.map((u) => `<span class="tag dim" title="${esc(u.reason)}">${esc(sourceLabel(u.platform))} id not held</span>`).join(' ');
   if (!held && !not) {
@@ -180,7 +181,7 @@ function renderPreview(host, p) {
     pp.body.append(tableFrom(p.proposals.list, [
       { label: 'Employee', key: 'employee_id', render: (x) => `${esc(fleetLabel(x.fleet_id) || x.fleet_id)} <span class="mono">${esc(x.employee_id)}</span>` },
       { label: 'Name', key: 'name' },
-      { label: 'Accounts HR groups', key: 'accounts', render: (x) => x.accounts.map((a) => pill(sourceLabel(a.platform), 'plat', a.ext_id)).join(' ') },
+      { label: 'Accounts HR groups', key: 'accounts', render: (x) => x.accounts.map((a) => chanChip(a.platform, { title: a.ext_id })).join(' ') },
       { label: 'Status', key: 'status', render: (x) => ({ new: pill('new', 'info'), pending: pill('already waiting'),
         same: pill('answered: one person', 'ok'), different: pill('answered: two people') }[x.status] || esc(x.status)) },
     ], { compact: true }));

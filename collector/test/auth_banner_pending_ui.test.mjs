@@ -23,6 +23,10 @@ const srv = app.listen(0);
 await new Promise((r) => srv.once('listening', r));
 const base = `http://127.0.0.1:${srv.address().port}`;
 const browser = await launchChromium();
+/* Every page below blocks service workers (integration, 2026-11-12): the
+   desktop registers /sw.js since ARK, and route() does not see a request the
+   worker answers — the /api/auth stub went unread after the first page and
+   the banner showed the mock server's credential rows instead. */
 
 /* 12:30 in Dubai, TODAY in Dubai. This was the literal 2026-09-23T08:30Z,
    and the page prints a bare "saved 12:30" only for a save made on the
@@ -57,7 +61,7 @@ const banner = (page) => page.$eval('#authBanner', (e) => ({
 /* ══ 1. saved and untested, alone ═══════════════════════════════════════ */
 console.log('\nsaved and not yet tested, on its own');
 {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, serviceWorkers: 'block' });
   let answer = body([PENDING, PENDING_2]);
   await page.route('**/api/auth**', (r) => r.fulfill({ contentType: 'application/json', body: answer }));
   await page.goto(`${base}/#overview`, { waitUntil: 'networkidle' });
@@ -102,7 +106,7 @@ console.log('\nsaved and not yet tested, on its own');
 /* ══ 2. beside a real stop ══════════════════════════════════════════════ */
 console.log('\nbeside a credential that really is refused');
 {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, serviceWorkers: 'block' });
   await page.route('**/api/auth**', (r) => r.fulfill({ contentType: 'application/json',
     body: body([PENDING, STOPPED]) }));
   await page.goto(`${base}/#overview`, { waitUntil: 'networkidle' });
@@ -120,7 +124,7 @@ console.log('\nbeside a credential that really is refused');
 /* ══ 3. Apply redraws it ════════════════════════════════════════════════ */
 console.log('\nthe paste box’s Apply redraws the banner');
 {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, serviceWorkers: 'block' });
   let applied = false;
   let authReads = 0;
   await page.route('**/api/auth**', (r) => {

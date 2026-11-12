@@ -361,4 +361,47 @@ export const SCHEMA_FILES = [
   /* v114: charging_link's 'held' tier (a fold's contradictory decisions,
      never recomputed) and one confirmation per customer (a unique index). */
   'schema_v114.sql',
+  /* v115: data retention — the record of each nightly pass (retention_run,
+     retention_run_table), the boundary pages read to say "thinned by
+     retention before <date>" (retention_state), and the duplicate
+     (plate, captured_at DESC) index on telemetry_snapshot dropped, keeping
+     the twin the planner already uses (src/data_retention.js). */
+  'schema_v115.sql',
+  /* v116: Bolt's fleet-integration orders (getFleetOrders) — one row per
+     order with what the collector did with it: filled a portal trip row,
+     stood in for a trip the portal had not answered for, or was held
+     (src/sources/bolt_orders.js). */
+  'schema_v116.sql',
+  /* v117: Uber's live per-trip money — one row per transaction from POST
+     /v1/vehicle-suppliers/transactions (src/sources/uber_transactions.js), a
+     per-trip view over them, and trip.price_source, which says where a price
+     came from so the live feed can fill only where nothing better exists. */
+  'schema_v117.sql',
+  /* v119: two day roll-ups the hero sparklines read through /api/history
+     (api/history_routes.js) — each Uber account's first ONLINE instant per
+     Dubai day (the #online-time Late series, for any expected start) and cash
+     fares by account and day (the #deposits ceiling, cut at each week's end)
+     — and when each was last built (src/history_rollup.js). v115–v118 belong
+     to the other builders of the same batch. */
+  'schema_v119.sql',
+  /* v121: passkeys and single sign-on (ULM-DESIGN §5.1, §14 decision 3) —
+     access_passkey (credential id, public key, sign count, transports, the
+     person), access_sso_identity (the provider's subject for a person) and
+     access_session.auth_method. Both methods are off until the Owner turns
+     them on; api/access/signin_methods.js. */
+  'schema_v121.sql',
+  /* v122: ULM Phase 4 — access reviews as a cycle (access_review_cycle and
+     access_review_item: every grant and team place, each with its reviewer
+     and a state; unattested access ends 14 days after the close), the
+     dormancy columns on access_user (reinstated_at restarts the 60-day clock,
+     dormant_since lets sign-in say why), and finding_owner (who took, was
+     assigned or closed a finding on #insights). api/access/reviews.js and
+     api/access/findings.js. */
+  'schema_v122.sql',
+  /* v124: row-level security as the backstop to the API's fleet filter
+     (ULM-DESIGN §4) — the restricted fleet_request role and the functions
+     that secure one table or view at a time; src/db.js runs them after the
+     migrations, one object per statement (src/fleet_scope.js). Every
+     statement guarded: without CREATEROLE it creates nothing and is inert. */
+  'schema_v124.sql',
 ];

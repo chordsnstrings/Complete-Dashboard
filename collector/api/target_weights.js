@@ -61,6 +61,7 @@
        can ask a driver for something another does not.
      · From WEIGHTED_FROM: the day the operator ruled. The days of October
        before it keep the equal plans they were judged against. */
+import { outsideFleetScope } from '../src/fleet_scope.js';
 
 export const WEIGHT_WEEKS = 8;
 export const WEIGHT_MIN_WEEKS = 4;
@@ -181,12 +182,23 @@ export async function monthWeights(q, month, { now = new Date() } = {}) {
   const ruleStart = st?.d || (realToday > WEIGHTED_FROM ? realToday : WEIGHTED_FROM);
   if (last < ruleStart) return null;
   const from = first > ruleStart ? first : ruleStart;
-  const lw = await learnWeights(q, from);
+  /* COMPANY-WIDE, EVEN FOR A READER WHOSE STATEMENTS ARE NARROWED
+     (src/fleet_scope.js, sql/schema_v124.sql). The weights are learned from
+     EVERY fleet's trips and frozen into target_weights, a table with no fleet
+     column that every page and every text reads. Learned inside a one-fleet
+     reader's row-level-security scope, the first reader of a month would
+     freeze ONE fleet's weekday pattern into the company's targets for good —
+     and the freeze, an INSERT, would fail anyway in that scope's read-only
+     transaction and take the page down with it. So both run outside the
+     scope, exactly as they run for everyone else. Inert while no route that
+     reaches here is narrowed (/api/target and /api/lowperf are 'mixed' and
+     'rows' today, which row-level security does not apply to). */
+  const lw = await outsideFleetScope(() => learnWeights(q, from));
   const out = { month, from_day: from, trips: lw.ok ? lw.trips : null, fares: lw.ok ? lw.fares : null, basis: lw.basis, frozen: false };
   if (realToday < from) return out;
-  await q(`INSERT INTO target_weights (month, from_day, trips, fares, basis) VALUES ($1::date, $2::date, $3::jsonb, $4::jsonb, $5::jsonb)
+  await outsideFleetScope(() => q(`INSERT INTO target_weights (month, from_day, trips, fares, basis) VALUES ($1::date, $2::date, $3::jsonb, $4::jsonb, $5::jsonb)
            ON CONFLICT (month) DO NOTHING`,
-  [first, from, out.trips ? JSON.stringify(out.trips) : null, out.fares ? JSON.stringify(out.fares) : null, JSON.stringify(out.basis)]);
+  [first, from, out.trips ? JSON.stringify(out.trips) : null, out.fares ? JSON.stringify(out.fares) : null, JSON.stringify(out.basis)]));
   return (await read()) || out;
 }
 

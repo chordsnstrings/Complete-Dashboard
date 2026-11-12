@@ -36,6 +36,10 @@ import { onlineSpansSql } from '../api/online_span_sql.js';
 import { ONLINE_HOURS_SLICES, ONLINE_HOURS_ROWS } from '../api/online_hours_sql.js';
 import { log } from './log.js';
 import { dubaiIso } from './util.js';
+/* The two day roll-ups /api/history reads for the hero sparklines
+   (sql/schema_v119.sql). Their own module: they depend on nothing this file
+   writes, so the ordering argument below does not reach them. */
+import { refreshFirstOnline, refreshCashFareDay } from './history_rollup.js';
 
 const SRC = 'rollup';
 
@@ -602,6 +606,13 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
   /* Beside driver_day because it is cut from the same spans; it reads only
      driver_timeline_event, so its place in the order is not load-bearing. */
   out.push(await runOne(db, 'driver_online_hour', () => refreshOnlineHours(db, { since })));
+  /* The hero sparklines' two roll-ups (src/history_rollup.js). They read
+     driver_timeline_event and trip_cash only — nothing written above — so
+     their place is not load-bearing; beside the online hours because the
+     first one is cut from the same timeline. Each is its own runOne, so a
+     failure is recorded against its own name and stops nothing else. */
+  out.push(await runOne(db, 'driver_first_online', () => refreshFirstOnline(db, { since })));
+  out.push(await runOne(db, 'cash_fare_day', () => refreshCashFareDay(db, { since })));
   out.push(await runOne(db, 'driver_lifetime', () => refreshLifetime(db)));
   /* Last, and deliberately: it reads the collector-written tables, not the
      rollups, so it does not depend on this order — but running it here means
@@ -619,7 +630,7 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
      cheap next to the rollup that just ran. Failure is not fatal: stale
      statistics are a slow query, not a wrong one. */
   try {
-    await db.query('ANALYZE trip, rollup_day, rollup_week, rollup_month, rollup_person_month, driver_payout_day, driver_day, driver_lifetime, driver_online_hour');
+    await db.query('ANALYZE trip, rollup_day, rollup_week, rollup_month, rollup_person_month, driver_payout_day, driver_day, driver_lifetime, driver_online_hour, driver_first_online, cash_fare_day');
   } catch (e) { log.warn(SRC, 'analyze failed — plans may be stale', { err: String(e).slice(0, 120) }); }
 
   const failed = out.filter((o) => o.error);

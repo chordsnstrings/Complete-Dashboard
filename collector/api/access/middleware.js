@@ -24,9 +24,11 @@ import { lookupEntry } from './manifest.js';
 import { appendAudit } from './audit.js';
 import * as svc from './service.js';
 import { isInternal } from './internal.js';
+import { NARROW_PARAM, mixedReason, onlyFleet } from './one_fleet.js';
 import { safeEqual, newToken } from './crypto.js';
 import { createHash } from 'node:crypto';
 import { rank, withheldSentence, CLASS, ROLE } from '../public/access_model.js';
+import { fleetScopeReady, rlsCacheKey, enterFleetScope, validFleets } from '../../src/fleet_scope.js';
 
 export const SID = 'fm_sid';
 export const CSRF = 'fm_csrf';
@@ -70,6 +72,29 @@ export const STEPUP_MINUTES = 10;
 export const READ_CAPS = new Set(['export']);
 /* Classes whose answers must never be stored by a browser or a proxy (§9.2). */
 export const NO_STORE = new Set(['CT', 'DOC', 'CASH', 'HR', 'MRG', 'PAX', 'AUDIT', 'RAW', 'CRED']);
+
+/* A request whose statements will run under row-level security for `fleets`
+   (src/fleet_scope.js). Its answer is filed in the response cache under the
+   reader's own namespace — never under the address an unscoped caller
+   shares, which would hand the Owner an answer computed from one fleet's rows
+   — and the response says it was narrowed in the database (x-fm-rls), which
+   is how a deployment can be checked from outside. */
+function markScoped(req, res, fleets) {
+  const list = validFleets(fleets);
+  req.fmRls = list;
+  req.fmCacheKey = rlsCacheKey(list, req.fmCacheKey || req.originalUrl);
+  res.set('x-fm-rls', list.join(',') || 'none');
+}
+
+/* Opens the scope for a marked request. Mounted AFTER the response cache
+   (api/server.js), so the cache's own statements — the data version, the
+   target salt — run unscoped and stay the same for every caller, and a hit
+   (already computed under the same scope, in the reader's namespace) never
+   reaches it. The scope closes when the response ends. */
+export function rlsScope(req, res, next) {
+  if (!req.fmRls) return next();
+  return enterFleetScope(req.fmRls, res, next);
+}
 
 
 export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lookup = lookupEntry }) {
@@ -138,7 +163,16 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
           req.fm = { ...base, ...who };
           const s = who.session;
           if (s) {
-            const needMfa = who.kind === 'user' && mfaRequired(cfg, who) && !who.user.totp_enabled;
+            /* A role that must use two-step and has no code set up is held
+               to setting one up — unless THIS session was opened by a
+               multi-factor method: a user-verified passkey, or a single
+               sign-on whose provider said it used more than one factor
+               (api/access/signin_methods.js sets mfa_ok and auth_method only
+               then). ULM-DESIGN §5.1: "a passkey counts as MFA". Every
+               session from before v121 has auth_method NULL and is judged
+               exactly as before. */
+            const multiFactorSession = s.mfa_ok && (s.auth_method === 'passkey' || s.auth_method === 'sso');
+            const needMfa = who.kind === 'user' && mfaRequired(cfg, who) && !who.user.totp_enabled && !multiFactorSession;
             req.fm.restricted = who.kind === 'user' && who.user.must_change_password ? 'password'
               : needMfa ? 'mfa' : (who.kind === 'user' && who.user.totp_enabled && !s.mfa_ok ? 'mfa' : null);
             svc.touchSession(db, s.id).catch(() => {});
@@ -199,6 +233,7 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     const scope = access.scope;
     let targets = all;
     let rewrite = null;
+    let narrow = null;
     let filterRows = null;
     if (entry.fleet === 'param') {
       /* fleetFrom 'body': the handler acts on req.body.fleet and never reads
@@ -221,6 +256,42 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
       if (!access.allScope) filterRows = scope;
     } else if (entry.fleet === 'global') {
       targets = scope.length ? scope : all;
+    } else if (entry.fleet === 'narrow' && !access.allScope) {
+      /* 'narrow': a route that mixes every fleet for an unrestricted reader
+         and whose handler can answer for ONE fleet in every row, total and
+         count (api/access/one_fleet.js). A reader holding one fleet gets that
+         fleet's answer; the gate writes it into `_fmfleet` and `fleet` below.
+         Asking for a fleet outside the scope is refused with that reason, as
+         on a 'param' route. An unrestricted reader never reaches this branch:
+         for them the route is judged exactly as 'mixed' was — levels over
+         every fleet, no rewrite — so nothing changes for them. */
+      const asked = String(req.query.fleet || '');
+      if (asked && !all.includes(asked)) return { refuse: withheldBody(null, '', { error: 'bad_fleet', detail: `There is no fleet called ${asked}.` }) };
+      if (asked && !scope.includes(asked)) return { refuse: withheldBody(null, '', { error: 'fleet_scope', detail: 'That fleet is outside your access.' }) };
+      /* A reader holding some but not all of three or more fleets CAN choose
+         one: the fleet they ask for is narrowed to (review, 2026-11-12). The
+         refusal below said "choose one of your fleets" and then refused the
+         choice too — a reason that was not the true one. Only a reader who
+         names none of them is refused. */
+      if (!asked && scope.length > 1) {
+        return { refuse: withheldBody(null, '', { error: 'fleet_scope',
+          detail: 'Choose one of your fleets: this page can be narrowed to one fleet, not to some of them.' }) };
+      }
+      targets = asked ? [asked] : scope.slice(0, 1);
+      if (targets.length) {
+        narrow = targets[0];
+        /* FAIL CLOSED. The handlers read the fleet back through onlyFleet(),
+           which accepts a plain id and nothing else; a fleet id it would not
+           accept would come back as null — "every fleet, as before" — while
+           the gate believed the answer narrowed. Refused here instead, so
+           the gate and the handler can never disagree about it. */
+        if (onlyFleet({ query: { [NARROW_PARAM]: narrow } }) !== narrow) {
+          return { refuse: withheldBody(null, '', { error: 'fleet_scope',
+            detail: 'This page is narrowed to one fleet by the fleet\'s id, and this fleet\'s id is not one it can '
+              + 'narrow by — so it is refused rather than shown with every fleet\'s records.' }) };
+        }
+        if ((entry.fleetRows || []).length) filterRows = targets;
+      }
     } else if (!access.allScope) {
       /* 'mixed': the answer combines every fleet's records and carries no
          fleet on its rows to filter by (a person's page, a car's page). A
@@ -229,14 +300,15 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
          the refusal said "not shown to your role: driver identity" to an
          Operations manager who plainly holds driver identity for their own
          fleet: a reason that was not the true one. */
-      return { refuse: withheldBody(null, '', { error: 'fleet_scope',
-        detail: 'This combines the records of every fleet, and your access covers only some of them. '
-          + 'Ask the Owner or an Access admin if you need it for every fleet.' }) };
+      /* …and the reason is the route's own (api/access/one_fleet.js): "this
+         combines the records of every fleet" was false of, say, the revenue
+         target, which is one figure set for the company. */
+      return { refuse: withheldBody(null, '', { error: 'fleet_scope', detail: mixedReason(entry) }) };
     }
     const combine = entry.fleet === 'global' ? 'max' : 'min';
     const levels = access.levelsOver(targets, combine === 'max'
       ? (a, b) => (rank(a) >= rank(b) ? a : b) : (a, b) => (rank(a) <= rank(b) ? a : b));
-    return { targets, rewrite, filterRows, levels };
+    return { targets, rewrite, narrow, filterRows, levels };
   }
 
   async function gate(req, res, next) {
@@ -268,7 +340,20 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
        emptied a signed-in person's offline figures and started again. */
     if ((fm.kind === 'user' || fm.kind === 'device') && fm.access) res.set('x-fm-scope', fingerprintOf(fm.access));
     if (entry?.self) return next();                 // /api/auth/*, /api/access/*: the handler decides
-    if (fm.kind === 'system') return next();
+    if (fm.kind === 'system') {
+      /* The response cache refreshing a narrowed reader's stale answer
+         (api/cache.js pump) names the reader's fleets in x-fm-rls, so the
+         refresh recomputes under the same row-level security the reader's
+         own request did and files it under the same key. Honoured only here,
+         for the process itself (internal token + loopback, identify()); the
+         system's own warming and refreshing carry no such header and take
+         today's path. */
+      const asked = req.get('x-fm-rls');
+      if (asked != null && fleetScopeReady()) {
+        try { markScoped(req, res, String(asked).split(',').filter(Boolean)); } catch { /* not fleet ids: unscoped */ }
+      }
+      return next();
+    }
 
     if (fm.kind === 'anonymous') {
       if (fm.mode === 'open' && !fm.broken) {
@@ -295,6 +380,17 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
       return refuse(res, 403, { error: 'undeclared', detail: 'This address is not open to signed-in roles yet.' });
     }
     if (entry.public) return next();
+    /* AN ACCOUNT THAT HOLDS NOTHING AT ALL is told exactly that. Single
+       sign-on with provisioning on (api/access/signin_methods.js) makes such
+       accounts on purpose — a verified company address gets an account with
+       no role until an Access admin gives it one — and so does a person whose
+       every grant ended. Every route below refused them already; but each
+       fleet rule answered with its own reason ("choose one of your fleets",
+       "your access covers only some of them"), and none was the true one. */
+    if (fm.kind === 'user' && !(fm.access?.scope || []).length) {
+      return refuse(res, 403, { error: 'no_access',
+        detail: 'Your account has no access to anything yet. Ask the Owner or an Access admin to give you a role.' });
+    }
 
     const access = fm.access;
     const j = judge(req, entry, access);
@@ -397,6 +493,23 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
       u.searchParams.set('fleet', j.rewrite);
       req.fmCacheKey = `${u.pathname}${u.search}`;
     }
+    /* A 'narrow' route, for a one-fleet reader: the whole answer is that
+       fleet's. `_fmfleet` is the parameter the handler narrows every query
+       by; `fleet` is written too, so the queries that already followed the
+       fleet chip follow it as well. Both go into the cache key, so the
+       cache's background refresh (which fetches the key as a URL, as the
+       system) recomputes this same narrowed answer, and a cached answer is
+       only ever served under a key that names its fleet. Whatever the caller
+       typed into either is overwritten — asking for another fleet was
+       refused above. */
+    if (j.narrow) {
+      req.query.fleet = j.narrow;
+      req.query[NARROW_PARAM] = j.narrow;
+      const u = new URL(req.fmCacheKey || req.originalUrl, 'http://local');
+      u.searchParams.set('fleet', j.narrow);
+      u.searchParams.set(NARROW_PARAM, j.narrow);
+      req.fmCacheKey = `${u.pathname}${u.search}`;
+    }
     /* A SEARCH IS A QUESTION ABOUT EVERY COLUMN IT MATCHES. /api/trips/list
        ?q= matches the plate, the driver's name and both addresses. The shaper
        nulls the addresses for a role without places (Finance), but the rows
@@ -417,6 +530,47 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
         const u = new URL(req.fmCacheKey || req.originalUrl, 'http://local');
         u.searchParams.set('_fmsearch', req.query._fmsearch);
         req.fmCacheKey = `${u.pathname}${u.search}`;
+      }
+    }
+    /* ROW-LEVEL SECURITY UNDER THE FLEET FILTER (src/fleet_scope.js,
+       sql/schema_v124.sql). A reader whose grants cover some fleets but not
+       all, reading a 'param' route — the class where the filter above was
+       just rewritten to the reader's fleet and the handler is trusted to put
+       it on every statement. From here the database holds it too: each
+       statement the handler sends runs as `fleet_request` with app.fleets
+       set to the judged fleet, so one that forgot the filter still cannot
+       read the other fleet.
+
+       'param' only, deliberately, and only reads. A 'rows' answer is
+       computed over every fleet and trimmed by the shaper, and some of its
+       per-row figures need the company: /api/lowperf splits the company's
+       target over the drivers active that day, and inside one fleet's scope
+       that count fell (5 to 3 on the fixture's first day,
+       test/rls_routes.test.mjs section 2) — every driver's share of the
+       plan would have grown by the same factor. 'global' answers are the
+       company's by definition; 'mixed' ones are refused above. A write is
+       never narrowed (src/fleet_scope.js says why) — and neither is an
+       ACTION that happens to be a GET: the provider probes (cap
+       collector.probe) spend quota and record what the provider said
+       (src/auth_state.js noteCredential), and src/sources/bolt.js would
+       save a successor refresh token (setSetting) if the portal ever handed
+       one back. In a read-only scope those writes would be lost — the last
+       one for everybody, as a dead credential. A download ('export', READ_CAPS)
+       only reads, and is narrowed.
+
+       Applied after the search narrowing, which parses fmCacheKey as a URL;
+       the scoped key is not one (rlsCacheKey). */
+    if (fleetScopeReady() && !access.allScope && entry.fleet === 'param'
+        && (req.method === 'GET' || req.method === 'HEAD')
+        && (!entry.cap || READ_CAPS.has(entry.cap))) {
+      /* A fleet id SET LOCAL cannot carry (src/fleet_scope.js validFleets)
+         is refused there, never escaped. This gate is an async Express 4
+         middleware, where a throw is a request that hangs; so such a reader
+         keeps the API's own filter — today's path — and the log says why. */
+      try {
+        markScoped(req, res, j.targets);
+      } catch (e) {
+        log.warn('access', 'row-level security not applied to this request', { path, err: String(e.message || e).slice(0, 160) });
       }
     }
     req.fm.levels = L;
@@ -556,5 +710,5 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     return fm.levels?.[cls] ?? fm.access?.levels?.[cls] ?? '';
   };
 
-  return { identify, gate, levelOf, resolveSession, mfaRequired, cache, reveals };
+  return { identify, gate, levelOf, resolveSession, mfaRequired, cache, reveals, rlsScope };
 }

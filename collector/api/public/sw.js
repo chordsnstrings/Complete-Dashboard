@@ -44,6 +44,43 @@ const SHELL = `${VERSION}-shell`;
    and a cache from before partitions existed is not one to keep. */
 const DATA = `${VERSION}-data-2`;
 
+/* WHICH DEPLOY THIS WORKER IS. The server writes VERSION as 'fleet-' + the
+   shell's fingerprint, and stamps every piece of code it serves with the same
+   fingerprint in X-FM-Build (api/server.js shellHash). So the worker knows,
+   for any response, whether it belongs to its own deploy. Null when the
+   literal above was never substituted (a local tool, the mock): nothing is
+   then second-guessed. */
+const BUILD = /^fleet-[0-9a-f]{12}$/.test(VERSION) ? VERSION.slice('fleet-'.length) : null;
+const sameBuild = (res) => {
+  const b = res.headers.get('x-fm-build');
+  return !BUILD || !b || b === BUILD;
+};
+
+/* THE DATA CACHE IS BOUNDED, AND THE OLDEST GOES FIRST.
+   ─────────────────────────────────────────────────────────────────────────
+   It kept every /api answer it was ever given, with no limit, until the next
+   deploy renamed it (the front-end audit, 2026-11-12) — and since the
+   window, the chips and the page are all in the address, every page a reader
+   opens under every window is a new entry: a day of reading is hundreds of
+   them, kept on the reader's disk to serve an offline open that only ever
+   needs the last few pages. Registering the worker on the desktop build as
+   well (swreg.js) made that a growth with no floor.
+
+   So the data cache holds at most `entries` answers and `bytes` of them, and
+   when a new answer would take it over either bound, the answers stored
+   longest ago are dropped until it fits — re-storing an address makes it the
+   newest again. One answer over `entry` is not kept at all: a single export
+   is not worth a page's worth of answers. The largest page answer measured
+   on production, /api/unauthorized/attributed at 1.86 MB decoded
+   (2026-11-12, the audit's timings), fits with room. A ledger of when each
+   address was stored and how big it was lives IN the cache, beside the scope
+   marker below, so it is emptied with the cache — by startScope(), by a
+   sign-out (signin.js, access.js) — and survives the worker being stopped
+   when idle; anything the ledger does not know is read from the stamp the
+   answer carries and counted as stored then. */
+const DATA_CAP = Object.freeze({ entries: 150, bytes: 24 * 1024 * 1024, entry: 4 * 1024 * 1024 });
+const LEDGER_KEY = '/__fm-data-ledger';
+
 /* The smallest set that can paint a usable first screen offline. The phone
    modules are listed by hand rather than globbed: a worker that precaches a
    directory listing it cannot see is a worker that silently precaches nothing. */
@@ -61,6 +98,11 @@ const SHELL_FILES = [
      under the Arkiv tokens — usable, but not what the reader chose. */
   '/m/arkiv-m.css',
   '/m/app.js', '/m/ui.js', '/m/screens.js',
+  /* FOCUS and MOTION on the phone (2026-11-12, FIX-STATUS MOB): m/app.js
+     imports both modules, m/focus-m.js imports the desktop's ../focus.js for
+     its rules, and index.html appends the motion sheet for a reader with the
+     layer on. A cold offline open needs all four. */
+  '/m/focus-m.js', '/m/motion-m.js', '/focus.js', '/m/motion-m.css',
   /* Every module the phone's three files reach, followed by hand rather than
      assumed: m/app.js imports ../daterange.js, and daterange.js imports
      ./tz.js, and data.js imports ./swr.js. None of the three were listed, so a
@@ -68,6 +110,9 @@ const SHELL_FILES = [
      only ever in the cache because a previous online visit had put them there
      one request at a time. */
   '/data.js', '/ui.js', '/charts.js', '/daterange.js', '/tz.js', '/swr.js',
+  /* ui.js imports ./pagemeta.js for the page contract's token (2026-11-12:
+     the sign-in page asks it too, and that page loads no ui.js). */
+  '/pagemeta.js',
   /* ui.js imports ./tokens.js (the colour contract, since the reskin's STEP 0),
      and m/screens.js imports ../deposit_core.js, ../today.js and
      ../onlinetime.js — three modules that were NEVER on this list, found by
@@ -90,6 +135,9 @@ const SHELL_FILES = [
      ./access_model.js — both on the phone's path to its first screen — and
      every page links /access.css. */
   '/access.js', '/access_model.js', '/access.css',
+  /* data.js imports ./retention_note.js too (2026-11-12): the line a page
+     prints when its window reaches data the retention pass has thinned. */
+  '/retention_note.js',
   /* The phone redesign's control bar names the window and the controls a
      screen ignores in the desktop shell's own words, so m/app.js imports
      ../shell.js — a module the phone never reached before. */
@@ -111,8 +159,13 @@ self.addEventListener('install', (e) => {
   e.waitUntil((async () => {
     const c = await caches.open(SHELL);
     await Promise.all(SHELL_FILES.map(async (f) => {
-      try { await c.add(new Request(f, { cache: 'reload' })); }
-      catch { /* one missing file must not sink the install */ }
+      /* Fetched and checked rather than c.add(): a file from ANOTHER deploy —
+         the server redeployed between this worker's own fetch and these —
+         must not enter this deploy's shell (sameBuild above). */
+      try {
+        const res = await fetch(new Request(f, { cache: 'reload' }));
+        if (res.ok && sameBuild(res)) await c.put(f, res);
+      } catch { /* one missing file must not sink the install */ }
     }));
     await self.skipWaiting();
   })());
@@ -134,8 +187,84 @@ const stamp = async (res) => {
   const body = await res.clone().blob();
   const h = new Headers(res.headers);
   h.set('x-sw-cached-at', new Date().toISOString());
+  /* …and how big it is, so the bound below can be kept without reading a
+     single body back. */
+  h.set('x-sw-bytes', String(body.size));
   return new Response(body, { status: res.status, statusText: res.statusText, headers: h });
 };
+
+/* Keeping an answer, one at a time: the ledger is read, changed and written
+   back by each, and two writers interleaved would each drop the other's
+   line. A failed keep never stops the next.
+
+   WHOSE ANSWER, checked again when it is kept. A keep waits its turn behind
+   the ones before it, so it can run well after its answer arrived — after
+   another reader's first answer has emptied the cache for THEIR scope
+   (startScope below). As first written, a keep opened the cache when its
+   turn came and put its answer in whatever it found there: measured (the
+   ARK review, 2026-11-12, test/sw_desktop.test.mjs §2b), thirty answers
+   for one scope and then one under another left 28 of the thirty in the
+   new scope's cache, under its name — one reader's figures, painted
+   for the next on an offline open: the exact thing the scope exists to
+   prevent (ULM-DESIGN §9.2). Before the queue, the put followed the scope
+   check by one await. So each keep carries the scope it was answered under
+   and is dropped when the cache has moved on: checked before the work, and
+   again just before the put; startScope names the new scope FIRST, so a
+   keep in flight sees the change the moment it begins. */
+let keeping = Promise.resolve();
+function keepData(request, res, scope) {
+  const job = keeping.then(() => keepOne(request, res, scope));
+  keeping = job.catch(() => {});
+  return job;
+}
+/* The two lines the cache keeps about itself are not answers. A function, not
+   a Set built here: SCOPE_KEY is declared further down. */
+const isMeta = (u) => { const p = new URL(u).pathname; return p === SCOPE_KEY || p === LEDGER_KEY; };
+async function keepOne(request, res, scope) {
+  if (scope !== await currentScope()) return;          // the cache belongs to someone else now
+  const c = await caches.open(DATA);
+  const stamped = await stamp(res);
+  const bytes = Number(stamped.headers.get('x-sw-bytes')) || 0;
+  if (bytes > DATA_CAP.entry) return;
+  if (scope !== lastScope) return;                     // …and it moved on while the body was read
+  await c.put(request, stamped);
+  let ledger = {};
+  try { const l = await c.match(LEDGER_KEY); if (l) ledger = await l.json(); } catch { ledger = {}; }
+  ledger[request.url] = [Date.now(), bytes];
+  /* The ledger against what the cache really holds: a line for an answer
+     that is gone is dropped, and an answer with no line (a keep that was cut
+     off between its two writes) is read from its own stamp. */
+  const held = (await c.keys()).map((r) => r.url).filter((u) => !isMeta(u));
+  const live = new Set(held);
+  for (const u of Object.keys(ledger)) if (!live.has(u)) delete ledger[u];
+  for (const u of held) {
+    if (ledger[u]) continue;
+    const r = await c.match(u, { ignoreVary: true });
+    ledger[u] = [Date.parse(r?.headers.get('x-sw-cached-at') || '') || 0, Number(r?.headers.get('x-sw-bytes')) || 0];
+  }
+  const oldestFirst = Object.entries(ledger).sort((a, b) => a[1][0] - b[1][0]);
+  let n = oldestFirst.length;
+  let total = oldestFirst.reduce((s, [, v]) => s + v[1], 0);
+  for (const [u, [, b]] of oldestFirst) {
+    if (n <= DATA_CAP.entries && total <= DATA_CAP.bytes) break;
+    await c.delete(u, { ignoreVary: true });
+    delete ledger[u];
+    n -= 1; total -= b;
+  }
+  await c.put(LEDGER_KEY, new Response(JSON.stringify(ledger), { headers: { 'content-type': 'application/json' } }));
+}
+
+/* WHERE AN ANSWER CAME FROM, told to the page that asked (swreg.js). The
+   phone reads the stamp off /api/status; the desktop build, which reads no
+   stamp, is told each time the worker answers from its copy ('hit', with
+   when that copy was stored) or has none to give ('miss'), so it can say on
+   screen that what it shows is not live. */
+async function tell(clientId, msg) {
+  try {
+    const c = clientId ? await self.clients.get(clientId) : null;
+    if (c) c.postMessage({ type: 'fm-sw', ...msg });
+  } catch { /* the page has gone */ }
+}
 
 /* The scope the data cache belongs to, kept IN the cache (a worker is
    stopped whenever it is idle, and a scope held only in memory would be
@@ -149,13 +278,44 @@ async function currentScope() {
   return lastScope;
 }
 async function startScope(scope) {
-  await caches.delete(DATA);
-  await (await caches.open(DATA)).put(SCOPE_KEY, new Response(scope));
+  /* Named before the cache is emptied, so a keep still queued for the old
+     scope drops its answer instead of putting it in the new cache (keepOne).
+     A switch that fails part-way forgets the name again: the next answer
+     reads the scope back from the cache, finds the old one, and retries. */
   lastScope = scope;
+  try {
+    await caches.delete(DATA);
+    await (await caches.open(DATA)).put(SCOPE_KEY, new Response(scope));
+  } catch (err) { lastScope = undefined; throw err; }
 }
 
 self.addEventListener('fetch', (e) => {
   const { request } = e;
+  /* A HEAD for a piece of the shell is answered with the headers of the copy
+     this worker would serve for it.
+     ─────────────────────────────────────────────────────────────────────
+     The desktop asks which deploy a module is from with a HEAD (app.js
+     deployOf: X-FM-Build on its own app.js at boot and on each page module as
+     it loads), and refuses to run a page module from one deploy on top of the
+     app.js and ui.js of another — the 2026-09-06 failure server.js records.
+     A worker that let HEAD through to the network while serving GETs from its
+     cache would make that check compare the SERVER's build with the server's
+     build: a tab running last week's app.js from this cache would be told it
+     was current, and the next page's module, fetched fresh, would run on top
+     of it unnoticed. Answered from the same copy the GET gets, the check
+     compares what this tab actually runs. Not in the cache → the network, as
+     before. Never for /api/. */
+  if (request.method === 'HEAD') {
+    const u = new URL(request.url);
+    if (u.origin === self.location.origin && !u.pathname.startsWith('/api/')) {
+      e.respondWith((async () => {
+        const hit = await caches.match(u.href, { cacheName: SHELL });
+        return hit ? new Response(null, { status: hit.status, statusText: hit.statusText, headers: hit.headers })
+          : fetch(request);
+      })());
+    }
+    return;
+  }
   if (request.method !== 'GET') return;                 // never replay a write
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;      // tiles and the like
@@ -178,10 +338,9 @@ self.addEventListener('fetch', (e) => {
            cached here would be served for a week after the fault was fixed. */
         const noStore = /no-store/i.test(fresh.headers.get('cache-control') || '')
           || url.pathname.startsWith('/api/auth') || url.pathname.startsWith('/api/access');
-        if (fresh.ok && !noStore) {
-          const c = await caches.open(DATA);
-          c.put(request, await stamp(fresh.clone()));
-        }
+        /* Kept within the bound (keepData), after the answer has gone to the
+           page: waitUntil holds the worker open for the write. */
+        if (fresh.ok && !noStore) e.waitUntil(keepData(request, fresh.clone(), scope).catch(() => {}));
         return fresh;
       } catch {
         /* The cache only ever holds ONE scope's answers (startScope empties it
@@ -190,8 +349,10 @@ self.addEventListener('fetch', (e) => {
         if (hit) {
           const h = new Headers(hit.headers);
           h.set('x-sw-cache', 'hit');
+          e.waitUntil(tell(e.clientId, { cache: 'hit', at: hit.headers.get('x-sw-cached-at'), path: url.pathname }));
           return new Response(await hit.blob(), { status: 200, headers: h });
         }
+        e.waitUntil(tell(e.clientId, { cache: 'miss', path: url.pathname }));
         return new Response(JSON.stringify({ error: 'offline', offline: true }),
           { status: 503, headers: { 'content-type': 'application/json', 'x-sw-cache': 'miss' } });
       }
@@ -207,7 +368,11 @@ self.addEventListener('fetch', (e) => {
     if (hit) return hit;
     try {
       const fresh = await fetch(request);
-      if (fresh.ok && url.pathname !== '/') {
+      /* Only this deploy's code enters this deploy's shell (sameBuild): a
+         module fetched after the server moved on is served, never kept — or
+         the cache would hand next week's page module to this week's app.js on
+         every later open, and the HEAD above would vouch for it. */
+      if (fresh.ok && url.pathname !== '/' && sameBuild(fresh)) {
         const c = await caches.open(SHELL);
         c.put(request, fresh.clone());
       }
