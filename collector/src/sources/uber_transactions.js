@@ -606,10 +606,10 @@ async function collectOrg({ o, db, q, now, hours, httpImpl, tokenFor, noteRest, 
       stop = { why: `Uber rate-limited this run (429) at ${stamp(w.start).slice(11, 16)} UTC` };
       continue;
     }
-    const status = r.res?.status ?? null;
-    if (r.error && status != null && status >= 400 && status < 500) {
-      sameRefusal = lastRefusal === status ? sameRefusal + 1 : 1;
-      lastRefusal = status;
+    const code = r.res?.status ?? null;
+    if (r.error && code != null && code >= 400 && code < 500) {
+      sameRefusal = lastRefusal === code ? sameRefusal + 1 : 1;
+      lastRefusal = code;
       noAnswer = 0;
       if (sameRefusal >= STOP_AFTER_REFUSALS) {
         stop = { why: `Uber refused ${sameRefusal} windows in a row (${r.error.slice(0, 120)}) — `
@@ -617,7 +617,7 @@ async function collectOrg({ o, db, q, now, hours, httpImpl, tokenFor, noteRest, 
       }
       continue;
     }
-    if (r.network || (status != null && status >= 500)) {
+    if (r.network || (code != null && code >= 500)) {
       noAnswer += 1;
       sameRefusal = 0; lastRefusal = null;
       if (noAnswer >= 3) stop = { why: `three windows in a row did not answer (${String(r.error).slice(0, 120)})` };
