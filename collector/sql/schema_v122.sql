@@ -90,8 +90,21 @@ CREATE INDEX IF NOT EXISTS access_review_item_reviewer ON access_review_item (re
 --                  reinstatement — so sign-in can say why the account is
 --                  closed and how to get back, which it could not tell from
 --                  an admin's suspension.
-ALTER TABLE access_user ADD COLUMN IF NOT EXISTS reinstated_at timestamptz;
-ALTER TABLE access_user ADD COLUMN IF NOT EXISTS dormant_since timestamptz;
+-- The one statement here that needs more than CREATE: altering a table
+-- needs its OWNER. The app's own user created access_user in v86, so it
+-- owns it — but this file runs as ONE query (src/db.js migrate), so one
+-- refused statement would roll back every table above and leave the review
+-- and finding routes without theirs, retried and refused at every boot. A
+-- missing privilege is therefore reported and passed, never raised. Without
+-- the columns the dormancy sweep fails (logged; the rest of the housekeeping
+-- still runs) and sign-in says the plain "This account is suspended".
+DO $$
+BEGIN
+  ALTER TABLE access_user ADD COLUMN IF NOT EXISTS reinstated_at timestamptz;
+  ALTER TABLE access_user ADD COLUMN IF NOT EXISTS dormant_since timestamptz;
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'v122: access_user.reinstated_at/dormant_since not added: %', SQLERRM;
+END $$;
 
 -- FINDING OWNERSHIP (§8 act:finding.own: take, assign and close a finding on
 -- #insights; records who acted). A finding is the insight table's own key —

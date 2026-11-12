@@ -435,8 +435,10 @@ export async function markReinstated(db, id, now = new Date()) {
    the account's holder, and nobody else, why it is closed. */
 export async function inactiveDetail(db, user) {
   if (user.status === 'suspended') {
+    /* Without v122's columns (a refused migration, sql/schema_v122.sql) the
+       plain sentence below is still true; a sign-in must not fail on it. */
     const { rows } = await db.query(
-      'SELECT dormant_since, last_login_at, created_at FROM access_user WHERE id = $1', [user.id]);
+      'SELECT dormant_since, last_login_at, created_at FROM access_user WHERE id = $1', [user.id]).catch(() => ({ rows: [] }));
     const u = rows[0];
     if (u?.dormant_since) {
       const last = u.last_login_at ? `the last sign-in was on ${dayText(u.last_login_at)}`

@@ -28,7 +28,10 @@
        finding → "the finding's own fleet decides" fails.
      reviews.js reviewSweep: open the month's review before ending what is
        due → "the due grant ended, and the review that opened in the same
-       pass does not list it" fails. */
+       pass does not list it" fails.
+     schema_v122.sql: the two ALTERs on access_user bare, outside their DO
+       block → "v122 runs for a user that does not own access_user" fails
+       ("must be owner of table access_user"). */
 import { PGlite } from '@electric-sql/pglite';
 import express from 'express';
 import { readFileSync } from 'node:fs';
@@ -464,6 +467,30 @@ console.log('\n9. the sweep ends what is due before it opens the month’s revie
   check('the due grant ended, and the review that opened in the same pass does not list it',
     r.expired?.grants?.includes(Number(g.id)) && st === 'revoked' && r.opened?.period === '2027-02'
       && !lines.some((l) => Number(l.grant_id) === Number(g.id)), JSON.stringify({ r, lines }));
+}
+
+/* ══ 10. the migration, run by a user that does not own access_user ═════
+   src/db.js runs each schema file as one query: one refused statement rolls
+   back the whole file, and is refused again at every boot. The only
+   statements in v122 needing more than CREATE are the two ALTERs on
+   access_user (they need its owner); they are guarded, so the new tables
+   are made whatever happens to those. REVERSION: the two ALTERs bare —
+   "v122 runs for a user that does not own access_user" fails. */
+console.log('\n10. v122 runs even where access_user is not this user’s to alter');
+{
+  const fresh = new PGlite();
+  for (const f of SCHEMA_FILES.filter((x) => x !== 'schema_v122.sql')) {
+    await fresh.exec(readFileSync(new URL(`../sql/${f}`, import.meta.url), 'utf8'));
+  }
+  await fresh.exec(`CREATE ROLE rev_not_owner NOLOGIN; GRANT CREATE, USAGE ON SCHEMA public TO rev_not_owner;`);
+  let err = null;
+  try {
+    await fresh.exec(`SET ROLE rev_not_owner; ${readFileSync(new URL('../sql/schema_v122.sql', import.meta.url), 'utf8')}`);
+  } catch (e) { err = e; }
+  await fresh.exec('RESET ROLE');
+  const made = (await fresh.query(`SELECT count(*)::int AS n FROM pg_tables WHERE tablename IN ('access_review_cycle', 'access_review_item', 'finding_owner')`)).rows[0].n;
+  check('v122 runs for a user that does not own access_user, and still makes its tables', !err && made === 3, String(err?.message || made));
+  await fresh.close();
 }
 
 server.close();

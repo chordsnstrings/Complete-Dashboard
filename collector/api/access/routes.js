@@ -1352,7 +1352,11 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
        required, reviews past their due date closed, and access nobody
        attested ended 14 days after the close (reviewSweep). */
 export async function housekeeping(db, { log = { info() {} }, now = new Date() } = {}) {
-  const dormant = await dormantSweep(db, { now });
+  /* A failed dormancy pass is logged and does not stop the other two. */
+  const dormant = await dormantSweep(db, { now }).catch((e) => {
+    log.warn?.('access', 'dormancy sweep failed', { err: String(e).slice(0, 160) });
+    return [];
+  });
   const ended = await db.query(
     `UPDATE access_grant SET status = 'revoked', revoked_at = now()
       WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= now() RETURNING id`);
