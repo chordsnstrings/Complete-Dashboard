@@ -11,9 +11,11 @@
    registered after `app.use(access.identify)`, and identify() runs for every
    /api path. Its first act is `svc.getConfig(db)`: a query against
    access_config, on the same eight-connection pool the heavy reads share.
-   Measured on production 2026-11-12: /api/admin-mode, which does no more than
-   identify does, took 7.96 s cold; 4,502 queries ran 2.5 s or longer in 19
-   hours of log (p90 12.7 s, max 71 s). When those fill the pool, the
+   Measured on production 2026-11-12: /api/admin-mode, whose handler touches
+   no database at all (server.js; it is never cached), took 7.96 s cold — time
+   that can only have gone on the middleware in front of it, identify() and the
+   gate; and 4,502 queries ran 2.5 s or longer in 19 hours of log (p90 12.7 s,
+   max 71 s). When those fill the pool, the
    platform's probe (http_path /api/health, every 15 s) queues behind them,
    times out, and the platform restarts the API — which empties the response
    cache and makes the next wave of traffic entirely cold. server.js's
