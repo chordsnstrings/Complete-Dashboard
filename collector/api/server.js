@@ -355,6 +355,9 @@ app.use('/api', (req, res, next) => (
   VARIES_BY_CALLER.some((p) => req.originalUrl.split('?')[0].startsWith(p))
     ? next()
     : cache(req, res, next)));
+/* A narrowed reader's statements run under row-level security from here on
+   (src/fleet_scope.js) — after the cache, so its own queries stay unscoped. */
+app.use(access.rlsScope);
 
 /* A slow query is the most common reason a panel renders as a skeleton, and
    until now nothing on the server said WHICH one. bin/render-audit.mjs can see

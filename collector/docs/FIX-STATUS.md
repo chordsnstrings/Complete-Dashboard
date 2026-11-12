@@ -6013,3 +6013,84 @@ dormant exemption for Owners (§11.2 exempts nobody but the last Owner) — whic
 | # | Fix | Where | Proof | State |
 |---|---|---|---|---|
 | REV-I1 | **The dormancy sweep suspended accounts while sign-in was optional.** Found while merging the batch: `dormantSweep` had no mode gate, so on production — optional sign-in, where nobody needs to sign in to use the dashboard — the first hourly housekeeping after deploy would have suspended every account but the last active Owner(s), and an Owner turning sign-in on later would have found colleagues locked out on day one. The same reasoning `reviewSweep` already used ("nobody is obliged to sign in") now applies: nothing happens while sign-in is optional, and once it is required the 60 days start no earlier than the moment it became required (`access_config.updated_at` for `mode`; no floor when only `ACCESS_MODE` pins it). The paragraph above ("reaches production 60 seconds after the deploy") no longer holds | `api/access/reviews.js` dormantSweep | `access_reviews` §6 — optional mode set 90 days ago: left alone; required since today: left alone; the existing checks run with the mode required for longer than the window. Reverted (gate dropped): 3 checks fail; reverted (floor dropped): 3 fail | written, not deployed |
+## RLS - Database roles and row-level security (2026-11-12)
+
+ULM-DESIGN §4's backstop, which §16 listed as not built: a restricted database role, a fleet
+policy on every fleet-bearing table, and a one-fleet reader's statements run under both. Inert for
+every caller the API does not narrow (the Owner and every all-fleet role, the system's warmer and
+refresher, an anonymous visitor in open mode, every write, the collector): they never enter a scope,
+and the pool's own `query()` runs for them untouched. Production runs in open mode with no one-fleet
+reader, so on deploy nothing visible changes; the boot log says whether the backstop is in use and,
+if not, why. ULM-DESIGN.md "As built, 2026-11-12" has the design, the decisions and the traps.
+
+| id | what | where | test | state |
+|---|---|---|---|---|
+| RLS1 | **The restricted role** `fleet_request` — NOLOGIN, NOINHERIT, NOBYPASSRLS, owns nothing, SELECT only. Made by v124 when the application's user has CREATEROLE, which then grants it to itself (Postgres 16 gives a role's creator ADMIN without SET). Every statement guarded: without CREATEROLE nothing is created, nothing raises, and the API says why, with the two lines an administrator can run | `sql/schema_v124.sql:91-129`, registered `src/schema_files.js:369` | `rls_scope` §3, §8; `rls_pg` §1, §5 (PG 16.15: `set_option` true after v124) | written, not deployed |
+| RLS2 | **The policy** `fm_fleet_scope` on every table with a text `fleet_id`/`fleet` (49 at v124; `driver`, the person spine, exempt): FOR ALL TO PUBLIC, USING `current_user <> 'fleet_request' OR fleet_id = ANY(app.fleets)` — only a session that has assumed the role is narrowed; any other role reads as before. RLS on, never FORCEd (the owner, i.e. every unrestricted caller, stays exempt). The 11 views get `security_invoker` (a definer view hands the owner's exemption to the reader: measured, every fleet's rows through it). An unset scope matches no fleet; NULL-fleet and `'*'` rows are no fleet's | `sql/schema_v124.sql:131-303` (`fm_rls_usable`, `fm_rls_plan`, `fm_rls_secure`) | `rls_scope` §4, §5, §7 | written, not deployed |
+| RLS3 | **The boot pass**: after every migration, `fm_rls_plan()` then `fm_rls_secure()` ONE OBJECT PER STATEMENT (a migration file is one transaction and would hold ACCESS EXCLUSIVE on fifty objects at once), 3 s `lock_timeout` each and 20 s for the whole pass (the API answers 503 until it ends; what it does not reach is reported `deferred` and finished next boot); the read grant lands even when the lock waits (GRANT takes no lock a reader holds). Re-secures what later migrations undo (`CREATE OR REPLACE VIEW` resets `security_invoker`; v53's DROP + CREATE loses the grant too) and new fleet tables. Then the probe decides — refusing a role that could bypass RLS or holds an owner's rights — and logs "in use" / "in use, partly: …" / "not in use: <reason>" | `src/db.js:295,321`; `src/fleet_scope.js:279,309` | `rls_scope` §3, §4 (a pass out of time defers the rest), §6, §7; `rls_pg` §1, §2, §4 (a held table: `busy` in 410 ms, grant kept, secured by the next pass) | written, not deployed |
+| RLS4 | **The restricted path**: `pool.query` patched in place. Inside a scope each statement runs on a pooled connection as `BEGIN; SET TRANSACTION READ ONLY; SET LOCAL ROLE fleet_request; SET LOCAL app.fleets = '…'` (one round trip), the statement, `COMMIT`; a failure rolls back, and a connection that cannot is destroyed, never pooled inside the reader's transaction. A write in scope fails (READ ONLY + SELECT-only role): a narrowed read must never feed a shared write. The scope closes at `res.end`, so the access audit runs as before (the slow-query plan is taken as its statement finishes, inside the scope: plain EXPLAIN, allowed read-only, under the reader's role — corrected in the review). `outsideFleetScope()` is the explicit exemption | `src/fleet_scope.js:127,152,192,213`; `src/db.js:128` | `rls_scope` §2 (fake pool: the exact protocol); `rls_pg` §3 (24 scoped statements at once on several connections, each its own fleet; no connection left as the role) | written, not deployed |
+| RLS5 | **The gate marks** a reader whose grants cover some fleets but not all, reading (GET/HEAD) a `param` route: `req.fmRls`, the answer filed under its own cache key (`rls:<fleets>\|<url>`, never the address an unscoped caller shares), `x-fm-rls` on the response. Not `rows` (computed over every fleet and trimmed by the shaper; some per-row figures need the company — RLS9), not `global`, not writes, and not an action that is a GET: the provider probes (cap `collector.probe`) record what the provider said (`noteCredential`) and would save a successor Bolt refresh token, writes that must land — a download (`export`) only reads and is narrowed. A fleet id the scope cannot carry is refused by `validFleets`, caught in the gate (an async Express 4 middleware, where a throw is an unhandled rejection and a hung request) and the reader keeps the API's own filter, logged. `rlsScope` is mounted after the response cache, so the cache's version and salt queries stay unscoped and the same for everyone | `api/access/middleware.js:81,93,459,495`; `api/server.js:313` | `rls_gate` §1, §2 (the probe-like route: not narrowed, its write lands), §3, §5, §6 (an odd fleet id: answered, unscoped) | written, not deployed |
+| RLS6 | **The stale refresh** of a scoped key fetches the address inside it with `x-fm-rls`, honoured only for the process itself (internal token + loopback), so it recomputes under the same scope and files under the same key; an outside caller's `x-fm-rls` does nothing | `api/cache.js:252`; `api/access/middleware.js:303` | `rls_gate` §4 | written, not deployed |
+| RLS7 | **`monthWeights()`** learns and freezes the company's weekday weights outside any scope — learned inside one it would freeze one fleet's pattern into `target_weights` (no fleet column) for good, and the INSERT would fail the page. Inert today (`/api/target*` are `mixed`, `/api/lowperf` is `rows`); here so that narrowing them later cannot break it | `api/target_weights.js:196,199` | `rls_scope` §9 | written, not deployed |
+| RLS8 | **Measured: 8 of the 71 `param` GET routes the gate narrows (78, less the seven actions) mix the other fleet into a one-fleet answer**, so a one-fleet reader's answer now changes on them: `/api/compare` (the collectors list), `/api/compliance/drivers` (`rows_with_a_date`), `/api/drivers/directory` (a person's state, licence and rating from their other-fleet accounts), `/api/economics/assets` and `/api/economics/drivers` (alert coverage measured over every fleet's alerts; a car's alerts and last position), `/api/revenue` (a platform's collection status), `/api/roster` (fleets worked, plates, lifetime trips), `/api/unauthorized/attributed` (attribution evidence from the other fleet's trips). Of the rest, 61 answer identically and 2 with the same status (their bodies carry the clock: online hours' live edge, the workbook's creation stamp); none fails | `test/rls_routes.test.mjs` `KNOWN` | `rls_routes` §1 (both fleets, a deterministic split; a route that starts mixing fails) | measured; handlers unchanged |
+| RLS9 | Why `rows` routes are left to the shaper: inside one fleet's scope `/api/lowperf`'s drivers active on a day — the divisor of the company's plan — fell 5 → 3 on the fixture's first day, so every share would grow by that factor | `api/access/middleware.js:468` (the comment) | `rls_routes` §2 | measured |
+
+**Proof by reversion** (each file copied, mutated, the named test run, restored byte for byte):
+the gate's marking off → `rls_gate` 10 fail; marking all-fleet readers too → 5; no scoped cache key
+→ 5; the stale refresh fetching the key as a URL → 3; probes narrowed too (the `READ_CAPS` condition dropped) → 2 (the probe 500s on its own bookkeeping write); the gate's try/catch around the marking dropped → `rls_gate` dies on the unhandled rejection; `scopedQuery` always raw → `rls_scope` §2
+fails; policy `USING (true)` → 12 (and `rls_routes` §1, §2); its `current_user` arm dropped → 1
+(another role then reads nothing); FORCE added → 2; the plan's view branch dropped → 2; no
+`security_invoker` → 9; v124's self-grant dropped → 3 (and `rls_pg` "v124 granted itself SET");
+the probe's bypass and owner checks dropped → 1 each; `validFleets` loosened → 1; `monthWeights`
+learning or freezing in scope → 1 / 3; the scope not closing at `res.end` → 1; the pass's time budget dropped → 2; a failed rollback
+pooled instead of destroyed → 1; the grant skipped for tables → `rls_routes` 4 (every route 500s);
+no `lock_timeout` → `rls_pg` 4 (it waited the full 5 s); `BEGIN` dropped from the preamble →
+`rls_pg` 6.
+
+**Verified locally on PostgreSQL 16.15** (production's major version; a throwaway cluster on port
+8313, removed afterwards): `test/rls_pg.test.mjs` 23/0, and the real `api/server.js` booted on it
+(log: "row-level security pass {objects: 123, failed: 0}", "in use: 49 fleet tables … all 11
+views"). An Egari-only reader's `/api/roster` came back `x-fm-rls: egari` with
+`platforms_with_trips ["uber"]` (miss, then hit), while the all-fleet reader and an anonymous visitor
+at the same address got `["bolt","uber"]` (the other fleet's platform — RLS8) from their own entry;
+`/api/trips/list` for the reader held Egari rows only; no ERROR line. Tests: `rls_scope` 79/0,
+`rls_gate` 28/0, `rls_routes` 5/0, `rls_pg` 23/0 (skips without a server). Also run, all green:
+`access_core` 211, `cache` 59, `migrate` 34, `pg_session` 9, `upsert` 21, `collector_invariants`
+129, `target_weights` 47, `route_smoke` 60, `access_manifest` 17, `lowperf` 107, `revenue_target`
+85, `target_month` 60, `warm` 28, `agent_access` 12, `agent_reach` 74, `server_redaction` 64,
+`fleet_discovery` 117, `indexes` 12; `access_pages` skipped (no Postgres on 55432).
+
+**Only production can prove**: which path the application's database user takes (CREATEROLE or
+not — the boot log line says, and when it is "not in use" the reason carries the two administrator
+lines); lock waits on the busy tables during a deploy (a busy object is logged in `first_failures`
+and finished at the next boot); the restricted path's cost on real volumes — two extra round trips
+a statement, a per-row policy filter, and Postgres's security-barrier ordering, which evaluates a
+non-leakproof predicate (`ILIKE`, jsonb operators) after the policy and can cost it an index —
+measure the heavy `param` pages as a one-fleet reader before handing out one-fleet roles. A person
+querying a view by hand as a role that holds the view but not its tables loses it
+(`security_invoker`); the product's own user owns both and is unaffected.
+
+### RLS — independent review (2026-11-12)
+
+The diff `90d76da...fix/rls` reviewed as a security change: the gate's marking, the cache keys,
+the system header, the pool patch and its rollback paths, v124 statement by statement, the probe,
+every process-wide memo in `api/` and `src/` (only `api/performance_routes.js` holds state built
+from a fleet table), every GET-time write, and the docs' line references (all accurate). The
+builder's proofs by reversion re-run where they matter most and failed as claimed: the gate's
+marking off → `rls_gate` 10 fail; no scoped cache key → 5; policy `USING (true)` → `rls_scope` 12.
+`rls_pg` re-run on a throwaway PostgreSQL 16.15 cluster (port 8363, removed afterwards): 23/0,
+before and after the fixes below.
+
+| id | what | where | test | state |
+|---|---|---|---|---|
+| RLS10 | **A one-fleet reader made the Owner's performance pages slow, and could share a context with them.** `api/performance_routes.js` keeps its shaped context in a process-wide map (19-28 s to rebuild on production, by its own comments). Both routes are `param`, so a scoped reader reached it from inside the scope: the data version was read there — `collection_run` carries a fleet, so the reader's version was their fleet's latest run, a different string whenever the other fleet ran last — and the store then evicted every entry of "another version", i.e. the Owner's; the Owner's next chip rebuilt and evicted the reader's in turn (reproduced: Owner, Owner hit, reader, Owner rebuilt). The key also did not carry the scope, so with equal versions the reader got the Owner's unscoped context (the backstop bypassed) and the Owner could get the reader's. Now the version is read outside any scope (the company's, as the response cache keys on) and a scoped context is filed under its fleets | `api/performance_routes.js:265-267` | `rls_scope` §10 (7 checks; reverted → 4 fail) | written, not deployed |
+| RLS11 | **The boot log said "granted SELECT" for a grant that did not happen.** A table owned by another role that the application reads through a plain grant (no grant option): `GRANT` only WARNS "no privileges were granted", and `fm_rls_secure` recorded `granted SELECT, refused: must be owner …` while the role still could not read it (PGlite and PG 16.15). It now checks after the GRANT and says `refused: SELECT could not be granted to fleet_request — <user> does not own <t> (its owner is <owner>) and holds no grant option on it`. v124 has never been deployed, so the file is amended rather than superseded; a database that ran the earlier text replays it once (CREATE OR REPLACE) | `sql/schema_v124.sql:239-252` | `rls_scope` §11 (reverted → 1 fails); checked on PG 16.15 too | written, not deployed |
+| RLS12 | **Backups and restores (documented, not code).** Measured on PG 16.15: a role that is neither the tables' owner nor BYPASSRLS, holding SELECT, reads every row (the policy is permissive for it) but `pg_dump` now FAILS on every one of the 49 tables — "query would be affected by row-level security policy" — because pg_dump runs with `row_security = off`. Dump as the application's user or `doadmin`, or pass `--enable-row-security`. A dump also carries `GRANT … TO fleet_request`: restoring into a cluster without that role errors on those lines (fatal under `--exit-on-error` or `ON_ERROR_STOP`) — create the role first or restore with `--no-privileges`. DigitalOcean's own daily backups are physical and unaffected. For the backup-and-restore procedure still to be written | ULM-DESIGN "As built, 2026-11-12" | — | documented |
+| RLS13 | **What the backstop does not hold (documented).** It holds a FORGOTTEN filter, not SQL somebody else chooses: inside the reader's transaction a statement may `RESET ROLE` or `set_config('app.fleets', …)`, both open to the session's own user. Tables without a fleet column are not narrowed: the person tables §4 keeps whole, and those §4 calls per fleet that have yet to gain one (`ledger_policy`, `partner`, `place_cell`, `app_setting` by connection). A SECURITY DEFINER function or a materialized view would read as its owner — none exists at v124 (checked on the built schema), and the boot pass grants neither. A process-wide memo reached from a scoped request must key on the scope (RLS10) | ULM-DESIGN "As built, 2026-11-12" | — | documented |
+
+Not fixed, and why: `rows` routes stay un-narrowed in the database (RLS9's measurement stands: it
+would change figures, not only trim them). The eight changed routes (RLS8) are a measurement on
+fixture data — production has more NULL-fleet and `'*'` rows (company-wide collectors, unmapped
+telematics), which a scoped reader does not see, so more `param` answers may change for one-fleet
+readers there: compare them, not only time them, before granting one-fleet roles. `access_pages`
+was not run (it starts its own server on 8412 and a browser).

@@ -1,4 +1,5 @@
 import { internalHeaders, isInternal } from './access/internal.js';
+import { parseRlsCacheKey } from '../src/fleet_scope.js';
 import { dubaiIso } from '../src/util.js';
 import { createHash } from 'node:crypto';
 /* Response cache for read endpoints.
@@ -244,7 +245,14 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port, refre
     while (active < refreshConcurrency && queue.length) {
       const key = queue.shift();
       active++;
-      fetch(`http://127.0.0.1:${selfPort()}${key}`, { headers: internalHeaders() })
+      /* A narrowed reader's key (rls:<fleets>|<url>, src/fleet_scope.js) is
+         not a URL: fetch the address inside it, and name the fleets so the
+         gate recomputes under the same row-level security and files the
+         answer under this same key. Every other key is fetched as before. */
+      const scoped = parseRlsCacheKey(key);
+      const url = scoped ? scoped.url : key;
+      const headers = scoped ? { ...internalHeaders(), 'x-fm-rls': scoped.fleets.join(',') } : internalHeaders();
+      fetch(`http://127.0.0.1:${selfPort()}${url}`, { headers })
         .then((r) => r.arrayBuffer())
         .catch(() => {})
         .finally(() => { refreshing.delete(key); active--; pump(); });

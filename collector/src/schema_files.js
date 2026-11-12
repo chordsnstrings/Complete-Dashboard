@@ -381,4 +381,10 @@ export const SCHEMA_FILES = [
      assigned or closed a finding on #insights). api/access/reviews.js and
      api/access/findings.js. */
   'schema_v122.sql',
+  /* v124: row-level security as the backstop to the API's fleet filter
+     (ULM-DESIGN §4) — the restricted fleet_request role and the functions
+     that secure one table or view at a time; src/db.js runs them after the
+     migrations, one object per statement (src/fleet_scope.js). Every
+     statement guarded: without CREATEROLE it creates nothing and is inert. */
+  'schema_v124.sql',
 ];
