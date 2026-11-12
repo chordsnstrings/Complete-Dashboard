@@ -10738,8 +10738,8 @@ it again.
 
 - **The live commit.** `active_deployment.services[].source_commit_hash` names it; see HANDOFF §9.
 - **The build.** Both components build from `collector/Dockerfile`, which:
-  - uses `node:20-slim`;
-  - copies `package.json` only, with no lockfile;
+  - uses `node:20-slim` (`node:22-slim` from the 2026-11-12 batch);
+  - copies `package.json` only, with no lockfile (the lockfile and `npm ci` from the same batch);
   - has no `.dockerignore`.
 - **Alerts and logs.**
   - There are no app alerts, no uptime checks and no `log_destinations`.
@@ -10890,6 +10890,10 @@ What the OPS workstream learned that is not written down above. FIX-STATUS "OPS"
   on production. None is used in src/, api/ or bin/
   today (grep, 2026-11-12). Either move the Dockerfile to Node 22 or give CI a
   Node 20 leg before relying on CI for this.
+  **Resolved at integration (2026-11-12):** the Dockerfile is now
+  `FROM node:22-slim` and installs with `npm ci --omit=dev` from the committed
+  lockfile, so production, CI and the sandbox run one major version and one
+  dependency tree. Node 20 had left support on 2026-04-30.
 ## Data retention and restore — built 2026-11-12 (FIX-STATUS RET)
 
 **What the big tables held**, read off production `/api/coverage` at 03:36Z on 2026-11-12 (one
