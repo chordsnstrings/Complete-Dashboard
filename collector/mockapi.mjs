@@ -110,6 +110,19 @@ app.get('/api/live', (_, r) => r.json(plates.map((p, i) => ({
   place: i % 5 === 4 ? null : { area: ['Deira', 'Al Barsha 1', 'Dubai Marina', 'Business Bay'][i % 4], votes: 120 + i, seen: 200 + i },
 }))));
 
+/* The tracker roster's note (api/fleet_roster_routes.js, FIXLIST C18): the
+   mock's fleet has nothing set aside, which is the answer that draws nothing
+   — so the old skin's pages, held byte for byte by arkiv_classic_frozen, do
+   not move. A test that needs plates set aside overrides this with a fixture
+   (test/fleet_roster_pages.test.mjs). */
+app.get('/api/fleet/roster', (req, r) => r.json({
+  fleet: req.query.fleet || null, n: 0, held: 0, known: true, state: 'read',
+  reason: 'Every plate the tracker feed holds is one the tracker still lists.',
+  why: 'the tracker still lists every plate it holds', plates: [], truncated: false,
+  departed: 0, pending: 0, listed: 40,
+  fleets: [{ fleet: 'ecosine', polls: 900, updated_at: new Date().toISOString(), departed: 0, pending: 0, listed: 40 }],
+}));
+
 /* The replay day picker reached exactly 400 rows in production, which is what
    a cap looks like when it has bitten and nothing says so: the day a reader is
    looking for is simply not in the menu. */
@@ -275,6 +288,12 @@ app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03,
      that have stopped answering — the mock carries some, or a page that
      renders them would never be exercised. */
   silent_vehicles: 6, tracked_vehicles: 61, alerts: 8863,
+  /* What the tracker roster set aside from those counts (FIXLIST C18):
+     nothing here, which draws nothing — see /api/fleet/roster below. */
+  tracked_set_aside: 0,
+  fleet_roster: { n: 0, held: 0, known: true, state: 'read',
+    reason: 'Every plate the tracker feed holds is one the tracker still lists.',
+    why: 'the tracker still lists every plate it holds', plates: [], truncated: false },
   /* The safety headline, and the two things that make it readable: the
      distance it was actually taken over, and which days those were. `km` above
      runs to the edge of the window and alert_km stops at the feed's covered
@@ -2417,6 +2436,8 @@ app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
   alert_days: 22, alert_window_days: 30,
   current_driver: i === 6 ? null : drivers[i],
   driver_as_of: new Date().toISOString(),
+  /* Set aside by the tracker roster (FIXLIST C18): none of the mock's cars. */
+  set_aside: null,
 }))));
 
 /* #feeds — every car Uber lists as active, green or red per feed.

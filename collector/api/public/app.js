@@ -1650,7 +1650,10 @@ function overviewTiles(k) {
     ['Safety alerts', fmt(k.alerts),
       state.platform
         ? `harsh-driving events · not filtered by ${esc(state.platform)} — these come from the tracker, not a channel`
-        : `harsh-driving events${k.tracked_vehicles ? ` across ${fmt(k.tracked_vehicles)} tracked vehicles` : ''}`],
+        : `harsh-driving events${k.tracked_vehicles ? ` across ${fmt(k.tracked_vehicles)} tracked vehicles` : ''}`
+          /* The tracked count leaves out the plates the tracker has stopped
+             listing (FIXLIST C18); said, so the smaller number is not a mystery. */
+          + (k.fleet_roster?.n ? ` · ${fmt(k.fleet_roster.n)} the tracker has stopped listing are left out` : '')],
   ].map(([l, n, d]) => ({ label: l, html: n, sub: d, to: GO[l] || null, who: false }));
 
 }
@@ -4850,6 +4853,14 @@ V.safety = async (root) => {
           : ' A rate is only comparable per 100 km, which is what the table below ranks on.')
         + ' These come from the telematics box, so no channel filter narrows them.',
     });
+    /* The tracked count this rate is divided by leaves out the plates the
+       tracker has stopped listing (FIXLIST C18) — it was 268 on production
+       2026-11-12 with 132 of them frozen CABMAN listings, which halved the
+       rate. The server's sentence names how many this figure dropped. Its own
+       warn note rather than a clause on the verdict's sub-line, which the
+       focus pass folds out of sight under the contract (focus.js decide()). */
+    const asideS = rosterSentence(fleetK?.fleet_roster);
+    if (asideS) (ak ? AKB.vHost : host).append(note(`Tracked vehicles: ${asideS}`, 'warn'));
   }
   /* A tracker losing power is a hardware fault, not a driving style. Charted
      together they were one number under a heading about harsh driving. */
@@ -5685,6 +5696,24 @@ function areaCell(r) {
    tiles that count that flag can name the rule that produced it. */
 const FIX_FRESH_MIN = 30;
 
+/* THE PLATES THE TRACKER HAS STOPPED LISTING, said where they stopped
+   counting (FIXLIST C18, wired 2026-11-12).
+   /api/live leaves out the CABMAN fixes of every plate the collector's roster
+   has set aside — 132 of 177 CABMAN plates on production that morning, frozen
+   at a last fix days old, 29 of them counted as Moving. The route is a bare
+   array (the access manifest shapes it by path), so the sentence comes from
+   GET /api/fleet/roster beside it, in the server's own words. Nothing is
+   printed when the roster was read and set nothing aside; the server's
+   sentence when it set plates aside or cannot yet say; and the failure,
+   named, when it could not be asked — never silence that reads as "none". */
+function rosterSentence(r) {
+  if (!r) return null;
+  if (r.failed) return `Whether any tracker plate was set aside could not be read: ${r.failed}`;
+  if (r.known && !r.n) return null;
+  return r.reason || null;
+}
+const rosterRead = () => api('/api/fleet/roster').catch((e) => ({ failed: String(e?.message || e) }));
+
 V.live = async (root) => {
   /* Under the page contract (plan §4 #live): the verdict as the 00 statement
      — its figure, the cars not reporting, is not repeated as a tile (ruling
@@ -5708,12 +5737,14 @@ V.live = async (root) => {
   [kh, p.body].forEach(loading);
   const gen = currentGen();
   let rows;
+  const rosterP = rosterRead();
   try { rows = await api('/api/live'); } catch (e) {
     if (!alive(gen)) return;
     kh.innerHTML = ''; p.body.innerHTML = '';
     p.body.append(note(`The live feed could not be read: ${e.message}`, 'err'));
     return;
   }
+  const aside = rosterSentence(await rosterP);
   if (!alive(gen)) return;
   const fresh = rows.filter((r) => !r.stale).length;
   const moving = rows.filter((r) => +r.speed > 3).length;
@@ -5770,6 +5801,9 @@ V.live = async (root) => {
   ];
   if (!ak) kh.innerHTML = LIVE_TILES.map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
   p.body.innerHTML = '';
+  /* Above the table and before the empty state: every tile above counts the
+     rows the roster left, so the sentence is about all of them. */
+  if (aside) p.body.append(note(aside, 'warn'));
   if (!rows.length) { empty(p.body, 'Positions appear once a tracker feed — CABMAN or FMS — has credentials saved in Settings'); return; }
   if (feeds.length) {
     /* Two seat readings now, from two providers: CABMAN DT's pad (every five
@@ -6055,6 +6089,9 @@ V.map = async (root) => {
     clear();
     marks.innerHTML = '';
     let rows;
+    /* The plates the tracker has stopped listing are not drawn — /api/live
+       leaves them out (FIXLIST C18) — and the legend says so below. */
+    const rosterP = rosterRead();
     /* One slow endpoint must not take the page. A 504 here replaced the whole
        of #map — map, controls, legend — with an error box, because this fetch
        had no catch and the throw reached render(). */
@@ -6065,6 +6102,7 @@ V.map = async (root) => {
       b.onclick = () => showLive(); stat.append(b);
       return;
     }
+    const aside = rosterSentence(await rosterP);
     const withGps = rows.filter(hasFix);
     const noLock = rows.length - withGps.length;
     const sensed = withGps.filter((r) => r.seat_occupied != null);
@@ -6107,6 +6145,7 @@ V.map = async (root) => {
         + `${plural(noLock, 'is', 'are')} reporting 0,0 — no satellite lock — and ${
           plural(noLock, 'is', 'are')} not drawn.</span>`;
     }
+    if (aside) legend.innerHTML += `<span class="dim">${esc(aside)}</span>`;
     /* Set the plate BEFORE asking for the replay. `.click()` synchronously ran
        the replay handler, whose first statement reads the select — so it
        fetched whichever vehicle was previously chosen and drew that one's day

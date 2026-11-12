@@ -5773,3 +5773,36 @@ Also run, all green: `arkiv_fils` 80, `arkiv_people` 241, `arkiv_shell` 77, `cha
 `segment_boundary` 6, `unauthorized_attribution` 221; `arkiv_classic_frozen` on the driver,
 `segments` and `unauthorized` routes 21/0 (the Classic skin's DOM did not move: the frozen day has
 no unbooked journey). Tool: `bin/focus-rows-audit.mjs`.
+
+## WIRE - Wire fleet_roster.js (C18) and the wage-sheet classifier (2026-11-12)
+
+Two modules were written and never imported: `api/fleet_roster.js` (the API half of FIXLIST C18)
+and `src/salary/sheet.js` (the wage-sheet classifier). Measured on production first, GET only,
+counts only (2026-11-12 ~05:30Z): `/api/status` cabman/realtime rows_written 52; `/api/live` 268
+rows, 177 CABMAN, and 132 of those with a last poll more than a day old (five poll stamps: 45
+current, 43 at 11-10 23:20Z, 65 at 10-14, 2 at 09-04, 22 at 08-30); Moving 60, of which 29 were
+those plates; `/api/kpis?days=30` tracked_vehicles 268, silent_vehicles 162;
+`/api/vehicles/directory?days=30` 273 rows, and all 132 of those plates in it with no trip in the
+window or ever, no VIN, no make, no document and no other tracker. With them set aside the same
+reads give 136 live rows, Moving 31, silent 30 and 141 register rows.
+
+| id | what | where | test | state |
+|---|---|---|---|---|
+| WIRE1 | **`/api/live` leaves out the CABMAN fixes of a plate the roster set aside.** A plate another feed still reports shows that feed's fix; one only CABMAN reported drops out. Still a bare array: the access manifest shapes it by `[].lat`/`[].place` and filters rows by `[]`, so the sentence lives on WIRE4 | `api/server.js:2029`, `api/telemetry_sql.js:34` (LATEST_FIX's optional `keep`), `:67` (ROSTER_KEEP, null-safe) | `fleet_roster_wiring` §1, §5, §7 — reverted (the predicate and its parameter): §1 fails 2 | written, not deployed |
+| WIRE2 | **`/api/kpis` tracker counts the same way** — live_vehicles, fresh, silent_vehicles, tracked_vehicles — plus `tracked_set_aside` (the plates THIS figure dropped) and `fleet_roster` (exclusionNote with `removed`, so the sentence's count is the figure's own). The Alerts page divides its events by this tracked count | `api/server.js:747-760`, `:930` | `fleet_roster_wiring` §2, §5 — reverted: 7 fail | written, not deployed |
+| WIRE3 | **The register flags `set_aside`** ('departed'/'pending'/null) on a row only when the roster's word is the only word: no trip ever, no other feed's fix, no document, no vehicle or vehicle_profile row, no custody day — C18's predicate. The rows stay; a car whose CABMAN listing ended but which a channel knows is not set aside | `api/vehicle_routes.js:565-610`, `:694` | `fleet_roster_wiring` §3 — reverted: 5 fail | written, not deployed |
+| WIRE4 | **`GET /api/fleet/roster`** — the exclusion note for the bare-array routes: n, held, known, state, reason, why, plates (capped 200), per-fleet counts. Manifest: subject VEH, fleet `param` (a one-fleet reader gets only their fleet's plates, `rosterFor`), `plates` withheld below Full VEH, grain aggregate; an unknown fleet is a 400 | `api/fleet_roster_routes.js:30`, `api/access/manifest.json` (after `/api/live`) | `fleet_roster_wiring` §4 — file removed: 6 fail (404); `access_manifest` 17/0 | written, not deployed |
+| WIRE5 | **`api/fleet_roster.js`: four states, true sentences.** The read's catch made a failed query read "the roster has not been written yet" and cached it for a minute; a stored roster that did not parse said the same. Now `state` read/none/unreadable/failed, each with its own sentence, failures not cached; `exclusionNote(roster, {removed})` words the figure's own count (singular agrees; "No plate was taken out of this figure" when it dropped none); `rosterFor` for one fleet, listed-wins against every fleet; the comment that promised null when nothing was excluded (the code never did) corrected | `api/fleet_roster.js:85-235` | `fleet_roster_wiring` §5, §6 — reverted (catch + cache): 4 fail | written, not deployed |
+| WIRE6 | **#live**: a warn note above the table carrying the server's sentence (nothing when nothing is set aside; the failure named if `/api/fleet/roster` cannot be read). **#map**: the same line in the legend. **#safety**: a warn note under the verdict, "Tracked vehicles: …" (a note, not a clause on the verdict's sub-line, which the focus pass folds out of sight under the contract). **#overview**: the Safety alerts tile says how many plates the tracked count left out | `api/public/app.js:5709` (rosterSentence), `:5806`, `:6148`, `:4862`, `:1656` | `fleet_roster_pages` (browser, mock + fixtures) 13/0 — base app.js/vehicle.js swapped in: every positive check fails (10) | written, not deployed |
+| WIRE7 | **#vehicles**: the Vehicles tile and the search count drop the flagged rows ("141 vehicles · 132 set aside"); a warn note under the verdict names them with the roster's reason; the no-VIN sentence and the "Cars, by VIN" tile no longer count them as "neither counted nor ruled out"; the row's tracker cell reads "set aside", not "quiet" | `api/public/vehicle.js:1679`, `:1752`, `:1786`, `:2014` | `fleet_roster_pages` §#vehicles — reverted: 4 fail | written, not deployed |
+| WIRE8 | Test harness and mock: `test/mount.mjs` injects the three roster names into the server.js slice (the hard rule); `mockapi.mjs` serves `/api/fleet/roster` with nothing set aside and carries the new kpis/directory keys, so `mockapi` parity holds and the Classic skin does not move | `test/mount.mjs:63`, `:164`; `mockapi.mjs:118`, `:293`, `:2440` | `mockapi` 10/0; `arkiv_classic_frozen` ONLY=live,vehicles,safety,overview,salary,map 19/0 (held byte for byte) | written, not deployed |
+
+Not done in WIRE, with the reason: **"Moving" still counts a stale fix's speed.** After the roster
+exclusion, 1 of the 31 Moving rows on production is an FMS fix 508 days old at over 3 km/h; that is
+not a departed CABMAN plate, so the roster cannot take it out, and requiring a fresh fix changes the
+tile in the Classic skin, which `arkiv_classic_frozen` holds byte for byte (the mock's stale row 7
+moves at 35 km/h) — a fixture re-record and the operator's word on what Moving means. Also not
+done: `/api/kpis` tracker counts ignore `?fleet=` (they did before this change; the exclusion
+follows the same all-fleet scope). Run, green: `fleet_roster_wiring` 36/0, `fleet_roster_pages`
+13/0, `live_fix` 13/0, `vehicle_directory` 34/0, `access_manifest` 17/0, `mockapi` 10/0,
+`arkiv_classic_frozen` (the touched routes) 19/0.

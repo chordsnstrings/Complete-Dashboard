@@ -55,6 +55,12 @@ import { personMap } from '../api/person_map.js';
    inside the slice — so the helper is injected, real rather than stubbed: a
    stub would let the route stop reading HR with every test still green. */
 import { hrForCompliance } from '../api/hr_roster.js';
+/* The tracker roster's read side (FIXLIST C18). /api/live and /api/kpis set
+   aside the CABMAN plates the collector's roster says have departed, and both
+   routes are inside the slice — real rather than stubbed, because a stub that
+   set nothing aside would let either route stop reading the roster with every
+   test still green (test/fleet_roster_wiring.test.mjs is the one that checks). */
+import { fleetRoster, excludedPlates, exclusionNote } from '../api/fleet_roster.js';
 /* The provider alias tables, shared with src/probe.js. /api/schema/raw-fields
    matched raw field names against information_schema alone, so thirteen of
    Uber's fifteen fields read "not promoted to a column" while the collector
@@ -155,7 +161,7 @@ export async function mountAll(db, { serverRoutes = true, inject = {}, pre = nul
     grainOf, previousWindow, foldGrain, GRAINS, PERIODS, isPeriod, periodPartial,
     isAdmin, redactSettings, secretField, redactSampleValue, RAW_ALIASES, spanGaps,
     IDENTITY_DOCS, stripIdentity, withheldNote, photoHref, withPhotos, personMap,
-    hrForCompliance,
+    hrForCompliance, fleetRoster, excludedPlates, exclusionNote,
     refIds, peopleFor, attachPeople, log,
     recordImport, spanOf, tallyBatch, takeTally,
     LEDGER_CADENCE, ledgerSilence, aedText,

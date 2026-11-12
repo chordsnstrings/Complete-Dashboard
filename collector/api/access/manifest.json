@@ -3873,6 +3873,8 @@
      "fresh",
      "silent_vehicles",
      "tracked_vehicles",
+     "tracked_set_aside",
+     "fleet_roster",
      "alerts",
      "device_alerts",
      "alert_km",
@@ -3893,7 +3895,7 @@
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "Response built at api/server.js:799-878: spread of the trip aggregate t (server.js:510-594: trips, completed_trips, cancelled_trips, bookable_trips, cancelled_by_driver, declined_offers, cancelled_by_rider, cancelled_unsaid, other_outcome, no_outcome, completion_pct, cancel_pct, telematics_journeys, telematics_km, km, avg_km, trips_with_distance, revenue, priced_trips, avg_fare, priced_km, priced_"
+  "notes": "Response built at api/server.js:799-878: spread of the trip aggregate t (server.js:510-594: trips, completed_trips, cancelled_trips, bookable_trips, cancelled_by_driver, declined_offers, cancelled_by_rider, cancelled_unsaid, other_outcome, no_outcome, completion_pct, cancel_pct, telematics_journeys, telematics_km, km, avg_km, trips_with_distance, revenue, priced_trips, avg_fare, priced_km, priced_ WIRE 2026-11-12 (FIXLIST C18): live_vehicles, fresh, silent_vehicles and tracked_vehicles leave out the CABMAN fixes of plates the roster set aside; tracked_set_aside counts the plates that left the tracked count as a result, and fleet_roster is api/fleet_roster.js exclusionNote {n, held, known, state, reason, why, plates[], truncated} for that figure. Both are VEH, like the counts they describe."
  },
  {
   "method": "GET",
@@ -4110,7 +4112,30 @@
   ],
   "fleetKey": "fleet_id",
   "cap": null,
-  "notes": "api/server.js:1805-1868: top-level array, one row per plate (latest fix): plate, fleet_id, source, captured_at, polled_at, lat, lng, speed, status, seat_occupied, seat_count, seat_source, ac_on, odometer, fuel_level, stale, fix_age_min, poll_age_min, current_driver, driver_as_of. Takes NO parameters at all \u2014 ?fleet is ignored, every vehicle of both fleets is returned; rows carry fleet_id so the sh 2026-10-13: each row also carries place {area, votes, seen} \u2014 the gazetteer's name for the ground at lat/lng (api/place_sql.js placeAt), for the chat assistant's live_cars tool. A location, so it is under LOC with lat/lng: a role without locations gets all three nulled."
+  "notes": "api/server.js:1805-1868: top-level array, one row per plate (latest fix): plate, fleet_id, source, captured_at, polled_at, lat, lng, speed, status, seat_occupied, seat_count, seat_source, ac_on, odometer, fuel_level, stale, fix_age_min, poll_age_min, current_driver, driver_as_of. Takes NO parameters at all \u2014 ?fleet is ignored, every vehicle of both fleets is returned; rows carry fleet_id so the sh 2026-10-13: each row also carries place {area, votes, seen} \u2014 the gazetteer's name for the ground at lat/lng (api/place_sql.js placeAt), for the chat assistant's live_cars tool. A location, so it is under LOC with lat/lng: a role without locations gets all three nulled. WIRE 2026-11-12 (FIXLIST C18): the CABMAN fixes of a plate the collector's roster set aside are not candidates for its newest fix (api/telemetry_sql.js ROSTER_KEEP), so a plate only CABMAN reported and has stopped listing drops out. Still a bare array on purpose: the LOC paths and the '[]' row filter above depend on it. The sentence is GET /api/fleet/roster."
+ },
+ {
+  "method": "GET",
+  "path": "/api/fleet/roster",
+  "subject": "VEH",
+  "carries": [
+   "VEH"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "VEH",
+    "paths": [
+     "plates"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/fleet_roster_routes.js (WIRE, 2026-11-12; FIXLIST C18). Reads the CABMAN roster the collector keeps in source_state (src/sources/cabman.js; api/fleet_roster.js caches it a minute) and answers {fleet, n, held, known, state (read|none|unreadable|failed), reason, why, plates[] (capped at 200), truncated, departed, pending, listed, fleets[{fleet, polls, updated_at, departed, pending, listed}]}. Writes nothing. It exists because /api/live and /api/vehicles/directory are bare arrays shaped by '[]' paths here, so the sentence saying which plates they set aside cannot ride on them. ?fleet= narrows to one fleet's roster (rosterFor), so 'param' keeps the other fleet's plates from a one-fleet reader; an unknown fleet is a 400, never 'not written yet'. plates[] are vehicle identifiers, withheld below Full VEH; grain aggregate so a totals-only role (the wall display) still gets the counts and the sentence."
  },
  {
   "method": "GET",
@@ -7550,7 +7575,7 @@
   ],
   "fleetKey": "fleet_id",
   "cap": null,
-  "notes": "api/vehicle_routes.js:101-605. Body is a BARE ARRAY (:522-604) of {plate, trips, telematics_journeys, days, days_moved, km, telematics_km, revenue, priced_trips, payout, payout_days, payout_even_split, drivers(count), platforms(count), last_trip, last_movement, fleet_id, make, model, year, vin, vin_channels, distinct_vins, last_fix, status, speed, stale, fix_age_min, soonest_expiry, doc_days_left,"
+  "notes": "api/vehicle_routes.js:101-605. Body is a BARE ARRAY (:522-604) of {plate, trips, telematics_journeys, days, days_moved, km, telematics_km, revenue, priced_trips, payout, payout_days, payout_even_split, drivers(count), platforms(count), last_trip, last_movement, fleet_id, make, model, year, vin, vin_channels, distinct_vins, last_fix, status, speed, stale, fix_age_min, soonest_expiry, doc_days_left, WIRE 2026-11-12 (FIXLIST C18): each row carries set_aside ('departed' | 'pending' | null): the CABMAN roster set the plate aside AND nothing else holds a record of it (no trip ever, no other feed's fix, no document, no vehicle or vehicle_profile row, no custody day). The rows stay; the page counts them apart. A vehicle fact, VEH like the row."
  },
  {
   "method": "GET",

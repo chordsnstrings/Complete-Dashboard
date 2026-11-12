@@ -10754,3 +10754,39 @@ it again.
   - platform bookings (167);
   - the five dataset-coverage counts (154 each). These are one per `/api/coverage` computation, roughly every 7.4 min.
 - `/api/coverage` measured 16.9 s, 19.3 s and 32.7 s cold.
+
+## The CABMAN roster, read by the API — measured 2026-11-12 (WIRE)
+
+What production served that morning, before `api/fleet_roster.js` was wired in (GET, counts only):
+
+- `/api/live`: 268 rows — 177 CABMAN, 76 FMS, 15 Uber. The CABMAN `polled_at` takes five values:
+  45 plates on the current poll, 43 at 2026-11-10 23:20Z, 65 at 10-14 12:35Z, 2 at 09-04 and 22 at
+  08-30. 132 CABMAN plates have a last poll more than a day old; 153 of the 177 are stale.
+  - CABMAN now answers for two fleets: 172 rows carry `fleet_id` ecosine and 5 egari.
+  - Moving (speed > 3 km/h) 60, of which 29 are those 132 plates; Engaged 36 → 14 without them.
+- `/api/kpis?days=30`: tracked_vehicles 268, silent_vehicles 162, live_vehicles 92.
+- `/api/vehicles/directory?days=30`: 273 rows, 110 with a booking. All 132 plates are in it, and
+  not one has a trip in the window or ever, a VIN, a make, a document or another tracker — the
+  predicate the register now sets aside on (they all have `fleet_id` null there, too).
+- The 43 plates last polled 11-10 23:20Z are newer than the cohorts FIXLIST C18 measured in
+  September: the provider's list keeps changing, which is what the roster is for.
+
+### Traps this added to the list
+
+* **`plate = ANY($1)` with a NULL list is NULL, not false.** `excludedPlates()` returns null when
+  nothing is set aside, and `NOT (source = 'cabman' AND plate = ANY(NULL))` is NULL for every CABMAN
+  row — the plain form would have dropped the whole CABMAN fleet the day the roster was empty or
+  missing. `ROSTER_KEEP` (api/telemetry_sql.js) coalesces the comparison to false;
+  `fleet_roster_wiring` §5 and §7 hold it.
+* **`/api/live` and `/api/vehicles/directory` must stay bare arrays.** The access manifest shapes
+  them by path (`[].lat`, `[].lng`, `[].place` withheld from a role without locations; rows
+  filtered by `[]`.fleet_id for a one-fleet reader). Wrapping either in `{rows, note}` to carry a
+  sentence would have handed every role every position. A sentence that belongs beside a bare
+  array goes on its own route (`/api/fleet/roster`).
+* **A clause on a verdict's sub-line is not on the page under the contract.** focus.js folds a
+  long `.vdct-sub` out of sight; a `.note.warn` is flagged (one line on the face). An exclusion
+  that must be read goes in a warn note.
+* **The Classic skin is byte-frozen against the mock.** A page change that draws nothing for the
+  mock's answer leaves `arkiv_classic_frozen` green; one that changes what the mock's data draws
+  (for example "Moving" requiring a fresh fix: the mock's stale row 7 moves at 35 km/h) needs a
+  re-record and a sentence in the commit.

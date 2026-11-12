@@ -1664,10 +1664,22 @@ export async function renderVehicleDirectory(root) {
   root.append(tblP.panel);
   loading(tblP.body);
 
-  const [rows, fleet] = await Promise.all([
+  const [rows, fleet, roster] = await Promise.all([
     qAll('/api/vehicles/directory'), qAll('/api/kpis').catch(() => ({})),
+    /* Why a row is set aside, in the server's words (FIXLIST C18). */
+    qAll('/api/fleet/roster').catch(() => null),
   ]);
-  bar.querySelector('#vdn').textContent = `${rows.length} vehicles`;
+  /* THE PLATES THE TRACKER HAS STOPPED LISTING, and nothing else knows
+     (FIXLIST C18, wired 2026-11-12). The directory flags each one with
+     `set_aside` (api/vehicle_routes.js): on production that morning, 132 of
+     the 273 rows were CABMAN plates whose last poll was days old, with no
+     booking ever, no VIN, no document and no other feed. They stay in the
+     table, marked, and stop counting in the figures above it — the Vehicles
+     tile and this count read 141, not 273, and say why. */
+  const asideN = rows.filter((r) => r.set_aside).length;
+  const asideWhy = roster?.why || 'the tracker has stopped listing them';
+  bar.querySelector('#vdn').textContent = asideN
+    ? `${fmt(rows.length - asideN)} vehicles · ${fmt(asideN)} set aside` : `${rows.length} vehicles`;
 
   /* `trips` used to include telematics journeys, so a car that drove all month
      with no booking behind it counted as "Earning" — inverting the exact
@@ -1723,9 +1735,24 @@ export async function renderVehicleDirectory(root) {
       meta: `${fmt(cars.length)} cars`,
       sub: `${fmt(earning)} took a booking, ${fmt(movedOnly)} moved without one, ${fmt(still)} did not move at all.`
         + (tracked < cars.length ? ` ${fmt(cars.length - tracked)} carry no tracker fix, so nothing can say where they are.` : '')
-        + (setAside ? ` ${fmt(setAside)} other ${plural(setAside, 'plate', 'plates')} with no VIN — tracker or booking records that are not a car this fleet can identify — are in the table below and not counted here.` : '')
+        /* The no-VIN plates, less the ones the tracker roster set aside —
+           those are said apart, with the roster's reason, because "a record
+           that is not a car we can identify" and "a listing the tracker has
+           withdrawn, which nothing else ever knew" are different facts. Every
+           set-aside row has no VIN (nothing but the tracker knew it), so the
+           subtraction cannot go below nought. */
+        + (setAside - asideN ? ` ${fmt(setAside - asideN)} other ${plural(setAside - asideN, 'plate', 'plates')} with no VIN — tracker or booking records that are not a car this fleet can identify — are in the table below and not counted here.` : '')
         + (staleN ? ` ${fmt(staleN)} have a tracker that has gone quiet.` : ''),
     });
+    /* Its own warn note, under the verdict, rather than a clause on the
+       verdict's sub-line — the focus pass folds a long sub-line out of sight
+       under the contract (focus.js decide()), and this is the sentence that
+       explains why the register is a third smaller than it was. */
+    if (asideN) {
+      vHost.append(note(`${fmt(asideN)} ${plural(asideN, 'plate is', 'plates are')} set aside: ${asideWhy}, and `
+        + `nothing else holds a record of ${plural(asideN, 'it', 'them')} — marked in the table below and not `
+        + 'counted anywhere on this page.', 'warn'));
+    }
   }
 
   /* HOW MANY CARS, which is not the same question as how many plates.
@@ -1752,17 +1779,21 @@ export async function renderVehicleDirectory(root) {
      filed DIFFERENT VINs against one plate. Either the plate moved between two
      cars or a provider has it wrong, and both want a person's attention. */
   const disputed = rows.filter((r) => (r.distinct_vins || 0) > 1);
+  /* The set-aside plates are ruled out, so they are not among the no-VIN
+     plates this tile calls "neither counted nor ruled out". */
+  const openNoVin = noVin - asideN;
   const VDIR_TILES = [
-    { label: 'Vehicles', value: fmt(rows.length), sub: 'plates with any record at all' },
+    { label: 'Vehicles', value: fmt(rows.length - asideN),
+      sub: asideN ? `plates with a record · ${fmt(asideN)} more set aside` : 'plates with any record at all' },
     { label: 'Cars, by VIN', value: fmt(vins.size),
       /* Never "and the rest are duplicates". A plate with no VIN might be a
          car nobody filed one for or a plate that is not a car at all; this
          says which question is open rather than answering it. */
-      sub: noVin
-        ? `${fmt(noVin)} ${plural(noVin, 'plate carries', 'plates carry')} no VIN, so `
-          + `${plural(noVin, 'it is', 'they are')} neither counted here nor ruled out`
-        : 'every plate on the list carries one',
-      tone: noVin ? 'warn' : 'good' },
+      sub: openNoVin
+        ? `${fmt(openNoVin)} ${plural(openNoVin, 'plate carries', 'plates carry')} no VIN, so `
+          + `${plural(openNoVin, 'it is', 'they are')} neither counted here nor ruled out`
+        : asideN ? 'every plate still counted carries one' : 'every plate on the list carries one',
+      tone: openNoVin ? 'warn' : 'good' },
     agreed
       ? { label: 'Confirmed by two channels', value: fmt(agreed),
           sub: 'two providers filed the same VIN against this plate, so its identity is not '
@@ -1978,6 +2009,11 @@ export async function renderVehicleDirectory(root) {
       /* Under the page contract (plan §4 #vehicles) the tracker state is an
          outline chip: the word carries it, never a wash of colour. */
       render: (r) => {
+        /* Set aside by the tracker roster (FIXLIST C18): "quiet" would say the
+           tracker went silent on a car we have, which is not what happened. */
+        if (r.set_aside) {
+          return `<span title="${esc(`set aside: ${asideWhy}, and nothing else holds a record of this plate`)}">${pill('set aside', ak ? null : 'warn')}</span>`;
+        }
         if (!r.last_fix) return pill('none', ak ? null : 'warn');
         /* status is the tracker's state in one vocabulary (moving / standing /
            quiet); the device's own word is a tooltip (FIXLIST V6). */
