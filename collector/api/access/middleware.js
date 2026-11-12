@@ -138,7 +138,16 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
           req.fm = { ...base, ...who };
           const s = who.session;
           if (s) {
-            const needMfa = who.kind === 'user' && mfaRequired(cfg, who) && !who.user.totp_enabled;
+            /* A role that must use two-step and has no code set up is held
+               to setting one up — unless THIS session was opened by a
+               multi-factor method: a user-verified passkey, or a single
+               sign-on whose provider said it used more than one factor
+               (api/access/signin_methods.js sets mfa_ok and auth_method only
+               then). ULM-DESIGN §5.1: "a passkey counts as MFA". Every
+               session from before v121 has auth_method NULL and is judged
+               exactly as before. */
+            const multiFactorSession = s.mfa_ok && (s.auth_method === 'passkey' || s.auth_method === 'sso');
+            const needMfa = who.kind === 'user' && mfaRequired(cfg, who) && !who.user.totp_enabled && !multiFactorSession;
             req.fm.restricted = who.kind === 'user' && who.user.must_change_password ? 'password'
               : needMfa ? 'mfa' : (who.kind === 'user' && who.user.totp_enabled && !s.mfa_ok ? 'mfa' : null);
             svc.touchSession(db, s.id).catch(() => {});
@@ -295,6 +304,17 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
       return refuse(res, 403, { error: 'undeclared', detail: 'This address is not open to signed-in roles yet.' });
     }
     if (entry.public) return next();
+    /* AN ACCOUNT THAT HOLDS NOTHING AT ALL is told exactly that. Single
+       sign-on with provisioning on (api/access/signin_methods.js) makes such
+       accounts on purpose — a verified company address gets an account with
+       no role until an Access admin gives it one — and so does a person whose
+       every grant ended. Every route below refused them already; but each
+       fleet rule answered with its own reason ("choose one of your fleets",
+       "your access covers only some of them"), and none was the true one. */
+    if (fm.kind === 'user' && !(fm.access?.scope || []).length) {
+      return refuse(res, 403, { error: 'no_access',
+        detail: 'Your account has no access to anything yet. Ask the Owner or an Access admin to give you a role.' });
+    }
 
     const access = fm.access;
     const j = judge(req, entry, access);

@@ -1392,3 +1392,42 @@ Generated from the 2026-09-26 inventory of 189 routes. "gate today" is what guar
 | GET | /api/unauthorized/attributed/plan | none | yes | view:RAW (Owner diagnostics) | SYS |
 | GET | /api/unauthorized/attributed | none | yes | view:COND | ID,VEH,REV |
 | GET | /api/driver/unauthorized | none | yes | view:COND | ID,VEH,LOC |
+
+---
+
+## As built, 2026-11-12 — passkeys and single sign-on (§5.1, §10.1, §14 decision 3)
+
+§16 listed "Passkeys, SSO, email sign-in links" as not built. Passkeys and single sign-on are now
+built (branch `fix/passkeys-sso`, docs/FIX-STATUS.md section PKY); **emailed sign-in links are still
+not built**. Both new methods are OFF until the Owner turns them on in Access → Settings, so §14
+decision 3 stays the Owner's: "email only, or the company's Google or Microsoft, and is a passkey on
+every phone acceptable" is now a switch, not a project.
+
+- **Passkeys.** Registered from your own account page, signed in and re-confirmed; signing in needs no
+  email typed (discoverable credentials), so asking for one never says which addresses have passkeys.
+  User verification is required, which is what makes a passkey two factors: a passkey session counts
+  as two-step (§5.1), including for a role that must use it. The RP id and origin come from
+  `PUBLIC_URL`, read from the environment. A signature counter that goes backwards disables the
+  credential with the reason. Step-up ("confirm it is you") accepts the person's own passkey.
+- **Single sign-on.** OpenID Connect, authorization code with PKCE, nonce and a browser-bound state,
+  for ONE issuer (the company's own tenant). Issuer, client id and secret are environment variables,
+  never Settings values. Only an address the provider verified, on a domain the Owner listed; an
+  account that exists already, unless the Owner allows provisioning (a new account then has no access
+  until an Access admin gives it a role); the provider's subject decides once linked. Two-step is still
+  asked after the provider unless the provider says it used more than one factor (`amr`).
+- **Unchanged.** Both issue the password path's own session; step-up, four-eyes, the shaper, CSRF and
+  the audit judge them as they judge a password session. Open mode is unchanged.
+
+Where this differs from §5.1/§10.1 as written, and why:
+
+- **Two-step is still the first second factor for the Owner and Access admins.** A passkey can only be
+  added from a session that is not restricted, and by default those roles are held to setting up an
+  authenticator app first. After that a passkey alone signs them in. Letting a password-only session
+  register a passkey as its second factor would work too; it was left out to keep one set-up path.
+- **The sign-in page keeps its email and password form** beside "Continue with passkey" and "Continue
+  with <provider>": email sign-in links, the design's fallback, do not exist yet.
+- **No re-confirmation through the provider.** Step-up takes a code, a password or a passkey; a person
+  whose account single sign-on created has no password, so they re-confirm with a passkey or with
+  two-step once they turn it on (the step-up route says so).
+- **RLS (§4) does not know the two new tables yet** — `access_passkey` and `access_sso_identity` are
+  written only by the access routes, like every other `access_*` table.
