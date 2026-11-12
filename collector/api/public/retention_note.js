@@ -15,6 +15,8 @@
    (which imports data.js) would make a cycle. The Settings panel takes its
    helpers as arguments for the same reason. */
 
+/* tz.js, a leaf module the page already loads: the one Dubai calendar. */
+import { dubaiDay } from './tz.js';
 const esc = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export const dayWords = (iso) => {
@@ -95,18 +97,21 @@ const DUBAI_MS = 4 * 3600e3;
 /* The first Dubai day left whole, as api/data_retention_notes.js computes it
    — or, with `own`, the Dubai day the instant falls in (where a claim
    begins). */
+/* The day is read through tz.js's dubaiDay, the browser's one Dubai calendar
+   (test/timezone.test.mjs bans \`toISOString().slice(0, 10)\` under api/public:
+   it is the UTC day). The next day is noon of this one, in Dubai, plus 24 h. */
 export const wholeDayAfter = (t, own = false) => {
   const ms = new Date(t).getTime();
   if (!Number.isFinite(ms)) return null;
-  const day = new Date(ms + DUBAI_MS).toISOString().slice(0, 10);
+  const day = dubaiDay(new Date(ms));
   return own || (ms + DUBAI_MS) % 864e5 === 0 ? day
-    : new Date(Date.parse(`${day}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
+    : dubaiDay(new Date(Date.parse(`${day}T12:00:00+04:00`) + 864e5));
 };
 const POLICY_WORDS = { thin: 'thinned', remove: 'removed', keep: 'kept', failed: 'failed' };
 const num = (v) => (v == null ? null : Number(v).toLocaleString('en-US'));
 
 /* The Settings panel. `h` carries the page's own helpers (panel, tableFrom,
-   loading, empty, pill, dtStr, api) so this module imports nothing. */
+   loading, empty, pill, dtStr, api) so this module imports nothing but tz.js. */
 export function retentionPanel(h) {
   const p = h.panel('Data retention',
     'What the nightly pass looked at, would remove and removed — per table, with the reason each table is kept.');
