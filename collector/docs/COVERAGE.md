@@ -10754,3 +10754,52 @@ it again.
   - platform bookings (167);
   - the five dataset-coverage counts (154 each). These are one per `/api/coverage` computation, roughly every 7.4 min.
 - `/api/coverage` measured 16.9 s, 19.3 s and 32.7 s cold.
+
+## Traps found bringing focus and motion to the phone (2026-11-12, FIX-STATUS MOB)
+
+These belong with "Traps that have cost time more than once"; they are written here, at the end of
+the file, so the batch that found them merges without moving that list.
+
+* **Assigning `textContent` is a mutation even when the words do not change** (MOB4). The setter
+  replaces the element's text node every time, and inside a subtree a MutationObserver watches that
+  is a childList record. focus.js relabelled every "ⓘ notes" toggle on every pass, so its observer
+  scheduled the next pass 120 ms later, for as long as a page was open: 144 rewrites of six toggles
+  in 3 s on the desktop's #target at rest, on every page with a toggle since FOCUS went live
+  (2026-10-22). On the phone, whose pass runs inside the observer callback, the same write was an
+  endless microtask loop — the first browser probe never returned. Compare before writing
+  (`if (el.textContent !== t) el.textContent = t`), and in an observer that writes into the subtree
+  it watches, skip the records its own writes made.
+
+* **Headless Chromium in a touch context never applies `:active`.** Neither `page.mouse.down()` nor a
+  held CDP `Input.dispatchTouchEvent` touchStart made a phone button match `:active` (read at 50,
+  200 and 600 ms). To test a pressed style, force the state — CDP
+  `CSS.forcePseudoState({ nodeId, forcedPseudoClasses: ['active'] })`, as
+  test/phone_focus_motion.test.mjs §11 does. On a real iOS Safari `:active` needs a touch listener on
+  the element or an ancestor; m/motion-m.js registers one, passive, on the document.
+
+* **app.css already stills every transition and animation for reduced motion.** Its global reset
+  (`*,*::before,*::after{animation-duration:.001ms !important;…;transition-duration:.001ms
+  !important}`) wins over any rule and over an inline `style.transition`, so a new reduced-motion
+  rule for a transition or an animation adds nothing. A computed `transitionDuration` of `1e-06s`
+  under emulated reduced motion is that reset, not a fault. What it cannot reach is
+  `scroll-behavior: smooth`, which is not a transition: the phone's deck scrolled smoothly for that
+  reader until MOB11.
+
+* **A rule that stills an old animation can out-rank the new one on the same element** (MOB9).
+  m/motion-m.css switches off m.css's 14 px slide with `… .m-deck.push > * {animation:none}`, at
+  (0,6,0); the arrival fade `… .fx-arrive` was (0,5,0), so every block of the deck that landed after
+  a watched skeleton got the class and no animation. A test that only looked for the class passed.
+  Assert the animation — `el.getAnimations()` on the frame the class goes on — not the class.
+
+* **The phone's deck outlives every screen** (MOB8). The desktop builds a fresh `#view` per render;
+  the phone empties and refills one `.m-deck`. A class put on the deck with a timer to take it off
+  (an entrance) needs that timer cleared at the next render, or the old timer strips the new
+  screen's class halfway; and "content replaced a skeleton" is two mutation records (the parent
+  emptied, then refilled), never one record holding both as on the desktop.
+
+* **The phone's refresh paints this phone's copy, not the new answer** (found 2026-11-12, not
+  changed). m/app.js `refresh()` re-renders, and `api()` answers from the SWR store at once while
+  the live request runs behind; the desktop redraws on `data:refreshed` when that answer differs,
+  and the phone has no listener. So a pull-to-refresh shows what the phone already had, and the
+  fresh figures appear on the NEXT render. Do not cure it with a bare `data:refreshed` listener on
+  the phone: on the mock that event fires every 300–500 ms after a navigation (the trap above).

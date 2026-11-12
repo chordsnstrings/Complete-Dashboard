@@ -115,7 +115,16 @@ export function decide(b, view, foot) {
   const warn = b.matches('.note.warn, .note.err, .warn') || !!b.closest('.note.warn, .note.err');
   if (w <= LEAD_WORDS) return 'keep';
   if (warn) return 'flag';
-  if (ABSENT.test(t)) return 'absent';
+  /* The absence band's reason line (ui.js absenceBand(), "† what this page
+     does not know — the true reason for each") is BY CONSTRUCTION why a
+     figure is absent, whatever words it uses. The phrase list above missed
+     the ones that name their own gap — "The channel filed these bookings with
+     no distance on them…" under "Bookings carrying no distance 47" — and the
+     band folded the reason away, leaving a count of what is missing over no
+     reason at all (found by the phone pass, 2026-11-12; the desktop's band is
+     the same markup). It stays on the face, cut to its first line, like every
+     other absence. */
+  if (ABSENT.test(t) || b.matches('.absb-why')) return 'absent';
   if (nums(t) / w > DENSE || b.querySelector('.n, .num, b.big, .tg-v')) return 'keep';
   if (b.matches('p.cap') && b.previousElementSibling?.matches('h3') && b.parentElement?.matches('.panel')) return 'lead';
   // A block that links somewhere is where a reader goes next: one line, not a fold.
@@ -181,7 +190,9 @@ const hostOf = (b, view, foot) => {
   return h && view.contains(h) && h !== view ? h : view;
 };
 
-function toggleFor(host, view) {
+/* Exported for the phone (m/focus-m.js), whose sections take the same toggle
+   with the same words; on the phone it is a 44px target (m/arkiv-m.css §22). */
+export function toggleFor(host, view) {
   let btn = [...host.children].find((c) => c.classList?.contains('fx-more'));
   const hidden = host.querySelectorAll('[data-fx="fold"]').length;
   const cut = host.querySelectorAll('[data-fx="lead"], [data-fx="flag"], [data-fx="absent"], [data-fx="clamp"]').length;
@@ -198,9 +209,24 @@ function toggleFor(host, view) {
 function label(btn, host) {
   const n = +btn.dataset.n || 0;
   const open = host.classList.contains('fx-open');
-  const what = host.id === 'pageFoot' ? 'sources' : n ? `${n} note${n === 1 ? '' : 's'}` : 'more';
-  btn.textContent = open ? `Hide ${host.id === 'pageFoot' ? 'sources' : 'notes'}` : `ⓘ ${what}`;
-  btn.setAttribute('aria-expanded', String(open));
+  /* The page footer says "sources": the desktop's #pageFoot, and the footer
+     ui.js pageFoot() draws INSIDE a container that is not #view — the
+     phone's deck, and a desktop tab inside the phone's fallback. Only the
+     phone draws that inline form, so the desktop's own labels do not move. */
+  const foot = host.id === 'pageFoot' || host.classList.contains('pf-inline');
+  const what = foot ? 'sources' : n ? `${n} note${n === 1 ? '' : 's'}` : 'more';
+  const text = open ? `Hide ${foot ? 'sources' : 'notes'}` : `ⓘ ${what}`;
+  /* WRITTEN ONLY WHEN IT CHANGES. Assigning textContent replaces the button's
+     text node even when the words are the same, and that replacement is a
+     childList mutation inside #view — the subtree startFocus() observes. So
+     every pass that relabelled its toggles scheduled the next pass 120ms
+     later, for as long as the page stayed open: measured 2026-11-12 on
+     #target at rest, 144 rewrites of its 6 toggles in 3 s — focusView's walk
+     over the whole page eight times a second, on every page with a toggle,
+     since FOCUS went live. On the phone, whose pass runs inside the observer's
+     own callback (m/focus-m.js), the same write hung the page outright. */
+  if (btn.textContent !== text) btn.textContent = text;
+  if (btn.getAttribute('aria-expanded') !== String(open)) btn.setAttribute('aria-expanded', String(open));
 }
 
 /** One pass over the page: judge what is new, then give each panel its toggle. Idempotent. */
@@ -208,17 +234,42 @@ export function focusView() {
   const view = document.getElementById('view');
   const foot = document.getElementById('pageFoot');
   if (!view || !arkiv()) return;
+  focusIn(view, foot);
+  // The control bar's sentence ("the date range does not apply here") is the
+  // control's own business: it becomes the bar's tooltip, said where it applies.
+  const a = document.getElementById('fApplies'), bar = document.getElementById('filters');
+  if (a && bar) bar.title = clean(a.textContent);
+}
+
+/** The same pass over any container and its footer: #view on the desktop
+    (focusView above), and on the phone the desktop module its fallback draws
+    for a driver's or a car's tab (m/focus-m.js).
+
+    `looseHost: false` is the phone's one difference, and only for that
+    container. A block whose nearest host is the container ITSELF — no panel,
+    no section around it — gets its toggle appended to the end of the whole
+    container on the desktop, which on a 390px screen is a screenful or more
+    below the line it opens. There it is left whole instead: a fold whose way
+    back in is out of sight is a fold the reader never finds, which is the
+    "nothing removed" promise kept in letter and broken in fact.
+
+    The footer may sit INSIDE the container (the phone's inline footer), so
+    every host is looked up with the footer known — on the desktop #pageFoot
+    is outside #view and nothing changes. */
+export function focusIn(view, foot, { looseHost = true } = {}) {
   const hosts = new Set();
+  const loose = (b) => !looseHost && hostOf(b, view, foot) === view;
   for (const root of [view, foot].filter(Boolean)) {
     for (const b of blocksIn(root, view)) {
-      b.dataset.fx = decide(b, view, foot);
+      const v = decide(b, view, foot);
+      b.dataset.fx = v !== 'keep' && loose(b) ? 'keep' : v;
       if (b.dataset.fx !== 'keep') hosts.add(hostOf(b, view, foot));
     }
   }
   for (const s of view.querySelectorAll('.kpi .s, .kpi .t-sub, .kpi .sub')) {
     if (s.dataset.fx) continue;
     const t = clean(s.textContent);
-    if (words(t) > SUB_WORDS) {
+    if (words(t) > SUB_WORDS && !loose(s)) {
       s.dataset.fx = 'clamp';
       if (!s.title) s.title = t;
       hosts.add(hostOf(s, view, null));
@@ -234,17 +285,16 @@ export function focusView() {
     if (!said && first) first.dataset.fx = 'lead';
   }
   // Re-count every host that holds a mark, not only the new ones: a panel
-  // whose body re-rendered may have lost marks and must say so.
-  for (const m of view.querySelectorAll('[data-fx]:not([data-fx="keep"])')) hosts.add(hostOf(m, view, null));
+  // whose body re-rendered may have lost marks and must say so. The footer is
+  // named, so a footer INSIDE the container (the phone's) counts as itself.
+  for (const m of view.querySelectorAll('[data-fx]:not([data-fx="keep"])')) hosts.add(hostOf(m, view, foot));
   if (foot?.querySelector('[data-fx="fold"]')) hosts.add(foot);
   for (const h of hosts) toggleFor(h, view);
-  // The control bar's sentence ("the date range does not apply here") is the
-  // control's own business: it becomes the bar's tooltip, said where it applies.
-  const a = document.getElementById('fApplies'), bar = document.getElementById('filters');
-  if (a && bar) bar.title = clean(a.textContent);
 }
 
-function applyFocus(on) {
+/* Exported for the phone's switch (m/focus-m.js focusSwitch): the same key,
+   the same mark on <html>, so the two builds cannot disagree about it. */
+export function applyFocus(on) {
   const r = document.documentElement;
   r.dataset.focus = on ? 'on' : 'off';
   try { localStorage.setItem(KEY, on ? 'on' : 'off'); } catch { /* private window */ }

@@ -5773,3 +5773,83 @@ Also run, all green: `arkiv_fils` 80, `arkiv_people` 241, `arkiv_shell` 77, `cha
 `segment_boundary` 6, `unauthorized_attribution` 221; `arkiv_classic_frozen` on the driver,
 `segments` and `unauthorized` routes 21/0 (the Classic skin's DOM did not move: the frozen day has
 no unbooked journey). Tool: `bin/focus-rows-audit.mjs`.
+
+## MOB - Focus and motion on the phone (2026-11-12)
+
+The batch of 2026-11-12, "Arkiv redesign leftovers: … focus and motion on the phone". HANDOFF 0.9
+and 0.11 left both layers on the desktop build, and the front-end audit of the same day confirmed
+it: the phone printed every word of every explanation — the footer's 50 words of sources and
+principle on every screen, 57 under Today's livebar, 85 under one payout caption, 99 under one
+online-time reason — and its only movement was the old skin's 14 px slide (m.css `m-push`), replayed
+on every render, a pull-to-refresh included. docs/AUDIT.md "Focus and motion on the phone" has the
+rendering pass.
+
+| id | what | file:line | test | state |
+|---|---|---|---|---|
+| MOB1 | **FOCUS on the phone.** `m/focus-m.js` marks the phone's prose with the desktop's own verdicts (`../focus.js` `decide()`, the rules the operator approved after the 106-page demo). Prose is an ALLOW-LIST — a caption (`.m-cap`), a statement's sentence, the hour sentence, a target cell's sub-line, an absence band's reason, the footer, and a tile's sub-line by the desktop's tile rule — never the desktop's climb from a text node to its nearest div, so no row, tile figure, tile label or control is ever a candidate. A host is a section (a card, a statement band, the absence band, the tile band, the footer); a line loose in the deck stays whole | `api/public/m/focus-m.js:92` (the lists), `:125` (`markDeck`) | `phone_focus_motion` §3 | written, not deployed |
+| MOB2 | **No layout shift.** The pass runs inside the MutationObserver callback, before the browser paints what a screen has just drawn — the desktop debounces 120 ms, so a caption paints and then folds under the reader | `api/public/m/focus-m.js:203` (`startFocusM`) | §4: 198 prose blocks on Today, To the bank and Online time watched frame by frame, none on screen for a frame unmarked; layout shift 0.0003 with the pass on and off (Today, To the bank) | written, not deployed |
+| MOB3 | **The phone's own verdicts**, each on a measured case: a statement sentence carrying two figures or more stays whole (To the bank's "Our own figure … AED 110,962.09, a difference of AED 217.57" — caught by `payout_mobile`); a section's first caption and a warning statement's sentence are cut to one line instead of folded; a tile line that is mostly figures is never cut ("1 already on · 1 not in yet · …"); and a section whose marks hide fewer than 25 words is left whole — its 56 px toggle would make it longer (More grew 1838 → 1865 px in the first sweep, Corporate's tile band took a toggle row to hide six words) | `api/public/m/focus-m.js:144` (statement), `:149` (first caption, warning), `:158` (tile line), `:113`/`:174` (pays) | §3 (Today's and To the bank's statements whole, Safety's 23-word sentence and Corporate's band whole, the dense tile line, "no screen is taller with the pass on"); `payout_mobile` 39/0 | written, not deployed |
+| MOB4 | **The desktop's focus pass ran for ever.** `label()` assigned `textContent` on every pass — a childList mutation in the subtree `startFocus()` observes — so the pass re-ran every ~120 ms for as long as a page stayed open: 144 rewrites of 6 toggles in 3 s on #target at rest, on every page with a toggle since FOCUS went live. Now written only when it changes. On the phone the same write hung the page outright (the pass runs in the callback), so the phone's observer also ignores the records its own toggles make | `api/public/focus.js:228`; `api/public/m/focus-m.js:211` | §5: 0 mutations in 3 s at rest on Today and To the bank with both layers on; 0 toggle rewrites on the desktop's #target | written, not deployed |
+| MOB5 | **An absence band's reason never folds.** `decide()` returns `absent` (on the face, cut to one line) for `p.absb-why` whatever its words: the phrase list missed "The channel filed these bookings with no distance on them…", and Today's band showed "Bookings carrying no distance 47" over no reason. The desktop's band is the same markup | `api/public/focus.js:127` | §3 (nothing that says a figure is absent, or why, is folded or hidden; every band reason visible) | written, not deployed |
+| MOB6 | `../focus.js`: `focusIn(view, foot, { looseHost })` — the desktop's pass over any container, which the phone's fallback tab (a desktop module) is judged by, with blocks that have no panel around them left whole rather than toggled from the container's end; `toggleFor` and `applyFocus` exported; the inline footer's toggle says "sources". The desktop's behaviour is unchanged | `api/public/focus.js:259`, `:195`, `:297`, `:216` | `focus_layout` 58/0 as before; §3 (fallback: no toggle hung on the container; footer "ⓘ sources") | written, not deployed |
+| MOB7 | `m/arkiv-m.css` §22: the ⓘ toggle is a 44 px target with no sticky hover colour; in the tile band it spans the row; and with the notes folded the control-bar sentence (`.ak-applies`) leaves the top of the deck — the desktop folds it into its bar's tooltip, and the phone's bar opens a sheet that heads with it word for word | `api/public/m/arkiv-m.css:570`, `:589`, `:595` | §3, §11 (every control ≥ 44 px on every screen with both layers on) | written, not deployed |
+| MOB8 | The switch: More → This app, "Show every word" / "Fold the explanations again", under the desktop's key (`fleet.focus`) and mark, after the desktop button (still the card's first) | `api/public/m/focus-m.js:222`; `api/public/m/screens.js:1533` | §6 | written, not deployed |
+| MOB9 | **MOTION on the phone**, `m/motion-m.js`: a new address is an arrival (`fx-enter` on the deck, which outlives every screen, its timer cleared at the next render) and the same address a redraw (nothing); content that replaced a watched skeleton comes up (`fx-arrive`, across the two records the phone's empty-then-refill makes); a tile or target figure that changed since the screen was last drawn is washed (`fx-tick`: Today's minute refresh, a redraw with new figures) and an arrival forgets; the busy element; notes come up when opened; a passive document touch listener, so iOS Safari applies `:active` on the header, bar, tabs and sheet | `api/public/m/motion-m.js:98`, `:127`, `:139`, `:190`, `:120` | §8, §9 | written, not deployed |
+| MOB10 | `m/motion-m.css`: the boot sheet (the mark on the wordmark's own box within 0.5 px in both themes' artwork, the rule and "Opening the dashboard" on the control bar, after four seconds what the wait is for — the code, then the server — and "The dashboard stopped opening" when a module fails); the entrance (blocks settle 4 px in reading order, ink rules drawn by the pen) in place of the 14 px slide; the skeleton as a ledger hairline and the busy line; the wash; press colours that arrive in 60 ms and lift over 280 ms, a button's 1 px give, the lit tab's rule drawn in. Everything that moves behind `prefers-reduced-motion: no-preference`; tokens only; nothing moves the layout | `api/public/m/motion-m.css:49`, `:113`, `:140`, `:160`, `:199` | §1, §7, §8, §10, §11, §12 (every block where it stands with the layer off, 5 screens) | written, not deployed |
+| MOB11 | `index.html`: `data-motion` stamped on the phone by the desktop's rules (off under automation unless asked, `?motion=` remembered); `m/motion-m.css` APPENDED beside m.css so it never holds the first paint; the desktop's motion.css written for the desktop only; the failed-boot watch ends at the phone's first screen (`data-boot="up"`) | `api/public/index.html:121`, `:140`, `:157`, `:210` | §2; §7 (a failure after the first screen does not say "stopped opening"); §12 (the sheet held back 1.5 s: first paint not held) | written, not deployed |
+| MOB12 | `m/app.js`: both layers started with the shell, before the first screen; `motionScreen()` before the deck is emptied; `data-boot` "who" once the code runs, "up" at the first screen | `api/public/m/app.js:121`, `:127`, `:296` | §2, §7, §8 | written, not deployed |
+| MOB13 | `m/arkiv-m.css` §23: for reduced motion the deck jumps back to the top instead of scrolling there — the one movement app.css's global reset (every transition and animation at .001 ms) cannot reach | `api/public/m/arkiv-m.css:597` | §10 | written, not deployed |
+| MOB14 | `sw.js` precaches `m/focus-m.js`, `m/motion-m.js`, `focus.js` and `m/motion-m.css` for a cold offline open | `api/public/sw.js:68` | §2; `tokens` 150/0; `phone_arkiv` §1 (the static import graph) | written, not deployed |
+| MOB15 | `bin/focus-rows-audit.mjs` `PHONE=1` (and `WINDOW=`): the phone sweep — every phone screen and the fallback's two desktop tabs at 390×844 with a coarse pointer, folding on and off: marks on rows or layouts, rows cut, toggles under 44 px, the deck's height | `bin/focus-rows-audit.mjs:51`, `:91` | run against `test/preview.mjs` on :8308, both windows: 26 screens, 0 faults (docs/AUDIT.md) | written, not deployed |
+| MOB16 | Tests changed: `arkiv_motion`'s three checks that encoded "never on the phone" — the stamp is the Arkiv skin's on both builds, motion.css is the desktop's alone, and the phone follows the same remembered switch with its own sheet | `test/arkiv_motion.test.mjs:93`, `:164` | `arkiv_motion` 56/0 | written, not deployed |
+
+**Revert proofs** (`test/phone_focus_motion.test.mjs`, with `ONLY=` the sections that guard each;
+every file copied first and restored, md5 identical each time):
+
+- MOB1 — the desktop's climb over the whole phone deck (`focusIn(deck)`): §3 fails 7 — tile figures
+  and labels marked (`span.n`, `span.l`), statements, stale warnings and an empty state hidden, the
+  decks 1,349 px taller.
+- MOB2 — marking 120 ms after the change: §4, 198 of 198 blocks on screen unmarked. (The layout-shift
+  score did not move with this revert — 0.0003 either way — so the frame-by-frame watch is the proof.)
+- MOB3 — each verdict removed in turn: the statement with figures folded (§3, and `payout_mobile`
+  fails "to the fils"); the dense tile line cut; the pays rule gone (More 1838 → 1865 px, Safety's
+  sentence and Corporate's band folded).
+- MOB4 — the label written on every pass: §5, 144 rewrites in 3 s on #target. With that AND the phone
+  observer reading its own toggles, the phone page never answers again; with either guard alone it
+  does.
+- MOB5 — the band reason judged by the phrase list: Today's and Money's reason folded.
+- MOB6 — the fallback's loose blocks hosted by the container: a toggle hung on `.m-fallback`, and the
+  empty state's explanation folded. The footer labelled as notes: "ⓘ 2 notes".
+- MOB7 — the toggle at the desktop's size: 17–18 px on every screen; the control sentence kept in
+  the deck.
+- MOB8 — no switch: §6.
+- MOB9 — every render an arrival (the refresh replays the entrance); an arrival that keeps the last
+  drawing (the reopened screen washes "2,057"); no wash; a wash whatever the figure said (7 failures).
+- MOB10 — the arrival fade at a bare class's weight: no fade runs — the old slide's off-switch
+  out-ranked it, found by this test's first run; the press colour at the lift's pace; the boot mark
+  4 px off.
+- MOB11 — the stamp desktop-only again (12 failures); the phone's sheet parser-written (first paint
+  1,608 ms with the sheet held 1.5 s); the boot watch kept after the first screen (a late rejection
+  lays "The dashboard stopped opening" over a working screen).
+- MOB13 — the smooth scroll kept: §10.
+
+Three refinements of the first draft could not be caught by any check and were REMOVED rather than
+kept untested: a segment in a figure's slot, a redraw's baseline snapshot, and a guard while a screen
+is being drawn. No phone screen redraws a tile with another value on a segment switch (People,
+Fleet, Optimise, Online time — measured) or draws a figure twice on its way to the answer.
+
+**Not provable here.** The passive touch listener exists for iOS Safari; headless Chromium applies
+`:active` for neither a held mouse nor a held touch (COVERAGE, end), so the pressed styles are proved
+with the state forced through DevTools (§11).
+
+**Existing suites, each run alone with the change:** `phone_focus_motion` 98/0, `phone_arkiv` 271/0,
+`phone_classic` 34/0, `phone` 159/0, `tokens` 150/0, `arkiv_skin` 119/0, `arkiv_shell` 77/0,
+`arkiv_motion` 56/0, `focus_layout` 58/0, `boot_order` 5/0, `payout_mobile` 39/0, `deposit_ui` 43/0,
+`phone_clock` 8/0 (1 skipped), `brand` 31/0, `signin_page` 35/0. Not run, by this batch's rules:
+`phone_render`, `phone_today_only`, `spacing`, `audit_tools_detect` (they need :8099) and
+`arkiv_classic_frozen` (the Classic skin draws nothing new: `phone_classic` holds its phone DOM).
+
+**Found on the way, not changed** (docs/AUDIT.md): m/app.js prepends the control sentence after a
+screen has drawn — a layout shift of up to 0.37 on Online time with every word shown (with the notes
+folded, the default, the sentence is not drawn); and the phone's refresh paints its stored copy,
+showing new figures only on the next render (COVERAGE, end).

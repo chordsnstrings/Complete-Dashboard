@@ -37,6 +37,14 @@ import { phoneContract } from './ui.js';
    builds nothing on import — its moves run only when the desktop calls
    buildShell() — so the phone takes the words and not the shell. */
 import { windowWords, appliesSentence } from '../shell.js';
+/* FOCUS and MOTION, the Arkiv skin's two desktop layers, on the phone's own
+   shell (m/focus-m.js, m/motion-m.js): both inert under the old skin, motion
+   inert unless index.html stamped data-motion. Static imports, because the
+   folds must be on the first screen before it paints — a fold that arrives
+   after the screen is a screen that jumps — and the two files are fetched in
+   the same wave as ./screens.js, so the first paint waits for nothing more. */
+import { startFocusM } from './focus-m.js';
+import { startMotionM, motionScreen } from './motion-m.js';
 
 const root = document.getElementById('m');
 /* ── which phone app ──────────────────────────────────────────────────────
@@ -108,7 +116,15 @@ if (AK) {
   ctl.append(ctlParts, el('span', 'ak-ctl-caret', '▾'));
   ctl.lastChild.setAttribute('aria-hidden', 'true');
   root.insertBefore(ctl, deck);
+  /* Before the first screen, so the first screen is marked as it is drawn
+     and the first arrival is an arrival. */
+  startFocusM(deck);
+  startMotionM(deck);
 }
+/* The boot sheet (m/motion-m.css §1) says what the wait is: the code is in and
+   running and the shell is up, so from here it is the server's answer to who
+   is signed in. Stamped only while the layer is on (index.html). */
+if (document.documentElement.dataset.boot === 'code') document.documentElement.dataset.boot = 'who';
 
 TABS.forEach((t) => {
   const b = el('button', 'm-tab');
@@ -272,6 +288,13 @@ async function render() {
   state.view = id; state.param = param; state.sub = sub;
 
   const depth = [view, param, sub].filter(Boolean).length;
+  /* MOTION (m/motion-m.js): a new address is a screen arriving and takes the
+     skin's entrance; the same address is a redraw and keeps still. Under the
+     layer the slide below gives way to it (m/motion-m.css §3); with the layer
+     off this returns undefined and the slide is what it always was. And the
+     first screen ends the boot sheet's wait. */
+  motionScreen();
+  if (document.documentElement.dataset.boot) document.documentElement.dataset.boot = 'up';
   deck.classList.remove('push', 'pop');
   void deck.offsetWidth;                      // restart the animation
   deck.classList.add(depth < lastDepth ? 'pop' : 'push');

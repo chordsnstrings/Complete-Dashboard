@@ -1,0 +1,274 @@
+/* MOTION on the phone — the Arkiv skin's motion layer, phone build.
+   ─────────────────────────────────────────────────────────────────────────
+   The operator, 2026-10-27, of the Arkiv skin: "within the arkiv skin little
+   micro animations, highlights, sticking to the theme, but sprinkling in", and
+   "ensuring page load is also engaging". ../motion.css carried that to the
+   desktop build only (HANDOFF 0.11); this is the same layer on the phone's
+   own shell, with the phone's own gestures where a thumb is not a pointer.
+
+   THE SAME FOUR GESTURES, all of them ones the skin already makes standing
+   still: a RULE drawn in ink, PAPER settling (4px, never more), a WASH on a
+   figure (--w-ink, the skin's own highlight) and the HAIRLINE a ledger is
+   ruled on (waiting). Nothing bounces, nothing loops except what really is
+   waiting, nothing moves a figure, and no layout moves: every movement here is
+   opacity, a transform, an outline, a background or a pseudo-element that is
+   out of the flow, so a screen with the layer on is laid out to the pixel as
+   it is with the layer off (test/phone_focus_motion.test.mjs measures it).
+
+   A FILE OF ITS OWN, as the desktop's is: m/arkiv-m.css says how the phone
+   LOOKS and stays free of the layer's @keyframes, and turning the layer off is
+   one switch that leaves every screen exactly as it was. Every selector
+   carries [data-motion="on"] under the skin on the phone build, (0,4,0) at
+   least, so it outranks m.css and m/arkiv-m.css whatever the order.
+
+   LOADED WITHOUT BLOCKING THE FIRST PAINT. index.html APPENDS it (as it does
+   m.css), where the desktop's is written in by the parser: the phone's first
+   paint is the one the front-end audit of 2026-11-12 measured at 10 s on a
+   cold Today, and a sheet that only animates must not hold it back. It is
+   small and lands long before the phone's ~30 modules, so the boot sheet is up
+   for the wait it exists for; if it lands late nothing shifts, because nothing
+   in it moves the layout.
+
+   REDUCED MOTION. Everything that moves sits under
+   @media (prefers-reduced-motion: no-preference). A reader who asked for less
+   motion keeps the boot sheet's words and the press colours, which are not
+   motion, and nothing else; m/motion-m.js checks the same query before it adds
+   a class. (The phone's OWN movements are already cut to .001ms for that
+   reader by app.css's global reset; the one it cannot reach, the deck's
+   smooth scroll back to the top, is stilled in m/arkiv-m.css §23, so it holds
+   with this layer switched off too.)
+
+   WHAT MOVES WHEN is m/motion-m.js's: a screen arriving (not the same screen
+   drawn again), content arriving after a wait the reader watched, and a
+   headline figure that changed between two drawings of a screen. */
+
+/* The pen's reach along a rule, registered so a gradient stop can move: an
+   unregistered custom property flips at the halfway point. */
+@property --akm-pen{syntax:'<percentage>';inherits:false;initial-value:100%}
+
+/* ── 1 · the boot sheet ─────────────────────────────────────────────────────
+   Until m/app.js runs, #m is EMPTY: the phone's first paint is paper and
+   nothing else, for as long as its modules take to arrive (most of the 33
+   files of a cold Today; FIX-STATUS LAZY). The blank becomes the shell it is
+   about to be, out of pseudo-elements alone — no element is added, nothing
+   has to remember to take it down:
+
+     the mark      exactly where the header's wordmark will stand (16px in, the
+                   44px box's centre 28px down, at the wordmark's own size), so
+                   on the frame the shell lands nothing under it moves;
+     the rule      where the control bar's rule will be (56px down), a hairline
+                   the pen writes over and over — the one honest way to say
+                   "working" without a percentage this page cannot know;
+     the label     "Opening the dashboard", in the control bar's own type,
+                   where the bar's words will be — after a beat, so a warm open
+                   never flashes it;
+     the sentence  after four seconds, what the wait is FOR, from data-boot:
+                   "code" (stamped by index.html before the first paint) while
+                   the modules arrive, "who" (m/app.js, once its code runs and
+                   the shell is up) while the server says who is signed in,
+                   and "up" at the first screen, where all of it goes.
+
+   In the second wait the shell is up and the sheet lies OVER it: the label
+   over the still-empty control bar, the sentence in the still-empty deck; the
+   mark is the shell's own by then. "failed" (index.html, a module that would
+   not load or threw before the first screen) stops the pen and says so —
+   "still opening" would be a lie told over a screen that never will. */
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] body:has(> #m:empty)::before{
+  content:"";position:fixed;z-index:1;font-size:var(--d2);
+  top:calc(env(safe-area-inset-top, 0px) + 28px - .5em);left:16px;width:1.06em;height:1em;
+  background:var(--logo) center/contain no-repeat;pointer-events:none}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-boot="code"] #m::before,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-boot="who"] #m::before,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-boot="failed"] #m::before{
+  content:"Opening the dashboard";position:fixed;z-index:21;box-sizing:border-box;
+  top:calc(env(safe-area-inset-top, 0px) + 56px);left:0;right:0;height:44px;padding:0 16px;
+  display:flex;align-items:center;border-top:1px solid var(--hair);background:var(--paper);
+  font-family:var(--mono);font-size:var(--t2);font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+  line-height:1.5;color:var(--grey);pointer-events:none;
+  opacity:0;animation:akm-show 1ms linear .35s forwards}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-boot="code"] #m::after,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-boot="who"] #m::after,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-boot="failed"] #m::after{
+  content:"Still opening.";position:fixed;z-index:21;
+  top:calc(env(safe-area-inset-top, 0px) + 116px);left:16px;right:16px;
+  font-family:var(--sans);font-size:var(--t5);line-height:1.5;color:var(--grey);pointer-events:none;
+  opacity:0;animation:akm-show 1ms linear 4s forwards}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-boot="code"] #m::after{
+  content:"Still opening \2014  the dashboard\2019s code is still arriving."}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-boot="who"] #m::after{
+  content:"Still opening \2014  waiting for the server to answer."}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-boot="failed"] #m::before{
+  content:"The dashboard stopped opening";color:var(--ink);opacity:1;animation:none}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-boot="failed"] #m::after{
+  content:"Something on this page failed to load. Reload the page to try again.";opacity:1;animation:none}
+/* The pen itself: an ink stroke along the rule, drawn left to right and then
+   lifted from the left. Transform only, so the compositor draws it and it
+   keeps moving while the main thread is busy compiling the very code it is
+   waiting for. */
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-boot="code"] body::after,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-boot="who"] body::after{
+  content:"";position:fixed;z-index:22;top:calc(env(safe-area-inset-top, 0px) + 56px);left:0;right:0;
+  height:1.5px;background:var(--ink);transform-origin:0 0;transform:scaleX(0);pointer-events:none}
+
+/* ── 3 · a screen arriving ──────────────────────────────────────────────────
+   m/motion-m.js puts .fx-enter on the deck when the ADDRESS changed, never on
+   a redraw of the same screen. The old skin's slide (m.css m-push/m-pop, 14px
+   on every render, a refresh included) gives way to the skin's settle: each
+   block of the screen comes up 4px in reading order, 45ms apart and no later
+   than the ninth, while every ink rule — a numbered section's, the 00 band's,
+   a plain statement's — is drawn by the pen as its block lands. The rule is a
+   border-image over the border it replaces, exact at any pixel ratio and, at
+   100%, exactly the border: when the class goes, nothing changes. A statement
+   with a tone keeps its own coloured rule (3px, semantic) undrawn. */
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.push > *,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.pop > *{animation:none}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > :nth-child(2){--fx-d:45ms}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > :nth-child(3){--fx-d:90ms}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > :nth-child(4){--fx-d:135ms}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > :nth-child(5){--fx-d:180ms}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > :nth-child(6){--fx-d:225ms}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > :nth-child(7){--fx-d:270ms}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > :nth-child(8){--fx-d:315ms}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > :nth-child(n+9){--fx-d:360ms}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-card:has(> h2),
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-sec,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .sechd,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-stats,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-lede:not(.good):not(.warn):not(.bad){
+  border-image:linear-gradient(90deg,var(--ink) var(--akm-pen),transparent var(--akm-pen)) 1}
+
+/* ── 6 · waiting ────────────────────────────────────────────────────────────
+   THE SKELETON as a ledger line: the phone's 76px placeholder keeps its room
+   (so what replaces it lands where it stood) and becomes the hairline a block
+   is about to be written on, with the pen moving along it, in place of the
+   grey shimmer. THE BUSY HAIRLINE: while any of the screen's requests is out
+   (data.js data-busy; Today's quiet minute refresh is not counted), a 1.5px
+   pen stroke runs along the top of the screen, under the status bar of an
+   installed app. Shown after a beat, so an answer from the browser's own copy
+   never flashes it. */
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-skel{
+  background:linear-gradient(var(--hair),var(--hair)) 0 100% / 100% 1px no-repeat}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-skel::after{
+  inset:auto auto 0 0;width:28%;height:1px;background:var(--ink);transform:translateX(-100%);animation:none}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] #akBusy{
+  position:fixed;top:env(safe-area-inset-top, 0px);left:0;right:0;height:1.5px;z-index:90;overflow:hidden;
+  pointer-events:none;opacity:0;transition:opacity .25s var(--ease)}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-busy] #akBusy{opacity:1;transition-delay:.2s}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] #akBusy::before{
+  content:"";position:absolute;top:0;bottom:0;left:0;width:24%;background:var(--ink);transform:translateX(-100%)}
+
+/* ── 7 · under the thumb ────────────────────────────────────────────────────
+   The desktop's hover details have no phone equivalent — there is no hover,
+   and a :hover rule on a touch screen sticks to whatever was last tapped. The
+   thumb gets the PRESS instead: the colour the skin already gives a pressed
+   row, tile or button arrives in 60ms and lifts over 280ms rather than
+   snapping, and the controls that had no press colour at all (a choice in
+   the sheet, a tab, the ⓘ toggle, a chip, a segment) get the same paper-2.
+   A colour arriving is not motion; these stay on under reduced motion. The
+   1px give of a pressed button, the current tab's rule drawn in, and folded
+   notes coming up when opened are motion, and sit below with the rest. */
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-row,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] a.m-stat,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-btn,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-opt,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-pick,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .ak-ctl,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-ico,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-tab,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .fx-more,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] button.m-chip,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-seg button{
+  transition:background-color .28s var(--ease),color .18s var(--ease)}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-row:active,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] a.m-stat:active,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-btn:active,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-opt:active,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-pick:active,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .ak-ctl:active,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-ico:active,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-tab:active,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .fx-more:active,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] button.m-chip:active,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-seg button:active{transition-duration:60ms}
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-opt:active,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-tab:active,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .fx-more:active,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] button.m-chip:not(.on):active,
+:root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-seg button:not(.on):active{background:var(--paper-2)}
+
+/* ── everything that MOVES ──────────────────────────────────────────────── */
+@media (prefers-reduced-motion:no-preference){
+  /* §1 the pen on the boot sheet, and its label easing in. */
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-boot="code"] body::after,
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-boot="who"] body::after{
+    opacity:0;animation:akm-show .3s var(--ease) .35s forwards,akm-boot-pen 1.9s var(--ease) .35s infinite}
+
+  /* §3 the screen: blocks settle, rules are drawn. */
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > *{
+    animation:akm-in .46s var(--ease-out) var(--fx-d,0ms) backwards}
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-card:has(> h2),
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-sec,
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .sechd,
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-stats,
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck.fx-enter > .m-lede:not(.good):not(.warn):not(.bad){
+    animation:akm-in .46s var(--ease-out) var(--fx-d,0ms) backwards,
+      akm-pen .72s var(--ease-out) calc(var(--fx-d,0ms) + 60ms) backwards}
+
+  /* §4 content that arrived after a wait the reader watched: it comes up, it
+     does not jump in. Opacity only — a list that slid would move every row
+     under the thumb. Named again as a child of the deck, at the weight of the
+     rule that stills the old slide (§3): at lower weight that rule won on
+     every block of the deck, and a screen that had stood on its skeleton for
+     ten seconds landed with no movement at all (found by this layer's own
+     test, the first time it ran). */
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .fx-arrive,
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-deck > .fx-arrive{animation:akm-fade .34s var(--ease-out) backwards}
+
+  /* §5 a figure that moved between two drawings of a screen: boxed in ink and
+     washed, the way a proof-reader marks a changed figure, then lifted. An
+     outline, so nothing is laid out again; on the tile's figure the box is
+     the number's width, not the tile's. */
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .fx-tick{outline:1px solid transparent;outline-offset:3px;
+    animation:akm-tick 2.4s var(--ease) both}
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-stat .n.fx-tick{width:fit-content}
+
+  /* §6 the pen along a skeleton's line and along the top of the screen. */
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-skel::after{animation:akm-scan 1.5s var(--ease) infinite}
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"][data-busy] #akBusy::before{animation:akm-busy 1.3s var(--ease) infinite}
+
+  /* §7 a button gives 1px under the thumb (`translate`, so a control that is
+     already transformed keeps its transform); the lit tab's rule is drawn in
+     from the left when it becomes the lit one; folded notes come up when the
+     reader opens them. A row does not move: a thumb that lands on one is as
+     often starting a scroll as a tap. */
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-btn:not(:disabled):active,
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-ico:active,
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .fx-more:active,
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] button.m-chip:active,
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-seg button:not(:disabled):active{translate:0 1px}
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .m-tab.on::before{
+    transform-origin:0 50%;animation:akm-grow .36s var(--ease-out) backwards}
+  :root[data-skin="arkiv"][data-ui="phone"][data-motion="on"] .fx-unfold.fx-open [data-fx="fold"]{
+    animation:akm-in .3s var(--ease-out) backwards}
+}
+
+@keyframes akm-show{to{opacity:1}}
+@keyframes akm-fade{from{opacity:0}}
+@keyframes akm-in{from{opacity:0;transform:translateY(4px)}}
+@keyframes akm-pen{from{--akm-pen:0%}to{--akm-pen:100%}}
+@keyframes akm-grow{from{transform:scaleX(0)}}
+/* Drawn, then lifted from the left: visible from p to the end as p runs 0→1,
+   which is translateX(p) scaleX(1−p) from a left origin. */
+@keyframes akm-boot-pen{
+  0%{transform:translateX(0) scaleX(0)}
+  50%{transform:translateX(0) scaleX(1)}
+  100%{transform:translateX(100%) scaleX(0)}}
+/* 28% wide, so 100/28 of its own width carries it past the far end. */
+@keyframes akm-scan{from{transform:translateX(-100%)}to{transform:translateX(358%)}}
+@keyframes akm-busy{from{transform:translateX(-100%)}to{transform:translateX(417%)}}
+/* No background at either end: it comes from, and goes back to, whatever the
+   figure wears at rest — nothing, or the highlighter's own wash. */
+@keyframes akm-tick{
+  0%{outline-color:transparent}
+  8%,40%{background-color:var(--w-ink);outline-color:var(--ink)}
+  100%{outline-color:transparent}}

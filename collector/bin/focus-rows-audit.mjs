@@ -27,13 +27,28 @@
    ONLY narrows to the routes given (comma separated); MORE adds routes to
    the full list; SETTLE is the wait after the network goes quiet (ms). A slow
    page read before its panels arrive reports fewer marks, so compare two
-   servers with the same SETTLE, run side by side. */
+   servers with the same SETTLE, run side by side.
+
+   PHONE=1 sweeps the PHONE build instead (m/focus-m.js, 2026-11-12): every
+   phone screen test/phone_harness.mjs lists (the segment taps included) and
+   the two desktop tabs its fallback draws, at 390×844 with a coarse pointer
+   and the Arkiv skin. Each screen is opened twice, folding on and off, and
+   it reports, besides the marked layout elements above: every mark on a
+   row, a list, a tile's figure or label, a button or a link; every ROW whose
+   height differs between the two (a cut row is shorter with folding on);
+   every ⓘ toggle under 44px; and what a phone reader is spared — the deck's
+   height on and off.
+
+     PORT=8308 node test/preview.mjs &
+     PHONE=1 node bin/focus-rows-audit.mjs http://127.0.0.1:8308 /tmp/fx-phone.json */
 import { writeFileSync } from 'node:fs';
 import { launchChromium } from '../test/browser.mjs';
 import { ROUTES } from '../test/routes_list.mjs';
+import { SCREENS as PHONE_SCREENS, DESKTOP_TABS } from '../test/phone_harness.mjs';
 
 const BASE = process.argv[2] || 'http://127.0.0.1:8200';
 const OUT = process.argv[3] || '/tmp/focus-rows-audit.json';
+const PHONE = process.env.PHONE === '1';
 const EXTRA = ['import-sheet', 'opening', 'salary', 'advances', 'charging', 'policy', 'deposits', 'payouts', 'supply',
   'cancellations', 'hr-roster', 'same-person', 'feeds', 'unauthorized'];
 const SKIP = /not-a-|nonsense|zzz-/;
@@ -69,8 +84,85 @@ const PROBE = () => {
   return { marks: document.querySelectorAll('#view [data-fx]:not([data-fx="keep"])').length, rows };
 };
 
+/* THE PHONE'S PROBE: the deck of the phone build, read once with folding on
+   and once off. A row is the phone's table (m/ui.js row()), so a mark on or
+   in one is a fault however it came to be there, and a row that is shorter
+   with folding on has been cut. */
+const PROBE_PHONE = () => {
+  const deck = document.querySelector('#m .m-deck');
+  if (!deck) return { error: 'no phone deck — is this the phone build?' };
+  const LAYOUT = 'div, section, article, ul, ol, dl, table, figure, header, footer, nav, aside, form, fieldset';
+  const name = (e) => `${e.tagName.toLowerCase()}.${String(e.className).split(' ')[0]}`;
+  const marks = [...deck.querySelectorAll('[data-fx]:not([data-fx="keep"])')];
+  return {
+    marks: marks.length,
+    fx: marks.reduce((o, m) => ({ ...o, [m.dataset.fx]: (o[m.dataset.fx] || 0) + 1 }), {}),
+    layout: marks.filter((m) => [...m.children].some((c) => c.matches(LAYOUT))).map((m) => ({ fx: m.dataset.fx, el: name(m),
+      text: m.textContent.replace(/\s+/g, ' ').trim().slice(0, 90) })),
+    onRows: [...deck.querySelectorAll('.m-row [data-fx]:not([data-fx="keep"]), .m-row[data-fx]:not([data-fx="keep"]), '
+      + '.m-rows[data-fx]:not([data-fx="keep"]), .m-stat .n[data-fx], .m-stat .l[data-fx], button[data-fx], a[data-fx]:not([data-fx="keep"])')].map(name),
+    rows: [...deck.querySelectorAll('.m-row')].map((r) => Math.round(r.getBoundingClientRect().height)),
+    toggles: [...document.querySelectorAll('#m .fx-more')].map((b) => Math.round(b.getBoundingClientRect().height)),
+    height: deck.scrollHeight,
+  };
+};
+/* WINDOW (phone only) is added to every screen's address — the seeded
+   preview holds August 2026 alone, so `WINDOW=from=2026-08-01&to=2026-08-31`
+   reads its screens full rather than empty. */
+const withWindow = (r) => (process.env.WINDOW ? `${r}${r.includes('?') ? '&' : '?'}${process.env.WINDOW}` : r);
+const phoneRoutes = (ONLY ? ONLY.map((r) => ({ route: r })) : [...PHONE_SCREENS, ...DESKTOP_TABS.map((r) => ({ route: r }))])
+  .filter((s) => !SKIP.test(s.route)).map((s) => ({ ...s, route: withWindow(sub(s.route)) }));
+
 const browser = await launchChromium();
 const results = [];
+if (PHONE) {
+  const queue = [...phoneRoutes];
+  const read = async (s, focus) => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true,
+      serviceWorkers: 'block', timezoneId: 'Asia/Dubai' });
+    await ctx.addInitScript((f) => { try { localStorage.setItem('fleet.focus', f); } catch { /* */ } }, focus);
+    const page = await ctx.newPage();
+    try {
+      await page.goto(`${BASE}/?ui=phone&skin=arkiv#${s.route}`, { waitUntil: 'load', timeout: 60000 });
+      await page.waitForLoadState('networkidle', { timeout: 90000 }).catch(() => {});
+      await page.waitForFunction(() => !document.querySelector('#m .m-skel'), null, { timeout: 30000 }).catch(() => {});
+      if (s.tap) { await page.click(s.tap).catch(() => {}); await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {}); }
+      await page.waitForTimeout(SETTLE);
+      return await page.evaluate(PROBE_PHONE);
+    } finally { await ctx.close(); }
+  };
+  const worker = async () => {
+    for (let s; (s = queue.shift());) {
+      const name = s.as || s.route;
+      try {
+        const on = await read(s, 'on');
+        const off = await read(s, 'off');
+        const cut = on.rows && off.rows && on.rows.length === off.rows.length
+          ? on.rows.map((h, i) => (h !== off.rows[i] ? `row ${i}: ${off.rows[i]} → ${h}px` : null)).filter(Boolean)
+          : [`row count ${off.rows?.length} → ${on.rows?.length} (read again with a longer SETTLE)`];
+        const small = (on.toggles || []).filter((h) => h < 44);
+        results.push({ route: name, ...on, rowsCut: cut, smallToggles: small, heightOff: off.height });
+        const bad = [on.layout?.length && `${on.layout.length} layout marked`, on.onRows?.length && `${on.onRows.length} on rows`,
+          cut.length && `${cut.length} rows cut`, small.length && `${small.length} toggles < 44px`].filter(Boolean);
+        console.log(`${name}: ${on.marks} marks ${JSON.stringify(on.fx)} · deck ${off.height} → ${on.height}px${bad.length ? ` · ${bad.join(', ')}` : ''}`);
+      } catch (e) {
+        results.push({ route: name, error: String(e).slice(0, 160) });
+        console.log(`${name}: ERROR ${String(e).slice(0, 100)}`);
+      }
+    }
+  };
+  console.log(`${phoneRoutes.length} phone screens`);
+  /* Two workers: each screen is two page loads, and the phone's Today is the
+     slowest screen the product has. */
+  await Promise.all([worker(), worker()]);
+  await browser.close();
+  writeFileSync(OUT, JSON.stringify(results, null, 1));
+  const faults = results.filter((x) => x.layout?.length || x.onRows?.length || x.rowsCut?.length || x.smallToggles?.length);
+  const hOn = results.reduce((a, x) => a + (x.height || 0), 0), hOff = results.reduce((a, x) => a + (x.heightOff || 0), 0);
+  console.log(`\n${results.length} phone screens, ${faults.length} with a fault (a mark on a row or a layout, a row cut, a toggle under 44px); `
+    + `deck ${hOff} → ${hOn}px over all; errors ${results.filter((x) => x.error).length} → ${OUT}`);
+  process.exit(0);
+}
 const queue = [...routes];
 const worker = async () => {
   for (let r; (r = queue.shift());) {

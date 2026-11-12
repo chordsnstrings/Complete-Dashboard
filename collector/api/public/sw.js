@@ -61,6 +61,11 @@ const SHELL_FILES = [
      under the Arkiv tokens — usable, but not what the reader chose. */
   '/m/arkiv-m.css',
   '/m/app.js', '/m/ui.js', '/m/screens.js',
+  /* FOCUS and MOTION on the phone (2026-11-12, FIX-STATUS MOB): m/app.js
+     imports both modules, m/focus-m.js imports the desktop's ../focus.js for
+     its rules, and index.html appends the motion sheet for a reader with the
+     layer on. A cold offline open needs all four. */
+  '/m/focus-m.js', '/m/motion-m.js', '/focus.js', '/m/motion-m.css',
   /* Every module the phone's three files reach, followed by hand rather than
      assumed: m/app.js imports ../daterange.js, and daterange.js imports
      ./tz.js, and data.js imports ./swr.js. None of the three were listed, so a
