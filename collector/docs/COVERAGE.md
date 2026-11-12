@@ -10834,3 +10834,11 @@ What the OPS workstream learned that is not written down above. FIX-STATUS "OPS"
   column, and a wrong count there is a forgeable address recorded as fact.
   The request budget does not depend on it unless neither connecting-ip
   header arrives.
+* **Production's `/api/health` before this branch** (GET, 2026-11-12 04:2xZ,
+  production `52cbf9d`): `{"ok":true,"migrating":false}` and nothing else —
+  no commit, no front end — served `cache-control: private` through
+  Cloudflare (`server: cloudflare`, a `cf-ray`). `/sw.js` served
+  `const VERSION = 'fleet-714b035d76ad'`: `fleet-` + 12 hex, the string the
+  new `frontend` field reports from the same `shellHash`. After the deploy,
+  health should carry `commit`, `frontend`, `started_at`, `uptime_s` and
+  `rate_limit`, with `cache-control: no-store`.
