@@ -74,15 +74,37 @@
    shape api/public/data.js already prints ("429 too many requests: …"), and
    Cache-Control: no-store so no cache keeps it.
 
-   Exempt: /api/health (above), and the process's own loopback fetches — the
-   cache warmer (api/warm.js) and the stale-revalidate refresh (api/cache.js).
-   Those carry the per-process internal token from a loopback socket; that is
-   exactly what identify() calls kind 'system', and the rule is the same
-   function, isInternal(), so the two can never disagree. A plain loopback
-   caller WITHOUT the token is budgeted like anyone else: it costs a local
-   tool nothing at 600 a minute, and it means no assumption about what
-   App Platform's routing layer looks like from inside the container is
-   needed for the exemption to be safe.
+   Exempt: /api/health (above), and the process calling itself over loopback.
+   Two kinds of self-call exist, and both are exempt:
+     - the cache warmer (api/warm.js) and the stale-revalidate refresh
+       (api/cache.js) carry the per-process internal token from a loopback
+       socket; that is exactly what identify() calls kind 'system', and the
+       rule is the same function, isInternal(), so the two can never disagree;
+     - the assistant's tool calls (api/agent_routes.js, fetchApi) carry the
+       ASKER's cookie and no token — on purpose, so the gate shapes each
+       answer to the asker's access — from a loopback socket.
+   The second kind was budgeted at first (review of 2026-11-12), and it was
+   wrong twice over. Every asker's tool calls arrive from 127.0.0.1 with no
+   connecting-ip header, so ALL of them shared one '127.0.0.1' key: 600 reads
+   a minute for every conversation on the server together, one busy asker
+   starving the rest. And each was counted under 'req.ip' in health — the
+   very count the deploy check reads as "the platform sends neither header,
+   readers share one key, switch the budget off". They are already paid for:
+   the chat request that caused them spent its asker's chat budget (20 per
+   10 minutes), and one turn is capped at MAX_STEPS model steps.
+   selfCall() below is the rule: a loopback socket AND none of the headers a
+   relaying proxy adds (X-Forwarded-For, Forwarded, X-Real-IP, the two
+   connecting-ip headers). A reader's request reaches the container from
+   App Platform's router over the container network, never over loopback —
+   the image runs `node api/server.js` directly, with nothing in front of it
+   inside the container — and anything that did relay over loopback would
+   add X-Forwarded-For (it is what `trust proxy` reads). Were that ever
+   wrong, the cost is those requests going unbudgeted — the state before
+   this budget existed — not a reader locked out. A loopback request that
+   DOES carry a forwarding header is budgeted by it like any other. Health
+   counts self-calls separately (self_calls_since_boot), never as 'req.ip'.
+   The same rule keeps a local test that starts the real server and drives
+   it from 127.0.0.1 (signin_page, access_pages) clear of the budget.
 
    ── WHICH ADDRESS IS "THE CLIENT" — verified and assumed ─────────────────
    The key is the first of these that holds exactly one valid IP address:
@@ -123,8 +145,15 @@
 
    ── MEMORY IS BOUNDED ────────────────────────────────────────────────────
    One entry per client key, holding up to four small counters. Entries whose
-   windows have all ended are swept at most once a minute and whenever the map
-   is full. At RATE_LIMIT_MAX_KEYS (default 10,000 — this dashboard has tens
+   windows have all ended are swept at most once a minute, and when the map is
+   full and a new key arrives — but then only once the earliest window held
+   can have ended, and at most once a second. The first version swept on
+   EVERY new key while full: with 10,000 live entries that is a 10,000-step
+   walk per request that frees nothing (no window can end sooner than the
+   earliest one held), so a flood of fresh keys — exactly the case the cap
+   exists for — bought a full scan of the map with each refused request
+   (review of 2026-11-12; test/ops_health_budget.test.mjs counts the walks).
+   At RATE_LIMIT_MAX_KEYS (default 10,000 — this dashboard has tens
    of readers) a NEW key is not added: it shares one overflow entry with every
    other new key until the sweep frees room. Clients already tracked keep
    their own budgets; under a flood of fresh keys, the newcomers are budgeted
@@ -247,6 +276,17 @@ export function clientKey(req) {
   return { key: ip, source: 'req.ip', invalid };
 }
 
+/* Is this the process calling itself? A loopback socket, and none of the
+   headers a relaying proxy adds — see "Exempt:" in the header for why both,
+   and why the assistant's tool calls depend on it. The loopback spellings are
+   the three api/access/internal.js accepts for isInternal(). */
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const RELAYED = ['x-forwarded-for', 'forwarded', 'x-real-ip', 'do-connecting-ip', 'cf-connecting-ip'];
+export function selfCall(req) {
+  if (!LOOPBACK.has(String(req.socket?.remoteAddress || ''))) return false;
+  return RELAYED.every((h) => req.headers?.[h] === undefined);
+}
+
 /* ── which budget a request spends ──────────────────────────────────────── */
 
 export const BUDGETS = {
@@ -262,12 +302,18 @@ export const BUDGETS = {
 };
 
 /* The provider-calling actions outside /api/probe/*. Each of these spends a
-   provider's quota or mints provider state on every call:
+   provider's quota or mints provider state on every call it is not refused:
      /api/finance/payouts/verify   asks Uber/Bolt for the payouts to compare
-     /api/uber/fares/run           runs Uber fare collection now
-     /api/analyst/run              a model call (MiniMax was refusing with 402
-                                   "usage limit reached" on 2026-11-12)
-     /api/tesla/connect            mints a Tesla sign-in link and stores its state */
+     /api/uber/fares/run           queues an Uber fares pass for the worker,
+                                   which spends Uber's report slots (the route
+                                   answers 409 while one is queued or running)
+     /api/analyst/run              queues an analyst pass: a model call once
+                                   the worker runs it (409 likewise; MiniMax
+                                   was refusing with 402 "usage limit reached"
+                                   on 2026-11-12)
+     /api/tesla/connect            mints a Tesla sign-in link and stores its state
+   The two queued actions already refuse a duplicate; the budget bounds how
+   often a client can start a new pass once the last one has finished. */
 export const PROVIDER_PATHS = new Set(['/api/finance/payouts/verify', '/api/uber/fares/run',
   '/api/analyst/run', '/api/tesla/connect']);
 /* Under /api/probe/ but a database read — see the header. */
@@ -348,6 +394,7 @@ export function makeRateLimiter({ env = process.env, now = Date.now, log = null 
     log?.warn?.('ratelimit', 'RATE_LIMIT_MAX_KEYS is not a positive whole number — keeping 10000');
   }
   const SWEEP_MS = 60_000;
+  const FULL_SWEEP_MS = 1_000;
   const clients = new Map();          // key → { b: { [budget]: { n, reset } }, until }
   const overflow = { b: {}, until: 0 };
   const sources = Object.fromEntries(KEY_SOURCES.map((s) => [s, 0]));
@@ -355,11 +402,23 @@ export function makeRateLimiter({ env = process.env, now = Date.now, log = null 
   let invalidHeaders = 0;
   let refused = 0;
   let overflowed = 0;
+  let selfCalls = 0;
   let lastSweep = 0;
+  let sweeps = 0;
+  /* No entry held can expire before this: the smallest `until` the last sweep
+     kept, lowered as entries are added. An entry's `until` only ever grows,
+     so it stays a true lower bound — a sweep before it cannot free anything. */
+  let nextExpiry = Infinity;
 
   const sweep = (t) => {
-    for (const [k, c] of clients) if (c.until <= t) clients.delete(k);
+    let soonest = Infinity;
+    for (const [k, c] of clients) {
+      if (c.until <= t) clients.delete(k);
+      else if (c.until < soonest) soonest = c.until;
+    }
+    nextExpiry = soonest;
     lastSweep = t;
+    sweeps += 1;
   };
 
   function limiter(req, res, next) {
@@ -367,6 +426,8 @@ export function makeRateLimiter({ env = process.env, now = Date.now, log = null 
     const path = budgetPath(req.path);
     if (path === null || path === '/api/health') return next();
     if (isInternal(req)) return next();
+    /* The assistant's tool calls and any other self-call — see "Exempt:". */
+    if (selfCall(req)) { selfCalls += 1; return next(); }
 
     const t = now();
     const { key, source, invalid } = clientKey(req);
@@ -377,7 +438,10 @@ export function makeRateLimiter({ env = process.env, now = Date.now, log = null 
 
     let c = clients.get(key);
     if (!c) {
-      if (clients.size >= maxKeys) sweep(t);
+      /* Full: walk the map only when something in it can have expired, and
+         not more than once a second — under a flood of fresh keys whose
+         entries expire one by one, each expiry would otherwise buy a walk. */
+      if (clients.size >= maxKeys && t >= nextExpiry && t - lastSweep >= FULL_SWEEP_MS) sweep(t);
       if (clients.size >= maxKeys) { c = overflow; overflowed += 1; }
       else { c = { b: {}, until: 0 }; clients.set(key, c); }
     }
@@ -389,6 +453,7 @@ export function makeRateLimiter({ env = process.env, now = Date.now, log = null 
       c.b[name] = w;
     }
     if (w.reset > c.until) c.until = w.reset;
+    if (c !== overflow && c.until < nextExpiry) nextExpiry = c.until;
     if (w.n >= b.limit) {
       refused += 1;
       const retryAfter = Math.max(1, Math.ceil((w.reset - t) / 1000));
@@ -407,8 +472,12 @@ export function makeRateLimiter({ env = process.env, now = Date.now, log = null 
     return {
       enabled: true,
       key_source_last: lastSource,
-      key_source_this_request: req ? clientKey(req).source : null,
+      key_source_this_request: req ? (selfCall(req) ? 'self-call (exempt)' : clientKey(req).source) : null,
       key_sources_since_boot: { ...sources },
+      /* Not in key_sources_since_boot: a self-call is not a reader, and
+         counting it under 'req.ip' would fake the very signal the deploy
+         check reads there. */
+      self_calls_since_boot: selfCalls,
       invalid_header_values_since_boot: invalidHeaders,
       clients_tracked: clients.size,
       max_clients: maxKeys,
@@ -418,8 +487,10 @@ export function makeRateLimiter({ env = process.env, now = Date.now, log = null 
         .map(([k, v]) => [k, { limit: v.limit, window_s: v.window_s, from_env: v.from_env }])),
     };
   };
-  /* For tests: the number of entries held, overflow excluded. */
+  /* For tests: the number of entries held, overflow excluded, and how many
+     times the map has been walked. */
   limiter.size = () => clients.size;
+  limiter.sweeps = () => sweeps;
   return limiter;
 }
 

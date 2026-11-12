@@ -10842,3 +10842,41 @@ What the OPS workstream learned that is not written down above. FIX-STATUS "OPS"
   new `frontend` field reports from the same `shellHash`. After the deploy,
   health should carry `commit`, `frontend`, `started_at`, `uptime_s` and
   `rate_limit`, with `cache-control: no-store`.
+  Re-measured by the review, 2026-11-12 ~05:40Z: the same two answers
+  (`{"ok":true,"migrating":false}`, `cache-control: private`, and
+  `fleet-714b035d76ad`).
+
+### What the review of fix/ops added (2026-11-12)
+
+* **A loopback caller is not necessarily "the system".** The assistant's
+  tool calls (`api/agent_routes.js`, `fetchApi`) come from 127.0.0.1 carrying
+  the ASKER's cookie and no internal token, so a budget that exempts only
+  token-bearing loopback calls (isInternal) puts every conversation on the
+  server under one `127.0.0.1` key, and — worse for the deploy check —
+  counts every tool call as `req.ip`, the source whose presence means "the
+  platform sends neither connecting-ip header". `selfCall()` in api/ops.js
+  (a loopback socket and none of X-Forwarded-For, Forwarded, X-Real-IP,
+  do-/cf-connecting-ip) is the rule; health counts self-calls apart, as
+  `self_calls_since_boot`. Anything that classifies callers by address has to
+  know about this path: a per-asker loopback fetch is not a reader and not
+  the warmer either.
+* **The house's own tools reach production from ONE address, and after this
+  deploy they share one budget.** `bin/live-ui.mjs`, `bin/prod-mirror.mjs`,
+  `bin/page-audit.mjs` and `bin/live-audit.mjs` all fetch production from the
+  sandbox's egress address, so together they get 600 reads a minute. A full
+  render audit through live-ui is "something over a thousand upstream
+  requests" (its own header); run sequentially that has stayed well under the
+  budget, but parallel browser contexts can pass it, and the page then shows
+  the 429's reason ("too many requests from this address — try again in N
+  seconds") — a refusal, not a product defect. Run audits one context at a
+  time, or set `RATE_LIMIT_READS_PER_MIN` higher for the pass (a spec change:
+  it redeploys the last built commit, trap 25).
+* **Production runs Node 20; CI and this sandbox run Node 22.**
+  `collector/Dockerfile` is `FROM node:20-slim`; `.github/workflows/ci.yml`
+  uses Node 22 (as its brief specified) and the sandbox has v22.22.0. A green
+  run therefore does not prove the code runs on production's runtime: an API
+  that exists only from Node 21/22 (`Object.groupBy`, `Promise.withResolvers`,
+  the new `Set` methods) passes `node --check` and every test here and throws
+  on production. None is used in src/, api/ or bin/
+  today (grep, 2026-11-12). Either move the Dockerfile to Node 22 or give CI a
+  Node 20 leg before relying on CI for this.

@@ -276,7 +276,9 @@ app.use((req, res, next) => {
    questions per 10 minutes and 10 provider-calling actions an hour per client,
    429 with Retry-After beyond that. Before identify() too, so a client over
    budget costs no access_config query. The process's own warmer and refresh
-   are exempt by the same isInternal() rule identify() uses for kind 'system'.
+   are exempt by the same isInternal() rule identify() uses for kind 'system',
+   and so is every other self-call — the assistant's tool calls above all,
+   which come over loopback with the asker's cookie (api/ops.js, selfCall()).
 
    `shellHash` is read through a getter: it is computed far below, with the
    static files, and is initialised long before anything can connect. */

@@ -137,6 +137,18 @@ const getJson = async (base, path, headers = {}, timeoutMs = 3000) => {
   }
   check('the warmer (internal token on loopback) is never budgeted', sysOk === 8, `${sysOk} of 8 reached identify()`);
 
+  /* The assistant's tool calls look like this over real HTTP: loopback, the
+     asker's cookie, no token, no forwarding header. Past the budget of five. */
+  let selfOk = 0;
+  for (let i = 0; i < 8; i += 1) {
+    try { await getJson(base, '/api/kpis', { cookie: 'fm_sid=not-a-real-session' }, 250); } catch { selfOk += 1; }
+  }
+  check('a self-call over loopback (the assistant\'s fetchApi) is never budgeted', selfOk === 8, `${selfOk} of 8 reached identify()`);
+  const h4 = await getJson(base, '/api/health').catch(() => ({ body: {} }));
+  check('…and health counts it apart, never as req.ip',
+    h4.body?.rate_limit?.self_calls_since_boot >= 8 && h4.body?.rate_limit?.key_sources_since_boot?.['req.ip'] === 0,
+    JSON.stringify(h4.body?.rate_limit));
+
   srv.closeAllConnections?.();
   srv.close();
   for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
@@ -277,15 +289,35 @@ const drive = (lim, req) => { const res = fakeRes(); let passed = false; lim(req
     chat.slice(0, 20).every((x) => x.passed) && !chat[20].passed && chat[20].res.headers['retry-after'] === '600');
   check('/api/health is exempt inside the limiter too', Array.from({ length: 700 }, () => drive(lim, fakeReq('GET', '/api/health', A))).every((x) => x.passed));
   check('pages and scripts are not budgeted', Array.from({ length: 700 }, () => drive(lim, fakeReq('GET', '/app.js', A))).every((x) => x.passed));
-  /* A loopback caller WITHOUT the token is budgeted like anyone else. */
-  const local = Array.from({ length: 601 }, () => drive(lim, fakeReq('GET', '/api/kpis', {}, '127.0.0.1')));
-  check('a loopback caller without the internal token is budgeted', !local[600].passed && local.slice(0, 600).every((x) => x.passed));
+  /* The process calling itself. The assistant's tool calls (api/agent_routes.js,
+     fetchApi) come from a loopback socket carrying the ASKER's cookie, no
+     internal token and no forwarding header — every asker's calls alike. The
+     first version budgeted them: all conversations then shared one
+     '127.0.0.1' key, and each call was counted as 'req.ip' in health, the
+     count the deploy check reads as "the platform sends neither header". */
+  const agentLike = { cookie: 'fm_sid=not-a-real-session' };
+  const self = Array.from({ length: 700 }, () => drive(lim, fakeReq('GET', '/api/kpis', agentLike, '127.0.0.1')));
+  check('a self-call (loopback socket, no forwarding header) is not budgeted, even past 600 a minute',
+    self.every((x) => x.passed), `${self.filter((x) => !x.passed).length} refused`);
+  check('…in the IPv4-mapped and IPv6 loopback spellings too',
+    ['::ffff:127.0.0.1', '::1'].every((a) => drive(lim, fakeReq('GET', '/api/kpis', {}, a)).passed));
+  /* Relayed over loopback: anything in front of the process adds a forwarding
+     header, and is budgeted by the address it names. */
+  const relayed = Array.from({ length: 601 },
+    () => drive(lim, fakeReq('GET', '/api/kpis', { 'x-forwarded-for': '203.0.113.30' }, '127.0.0.1')));
+  check('a loopback request that carries a forwarding header is budgeted like any other',
+    !relayed[600].passed && relayed.slice(0, 600).every((x) => x.passed));
+  const viaHeader = drive(lim, fakeReq('GET', '/api/probe/uber/rest', { 'do-connecting-ip': '203.0.113.20' }, '127.0.0.1'));
+  check('…including one that names a connecting-ip (that client is over its provider budget here)', !viaHeader.passed);
   const d = lim.describe(fakeReq('GET', '/api/health', {}));
-  check('health counts which header keyed each request since boot',
-    d.key_sources_since_boot['cf-connecting-ip'] === 11 + 1 + 21 && d.key_sources_since_boot['req.ip'] === 601,
-    JSON.stringify(d.key_sources_since_boot));
-  check('…and how many were refused', d.refused_since_boot === 3, String(d.refused_since_boot));
+  check('health counts which header keyed each request since boot, self-calls apart and never as req.ip',
+    d.key_sources_since_boot['cf-connecting-ip'] === 11 + 1 + 21 && d.key_sources_since_boot['do-connecting-ip'] === 1
+    && d.key_sources_since_boot['req.ip'] === 601 && d.self_calls_since_boot === 702,
+    JSON.stringify({ ...d.key_sources_since_boot, self: d.self_calls_since_boot }));
+  check('…and how many were refused', d.refused_since_boot === 4, String(d.refused_since_boot));
   check('…with no address in it', !/\d+\.\d+\.\d+\.\d+/.test(JSON.stringify(d)), JSON.stringify(d));
+  check('a health request that is itself a self-call says so',
+    lim.describe(fakeReq('GET', '/api/health', {}, '127.0.0.1')).key_source_this_request === 'self-call (exempt)');
 }
 {
   const lim = makeRateLimiter({ env: { RATE_LIMIT: 'off', RATE_LIMIT_READS_PER_MIN: '1' } });
@@ -332,6 +364,39 @@ console.log('\nthe key map stops at its cap');
   clock += 61_000;
   const fresh = drive(lim, fakeReq('GET', '/api/kpis', { 'do-connecting-ip': '198.51.100.200' }));
   check('once windows end the sweep frees room for a new key of its own', fresh.passed && lim.size() === 1, String(lim.size()));
+}
+{
+  /* A full map under a flood of fresh keys, with nothing in it able to expire
+     for an hour: the first version walked all of it for every newcomer. */
+  let clock = 20_000_000;
+  const lim = makeRateLimiter({ env: { RATE_LIMIT_MAX_KEYS: '50' }, now: () => clock });
+  for (let i = 0; i < 50; i += 1) drive(lim, fakeReq('GET', '/api/probe/uber/rest', { 'do-connecting-ip': `198.51.100.${i + 1}` }));
+  const before = lim.sweeps();
+  for (let i = 0; i < 2000; i += 1) {
+    clock += 1;
+    drive(lim, fakeReq('GET', '/api/kpis', { 'do-connecting-ip': `203.0.${Math.floor(i / 250)}.${(i % 250) + 1}` }));
+  }
+  check('2,000 fresh keys against a full map walk it at most once, not once each',
+    lim.size() === 50 && lim.sweeps() - before <= 1, `${lim.sweeps() - before} walks, ${lim.size()} held`);
+}
+{
+  /* …and still free room as soon as something CAN expire, before the next
+     once-a-minute sweep would. K0 at t0 and K1..K4 at t0+30 s fill the map
+     (cap 5, reads windows of 60 s); the sweep at t0+61 s frees K0 and admits
+     N1; at t0+91 s K1..K4 have expired and only the full-map walk can see it. */
+  let clock = 30_000_000;
+  const lim = makeRateLimiter({ env: { RATE_LIMIT_MAX_KEYS: '5', RATE_LIMIT_READS_PER_MIN: '1' }, now: () => clock });
+  const k = (n) => fakeReq('GET', '/api/kpis', { 'do-connecting-ip': `198.51.100.${n}` });
+  drive(lim, k(1));
+  clock += 30_000;
+  for (let n = 2; n <= 5; n += 1) drive(lim, k(n));
+  clock += 31_000;
+  drive(lim, k(100));                          // the periodic sweep frees K0; N1 takes its place
+  drive(lim, k(101));                          // map full, nothing expired: overflow (spends its one read)
+  clock += 30_000;
+  const n2 = drive(lim, k(102));
+  check('a newcomer gets an entry of its own once the earliest window has ended, between minute sweeps',
+    n2.passed && lim.size() === 2, `passed ${n2.passed}, ${lim.size()} held`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
