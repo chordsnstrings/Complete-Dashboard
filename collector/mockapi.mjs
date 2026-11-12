@@ -15,6 +15,10 @@ import { deriveFleetName, platformLabel, accountLabel } from './src/fleet_names.
    moment either changes, and the browser tests that read this would then be
    certifying a shape nothing ships. */
 import { shape, windowOf, driverRecord, fleetRecord } from './api/performance_routes.js';
+/* The hero sparklines' registry and window rule — real, so /api/history's
+   fixture below answers for the same pages, series and spans the route does. */
+import { METRICS as H_METRICS, PAGES as H_PAGES, historyWindow, addDays as hAddDays,
+  mondayOf as hMondayOf } from './api/history_routes.js';
 /* The revenue target and the trips minimum are the real arithmetic over a
    made-up month, for the same reason: a fixture typed by hand would certify
    a shape the server stopped returning. */
@@ -3425,6 +3429,84 @@ app.get('/api/cancellations', (req, r) => {
         + 'strength of a word that does not say so.'
       : null,
   });
+});
+
+/* /api/history — the hero sparklines' series (api/history_routes.js).
+   ─────────────────────────────────────────────────────────────────────────
+   The same shape as the real route, from the real module's own registry and
+   window rule (imported, not copied, for the reason the performance import
+   above gives), over made-up values. Every kind of gap the real route sends
+   is in here, so a page that drew a null as zero, or dropped the reason, is
+   caught by the browser tests: today left out of a daily line, one day in
+   the middle not measured, a week still running, a week before any cash.
+   An unreadable start time is absent in the route's own words. */
+app.get('/api/history', (req, r) => {
+  const page = String(req.query.page || '');
+  const P = H_PAGES[page];
+  if (!P) return r.status(400).json({ error: 'page must name a page whose hero carries a history', pages: Object.keys(H_PAGES) });
+  const asked = req.query.metrics
+    ? [...new Set(String(req.query.metrics).split(',').map((s) => s.trim()).filter(Boolean))] : P.metrics;
+  const bad = asked.filter((m) => !P.metrics.includes(m));
+  if (!asked.length || bad.length) return r.status(400).json({ error: `#${page} carries no series called ${bad.join(', ')}`, metrics: P.metrics });
+  if (P.needs === 'id' && !req.query.id) return r.status(400).json({ error: `#${page} is one person's page — name the account with ?id=` });
+  const today = dubaiDay(new Date());
+  const w = historyWindow(req, P, today);
+  const meta = (m) => ({ metric: m, label: H_METRICS[m].label, unit: H_METRICS[m].unit, grain: H_METRICS[m].grain,
+    source: H_METRICS[m].source, basis: H_METRICS[m].basis });
+  const absent = (m, why) => ({ ...meta(m), absent: why, points: [], measured: 0, of: 0 });
+  const base = { page, grain: P.grain, from: w.from, to: w.to, today, fleet: req.query.fleet || null,
+    platform: req.query.platform || null, cut: w.cut };
+  if (w.future) return r.json({ ...base, series: Object.fromEntries(asked.map((m) => [m, absent(m, 'the window asked for begins after today, so it holds no history yet')])) });
+  const built = new Date(Date.now() - 9 * 60e3).toISOString();
+  const buckets = [];
+  if (P.grain === 'week') for (let d = hMondayOf(w.from); d <= w.to; d = hAddDays(d, 7)) buckets.push(d);
+  else for (let d = w.from; d <= w.to; d = hAddDays(d, 1)) buckets.push(d);
+  const startOk = /^([01]?\d|2[0-3]):([0-5]\d)$/.test(String(req.query.start ?? '').trim());
+  const series = {};
+  for (const m of asked) {
+    if (m === 'late' && !startOk) {
+      series[m] = absent(m, String(req.query.start ?? '').trim() === ''
+        ? 'No start time was set, so nobody is marked late or on time.'
+        : `"${String(req.query.start).trim().slice(0, 20)}" is not a time this page can read. Give it as HH:MM on a 24-hour clock — `
+          + '06:00, not 6am — and nobody is judged until it can be.');
+      continue;
+    }
+    let run = 0;
+    const points = buckets.map((d, i) => {
+      const p = { d, v: null, why: null };
+      const end = P.grain === 'week' ? hAddDays(d, 6) : d;
+      if (P.grain === 'day' && d >= today) { p.why = 'today is still being collected, so it is not drawn as a finished day'; return p; }
+      if (m === 'money' && end >= today) { p.why = 'this week is still running — 4 of its 7 days so far'; return p; }
+      if (m === 'cash_ceiling' || m === 'cash_carriers') {
+        p.as_of = end < today ? end : today;
+        if (i === 0) { p.why = `no valued cash fare is on record for anyone here by ${p.as_of}`; return p; }
+        run += 4200 + ((i * 611) % 2300);
+        p.v = m === 'cash_ceiling' ? Math.round(run * 100) / 100 : 180 + i * 3;
+        return p;
+      }
+      if (i === 3) {
+        p.why = m === 'late' ? 'no Uber account has an online event on this day — the timeline did not reach it, so nobody can be judged late or on time'
+          : m === 'money' ? '6 bookings this week, and no statement or priced fare covers them yet'
+            : 'no booking channel reported anything on this day';
+        return p;
+      }
+      p.v = m === 'late' ? 4 + ((i * 7) % 9)
+        : m === 'money' ? Math.round((1650 + ((i * 317) % 900)) * 100) / 100
+          : m === 'cancelled' ? 38 + ((i * 13) % 25)
+            : m === 'km' ? 14000 + ((i * 977) % 3000)
+              : m === 'revenue' ? 41000 + ((i * 1733) % 9000)
+                : m === 'completed' ? 690 + ((i * 29) % 80) : 740 + ((i * 31) % 90);
+      if (m === 'late') p.reported = 60 + i;
+      if (m === 'money') { p.money_days = 6; p.sources = ['statement']; }
+      return p;
+    });
+    series[m] = { ...meta(m), absent: null,
+      ...(m === 'late' ? { expected_start: String(req.query.start).trim().padStart(5, '0') } : {}),
+      ...(m.startsWith('cash_') ? { as_of: built } : {}),
+      built: { [H_METRICS[m].source]: built },
+      points, measured: points.filter((p) => p.v != null).length, of: points.length };
+  }
+  r.json({ ...base, series });
 });
 
 app.get('/api/tesla/status', (_, r) => r.json({

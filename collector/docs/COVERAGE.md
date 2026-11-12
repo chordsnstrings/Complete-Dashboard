@@ -10789,3 +10789,13 @@ rollup pass: `driver_first_online` (each Uber account's first ONLINE event per D
   `/api/history` for the same scope as its tile (the window, no chips) so the two agree; the
   endpoint itself honours both chips for any caller that sends them. Not fixed here — it is the
   route's defect, and a fix changes every figure on the page.
+* **A glance tile whose value is a bare dash keeps nothing but its label and reason.**
+  `bandTiles()` (`api/public/ui.js`) rebuilds such a tile as `{label, na}` (plus key and hero), so a
+  `spark`, a `delta` or a `sub` attached to it is dropped without a word. That is what keeps a line
+  off a Late that cannot be judged — and it is why a line, or a delta, put on a tile that might be
+  bare must not be relied on to appear.
+* **A sparkline's end mark is not round unless it is a stroke.** `spark()` stretches a 100-unit
+  box to its host (`preserveAspectRatio="none"`); a `<circle>` stretches with it — 14.7 × 4.0 px on
+  a hero tile. The glance tiles ask for `dot: 'cap'`, a zero-length path with a round,
+  non-scaling cap. The phone's lines keep the circle, held byte for byte by
+  `test/page_contract.test.mjs` §3b.

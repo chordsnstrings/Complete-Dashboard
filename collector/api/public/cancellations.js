@@ -32,7 +32,8 @@ import { hbars, barChart, donut } from './charts.js';
    to 2000-01-01..2100-01-01. A window control that silently governs nothing is
    worse than no control: it tells the reader a figure is bounded when it is
    not. */
-import { q, windowLabel } from './data.js';
+import { q, qAll, windowLabel } from './data.js';
+import { lineFor } from './history.js';
 
 /* Declining an offer and abandoning an accepted job are different behaviours
    and only the second leaves a rider standing in the street. They used to be
@@ -93,6 +94,16 @@ const declinedCell = (r) => {
 export async function renderCancellations(root) {
   root.innerHTML = '';
   loading(root);
+  /* THE CANCELLATIONS LINE (plan §4 cancellations: "needs a per-day series
+     … needs a new endpoint"): cancellations a day over this window, from the
+     day roll-up (api/history_routes.js), in ONE request beside the list and
+     only under the contract. qAll, the window WITHOUT the chips, and on
+     purpose: /api/cancellations reads the window alone and ignores both chips
+     (api/cancellation_routes.js), so the tile above counts every channel and
+     both fleets whatever the chips say — and a line narrowed by them would
+     disagree with its own figure. docs/COVERAGE.md records the route's
+     defect; when the route honours the chips this becomes q(). */
+  const histP = contract() ? qAll('/api/history', { page: 'cancellations' }).catch(() => ({ failed: true })) : null;
   let d;
   try {
     d = await q('/api/cancellations');
@@ -135,14 +146,16 @@ export async function renderCancellations(root) {
       sub: t.unattributed ? 'the channel does not report it' : 'every channel named the actor' },
   ];
   if (ak) {
+    const hist = histP ? await histP : null;
     const AKB = glanceBand(root, windowLabel());
     const bk = rows0.reduce((a, r) => a + (Number(r.bookings) || 0), 0);
     const none = rows0.filter((r) => !r.dropped && !r.declined).length;
     glance(AKB.tilesHost, bandTiles(CANC_TILES.map((x) => (x.label === 'Dropped a job'
       ? { ...x, hero: true, sub: `${x.sub}${!rows0.length ? ''
         : none ? ` · ${countOf(none, 'driver')} called none off themselves` : ' · every driver here called at least one off'}` }
-      : x.label === 'Cancellations' && bk
-        ? { ...x, sub: `${pct((Number(t.cancelled) / bk) * 100, 1)} of the ${fmt(bk)} bookings these ${countOf(rows0.length, 'driver')} took` }
+      : x.label === 'Cancellations'
+        ? { ...x, ...(hist ? lineFor(hist, 'cancelled') : {}),
+          ...(bk ? { sub: `${pct((Number(t.cancelled) / bk) * 100, 1)} of the ${fmt(bk)} bookings these ${countOf(rows0.length, 'driver')} took` } : {}) }
         : x))).tiles);
     cancHero(root, d, t, rows0);
   } else root.append(kpiRow(CANC_TILES));
