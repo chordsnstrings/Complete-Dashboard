@@ -33,7 +33,27 @@
        block → "v122 runs for a user that does not own access_user" fails
        ("must be owner of table access_user").
      schema_v122.sql: the backfill's WHERE made false → "the old sweep's
-       suspensions learn when they happened" fails. */
+       suspensions learn when they happened" fails.
+
+   THE INDEPENDENT REVIEW (2026-11-12), sections 11–17, each reverted and
+   run, each failing as named:
+     reviews.js mayDecide + GET: judge a lead by the line's reviewer_id
+       snapshot again → "a replaced lead no longer sees the team's lines"
+       and "…nor keeps them" fail.
+     reviews.js decideItem: drop the keep's settling of the same access's
+       other open lines → "kept in one review, the same grant's line in the
+       other is kept too" and "…closing the other review leaves nothing
+       unattested, and the grant stands" fail.
+     reviews.js stillHeld: drop the added_at test → "taken out and put back
+       after the review opened" fails (the line is unattested).
+     reviews.js inactiveDetail: explain whenever dormant_since is set →
+       "…then suspended by an admin: the plain sentence" fails.
+     findings.js seesFleet: judge rows by access.scope again → "their list
+       leaves out the other fleet's rows" and "…one of them is refused"
+       fail (Ecosine's closing note is served).
+     reviews.js idOf: return Number(v) → both checks of section 16 fail
+       with a 500 ("invalid input syntax for type bigint").
+     reviews.js markReinstated: no catch → "no such column: passed" fails. */
 import { PGlite } from '@electric-sql/pglite';
 import express from 'express';
 import { readFileSync } from 'node:fs';
@@ -44,6 +64,7 @@ import * as svc from '../api/access/service.js';
 import { hotp, totpStep, hashPassword } from '../api/access/crypto.js';
 import {
   periodOf, scheduledKind, monthlyReviewed, reviewSweep, dormantSweep, expireUnattested, DORMANT_DAYS, UNATTESTED_DAYS,
+  closeCycle, markReinstated,
 } from '../api/access/reviews.js';
 import { ROLE } from '../api/public/access_model.js';
 
@@ -511,6 +532,156 @@ console.log('\n10. v122 runs even where access_user is not this user’s to alte
   check('the old sweep’s suspensions learn when they happened — from the audit log, else from the 60th day',
     ds[Number(u1)] === '2026-08-30T10:00:00.000Z' && ds[Number(u2)] === '2026-07-31T00:00:00.000Z' && ds[Number(u3)] === null, JSON.stringify(ds));
   await fresh.close();
+}
+
+/* ══ 11–16: the independent review of 2026-11-12 ═════════════════════════
+   Each section below failed against the branch as built and passes with
+   its fix; the reversions are in the header. The Owner's re-confirmation
+   is renewed in the database (as a code would renew it) so these sections
+   do not depend on how long the ones above took. */
+const renew = async (id) => {
+  await db.query('UPDATE access_session SET stepup_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [id]);
+  svc.bumpAccess();
+};
+let dayReview = null;
+console.log('\n11. the team’s lead NOW decides its lines — a replaced lead does not');
+{
+  await renew(ownerId);
+  for (const [k, n] of [['lead2', 'Test Lead Two'], ['lead3', 'Test Lead Three'], ['mem', 'Test Member']]) {
+    await invite(k, 'DSP', { name: n });
+    await signIn(k);
+  }
+  const t = await owner.post('/api/access/teams', { name: 'Day shift', lead: people.lead2.id });
+  people.day = t.json?.team?.id;
+  for (const k of ['lead2', 'lead3', 'mem']) await owner.post(`/api/access/teams/${people.day}`, { member: { userId: people[k].id, on: true } });
+  await owner.post('/api/access/grants', { teamId: people.day, role: 'TEC', reason: 'the day shift looks after the cars' });
+  const o = await owner.post('/api/access/reviews/open', { kind: 'adhoc' });
+  dayReview = o.json?.cycle;
+  const before = await people.lead2.b.get('/api/access/reviews');
+  const memLine = (before.json?.items || []).find((i) => i.kind === 'membership' && i.user_id === people.mem.id && i.cycle_id === dayReview);
+  check('while they lead the team, its lead sees a member’s line and may decide it',
+    o.status === 200 && memLine?.canDecide === true, JSON.stringify(before.json?.items || before.json).slice(0, 300));
+  const ch = await owner.post(`/api/access/teams/${people.day}`, { lead: people.lead3.id });
+  /* REVERSION: judge a lead by the line's reviewer_id snapshot again. */
+  const after = await people.lead2.b.get('/api/access/reviews');
+  check('a replaced lead no longer sees the team’s lines',
+    ch.status === 200 && !(after.json?.items || []).some((i) => i.team_id === people.day), JSON.stringify(after.json?.items));
+  const k = await people.lead2.b.post(`/api/access/reviews/${dayReview}/attest`, { decisions: [{ item: memLine?.id, keep: true }] });
+  check('…nor keeps them — the true reason: the line is the team’s lead’s, or an Access admin’s',
+    k.status === 403 && k.json?.error === 'not_allowed' && /team’s lead/.test(k.json?.detail), JSON.stringify(k.json));
+  const n = await people.lead3.b.get('/api/access/reviews');
+  check('…and the new lead sees and may decide it at once',
+    (n.json?.items || []).some((i) => i.id === memLine?.id && i.canDecide), JSON.stringify(n.json?.items).slice(0, 300));
+}
+
+console.log('\n12. one attestation settles the same access in every open review');
+{
+  /* Two reviews open side by side (the Reviews tab has three Open buttons),
+     both listing one grant. REVERSION: drop the keep's settling of the
+     other lines in decideItem — the second line stays pending, the close
+     makes it unattested, and the grant someone attested would end. */
+  const g = (await db.query(`SELECT id FROM access_grant WHERE user_id = $1 AND role_code = 'DSP' AND status = 'active'`, [people.mem.id])).rows[0];
+  const mk = async (period) => (await db.query(
+    `INSERT INTO access_review_cycle (kind, period, due_at, items) VALUES ('adhoc', $1, now() + interval '14 days', 1) RETURNING id`, [period])).rows[0].id;
+  const line = async (cid) => (await db.query(
+    `INSERT INTO access_review_item (cycle_id, kind, grant_id, user_id, roles) VALUES ($1, 'grant', $2, $3, '{DSP}') RETURNING id`,
+    [cid, g.id, people.mem.id])).rows[0].id;
+  const a = await mk('test-12a'); const b = await mk('test-12b');
+  const la = Number(await line(a)); const lb = Number(await line(b));
+  const k = await owner.post(`/api/access/reviews/${a}/attest`, { decisions: [{ item: la, keep: true }] });
+  const { rows: st } = await db.query('SELECT id, state, decided_by, reason FROM access_review_item WHERE id = ANY($1::bigint[]) ORDER BY id', [[la, lb]]);
+  check('kept in one review, the same grant’s line in the other is kept too — by whom, and where',
+    k.status === 200 && st[1]?.state === 'kept' && Number(st[1]?.decided_by) === ownerId && new RegExp(`line ${la} of review ${a}`).test(st[1]?.reason),
+    JSON.stringify({ k: k.json, st }));
+  const { rows: au } = await db.query(`SELECT detail FROM access_audit WHERE action = 'access.review_kept' ORDER BY id DESC LIMIT 1`);
+  check('…and the audit row names every line the keep settled', (au[0]?.detail?.also_kept || []).includes(lb), JSON.stringify(au[0]?.detail));
+  const c = await closeCycle(db, { cycleId: Number(b) });
+  const gs = (await db.query('SELECT status FROM access_grant WHERE id = $1', [g.id])).rows[0].status;
+  check('…so closing the other review leaves nothing unattested, and the grant stands', c.closed && c.unattested === 0 && gs === 'active',
+    JSON.stringify(c));
+}
+
+console.log('\n13. a team place made after the review opened is not ended as unattested');
+{
+  /* REVERSION: drop the added_at test from stillHeld — the close makes
+     the re-added member's line unattested, and the sweep would take them
+     out of the team 14 days later. */
+  await renew(ownerId);
+  const off = await owner.post(`/api/access/teams/${people.day}`, { member: { userId: people.mem.id, on: false } });
+  const on = await owner.post(`/api/access/teams/${people.day}`, { member: { userId: people.mem.id, on: true } });
+  const c = await owner.post(`/api/access/reviews/${dayReview}/close`, {});
+  const { rows } = await db.query(`SELECT state FROM access_review_item WHERE cycle_id = $1 AND kind = 'membership' AND user_id = $2`,
+    [dayReview, people.mem.id]);
+  const still = (await svc.teamsOf(db, people.mem.id)).some((x) => x.id === people.day);
+  check('taken out and put back after the review opened: the listed place reads “already ended”, and they stay in the team',
+    off.status === 200 && on.status === 200 && c.status === 200 && rows[0]?.state === 'gone' && still, JSON.stringify({ c: c.json, rows }));
+}
+
+console.log('\n14. an admin’s suspension over the sweep’s is not explained as dormancy');
+{
+  /* REVERSION: explain whenever dormant_since is set (no check of the
+     reason) — the holder is told the sweep closed it, after an admin did. */
+  await renew(ownerId);
+  await invite('dozy', 'DSP', { name: 'Test Dozy' });
+  await db.query(`UPDATE access_user SET status = 'suspended', suspended_reason = $2, dormant_since = now() WHERE id = $1`,
+    [people.dozy.id, `no sign-in for ${DORMANT_DAYS} days`]);
+  svc.bumpAccess();
+  const d1 = await signIn('dozy');
+  check('closed by the sweep: told why', d1.status === 403 && /because nobody had signed in/.test(d1.json?.detail), JSON.stringify(d1.json));
+  const s = await owner.post(`/api/access/users/${people.dozy.id}`, { action: 'suspend', reason: 'a private reason for admins' });
+  const d2 = await signIn('dozy');
+  check('…then suspended by an admin: the plain sentence, not the sweep’s reason',
+    s.status === 200 && d2.status === 403 && d2.json?.detail === 'This account is suspended. Ask the Owner or an Access admin.', JSON.stringify(d2.json));
+}
+
+console.log('\n15. who is on a finding: a row only where the reader holds driver identity over its fleet');
+{
+  /* Dispatcher over Egari (driver identity there) plus Connections over
+     every fleet (credentials, no driver identity): their scope is both
+     fleets, their driver identity only Egari's — /api/insights refuses
+     them Ecosine's findings. REVERSION: judge rows by access.scope again —
+     the list and the single read hand them Ecosine's closing note. */
+  await renew(ownerId);
+  await invite('mixed', 'DSP', { fleets: ['egari'], name: 'Test Mixed' });
+  await db.query(`INSERT INTO access_grant (user_id, role_code, status, reason) VALUES ($1, 'CON', 'active', 'test: credentials, no driver identity')`,
+    [people.mixed.id]);
+  svc.bumpAccess();
+  await signIn('mixed');
+  const eco = { code: 'stale_tracker', entity_type: 'vehicle', entity_id: 'T9999' };
+  const egari = { code: 'idle_vehicle', entity_type: 'vehicle', entity_id: 'T1234' };
+  const q = (k) => `/api/access/findings?code=${k.code}&entity_type=${k.entity_type}&entity_id=${k.entity_id}`;
+  const list = await people.mixed.b.get('/api/access/findings');
+  check('their list leaves out the other fleet’s rows (and its closing note)',
+    list.status === 200 && !(list.json?.findings || []).some((f) => f.entity_id === 'T9999'), JSON.stringify(list.json).slice(0, 300));
+  const one = await people.mixed.b.get(q(eco));
+  check('…and one of them is refused, with the true reason', one.status === 403 && /ecosine/.test(one.json?.detail) && /driver identity/.test(one.json?.detail),
+    JSON.stringify(one.json));
+  const own = await people.mixed.b.get(q(egari));
+  check('…while their own fleet’s finding still reads', own.status === 200 && own.json?.signedIn === true, JSON.stringify(own.json).slice(0, 200));
+  const all = await owner.get('/api/access/findings');
+  check('…and a reader of every fleet still sees the other fleet’s row', (all.json?.findings || []).some((f) => f.entity_id === 'T9999'));
+}
+
+console.log('\n16. a number that is not a whole number is refused, not a 500');
+{
+  await renew(ownerId);
+  const c = await owner.post('/api/access/reviews/abc/close', {});
+  const a = await owner.post(`/api/access/reviews/${dayReview}/attest`, { decisions: [{ item: 1.5, keep: true }] });
+  check('a review number that is not one: 404, saying so', c.status === 404 && c.json?.error === 'not_found', JSON.stringify(c));
+  check('a line number that is not one: 400, saying what to send', a.status === 400 && a.json?.error === 'bad_request', JSON.stringify(a));
+}
+
+console.log('\n17. a reinstatement that succeeded is not turned into an error by the missing columns');
+{
+  /* Where v122's guarded ALTER was refused (section 10) the dormancy
+     columns do not exist. REVERSION: let markReinstated throw on any error
+     — the admin's reinstatement, already written, answers 500. */
+  const err = (code) => ({ query: async () => { const e = new Error('simulated'); e.code = code; throw e; } });
+  let missing = null; let other = null;
+  try { await markReinstated(err('42703'), 1); } catch (e) { missing = e; }
+  try { await markReinstated(err('08006'), 1); } catch (e) { other = e; }
+  check('no such column: passed, since there is no dormancy clock to restart', missing === null, String(missing));
+  check('…any other failure still reaches the admin', other?.code === '08006', String(other));
 }
 
 server.close();

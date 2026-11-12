@@ -78,6 +78,11 @@ const KINDS = ['quarterly', 'monthly', 'adhoc'];
 
 const num = (v) => (v == null ? null : Number(v));
 const iso = (v) => (v == null ? null : new Date(v).toISOString());
+/* A row id from a request: a positive whole number, else null. */
+const idOf = (v) => {
+  const n = typeof v === 'number' ? v : (/^\d{1,18}$/.test(String(v ?? '')) ? Number(v) : NaN);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+};
 /* Dubai's calendar: every calendar key in this product is Dubai's, and a
    quarter that turned at midnight UTC would open its review at 04:00. */
 const dubai = (d) => new Date(new Date(d).getTime() + 4 * 3600_000);
@@ -222,7 +227,16 @@ export function mayDecide(it, actor, now = new Date()) {
     return actor.owner ? null : { status: 403, error: 'not_allowed', detail: 'Only another Owner can attest an Owner’s access.' };
   }
   if (actor.manager) return null;
-  const lead = it.kind === 'membership' && (num(it.reviewer_id) === num(actor.id) || num(it.team_lead) === num(actor.id));
+  /* THE TEAM'S LEAD NOW — never whoever led it when the review opened.
+     `reviewer_id` is a snapshot, kept to show who the line was for. Judging
+     by it let a lead who had since been replaced (moved, demoted, or taken
+     off the team for cause) go on keeping their old team's access — which
+     stops it ending unattested — and taking people out of it, until the
+     review closed and beyond, on every unattested line (independent review,
+     2026-11-12). `team_lead` is read with the line (ITEM_SQL), so a change
+     of lead moves the lines to the new lead at once, and a team with no
+     lead leaves them to an Access admin or the Owner. */
+  const lead = it.kind === 'membership' && it.team_lead != null && num(it.team_lead) === num(actor.id);
   if (lead) return null;
   return { status: 403, error: 'not_allowed', detail: it.kind === 'membership'
     ? 'This line is for the team’s lead, or an Access admin, to decide.'
@@ -241,9 +255,20 @@ async function stillHeld(db, it) {
       `SELECT 1 FROM access_grant WHERE id = $1 AND status = 'active' AND (expires_at IS NULL OR expires_at > now())`, [it.grant_id]);
     return rows.length > 0;
   }
+  /* The SAME team place: one that was there when the line was written.
+     A grant line names its grant by id, so a grant made after the review
+     opened is never its line's to end. A team place has no id — and a
+     person taken out of the team and put back after the review opened (an
+     admin's fresh decision, ceiling-checked when it was made) was treated as
+     the place the review listed: left undecided, the close made it
+     unattested and the sweep took them out of the team 14 days later, as
+     access "nobody attested" (independent review, 2026-11-12). The line's
+     own created_at and the place's added_at are both the database's clock,
+     so a test's simulated `now` cannot skew the comparison. */
   const { rows } = await db.query(
     `SELECT 1 FROM access_team_member m JOIN access_team t ON t.id = m.team_id
-      WHERE m.team_id = $1 AND m.user_id = $2 AND t.archived_at IS NULL`, [it.team_id, it.user_id]);
+      WHERE m.team_id = $1 AND m.user_id = $2 AND t.archived_at IS NULL
+        AND ($3::timestamptz IS NULL OR m.added_at <= $3::timestamptz)`, [it.team_id, it.user_id, it.created_at ?? null]);
   return rows.length > 0;
 }
 /* Would ending this line leave the company with no active Owner? */
@@ -281,7 +306,38 @@ export async function decideItem(db, { itemId, cycleId = null, keep, reason = ''
     if (it.kind === 'grant') await svc.endGrant(db, num(it.grant_id), actor.id, 'revoked');
     else await svc.setMember(db, num(it.team_id), num(it.user_id), false, actor.id);
   }
-  return { ok: true, state, ...facts };
+  /* ONE ATTESTATION, EVERY OPEN LINE FOR THE SAME ACCESS.
+     ───────────────────────────────────────────────────────────────────────
+     Reviews can overlap: the Reviews tab opens a quarterly, a monthly and an
+     extra review side by side, and the schedule's monthly review can be open
+     while an admin opens the quarter's. A sensitive grant is then a line in
+     two reviews. Kept in one, its line in the other stayed pending — the
+     close made it unattested, and 14 days later the sweep ENDED a grant
+     someone had attested (independent review, 2026-11-12). §11.3 ends access
+     "nobody attested"; this access was attested. So a keep also settles
+     every other undecided line for the same grant, or the same team place
+     (a line written after the person last joined the team: an older line
+     was about a place that has since ended), saying where it was attested.
+     An Owner's line is settled only by an Owner's keep, as it would be
+     decided. A revoke needs no such step: the access is gone, and the other
+     lines read "already ended" when they are decided or closed. */
+  let alsoKept = [];
+  if (state === 'kept') {
+    const { rows: more } = await db.query(
+      `UPDATE access_review_item o SET state = 'kept', decided_by = $2, decided_at = $3, reason = $4
+        WHERE o.id <> $1 AND o.state IN ('pending', 'unattested') AND o.user_id = $7
+          AND NOT (o.state = 'unattested' AND o.expires_at <= $3)
+          AND (o.owner_only = false OR $8::boolean)
+          AND ((o.kind = 'grant' AND o.grant_id = $5)
+            OR (o.kind = 'membership' AND o.team_id = $6 AND o.created_at >= (
+                  SELECT m.added_at FROM access_team_member m WHERE m.team_id = $6 AND m.user_id = $7)))
+        RETURNING o.id`,
+      [itemId, actor.id, now, `Attested with line ${num(itemId)} of review ${num(it.cycle_id)}.`,
+        it.kind === 'grant' ? num(it.grant_id) : null, it.kind === 'membership' ? num(it.team_id) : null,
+        num(it.user_id), Boolean(actor.owner)]);
+    alsoKept = more.map((r) => num(r.id));
+  }
+  return { ok: true, state, ...facts, alsoKept };
 }
 
 /* ── close ─────────────────────────────────────────────────────────────── */
@@ -426,7 +482,14 @@ export async function dormantSweep(db, { now = new Date() } = {}) {
 
 /* Reinstatement restarts the dormancy clock and forgets the dormancy. */
 export async function markReinstated(db, id, now = new Date()) {
-  await db.query('UPDATE access_user SET reinstated_at = $2, dormant_since = NULL WHERE id = $1', [id, now]);
+  /* Called AFTER the reinstatement is written. Where v122's guarded ALTER
+     was refused the two columns do not exist (sql/schema_v122.sql); the
+     dormancy sweep cannot run there either, so there is no clock to restart
+     — and throwing turned a reinstatement that had succeeded into a 500 on
+     the admin's screen. Only a missing column (42703) is passed; any other
+     failure still reaches the admin, who can try again. */
+  await db.query('UPDATE access_user SET reinstated_at = $2, dormant_since = NULL WHERE id = $1', [id, now])
+    .catch((e) => { if (e?.code !== '42703') throw e; });
   svc.bumpAccess();
 }
 
@@ -438,9 +501,16 @@ export async function inactiveDetail(db, user) {
     /* Without v122's columns (a refused migration, sql/schema_v122.sql) the
        plain sentence below is still true; a sign-in must not fail on it. */
     const { rows } = await db.query(
-      'SELECT dormant_since, last_login_at, created_at FROM access_user WHERE id = $1', [user.id]).catch(() => ({ rows: [] }));
+      'SELECT dormant_since, suspended_reason, last_login_at, created_at FROM access_user WHERE id = $1', [user.id]).catch(() => ({ rows: [] }));
     const u = rows[0];
-    if (u?.dormant_since) {
+    /* …and only while the sweep's reason is still the reason. An admin who
+       suspends an account the sweep had already closed writes their own
+       reason over it without reinstating first, so dormant_since is still
+       set: sign-in went on saying "because nobody had signed in" when the
+       account was closed for something else (independent review,
+       2026-11-12). The admin's reason is for admins; the plain sentence is
+       the true one to give the holder. */
+    if (u?.dormant_since && u.suspended_reason === DORMANT_REASON) {
       const last = u.last_login_at ? `the last sign-in was on ${dayText(u.last_login_at)}`
         : `nobody had signed in to it since it was set up on ${dayText(u.created_at)}`;
       return `This account was suspended on ${dayText(u.dormant_since)} because nobody had signed in to it for `
@@ -488,10 +558,12 @@ export function reviewRoutes(app, { db, layer, wrap, h }) {
         LIMIT 2000`);
     const now = new Date();
     /* A lead's own place in their team is not theirs to see here: it is an
-       Access admin's line, like any other line about themselves. */
+       Access admin's line, like any other line about themselves. And only
+       the team's lead NOW sees its lines (mayDecide): a lead who has been
+       replaced no longer sees their old team's names. */
     const visible = lines.filter((it) => actor.manager
       || (it.kind === 'membership' && num(it.user_id) !== actor.id
-        && (num(it.reviewer_id) === actor.id || num(it.team_lead) === actor.id)));
+        && it.team_lead != null && num(it.team_lead) === actor.id));
     const items = visible.map((it) => {
       const no = mayDecide(it, actor, now);
       return {
@@ -552,9 +624,12 @@ export function reviewRoutes(app, { db, layer, wrap, h }) {
     const fm = me(req, res, { write: true });
     if (!fm) return undefined;
     if (fm.access.preview) return fail(res, 403, 'preview', 'You are previewing a role, which is read-only.');
-    const cycleId = Number(req.params.id);
+    /* Ids are whole numbers: "1.5" or "abc" reached a bigint comparison in
+       Postgres and came back as a 500 rather than the true reason. */
+    const cycleId = idOf(req.params.id);
+    if (cycleId == null) return fail(res, 404, 'not_found', 'No review has that number.');
     const decisions = Array.isArray(req.body?.decisions) ? req.body.decisions.slice(0, 500) : [];
-    if (!decisions.length || decisions.some((d) => !Number.isFinite(Number(d?.item)) || typeof d?.keep !== 'boolean')) {
+    if (!decisions.length || decisions.some((d) => idOf(d?.item) == null || typeof d?.keep !== 'boolean')) {
       return fail(res, 400, 'bad_request', 'Send each line as { item, keep: true or false }.');
     }
     if (decisions.some((d) => d.keep === false) && !stepupFresh(fm)) return fail(res, 403, 'stepup', 'Confirm it is you to continue.');
@@ -563,10 +638,15 @@ export function reviewRoutes(app, { db, layer, wrap, h }) {
     for (const d of decisions) {
       const reason = String(d.reason || '').trim().slice(0, 500);
       const r = await decideItem(db, { itemId: Number(d.item), cycleId, keep: d.keep, reason, actor });
-      results.push({ item: Number(d.item), ok: r.ok, state: r.state || null, error: r.error || null, detail: r.detail || null });
+      results.push({ item: Number(d.item), ok: r.ok, state: r.state || null, error: r.error || null, detail: r.detail || null,
+        ...(r.alsoKept?.length ? { alsoKept: r.alsoKept } : {}) });
       if (r.ok) {
+        /* `also_kept`: the same access's lines in other open reviews, which
+           this keep settled (decideItem) — so the log names every line it
+           decided, not only the one asked about. */
         await audit(req, `access.review_${r.state}`, 'review_item', Number(d.item), {
-          cycle: r.cycle, line: r.kind, user: r.user, grant: r.grant, team: r.team, roles: r.roles, reason, late: r.late });
+          cycle: r.cycle, line: r.kind, user: r.user, grant: r.grant, team: r.team, roles: r.roles, reason, late: r.late,
+          ...(r.alsoKept?.length ? { also_kept: r.alsoKept } : {}) });
       }
     }
     if (results.some((r) => r.ok && r.state === 'revoked')) layer.cache.clear();
@@ -584,7 +664,8 @@ export function reviewRoutes(app, { db, layer, wrap, h }) {
   app.post('/api/access/reviews/:id/close', wrap(async (req, res) => {
     const fm = manager(req, res, { write: true, stepup: true });
     if (!fm) return undefined;
-    const id = Number(req.params.id);
+    const id = idOf(req.params.id);
+    if (id == null) return fail(res, 404, 'not_found', 'No open review with that number.');
     const r = await closeCycle(db, { cycleId: id, by: fm.user.id });
     if (!r.closed) return fail(res, 404, 'not_found', 'No open review with that number.');
     layer.cache.clear();

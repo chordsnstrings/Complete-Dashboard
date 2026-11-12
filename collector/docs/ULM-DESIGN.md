@@ -1413,13 +1413,21 @@ section REV has one row per change.
   open one by hand in either mode.
 - **The last Owner is never ended by a review**, at the close or at the expiry (§11.2).
 - **Direct grants are attested by an Access admin or the Owner**, team places by the team's lead.
-  §11.3 names only leads; a direct grant belongs to no team, so no lead can attest it.
+  §11.3 names only leads; a direct grant belongs to no team, so no lead can attest it. The lead is
+  the team's lead at the moment of the decision, not whoever led it when the review opened (the
+  independent review, FIX-STATUS REV15).
+- **One keep settles the same access in every open review.** Reviews can overlap (three Open
+  buttons, and the schedule's monthly beside an admin's quarterly); access kept in one is no longer
+  left to end unattested in the other (REV16). A team place made after a review opened is not the
+  place it listed (REV17).
 - **Dormant suspension (§11.2)** was already in the hourly housekeeping; now reinstatement restarts
   the 60-day clock, sign-in says why and how to get back, each suspension is audited, and only the
   last active Owner is exempt (every Owner was).
 - **Finding ownership** is §8's `act:finding.own` on #insights' findings (`api/access/findings.js`):
   take, assign, close with an outcome and a note, reopen; the current state in `finding_owner`, the
-  history in the audit log. The routes are under `/api/access/` (manifest `self`, never cached).
+  history in the audit log. The routes are under `/api/access/` (manifest `self`, never cached). A
+  row is shown only where the reader holds driver identity (or `finding.own`) over its fleet —
+  /api/insights' own judgement (REV19).
 - The v86 `access_review` table is left in place, unread.
 - **Export watermarks (§9.3)** (`api/access/watermark.js`): every route that hands back a file —
   the trip CSV, the money workbook, Today, the month target, the low performers, a watch list, the

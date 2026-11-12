@@ -24,7 +24,8 @@
 
    WHO. Reading: a signed-in person who may read #insights' findings (driver
    identity at any level — the class /api/insights is declared under) or who
-   may take findings; a one-fleet reader sees only their fleet's. Acting: a
+   may take findings; each row only where they hold driver identity (or
+   finding.own) over that row's fleet (seesFleet, below). Acting: a
    signed-in person holding finding.own OVER THE FINDING'S FLEET — the fleet
    is read from the finding itself, never from the request. A visitor while
    sign-in is optional sees nothing here and can do nothing: taking a finding
@@ -79,9 +80,26 @@ async function write(db, key, v) {
 const canOwn = (access, fleet) => access.capsOver(fleet ? [fleet] : access.allFleets).includes('finding.own');
 /* …and may they read who is on findings at all? */
 const mayRead = (access) => Boolean(access.levelsAny?.ID) || (access.capsAny || []).includes('finding.own');
-/* A one-fleet reader sees the rows of their fleets; a finding about every
-   fleet (no fleet) only a reader of every fleet — /api/insights' own rule. */
+/* WHICH ROWS: a finding about a fleet, to a reader who holds driver identity
+   — or finding.own — OVER THAT FLEET; a finding about every fleet (no
+   fleet), only to one who holds it over every fleet. This is /api/insights'
+   own judgement (manifest subject ID, fleet 'param': the levels are those
+   held over the fleet asked about, the minimum over every fleet when none
+   is). It was `access.scope.includes(fleet)` — the fleets the reader holds
+   ANY class over — so an Access admin (SYS and AUDIT, no driver identity)
+   who was also a Dispatcher over Egari read Ecosine's ownership rows: what
+   each finding is about, who is on it, and the closing note, which is free
+   text about a driver or a car — rows /api/insights itself refuses them
+   (independent review, 2026-11-12). */
+const seesFleet = (access, fleet) => (fleet
+  ? Boolean(access.byFleet?.[fleet]?.ID) || access.capsOver([fleet]).includes('finding.own')
+  : Boolean(access.levels?.ID) || (access.caps || []).includes('finding.own'));
+/* Acting still asks, besides finding.own over the finding's fleet, that the
+   fleet be one the person holds any class over — unchanged from the build. */
 const inScope = (access, fleet) => (fleet ? access.scope.includes(fleet) : access.allScope);
+const notYours = (fleet) => (fleet
+  ? `This finding is about ${fleet}, and driver identity for ${fleet} is not shown to your role, so who is on it is not either.`
+  : 'This finding is about every fleet, and driver identity for every fleet is not shown to your role, so who is on it is not either.');
 
 export function findingRoutes(app, { db, wrap, h }) {
   const { me, fail, audit, noStore } = h;
@@ -123,10 +141,10 @@ export function findingRoutes(app, { db, wrap, h }) {
       : await db.query(`SELECT * FROM finding_owner WHERE state <> 'open' ORDER BY updated_at DESC LIMIT 500`);
     const live = one ? await currentFinding(db, one) : null;
     const fleetOfOne = live ? live.fleet_id : rows[0]?.fleet_id ?? null;
-    if (one && (live || rows[0]) && !inScope(fm.access, fleetOfOne)) {
-      return fail(res, 403, 'not_allowed', 'This finding is about a fleet your role does not cover.');
+    if (one && (live || rows[0]) && !seesFleet(fm.access, fleetOfOne)) {
+      return fail(res, 403, 'not_allowed', notYours(fleetOfOne));
     }
-    const shown = rows.filter((r) => inScope(fm.access, r.fleet_id));
+    const shown = rows.filter((r) => seesFleet(fm.access, r.fleet_id));
     const who = await names(shown.flatMap((r) => [r.owner_id, r.assigned_by, r.closed_by, r.updated_by]));
     const person = (id) => (id == null ? null : { id: num(id), name: who.get(num(id)) || `person ${id}` });
     const findings = shown.map((r) => ({
