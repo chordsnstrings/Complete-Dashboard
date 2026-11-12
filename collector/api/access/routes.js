@@ -28,6 +28,10 @@ import { sendSms, uaeMobile, maskPhone } from '../../src/smsala.js';
    action below, so both keep this file's Owner, step-up, ceiling and audit
    rules instead of a second copy of them. */
 import { signinMethodChanges, removePasskeys, unlinkSso, otherWayIn, usablePasskeys } from './signin_methods.js';
+/* ULM Phase 4 (2026-11-12): reviews as a cycle, dormant suspension, finding
+   ownership — each its own module, mounted below. */
+import { reviewRoutes, reviewSweep, dormantSweep, markReinstated, inactiveDetail } from './reviews.js';
+import { findingRoutes } from './findings.js';
 
 const MIN_REASON = 3;
 
@@ -194,9 +198,10 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     }
     if (user.status !== 'active') {
       await audit(req, 'auth.login_refused', 'user', user.id, { status: user.status });
-      return fail(res, 403, 'inactive', user.status === 'suspended'
-        ? 'This account is suspended. Ask the Owner or an Access admin.'
-        : 'This account is not active. Use the link you were sent, or ask an admin for a new one.');
+      /* Why, since when, and the way back — for an account the dormancy
+         sweep suspended (api/access/reviews.js inactiveDetail). Reached only
+         after the right password, so only the holder is told. */
+      return fail(res, 403, 'inactive', await inactiveDetail(db, user));
     }
     if (user.totp_enabled) {
       const ticket = newToken(24);
@@ -774,6 +779,9 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
          both, so a rehire still starts from an invitation. */
       const done = Boolean(target.password_changed_at) || await otherWayIn(db, id);
       await svc.updateUser(db, id, { status: done ? 'active' : 'invited', suspended_reason: null });
+      /* …and restarts the 60-day clock: without this the hourly dormancy
+         sweep suspended a reinstated person again within the hour (REV). */
+      await markReinstated(db, id);
     } else if (action === 'offboard') {
       if (reason.length < MIN_REASON) return fail(res, 400, 'reason', 'Say why.');
       await svc.updateUser(db, id, { status: 'offboarded', offboarded_at: new Date().toISOString(), suspended_reason: reason });
@@ -1317,51 +1325,15 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     return res.type('html').send(html);
   }));
 
-  app.get('/api/access/reviews', wrap(async (req, res) => {
-    const fm = me(req, res);
-    if (!fm) return undefined;
-    noStore(res);
-    const { rows } = await db.query(
-      `SELECT r.*, t.name AS team_name, t.lead_user_id FROM access_review r JOIN access_team t ON t.id = r.team_id
-        ORDER BY r.opened_at DESC LIMIT 200`);
-    const mine = rows.filter((r) => fm.access.caps.includes('access.manage') || Number(r.lead_user_id) === fm.user.id);
-    return res.json({ reviews: mine.map((r) => ({ ...r, id: Number(r.id), team_id: Number(r.team_id) })) });
-  }));
-  app.post('/api/access/reviews/open', wrap(async (req, res) => {
-    const fm = manager(req, res, { write: true });
-    if (!fm) return undefined;
-    const d = new Date();
-    const period = `${d.getUTCFullYear()}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
-    const { rowCount } = await db.query(
-      `INSERT INTO access_review (team_id, period, due_at)
-       SELECT id, $1, now() + interval '14 days' FROM access_team WHERE archived_at IS NULL
-       ON CONFLICT (team_id, period) DO NOTHING`, [period]);
-    await audit(req, 'access.review_opened', 'review', period, { teams: rowCount });
-    return res.json({ ok: true, period, opened: rowCount });
-  }));
-  app.post('/api/access/reviews/:id/attest', wrap(async (req, res) => {
-    const fm = me(req, res, { write: true });
-    if (!fm) return undefined;
-    const id = Number(req.params.id);
-    const { rows } = await db.query(
-      `SELECT r.*, t.lead_user_id FROM access_review r JOIN access_team t ON t.id = r.team_id WHERE r.id = $1`, [id]);
-    const r = rows[0];
-    if (!r || r.closed_at) return fail(res, 404, 'not_found', 'No open review with that number.');
-    if (Number(r.lead_user_id) !== fm.user.id && !fm.access.caps.includes('access.manage')) {
-      return fail(res, 403, 'not_allowed', 'Only the team lead or an admin attests this team.');
-    }
-    const decisions = Array.isArray(req.body?.decisions) ? req.body.decisions : [];
-    for (const dcs of decisions) {
-      if (dcs.keep === false && dcs.userId) {
-        await svc.setMember(db, Number(r.team_id), Number(dcs.userId), false, fm.user.id);
-      }
-    }
-    await db.query(`UPDATE access_review SET closed_at = now(), attested_by = $2, decisions = $3 WHERE id = $1`,
-      [id, fm.user.id, JSON.stringify(decisions)]);
-    layer.cache.clear();
-    await audit(req, 'access.review_attested', 'review', id, { removed: decisions.filter((x) => x.keep === false).length });
-    return res.json({ ok: true });
-  }));
+  /* ── reviews (ULM §11.3) and who is on a finding (§8 finding.own) ─────
+     Reviews were three routes here over one row per team per quarter; they
+     are now a cycle — every grant and team place, each with its reviewer and
+     a state, opened by the schedule or an admin, closed with unattested
+     access ending 14 days later (api/access/reviews.js, sql/schema_v122.sql).
+     Both modules decide exactly as these routes do, with these helpers. */
+  const helpers = { me, manager, fail, audit, noStore, isOwner, stepupFresh };
+  reviewRoutes(app, { db, layer, wrap, h: helpers });
+  findingRoutes(app, { db, wrap, h: helpers });
 
   /* ── four-eyes proposals (api/access/middleware.js propose/takeProposal) ── */
   /* A stored proposal is the payload of a route that combines every fleet
@@ -1417,22 +1389,30 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
   }));
 }
 
-/* Suspends people who have not signed in for 60 days, and ends grants whose
-   end date passed (they already confer nothing; this marks them so the
-   Access page stops listing them as current). Run by the API's scheduler. */
-export async function housekeeping(db, { log = { info() {} } } = {}) {
-  const dormant = await db.query(
-    `UPDATE access_user u SET status = 'suspended', suspended_reason = 'no sign-in for 60 days'
-      WHERE status = 'active' AND COALESCE(last_login_at, created_at) < now() - interval '60 days'
-        AND NOT EXISTS (SELECT 1 FROM access_grant g WHERE g.user_id = u.id AND g.role_code = 'OWN' AND g.status = 'active')
-      RETURNING id`);
+/* The API's hourly housekeeping (api/server.js). Three things:
+     · dormant accounts suspended — no sign-in for 60 days (§11.2), counted
+       from the latest of the last sign-in, the account's creation, its last
+       reinstatement and a password set from a link, and never the last
+       active Owner (api/access/reviews.js dormantSweep; each one audited);
+     · grants whose end date passed marked ended (they already confer
+       nothing; this stops the Access page listing them as current);
+     · the review cycle: the schedule's review opened once sign-in is
+       required, reviews past their due date closed, and access nobody
+       attested ended 14 days after the close (reviewSweep). */
+export async function housekeeping(db, { log = { info() {} }, now = new Date() } = {}) {
+  /* A failed dormancy pass is logged and does not stop the other two. */
+  const dormant = await dormantSweep(db, { now }).catch((e) => {
+    log.warn?.('access', 'dormancy sweep failed', { err: String(e).slice(0, 160) });
+    return [];
+  });
   const ended = await db.query(
     `UPDATE access_grant SET status = 'revoked', revoked_at = now()
       WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= now() RETURNING id`);
-  if (dormant.rowCount || ended.rowCount) {
+  if (dormant.length || ended.rowCount) {
     svc.bumpAccess();
     await appendAudit(db, { actorLabel: 'system:housekeeping', action: 'access.housekeeping', subjectType: 'system',
-      detail: { suspended: dormant.rows.map((r) => Number(r.id)), grants_ended: ended.rows.map((r) => Number(r.id)) } });
-    log.info('access', 'housekeeping', { suspended: dormant.rowCount, grants_ended: ended.rowCount });
+      detail: { suspended: dormant, grants_ended: ended.rows.map((r) => Number(r.id)) } });
+    log.info('access', 'housekeeping', { suspended: dormant.length, grants_ended: ended.rowCount });
   }
+  return { suspended: dormant, grants_ended: ended.rows.map((r) => Number(r.id)), reviews: await reviewSweep(db, { now, log }) };
 }

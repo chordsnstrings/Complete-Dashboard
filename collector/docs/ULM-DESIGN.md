@@ -1432,3 +1432,55 @@ Where this differs from §5.1/§10.1 as written, and why:
   two-step once they turn it on (the step-up route says so).
 - **RLS (§4) does not know the two new tables yet** — `access_passkey` and `access_sso_identity` are
   written only by the access routes, like every other `access_*` table.
+## As built, 2026-11-12 — Phase 4 (reviews, dormancy, watermarks, finding owners)
+
+Branch `fix/access-reviews`, written and tested, not deployed. One migration, `sql/schema_v122.sql`.
+This replaces §16's "Phase 4 (§13): quarterly reviews exist as a table and three routes, not as a
+cycle; no dormant suspension, no export watermarks, no finding ownership". docs/FIX-STATUS.md
+section REV has one row per change.
+
+- **Reviews (§11.3) are a cycle** (`api/access/reviews.js`). Opened by the schedule — the 1st of
+  each Dubai month: quarterly in January, April, July and October, monthly (sensitive classes only:
+  DOC at F, CASH, CRED, ACCUSE, AUDIT, RAW) in the other months — or by an Access admin; due in 14
+  days. One line per direct grant and per person in a team that holds a role, each with an owner
+  (the team's lead, or any Access admin/Owner) and a state. Each keep or revoke is audited.
+  Undecided lines become unattested at the close and end 14 days later unless someone attests them
+  first. **Deviation, on purpose:** the schedule opens reviews only once sign-in is REQUIRED — in
+  open mode nobody is obliged to sign in to attest, and unattested access would end. An admin can
+  open one by hand in either mode.
+- **The last Owner is never ended by a review**, at the close or at the expiry (§11.2).
+- **Direct grants are attested by an Access admin or the Owner**, team places by the team's lead.
+  §11.3 names only leads; a direct grant belongs to no team, so no lead can attest it. The lead is
+  the team's lead at the moment of the decision, not whoever led it when the review opened (the
+  independent review, FIX-STATUS REV15).
+- **One keep settles the same access in every open review.** Reviews can overlap (three Open
+  buttons, and the schedule's monthly beside an admin's quarterly); access kept in one is no longer
+  left to end unattested in the other (REV16). A team place made after a review opened is not the
+  place it listed (REV17).
+- **Dormant suspension (§11.2)** was already in the hourly housekeeping; now reinstatement restarts
+  the 60-day clock, sign-in says why and how to get back, each suspension is audited, and only the
+  last active Owner is exempt (every Owner was).
+- **Finding ownership** is §8's `act:finding.own` on #insights' findings (`api/access/findings.js`):
+  take, assign, close with an outcome and a note, reopen; the current state in `finding_owner`, the
+  history in the audit log. The routes are under `/api/access/` (manifest `self`, never cached). A
+  row is shown only where the reader holds driver identity (or `finding.own`) over its fleet —
+  /api/insights' own judgement (REV19).
+- The v86 `access_review` table is left in place, unread.
+- **Export watermarks (§9.3)** (`api/access/watermark.js`): every route that hands back a file —
+  the trip CSV, the money workbook, Today, the month target, the low performers, a watch list, the
+  assistant's attached workbook — carries who exported it and when, for a signed-in person or a
+  wall screen: the CSV's first line, and a workbook's properties, every sheet's print footer and a
+  last "Exported by" sheet. A visitor while sign-in is optional gets the file as before. No emailed
+  report carries an attachment (they are HTML and text bodies), so there is none to stamp.
+- **Where it shows.** Set up → Access → Reviews lists each open review card by card (a team, or
+  the roles given directly), the unattested lines with their end dates, and the finished reviews;
+  a team lead who manages no access finds their team's lines on Your account. "Who is on it" is a
+  panel on each finding's own page (#action/<rule>/<subject>); the #action and #insights absence
+  cells now say what is still not recorded — whether the fact itself changed, and who cleared a
+  finding its rule stopped finding.
+- **The migration.** v122's two `ALTER TABLE access_user` statements need the table's owner; they
+  run in a guarded block, so a refused privilege is a notice and the new tables are made regardless
+  (src/db.js runs a schema file as one query). Accounts the 2026-09-28 sweep had already suspended
+  get their `dormant_since` from the audit row that recorded it, so sign-in explains them too.
+- **Not done here:** `test/access_pages.test.mjs` §8 was rewritten for the cycle but not run (it
+  needs a local Postgres, and none runs in the build sandbox).

@@ -213,7 +213,7 @@ class Sheet {
   row(values, kinds = this.cols) {
     return this.push(values.map((v, i) => [v, (kinds && kinds[i]) || 'text']));
   }
-  xml(first) {
+  xml(first, footer = null) {
     const views = this.headerAt != null
       ? `<sheetViews><sheetView workbookViewId="0"${first ? ' tabSelected="1"' : ''}><pane ySplit="${this.headerAt}" topLeftCell="A${this.headerAt + 1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>`
       : `<sheetViews><sheetView workbookViewId="0"${first ? ' tabSelected="1"' : ''}/></sheetViews>`;
@@ -225,7 +225,13 @@ class Sheet {
        it and reports none without it — measured on the first production
        download, 2026-09-28. */
     const dim = `<dimension ref="A1${this.rows.length > 1 || this.lastCol > 1 ? `:${colName(Math.max(this.lastCol, 1) - 1)}${Math.max(this.rows.length, 1)}` : ''}"/>`;
-    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${dim}${views}<sheetFormatPr defaultRowHeight="15"/>${cols}<sheetData>${this.rows.join('')}</sheetData>${filter}</worksheet>`;
+    /* The print footer, on every page of every sheet, when the workbook has
+       one: who exported it and when (api/access/watermark.js). In a header
+       or footer '&' starts a code, so a literal one is doubled; Excel holds
+       at most 255 characters there, so the text is cut at 120 first.
+       headerFooter follows autoFilter in the worksheet's schema order. */
+    const hf = footer ? `<headerFooter><oddFooter>${xmlText(`&L${String(footer).slice(0, 120).replace(/&/g, '&&')}`)}</oddFooter></headerFooter>` : '';
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${dim}${views}<sheetFormatPr defaultRowHeight="15"/>${cols}<sheetData>${this.rows.join('')}</sheetData>${filter}${hf}</worksheet>`;
   }
   filterRef() {
     if (this.headerAt == null || !this.cols) return null;
@@ -243,6 +249,12 @@ export class Workbook {
     this.sheets = [];
     this.creator = creator;
     this.created = created;
+    /* Set by an export watermark (api/access/watermark.js stampWorkbook):
+       the file's own properties say who exported it, and every sheet's
+       print footer says so too. Unset, the file is exactly as before. */
+    this.lastModifiedBy = null;
+    this.description = null;
+    this.footer = null;
   }
   sheet(name, opts) {
     if (!name || name.length > 31 || BAD_SHEET.test(name) || /^'|'$/.test(name)) {
@@ -272,7 +284,7 @@ export class Workbook {
     }<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`;
     const rootRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`;
     const stamp = this.created.toISOString().replace(/\.\d{3}Z$/, 'Z');
-    const core = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:creator>${xmlText(this.creator)}</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${stamp}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${stamp}</dcterms:modified></cp:coreProperties>`;
+    const core = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:creator>${xmlText(this.creator)}</dc:creator>${this.lastModifiedBy ? `<cp:lastModifiedBy>${xmlText(this.lastModifiedBy)}</cp:lastModifiedBy>` : ''}${this.description ? `<dc:description>${xmlText(this.description)}</dc:description>` : ''}<dcterms:created xsi:type="dcterms:W3CDTF">${stamp}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${stamp}</dcterms:modified></cp:coreProperties>`;
     return zip([
       ['[Content_Types].xml', types],
       ['_rels/.rels', rootRels],
@@ -280,7 +292,7 @@ export class Workbook {
       ['xl/workbook.xml', workbook],
       ['xl/_rels/workbook.xml.rels', wbRels],
       ['xl/styles.xml', STYLES_XML],
-      ...this.sheets.map((s, i) => [`xl/worksheets/sheet${i + 1}.xml`, s.xml(i === 0)]),
+      ...this.sheets.map((s, i) => [`xl/worksheets/sheet${i + 1}.xml`, s.xml(i === 0, this.footer)]),
     ], this.created);
   }
 }

@@ -22,6 +22,7 @@
    it goes out with res.end, not res.json. */
 import { buildMoneyWorkbook, MAX_DAYS } from './money_workbook.js';
 import { personParam, loadDirectory, driverScope } from './driver_routes.js';
+import { exportStamp, stampWorkbook } from './access/watermark.js';
 
 const PLATFORMS = ['uber', 'bolt', 'yango', 'hotel'];
 const FLEETS = ['ecosine', 'egari'];
@@ -75,6 +76,8 @@ export function moneyExportRoutes(app, { q, wrap, winDays, log = null }) {
        of that name is built from them (api/money_workbook.js). */
     const directory = await loadDirectory(q, { from, to, platform, fleet });
     const { wb, totals } = await buildMoneyWorkbook({ q, from, to, fleet, platform, person, directory, hide });
+    /* Who took it and when, for a signed-in caller (api/access/watermark.js). */
+    stampWorkbook(wb, exportStamp(req), { what: `The money workbook, ${from} to ${to}`, asked: req.query });
     const buf = wb.toBuffer();
     const who = person ? `-${String(person.name || person.account).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}` : '';
     const name = `cash-and-money-${from}-to-${to}${fleet ? `-${fleet}` : ''}${platform ? `-${platform}` : ''}${who}.xlsx`;

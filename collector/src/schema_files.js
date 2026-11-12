@@ -373,4 +373,12 @@ export const SCHEMA_FILES = [
      access_session.auth_method. Both methods are off until the Owner turns
      them on; api/access/signin_methods.js. */
   'schema_v121.sql',
+  /* v122: ULM Phase 4 — access reviews as a cycle (access_review_cycle and
+     access_review_item: every grant and team place, each with its reviewer
+     and a state; unattested access ends 14 days after the close), the
+     dormancy columns on access_user (reinstated_at restarts the 60-day clock,
+     dormant_since lets sign-in say why), and finding_owner (who took, was
+     assigned or closed a finding on #insights). api/access/reviews.js and
+     api/access/findings.js. */
+  'schema_v122.sql',
 ];

@@ -28,6 +28,7 @@ import { monthTarget, validMonth, validDay, carTarget } from './revenue_target.j
 import { buildTodayWorkbook, TODAY_FILE_CLASSES } from './today_workbook.js';
 import { targetHours } from './target_hours.js';
 import { monthView, buildTargetMonthWorkbook, MONTH_FILE_CLASSES } from './target_month.js';
+import { exportStamp, stampWorkbook } from './access/watermark.js';
 
 export const HOURS_KEEP_MS = 30000;
 
@@ -89,6 +90,7 @@ export function targetRoutes(app, { q, wrap, log = null }) {
     const month = validMonth(req.query.month) ? String(req.query.month) : null;
     const t0 = Date.now();
     const { wb, name, month: m, drivers, days } = await buildTargetMonthWorkbook({ q, month, hide });
+    stampWorkbook(wb, exportStamp(req), { what: `The month target workbook, ${m}`, asked: req.query });
     const buf = wb.toBuffer();
     res.setHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('content-disposition', `attachment; filename="${name}"`);
@@ -105,6 +107,7 @@ export function targetRoutes(app, { q, wrap, log = null }) {
     const hide = new Set(levels ? TODAY_FILE_CLASSES.filter((c) => levels[c] !== 'F') : []);
     const t0 = Date.now();
     const { wb, name, month, drivers, cars, findings } = await buildTodayWorkbook({ q, hide });
+    stampWorkbook(wb, exportStamp(req), { what: 'The Today workbook', asked: req.query });
     const buf = wb.toBuffer();
     res.setHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('content-disposition', `attachment; filename="${name}"`);

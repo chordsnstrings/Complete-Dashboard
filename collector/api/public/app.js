@@ -2982,6 +2982,12 @@ async function actionContract(root) {
   const act = panel('What to do', 'The smallest useful next step.', 'act-do');
   act.body.innerHTML = `<p style="margin:0">${esc(r.action || '')}</p>`;
   g.append(why.panel, act.panel);
+  /* Who is on it — take, give, close, reopen (ULM §8 finding.own;
+     api/public/findingowner.js). Its own module, loaded beside the page:
+     a failed load leaves the page as it was rather than breaking it. */
+  const ownerSlot = el('div');
+  root.append(ownerSlot);
+  import('/findingowner.js').then((m) => ownerSlot.replaceWith(m.ownerPanel(r))).catch(() => {});
   const who = actionPeople(r, 'act-people');
   if (who) root.append(who.panel);
   if (view && r.entity_id) {
@@ -3029,9 +3035,12 @@ async function actionContract(root) {
           : INSIGHT_COST_BASIS[r.code] ? `${sentence(INSIGHT_COST_BASIS[r.code])}.` : 'As the rule computes it; see What we found.' }
       : { label: 'What it would cost', fig: null, none: 'Not priced',
         why: 'This rule does not size its findings in money, and the page never invents a number to rank it by.' },
-    { label: 'Whether anyone acted', fig: null, none: 'Not recorded',
-      why: 'A finding carries no acknowledgement and no owner. It leaves the list when its rule stops finding it — '
-        + 'nothing records whether a person acted or the fact simply changed.' },
+    /* Who took and closed it is recorded now (Who is on it, above; ULM §8
+       finding.own, 2026-11-12) — what still is not, is whether the fact
+       itself changed because of it. */
+    { label: 'Whether the fix worked', fig: null, none: 'Not recorded',
+      why: 'Who took this finding and how they closed it is recorded under Who is on it, for signed-in people. '
+        + 'Whether the fact itself changed is read only from the rule: the finding leaves the list when its rule stops finding it.' },
     r.metric != null
       ? { label: 'What the figure is not', fig: null, none: metric ? sentence(metric[0]) : 'The rule\'s figure',
         why: ACTION_NOT[r.code] || 'The figure the rule fired on, as it computed it — not a measure of what the finding costs.' }
@@ -6970,9 +6979,12 @@ async function insightsContract(root) {
       why: pricedN == null ? 'This server does not count how many open findings carry a cost.'
         : 'The rest are real and unpriced: no cost model exists for their kinds, so the list is ranked by '
           + 'severity and never by a number invented to sort on.' },
+    /* A person's taking and closing is recorded on each finding's own page
+       since 2026-11-12 (ULM §8 finding.own); the rule's own clearing — what
+       this count is — still names nobody. */
     { label: cleared ? `Who cleared the ${fmt(cleared)}` : 'Who clears a finding', fig: null, none: 'Not recorded',
-      why: 'The payload carries no actor and no acknowledgement. A finding leaves the list when its rule stops '
-        + 'finding it at the next run — nothing records whether a person acted or the fact simply changed.' },
+      why: 'A finding leaves the list when its rule stops finding it at the next run, and that names nobody. '
+        + 'A person who takes and closes a finding is recorded on the finding\'s own page, under Who is on it, for signed-in people.' },
     { label: 'Which feed raised a compliance item', fig: null, none: 'None',
       why: 'A compliance item is raised by a date passing, not by a feed: the dates come from the roster and the '
         + 'vehicle documents, so such an item names no channel.' },

@@ -76,6 +76,10 @@ export async function accountPage(root, _param, _sub) {
   }
 
   root.append(youPanel(), seesPanel());
+  /* Access reviews waiting for this person as a team's lead (ULM §11.3,
+     api/public/reviews_ui.js); nothing is drawn when none wait. */
+  const reviewsHost = h('div'); root.append(reviewsHost);
+  import('./reviews_ui.js').then((m) => m.waitingPanel(reviewsHost)).catch(() => {});
   if (who.owner) root.append(previewPanel());
   root.append(passwordPanel(), twoStepPanel(), passkeysPanel(), mobilePanel(), sessionsPanel(), lookPanel(), requestsPanel());
   return { title: 'Your account', sub: `Signed in as ${who.user?.email || ''}` };
