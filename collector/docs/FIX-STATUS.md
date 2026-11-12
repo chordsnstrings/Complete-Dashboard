@@ -6951,3 +6951,34 @@ are what broke only when they met, found by CI on each merge and by the batch's 
 | INT5 | **`trips_list`'s phone check read the whole page.** "The channel is on every card" passed on any mixed-case mention and failed once only the cards' capitalised line was left (Arkiv sets it in mono capitals; `innerText` reports "HOTEL"). It now reads every card's own text | `test/trips_list.test.mjs` | 76/76; reverted (the channel dropped from the card's line): fails | written, not deployed |
 | INT6 | **Classic `settings` re-recorded.** The base front end renders the recorded hash; the only change is RET's Data retention panel, shared by both skins (one block in a tag-level diff); re-recorded from a clean archive of HEAD. `month-target/2026-08` and `vehicle/L45235/movement` still differ, with the same hashes on the base front end — they predate the batch | `test/fixtures/arkiv_classic_frozen.json` | `ONLY=settings` 2/2 | written, not deployed |
 | INT7 | **`access_core`'s replay check raced the clock.** It rebuilt the used code from `totpStep()+1`; across a 30-second boundary that is the next step's, valid code (CI shard 1 on `950fff5`). The exact string is now sent again | `test/access_core.test.mjs` | 211/211; with the replay rule removed it still fails | written, not deployed |
+
+## The batch of 2026-11-12 on production
+
+**Deployed:** PR #32 merged as `6ccbea25`; deployment `aaed1564`, ACTIVE 2026-11-12 08:54Z, built
+by `bin/deploy.mjs` (`force_build`) after the spec gained COMMIT_SHA (deployment `d98754ba`,
+which redeployed `52cbf9d9` with it — COVERAGE trap 25). Every row above marked "written, not
+deployed" in the sections OPS, RET, BFO, UTX, WIRE, ARK, SPK, MOB, ANS, PKY, REV, RLS, ONE, SEC
+and INT is **live** from this deployment. What was then proved on production (GET, cache-busted,
+and screenshots through `bin/prod-mirror.mjs`):
+
+| Claim | Proof on production |
+|---|---|
+| OPS: health names its build | `/api/health` → `commit` `6ccbea25…`, `frontend` `fleet-2cf1bfa3cf98` = `sw.js` VERSION; `rate_limit.enabled`, keyed on `do-connecting-ip` |
+| Migrations | collector boot: v115, v116, v117, v119, v121, v122, v124 migrated ("ran 7, skipped 113 of 120"); the API then skipped all 120 |
+| RLS | "row-level security pass {objects 137, failed 0}"; "in use: 54 fleet tables carry the policy and all 12 views run as the reader" |
+| SEC1 | PUT `/api/settings` `{UBER_TOKEN_URL: <its default>}` → 400 `env_only` with the sentence; the key's source still `default`; `/api/settings` marks the ten destinations `env_only` |
+| WIRE | `/api/fleet/roster` known, n 132; `/api/kpis` tracked 268 → 136, silent 163 → 31, set aside 132; the note on `#vehicles` and `#live` |
+| ANS | the answer line and Act-on strip on `#overview`, `#vehicles`, `#live`, `#low-performers` (screenshots) |
+| ARK | `index.html` theme-color `#FFFFFF`/`#1E1F22`, preloads Karla + Plex Mono 400; `sw.js` carries DATA_CAP; row marks on 100 of 100 `#trips` rows (bolt, uber, hotel) |
+| SPK | `/api/history` answers; sparklines draw on `#cancellations` (1), `#online-time` (1), `#deposits` (2) once the boot roll-up finished at 08:59Z |
+| RET | `/api/settings/retention`: mode `dry_run`, "no retention pass has run yet; the first is at 19:53 UTC"; the panel draws on Settings |
+| UTX | first run 09:07Z, both fleets `ok`: 24/24 windows each, 165 and 97 transactions stored |
+| BFO | first pass: Egari 28 fleet-integration orders, 28/28 matched a portal row; Ecosine 0 (not entitled) |
+| PKY | `/api/auth/methods` → passkeys false, sso null (off) |
+| MOB / phone | `#today` at 390 renders (screenshot); every API call 200, no script error |
+
+**Not yet proved, each waiting on time:** RET's first pass (19:53Z, dry run); UTX's
+`agreement` with the fare walk (after the 10:05Z pass); the review schedule and dormancy sweep
+(they run only once sign-in is required); PKY and SSO (off until the Owner turns them on); RLS for
+a one-fleet reader (none exists).
+
