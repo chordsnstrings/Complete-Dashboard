@@ -346,7 +346,16 @@ function twoStepPanel({ then = null } = {}) {
         h('div', { class: 'acx-actions' }, btn, msg));
       return;
     }
-    if (required) body.append(note('Your role requires two-step sign-in, so it has to be on before anything else here opens.', 'warn'));
+    /* Unrestricted here, with two-step required and off, can only be a
+       session a multi-factor method opened (a passkey, or a provider that
+       used two factors — middleware.js identify): saying "nothing opens until
+       it is on" to that person would not be true. */
+    if (required) {
+      body.append(note(who.restricted
+        ? 'Your role requires two-step sign-in, so it has to be on before anything else here opens.'
+        : 'Your role requires two-step sign-in. This session already counts as two-step — you signed in with a passkey, or with a provider '
+          + 'that used two factors. Signing in with your password alone would ask you to set this up first.', 'warn'));
+    }
     const msg = msgLine();
     const btn = h('button', { type: 'button', class: 'btn primary', 'data-acx': 'totp-start' }, 'Set up two-step sign-in');
     btn.addEventListener('click', async () => {

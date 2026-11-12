@@ -38,7 +38,11 @@
        returns signed in" fails (the page sits on the sign-in form).
      · signin_methods.js credentialJson: drop userHandle — "the browser's
        passkey signs in" fails (the server refuses a credential naming
-       nobody). */
+       nobody).
+     · account.js twoStepPanel: always the "nothing opens until it is on"
+       note — "the account page tells a passkey session…" fails.
+     · signin.js passkeyInstead: return '' — "held to set up two-step after a
+       password, the page says a passkey counts by itself" fails. */
 import { PGlite } from '@electric-sql/pglite';
 import express from 'express';
 import { readFileSync } from 'node:fs';
@@ -245,17 +249,60 @@ try {
     await p.click('dialog .ac-passkey');
     check('…and the passkey re-confirms them', (await p.evaluate(() => window.__c)) === 'ok');
     check('…recorded on the session as a step-up', Boolean((await lastSession(fin.id)).stepup_at));
-    await p.goto(`${BASE}/harness/account`);
-    await p.waitForSelector('[data-panel="acct-passkeys"]:not([hidden]) table, [data-panel="acct-passkeys"]:not([hidden]) .cards', { timeout: 10000 }).catch(() => {});
+    /* Everyone who can change anything must use two-step; Finance has only a passkey. */
+    await svc.setConfig(db, 'mfa', 'writers', owner.id);
+    await svc.getConfig(db, { fresh: true });
+    try {
+      await p.goto(`${BASE}/harness/account`);
+      await p.waitForSelector('[data-panel="acct-passkeys"]:not([hidden]) table, [data-panel="acct-passkeys"]:not([hidden]) .cards', { timeout: 10000 }).catch(() => {});
+      const twoStep = await p.$eval('[data-panel="acct-twostep"]', (n) => n.innerText).catch(() => '');
+      check('the account page tells a passkey session that its two-step is already counted, not that nothing opens',
+        /already counts as two-step/.test(twoStep) && !/before anything else here opens/.test(twoStep), twoStep.slice(0, 160));
+    } finally {
+      await svc.setConfig(db, 'mfa', 'admins', owner.id);
+      await svc.getConfig(db, { fresh: true });
+    }
     const text = await p.$eval('[data-panel="acct-passkeys"]', (n) => (n.hidden ? '' : n.innerText));
     check('the account page lists the passkey by its name', /Virtual laptop/.test(text), text.slice(0, 200));
+    const { credentials: held } = await A.cdp.send('WebAuthn.getCredentials', { authenticatorId: A.authId });
     await p.click('[data-panel="acct-passkeys"] button[data-pk-remove]');
     await p.waitForFunction(() => /Passkey removed/.test(document.querySelector('[data-panel="acct-passkeys"] .acx-msg')?.textContent || ''), null, { timeout: 10000 });
     check('…and removes it', (await db.query('SELECT 1 FROM access_passkey WHERE user_id = $1', [fin.id])).rows.length === 0);
+    /* …and from the device, as the person would: otherwise the authenticator
+       holds two passkeys for this site, and with no email typed it may offer
+       the removed one — which the server rightly refuses as not registered
+       (seen: 2 runs in 3 failed the sign-in below before this). */
+    for (const c of held) await A.cdp.send('WebAuthn.removeCredential', { authenticatorId: A.authId, credentialId: c.credentialId });
     await p.fill('[data-acx="passkey-name"]', 'Second laptop');
     await p.click('[data-acx="passkey-add"]');
     await p.waitForFunction(() => /Passkey added/.test(document.querySelector('[data-panel="acct-passkeys"] .acx-msg')?.textContent || ''), null, { timeout: 10000 });
     check('"Add a passkey" makes one with the browser and lists it', /Second laptop/.test(await p.$eval('[data-panel="acct-passkeys"]', (n) => n.innerText)));
+
+    /* Held to set up two-step after a PASSWORD, the page says a passkey would
+       do — and signing in with it instead is not held. */
+    await svc.setConfig(db, 'mfa', 'writers', owner.id);
+    await svc.getConfig(db, { fresh: true });
+    try {
+      await p.evaluate(async () => { const { post } = await import('/access.js'); await post('/api/auth/logout', {}, { retry: false }); });
+      await p.goto(`${BASE}/signin`);
+      await p.waitForSelector('#si-login');
+      await p.fill('#si-email', fin.email);
+      await p.fill('#si-password', PASS);
+      await p.click('#si-login button[type="submit"]');
+      const hint = await p.waitForSelector('[data-act="usepasskey"]', { timeout: 15000 }).then(() => true, () => false);
+      check('held to set up two-step after a password, the page says a passkey counts by itself', hint);
+      if (hint) {
+        await p.click('[data-act="usepasskey"]');
+        await p.waitForSelector('[data-act="passkey"]');
+        await p.click('[data-act="passkey"]');
+        const landed = await reached(p, `${BASE}/`);
+        const who = landed ? await me(p) : {};
+        check('…and signing in with the passkey instead is not held', landed && who.signedIn && !who.restricted, JSON.stringify(who.restricted));
+      }
+    } finally {
+      await svc.setConfig(db, 'mfa', 'admins', owner.id);
+      await svc.getConfig(db, { fresh: true });
+    }
   });
   await A.ctx.close();
 

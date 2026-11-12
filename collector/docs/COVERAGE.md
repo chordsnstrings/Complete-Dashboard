@@ -10754,3 +10754,35 @@ it again.
   - platform bookings (167);
   - the five dataset-coverage counts (154 each). These are one per `/api/coverage` computation, roughly every 7.4 min.
 - `/api/coverage` measured 16.9 s, 19.3 s and 32.7 s cold.
+
+## Passkeys and single sign-on — built 2026-11-12 (PKY)
+
+Not a provider feed: two more ways to sign in (docs/FIX-STATUS.md section PKY, ULM-DESIGN "As built,
+2026-11-12"). Both are off until the Owner turns them on. The single sign-on provider is configured
+from the environment only (`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, optional
+`OIDC_NAME`), and passkeys and the return address follow `PUBLIC_URL`, also from the environment.
+
+### Traps this added to the list
+
+* **`Buffer.from(s, 'base64url')` skips characters outside the alphabet without a word.** Measured:
+  `'ab$$cd'` decodes as `'abcd'`. Two different strings then name the same credential, or a value
+  that is not base64url at all passes as one. Check the alphabet first (api/access/webauthn.js
+  fromB64url).
+* **WebAuthn will not use an IP address as the RP id.** A harness on `http://127.0.0.1:…` cannot
+  make or use a passkey; `http://localhost:…` can (a secure context, and a valid RP id). The browser
+  test runs on `http://localhost:8310` for that reason, and `PUBLIC_URL` on the platform must be the
+  site's https host, never an address.
+* **Three two-step codes per person per thirty seconds, in tests.** The server accepts the step
+  either side of now and refuses a step it has already seen (the replay rule), so a test that signs
+  a person in and re-confirms several times in a few seconds runs out of codes and fails with "that
+  code is not right" — a test fault that looks like a server fault. Track the last step per person,
+  and re-confirm only when the session's own ten minutes have run out
+  (test/access_passkey_sso.test.mjs `code`, `freshStepUp`).
+* **A passkey removed on the server stays on the device.** The authenticator keeps offering it, and
+  with no email typed it may offer it first; the server then refuses it as not registered (and now
+  says it may have been removed, and to delete it from the device too). The browser test deletes it
+  from its virtual authenticator, as a person would: before that, 2 runs in 3 failed a later passkey
+  sign-in. (WebAuthn L3's `signalUnknownCredential` could tell the device; not used yet.)
+* **A harness page that renders one module must load `who` first.** app.js loads it at boot; the
+  "confirm it is you" dialog reads `who.user.totp` to ask for a code or a password, and without it
+  asked an Owner with two-step for a password.

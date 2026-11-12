@@ -305,7 +305,11 @@ export function signinMethodRoutes(app, { db, layer, wrap, log = { info() {}, wa
     const row = typeof credential?.id === 'string' ? await passkeyByCredential(db, credential.id) : null;
     if (!row) {
       await audit(req, 'auth.login_failed', 'passkey', null, { method: 'passkey', why: 'unknown passkey' });
-      return fail(res, 401, 'unknown_passkey', 'This passkey is not registered with FleetMirror. Sign in another way, then add it on your account page.');
+      /* Most often a passkey removed from the account but still on the
+         device, which keeps offering it: said, so the person knows to delete
+         it there too. */
+      return fail(res, 401, 'unknown_passkey', 'This passkey is not registered with FleetMirror — it may have been removed from your account, '
+        + 'though this device still offers it. Sign in another way; then delete it from this device\u2019s saved passkeys, or add it again on your account page.');
     }
     const judged = await judgeAssertion(req, res, { credential, challenge: ch.challenge, rp, row, requireUserHandle: true,
       failAction: 'auth.login_failed', failDetail: {} });

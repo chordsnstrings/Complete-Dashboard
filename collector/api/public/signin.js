@@ -638,6 +638,21 @@ async function drawQr(text) {
   return q.createSvgTag({ cellSize: 4, margin: 16, scalable: true });
 }
 
+/* A passkey counts as two-step on its own (ULM-DESIGN §5.1; middleware.js
+   identify): a person held here after a PASSWORD sign-in, whose account has a
+   passkey, need not set up an app at all. The page cannot know before sign-in
+   whether this account has one, so it says "if" — and the way there is to
+   end this password session and sign in with the passkey. */
+const passkeyInstead = () => (S.methods?.passkeys && passkeySupported()
+  ? `<div class="si-quiet"><p>A passkey counts as two-step sign-in by itself. If this account has one,
+      <button type="button" class="si-link" data-act="usepasskey">sign out and use your passkey instead</button>.</p></div>` : '');
+async function usePasskeyInstead() {
+  try { await post('/api/auth/logout', {}, { retry: false }); } catch { /* ended either way */ }
+  await refreshWho();
+  S.notice = { tone: '', text: 'Choose “Continue with passkey” to sign in with your passkey.' };
+  stepLogin();
+}
+
 const TOTP_HEAD = `
     <p class="si-eyebrow">Two-step sign-in</p>
     <h1 tabindex="-1">Set up two-step sign-in</h1>
@@ -696,12 +711,14 @@ async function stepTotp() {
         </form>
       </li>
     </ol>
+    ${passkeyInstead()}
     ${signedInAs()}`, {
     title: 'Set up two-step sign-in',
     focus: 'h1',
     acts: {
       ...signOutAct,
       copykey: (btn) => copy(groups.join(''), btn.parentElement.querySelector('.si-status'), 'Key copied.'),
+      usepasskey: () => usePasskeyInstead(),
     },
   });
 
