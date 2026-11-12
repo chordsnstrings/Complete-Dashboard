@@ -78,22 +78,31 @@ const PERSON_OF = (a) => `coalesce(nullif(${a}.person_key, ''), ${a}.driver_ext_
    the fold half is already exported; this is the other half. */
 export const NAMED = (a) => `coalesce(btrim(${a}.driver_name), '') <> ''`;
 
+/* `fleet`, optional: an SQL expression (a bind such as '$7') naming the ONE
+   fleet whose custody records may be read, or null for every fleet — exactly
+   what these helpers always read. A car is one fleet's, but the accounts that
+   drove it on a day can be filed under the other fleet, and a reader whose
+   access covers one fleet must not be handed the other fleet's driver names
+   beside their own car (api/access/one_fleet.js). With no `fleet` the SQL is
+   byte for byte what it was. */
+const FLEET_OF = (a, fleet) => (fleet ? ` AND (${fleet}::text IS NULL OR ${a}.fleet_id = ${fleet})` : '');
+
 /** Names, comma-joined, for the plate and day named by the caller's columns. */
-export const custodyNames = (plate, day) =>
+export const custodyNames = (plate, day, fleet = null) =>
   `(SELECT string_agg(nm, ', ' ORDER BY nm) FROM (
       SELECT DISTINCT ON (${PERSON_OF('v')}) v.driver_name AS nm
         FROM vehicle_driver_day v
        WHERE v.plate = ${plate} AND v.day = ${day}
-         AND ${NAMED('v')}
+         AND ${NAMED('v')}${FLEET_OF('v', fleet)}
        ORDER BY ${PERSON_OF('v')}, v.is_primary DESC, v.trips DESC) s)`;
 
 /** The same people as {name, id} pairs, so every one of them is clickable. */
-export const custodyRefs = (plate, day) =>
+export const custodyRefs = (plate, day, fleet = null) =>
   `(SELECT jsonb_agg(jsonb_build_object('name', nm, 'id', id) ORDER BY nm) FROM (
       SELECT DISTINCT ON (${PERSON_OF('v')}) v.driver_name AS nm, v.driver_ext_id AS id
         FROM vehicle_driver_day v
        WHERE v.plate = ${plate} AND v.day = ${day}
-         AND ${NAMED('v')}
+         AND ${NAMED('v')}${FLEET_OF('v', fleet)}
        ORDER BY ${PERSON_OF('v')}, v.is_primary DESC, v.trips DESC) s)`;
 
 /* The custodian of a plate as of the most recent day we have custody for, for

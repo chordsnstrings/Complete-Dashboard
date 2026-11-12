@@ -21,7 +21,9 @@
      grain     record | list | aggregate | none
      fields    [{ class, paths }] — removed or masked for a caller below F
      whole     classes that cannot be separated: lacking one refuses the route
-     fleet     param | rows | global | mixed  (+ fleetRows, fleetKey)
+     fleet     param | rows | global | mixed | narrow  (+ fleetRows, fleetKey)
+               — narrow: mixed for an unrestricted reader, answered for the one
+               fleet of a one-fleet reader (api/access/one_fleet.js)
      cap       the action a write (or a GET with side effects) needs
      public    answers without signing in
      self      the handler makes its own access decision (/api/auth, /api/access)

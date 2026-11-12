@@ -24,6 +24,7 @@ import { lookupEntry } from './manifest.js';
 import { appendAudit } from './audit.js';
 import * as svc from './service.js';
 import { isInternal } from './internal.js';
+import { NARROW_PARAM, mixedReason } from './one_fleet.js';
 import { safeEqual, newToken } from './crypto.js';
 import { createHash } from 'node:crypto';
 import { rank, withheldSentence, CLASS, ROLE } from '../public/access_model.js';
@@ -199,6 +200,7 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     const scope = access.scope;
     let targets = all;
     let rewrite = null;
+    let narrow = null;
     let filterRows = null;
     if (entry.fleet === 'param') {
       /* fleetFrom 'body': the handler acts on req.body.fleet and never reads
@@ -221,6 +223,27 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
       if (!access.allScope) filterRows = scope;
     } else if (entry.fleet === 'global') {
       targets = scope.length ? scope : all;
+    } else if (entry.fleet === 'narrow' && !access.allScope) {
+      /* 'narrow': a route that mixes every fleet for an unrestricted reader
+         and whose handler can answer for ONE fleet in every row, total and
+         count (api/access/one_fleet.js). A reader holding one fleet gets that
+         fleet's answer; the gate writes it into `_fmfleet` and `fleet` below.
+         Asking for a fleet outside the scope is refused with that reason, as
+         on a 'param' route. An unrestricted reader never reaches this branch:
+         for them the route is judged exactly as 'mixed' was — levels over
+         every fleet, no rewrite — so nothing changes for them. */
+      const asked = String(req.query.fleet || '');
+      if (asked && !all.includes(asked)) return { refuse: withheldBody(null, '', { error: 'bad_fleet', detail: `There is no fleet called ${asked}.` }) };
+      if (asked && !scope.includes(asked)) return { refuse: withheldBody(null, '', { error: 'fleet_scope', detail: 'That fleet is outside your access.' }) };
+      if (scope.length > 1) {
+        return { refuse: withheldBody(null, '', { error: 'fleet_scope',
+          detail: 'Choose one of your fleets: this page can be narrowed to one fleet, not to some of them.' }) };
+      }
+      targets = scope.slice(0, 1);
+      if (targets.length) {
+        narrow = targets[0];
+        if ((entry.fleetRows || []).length) filterRows = targets;
+      }
     } else if (!access.allScope) {
       /* 'mixed': the answer combines every fleet's records and carries no
          fleet on its rows to filter by (a person's page, a car's page). A
@@ -229,14 +252,15 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
          the refusal said "not shown to your role: driver identity" to an
          Operations manager who plainly holds driver identity for their own
          fleet: a reason that was not the true one. */
-      return { refuse: withheldBody(null, '', { error: 'fleet_scope',
-        detail: 'This combines the records of every fleet, and your access covers only some of them. '
-          + 'Ask the Owner or an Access admin if you need it for every fleet.' }) };
+      /* …and the reason is the route's own (api/access/one_fleet.js): "this
+         combines the records of every fleet" was false of, say, the revenue
+         target, which is one figure set for the company. */
+      return { refuse: withheldBody(null, '', { error: 'fleet_scope', detail: mixedReason(entry) }) };
     }
     const combine = entry.fleet === 'global' ? 'max' : 'min';
     const levels = access.levelsOver(targets, combine === 'max'
       ? (a, b) => (rank(a) >= rank(b) ? a : b) : (a, b) => (rank(a) <= rank(b) ? a : b));
-    return { targets, rewrite, filterRows, levels };
+    return { targets, rewrite, narrow, filterRows, levels };
   }
 
   async function gate(req, res, next) {
@@ -395,6 +419,23 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
          exactly this answer. */
       const u = new URL(req.originalUrl, 'http://local');
       u.searchParams.set('fleet', j.rewrite);
+      req.fmCacheKey = `${u.pathname}${u.search}`;
+    }
+    /* A 'narrow' route, for a one-fleet reader: the whole answer is that
+       fleet's. `_fmfleet` is the parameter the handler narrows every query
+       by; `fleet` is written too, so the queries that already followed the
+       fleet chip follow it as well. Both go into the cache key, so the
+       cache's background refresh (which fetches the key as a URL, as the
+       system) recomputes this same narrowed answer, and a cached answer is
+       only ever served under a key that names its fleet. Whatever the caller
+       typed into either is overwritten — asking for another fleet was
+       refused above. */
+    if (j.narrow) {
+      req.query.fleet = j.narrow;
+      req.query[NARROW_PARAM] = j.narrow;
+      const u = new URL(req.fmCacheKey || req.originalUrl, 'http://local');
+      u.searchParams.set('fleet', j.narrow);
+      u.searchParams.set(NARROW_PARAM, j.narrow);
       req.fmCacheKey = `${u.pathname}${u.search}`;
     }
     /* A SEARCH IS A QUESTION ABOUT EVERY COLUMN IT MATCHES. /api/trips/list

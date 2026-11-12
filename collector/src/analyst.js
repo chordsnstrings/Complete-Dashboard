@@ -412,7 +412,14 @@ export async function measure(proposal, [from, to, fleet]) {
    read-only aggregate SQL, and a route or a test that already holds a
    connection should not have to reach for the module-level pool to see what
    the model was shown. */
-export async function buildBrief([from, to, fleet], { db = pool } = {}) {
+/* `coverageFleet`: set by /api/analyst/brief for a reader whose access covers
+   one fleet (api/access/one_fleet.js). Every trip figure here already follows
+   `fleet`; the per-source coverage did not — source_day_coverage counts each
+   channel's days over both fleets — so a one-fleet brief said how well BOTH
+   fleets' channels were collected. With it, the days and rows are counted from
+   that fleet's trips by the view's own definition (sql/schema_v9.sql). The
+   collector's analyst run never passes it, so its brief is unchanged. */
+export async function buildBrief([from, to, fleet], { db = pool, coverageFleet = null } = {}) {
   const p = [from, to, fleet];
   const W = `local_day BETWEEN $1::date AND $2::date AND ($3::text IS NULL OR fleet_id = $3)`;
   const q = (t) => db.query(t, p).then((r) => r.rows);
@@ -445,9 +452,16 @@ export async function buildBrief([from, to, fleet], { db = pool } = {}) {
                     / nullif(count(*) FILTER (WHERE outcome IS NOT NULL), 0), 1) cancel_pct,
               round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) avg_km
        FROM trip_ext WHERE ${W} GROUP BY 1 ORDER BY n DESC`),
-    db.query(
-      `SELECT source, count(*)::int days, sum(rows)::int rows
-       FROM source_day_coverage WHERE day BETWEEN $1::date AND $2::date GROUP BY 1`, [from, to])
+    (coverageFleet
+      ? db.query(
+        `SELECT source, count(*)::int days, sum(rows)::int rows
+           FROM (SELECT platform AS source, (requested_at AT TIME ZONE 'Asia/Dubai')::date AS day,
+                        count(*)::int AS rows
+                   FROM trip WHERE requested_at IS NOT NULL AND fleet_id = $3 GROUP BY 1, 2) c
+          WHERE day BETWEEN $1::date AND $2::date GROUP BY 1`, [from, to, coverageFleet])
+      : db.query(
+        `SELECT source, count(*)::int days, sum(rows)::int rows
+       FROM source_day_coverage WHERE day BETWEEN $1::date AND $2::date GROUP BY 1`, [from, to]))
       .then((r) => r.rows),
   ]);
   /* The segments that can actually be proposed on.

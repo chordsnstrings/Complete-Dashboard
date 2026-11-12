@@ -179,11 +179,11 @@
    }
   ],
   "whole": [],
-  "fleet": "mixed",
+  "fleet": "narrow",
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "api/analytics_routes.js:2197-2205 calls buildBrief in src/analyst.js:415-521. Response: {window, fleet ('both' when unset), headline{bookings, telematics, completed, bookable, avg_fare, priced, vehicles, drivers}, by_platform[]{platform, n, completion_pct, avg_km}, uber_tier_by_daypart[]{tier, daypart, n}, settlement[]{settlement_class, n, avg_fare}, properties[]{partner_name, n, avg_fare, avg_dea"
+  "notes": "api/analytics_routes.js:2197-2205 calls buildBrief in src/analyst.js:415-521. Response: {window, fleet ('both' when unset), headline{bookings, telematics, completed, bookable, avg_fare, priced, vehicles, drivers}, by_platform[]{platform, n, completion_pct, avg_km}, uber_tier_by_daypart[]{tier, daypart, n}, settlement[]{settlement_class, n, avg_fare}, properties[]{partner_name, n, avg_fare, avg_dea NARROW (2026-11-12, api/access/one_fleet.js): for a reader whose access covers one fleet the gate writes that fleet into _fmfleet and fleet, and the handler narrows every row, total and count to it; an unrestricted reader is judged exactly as mixed was."
  },
  {
   "method": "GET",
@@ -423,11 +423,11 @@
    }
   ],
   "whole": [],
-  "fleet": "mixed",
+  "fleet": "narrow",
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "Handler api/cancellation_routes.js:15-95; row shape from api/cancellation_sql.js:157-264. Each row is one person's cancellation record: person_key, driver_name, driver_ext_id, driver_ext_ids[], plates[] (cars cancellations happened in), platforms[], bookings, completed, cancelled, by_driver, dropped, declined, accepted, on_offer_channel, by_rider, unattributed, unattributed_platforms[], driver_aft"
+  "notes": "Handler api/cancellation_routes.js:15-95; row shape from api/cancellation_sql.js:157-264. Each row is one person's cancellation record: person_key, driver_name, driver_ext_id, driver_ext_ids[], plates[] (cars cancellations happened in), platforms[], bookings, completed, cancelled, by_driver, dropped, declined, accepted, on_offer_channel, by_rider, unattributed, unattributed_platforms[], driver_aft NARROW (2026-11-12, api/access/one_fleet.js): for a reader whose access covers one fleet the gate writes that fleet into _fmfleet and fleet, and the handler narrows every row, total and count to it; an unrestricted reader is judged exactly as mixed was."
  },
  {
   "method": "GET",
@@ -1511,13 +1511,13 @@
    }
   ],
   "whole": [],
-  "fleet": "mixed",
+  "fleet": "narrow",
   "fleetRows": [
    "windows[]"
   ],
   "fleetKey": "fleet_id",
   "cap": null,
-  "notes": "api/analytics_routes.js:1585-1675 (response at 1629). windows[] = every uber_trip_audit row: {fleet_id, kind, window_from, window_to, verified_at, uber_rows, our_rows, in_both, uber_only, ours_only, agreement_pct, outside_window, error, past_retention, took_ms, sample_missing, days, misfiled}. sample_missing is a JSONB array of up to 10 real Uber Trip UUIDs (src/sources/uber.js:1098, sql/schema_v4"
+  "notes": "api/analytics_routes.js:1585-1675 (response at 1629). windows[] = every uber_trip_audit row: {fleet_id, kind, window_from, window_to, verified_at, uber_rows, our_rows, in_both, uber_only, ours_only, agreement_pct, outside_window, error, past_retention, took_ms, sample_missing, days, misfiled}. sample_missing is a JSONB array of up to 10 real Uber Trip UUIDs (src/sources/uber.js:1098, sql/schema_v4 NARROW (2026-11-12, api/access/one_fleet.js): for a reader whose access covers one fleet the gate writes that fleet into _fmfleet and fleet, and the handler narrows every row, total and count to it; an unrestricted reader is judged exactly as mixed was."
  },
  {
   "method": "GET",
@@ -3567,11 +3567,11 @@
    }
   ],
   "whole": [],
-  "fleet": "mixed",
+  "fleet": "narrow",
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "api/analytics_routes.js:2001-2062 (response at 2043). rows[] (up to 200, one per platform+person) = {platform, person_key (coalesce(driver_ext_id, driver_name), so an identifier), driver_name, driver_ext_id, period_start, period_end, period_days, offered, accepted, completed, cancelled_driver, cancelled_client, work_time_seconds, price_cash, price_cashless, commission, driver_score, periods_seen, "
+  "notes": "api/analytics_routes.js:2001-2062 (response at 2043). rows[] (up to 200, one per platform+person) = {platform, person_key (coalesce(driver_ext_id, driver_name), so an identifier), driver_name, driver_ext_id, period_start, period_end, period_days, offered, accepted, completed, cancelled_driver, cancelled_client, work_time_seconds, price_cash, price_cashless, commission, driver_score, periods_seen,  NARROW (2026-11-12, api/access/one_fleet.js): for a reader whose access covers one fleet the gate writes that fleet into _fmfleet and fleet, and the handler narrows every row, total and count to it; an unrestricted reader is judged exactly as mixed was."
  },
  {
   "method": "GET",
@@ -3672,12 +3672,14 @@
    }
   ],
   "whole": [],
-  "fleet": "mixed",
-  "fleetRows": [],
-  "fleetKey": "",
+  "fleet": "narrow",
+  "fleetRows": [
+   "people"
+  ],
+  "fleetKey": "fleet_id",
   "cap": null,
   "auditRead": true,
-  "notes": "api/hr_roster_routes.js:49-52 -> rosterView (api/hr_roster.js:671-776). Body: latest{upload_id, export_date, sha256, rows_read, uploaded_by, uploaded_at}, uploads[]{id, sha256, export_date, export_date_from, filename, byte_len, rows_read, uploaded_by, uploaded_at} (uploads() :400-403, no uploaded_ip), today, people[]{fleet_id, employee_id, name, phone, email, hr_compliance_status, on_list, off_lis"
+  "notes": "api/hr_roster_routes.js:49-52 -> rosterView (api/hr_roster.js:671-776). Body: latest{upload_id, export_date, sha256, rows_read, uploaded_by, uploaded_at}, uploads[]{id, sha256, export_date, export_date_from, filename, byte_len, rows_read, uploaded_by, uploaded_at} (uploads() :400-403, no uploaded_ip), today, people[]{fleet_id, employee_id, name, phone, email, hr_compliance_status, on_list, off_lis NARROW (2026-11-12, api/access/one_fleet.js): for a reader whose access covers one fleet the gate writes that fleet into _fmfleet and fleet, and the handler narrows every row, total and count to it; an unrestricted reader is judged exactly as mixed was."
  },
  {
   "method": "GET",
@@ -3889,11 +3891,11 @@
    }
   ],
   "whole": [],
-  "fleet": "mixed",
+  "fleet": "narrow",
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "Response built at api/server.js:799-878: spread of the trip aggregate t (server.js:510-594: trips, completed_trips, cancelled_trips, bookable_trips, cancelled_by_driver, declined_offers, cancelled_by_rider, cancelled_unsaid, other_outcome, no_outcome, completion_pct, cancel_pct, telematics_journeys, telematics_km, km, avg_km, trips_with_distance, revenue, priced_trips, avg_fare, priced_km, priced_"
+  "notes": "Response built at api/server.js:799-878: spread of the trip aggregate t (server.js:510-594: trips, completed_trips, cancelled_trips, bookable_trips, cancelled_by_driver, declined_offers, cancelled_by_rider, cancelled_unsaid, other_outcome, no_outcome, completion_pct, cancel_pct, telematics_journeys, telematics_km, km, avg_km, trips_with_distance, revenue, priced_trips, avg_fare, priced_km, priced_ NARROW (2026-11-12, api/access/one_fleet.js): for a reader whose access covers one fleet the gate writes that fleet into _fmfleet and fleet, and the handler narrows every row, total and count to it; an unrestricted reader is judged exactly as mixed was."
  },
  {
   "method": "GET",
@@ -5358,11 +5360,13 @@
    }
   ],
   "whole": [],
-  "fleet": "mixed",
-  "fleetRows": [],
-  "fleetKey": "",
+  "fleet": "narrow",
+  "fleetRows": [
+   "rows"
+  ],
+  "fleetKey": "fleet_id",
   "cap": null,
-  "notes": "api/server.js:6127-6136. Body: {rows[], shown, truncated:false, history}. rows[] is {platform, rec_type, period_start, period_end, org_value, target_value, flagged_count, flagged, updated_at}. flagged is Uber's list of named drivers below the acceptance or trip-completion target, or above the cancellation target: [{driver_ext_id, value (the driver's rate or trip count), online_hours?}] (src/source"
+  "notes": "api/server.js:6127-6136. Body: {rows[], shown, truncated:false, history}. rows[] is {platform, rec_type, period_start, period_end, org_value, target_value, flagged_count, flagged, updated_at}. flagged is Uber's list of named drivers below the acceptance or trip-completion target, or above the cancellation target: [{driver_ext_id, value (the driver's rate or trip count), online_hours?}] (src/source NARROW (2026-11-12, api/access/one_fleet.js): for a reader whose access covers one fleet the gate writes that fleet into _fmfleet and fleet, and the handler narrows every row, total and count to it; an unrestricted reader is judged exactly as mixed was."
  },
  {
   "method": "GET",
@@ -5892,11 +5896,13 @@
    }
   ],
   "whole": [],
-  "fleet": "mixed",
-  "fleetRows": [],
-  "fleetKey": "",
+  "fleet": "narrow",
+  "fleetRows": [
+   "rows"
+  ],
+  "fleetKey": "fleet_id",
   "cap": null,
-  "notes": "api/segment_routes.js:101-221. Body {rows[],total,truncated,low_confidence,unreasoned,filter{verdict,plate,day,driver},facets{verdict[],plate[],day[],reason[],source[]},dedupe_rule,facet_totals,known_verdicts,clock_skew{segments,plates[],max_min}} (:184-220). rows = SEG_COLS (:78-91: source, passengers, plate, fleet_id, started/ended, distance, top_speed, verdict, verdict_reason, matched/nearest p"
+  "notes": "api/segment_routes.js:101-221. Body {rows[],total,truncated,low_confidence,unreasoned,filter{verdict,plate,day,driver},facets{verdict[],plate[],day[],reason[],source[]},dedupe_rule,facet_totals,known_verdicts,clock_skew{segments,plates[],max_min}} (:184-220). rows = SEG_COLS (:78-91: source, passengers, plate, fleet_id, started/ended, distance, top_speed, verdict, verdict_reason, matched/nearest p NARROW (2026-11-12, api/access/one_fleet.js): for a reader whose access covers one fleet the gate writes that fleet into _fmfleet and fleet, and the handler narrows every row, total and count to it; an unrestricted reader is judged exactly as mixed was."
  },
  {
   "method": "GET",
@@ -5960,12 +5966,14 @@
   "whole": [
    "SYS"
   ],
-  "fleet": "mixed",
-  "fleetRows": [],
-  "fleetKey": "",
+  "fleet": "narrow",
+  "fleetRows": [
+   "jobs"
+  ],
+  "fleetKey": "fleet",
   "cap": null,
   "auditRead": true,
-  "notes": "api/server.js:4388-4441. Body: {jobs[], total, shown, truncated, pending, running}. Each job is {id, mode, status, requested_by, requested_at, started_at, finished_at, error, attempts, progress, seconds, running_seconds}, capped at 40 with the cap disclosed. collector_job has a `fleet` column (the INSERT at ~4360 writes it), but this SELECT does not return it and the handler never reads ?fleet=. B"
+  "notes": "api/server.js:4388-4441. Body: {jobs[], total, shown, truncated, pending, running}. Each job is {id, mode, status, requested_by, requested_at, started_at, finished_at, error, attempts, progress, seconds, running_seconds}, capped at 40 with the cap disclosed. collector_job has a `fleet` column (the INSERT at ~4360 writes it), but this SELECT does not return it and the handler never reads ?fleet=. B NARROW (2026-11-12, api/access/one_fleet.js): for a reader whose access covers one fleet the gate writes that fleet into _fmfleet and fleet, and the handler narrows every row, total and count to it; an unrestricted reader is judged exactly as mixed was."
  },
  {
   "method": "GET",
@@ -6434,11 +6442,11 @@
    }
   ],
   "whole": [],
-  "fleet": "mixed",
+  "fleet": "narrow",
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "api/analytics_routes.js:1092-1257 (response at 1230). vehicles[] (up to 250 Uber plates) = {plate, trips, black, comfort, electric, uberx, premium, km, avg_km, make, model, year, colour, driver_refs[]{name, id, days} (top 3 people), driver_n, driver_accounts, premium_pct, model_key, model_premium_pct, model_best_pct, premium_gap_pct}. Top level: fleet_premium_pct, premium_min_trips, premium_rated_"
+  "notes": "api/analytics_routes.js:1092-1257 (response at 1230). vehicles[] (up to 250 Uber plates) = {plate, trips, black, comfort, electric, uberx, premium, km, avg_km, make, model, year, colour, driver_refs[]{name, id, days} (top 3 people), driver_n, driver_accounts, premium_pct, model_key, model_premium_pct, model_best_pct, premium_gap_pct}. Top level: fleet_premium_pct, premium_min_trips, premium_rated_ NARROW (2026-11-12, api/access/one_fleet.js): for a reader whose access covers one fleet the gate writes that fleet into _fmfleet and fleet, and the handler narrows every row, total and count to it; an unrestricted reader is judged exactly as mixed was."
  },
  {
   "method": "GET",
@@ -6737,11 +6745,11 @@
    }
   ],
   "whole": [],
-  "fleet": "mixed",
+  "fleet": "narrow",
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "Top-level array (server.js:1277 foldGrain). Day grain rows (server.js:1238-1252): d, trips, completed, cancelled, telematics_journeys, km, revenue, priced_trips, drivers, sources_silent, sources_expected, silent_sources, uncollected. Week/month grain (api/window.js:350-393) replaces them with d, grain, days, partial, of_days, drivers, drivers_basis, uncollected_days, uncollected, first_day, last_d"
+  "notes": "Top-level array (server.js:1277 foldGrain). Day grain rows (server.js:1238-1252): d, trips, completed, cancelled, telematics_journeys, km, revenue, priced_trips, drivers, sources_silent, sources_expected, silent_sources, uncollected. Week/month grain (api/window.js:350-393) replaces them with d, grain, days, partial, of_days, drivers, drivers_basis, uncollected_days, uncollected, first_day, last_d NARROW (2026-11-12, api/access/one_fleet.js): for a reader whose access covers one fleet the gate writes that fleet into _fmfleet and fleet, and the handler narrows every row, total and count to it; an unrestricted reader is judged exactly as mixed was."
  },
  {
   "method": "GET",
@@ -7582,11 +7590,13 @@
   "whole": [
    "SYS"
   ],
-  "fleet": "mixed",
-  "fleetRows": [],
-  "fleetKey": "",
+  "fleet": "narrow",
+  "fleetRows": [
+   "rows"
+  ],
+  "fleetKey": "fleet_id",
   "cap": null,
-  "notes": "api/feed_routes.js:306 handler. FEEDS_SQL is at :104 and has no fleet predicate. DRIVERS_SQL (:196) takes names from driver.full_name, driver_compliance and driver_platform_state. It takes the phone from driver_compliance, including OTHER accounts the spine puts on the same person (:241-250). ref() at :316-325 returns {name, id (the platform driver id, only where a driver page resolves), person_id"
+  "notes": "api/feed_routes.js:306 handler. FEEDS_SQL is at :104 and has no fleet predicate. DRIVERS_SQL (:196) takes names from driver.full_name, driver_compliance and driver_platform_state. It takes the phone from driver_compliance, including OTHER accounts the spine puts on the same person (:241-250). ref() at :316-325 returns {name, id (the platform driver id, only where a driver page resolves), person_id NARROW (2026-11-12, api/access/one_fleet.js): for a reader whose access covers one fleet the gate writes that fleet into _fmfleet and fleet, and the handler narrows every row, total and count to it; an unrestricted reader is judged exactly as mixed was."
  },
  {
   "method": "GET",

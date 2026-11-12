@@ -724,6 +724,13 @@ app.get('/api/kpis', wrap(async (req, res) => {
      couple of cycles behind; reporting is what is being measured, not
      punctuality. The silent count is returned beside them so a page can say
      which vehicles have gone quiet instead of quietly dropping them. */
+  /* ONE FLEET'S TRACKERS, for a reader whose access covers one fleet
+     (api/access/one_fleet.js). Every other figure on this answer already
+     follows the fleet the gate writes into ?fleet=; this one never read it,
+     so an Egari reader's "vehicles reporting" counted Ecosine's trackers too.
+     Narrowed ($1), a plate counts when that fleet filed a fix for it, and its
+     newest fix is that fleet's newest. Everyone else: the statement as it was. */
+  const onlyTrk = typeof req.query._fmfleet === 'string' && req.query._fmfleet ? req.query._fmfleet : null;
   const [v] = await q(`WITH RECURSIVE ${TELEMETRY_PLATES}
       SELECT
         count(*) FILTER (WHERE now() - captured_at < ${FIX_FRESH})::int live_vehicles,
@@ -733,8 +740,10 @@ app.get('/api/kpis', wrap(async (req, res) => {
       /* Each plate's newest captured_at, future included — what the
          DISTINCT ON this replaced kept. See api/telemetry_sql.js. */
       FROM (SELECT p.plate,
-                   (SELECT max(t.captured_at) FROM telemetry_snapshot t WHERE t.plate = p.plate) AS captured_at
-              FROM plates p WHERE p.plate IS NOT NULL) s`);
+                   (SELECT max(t.captured_at) FROM telemetry_snapshot t WHERE t.plate = p.plate${
+                     onlyTrk ? ' AND t.fleet_id = $1' : ''}) AS captured_at
+              FROM plates p WHERE p.plate IS NOT NULL) s${onlyTrk ? ' WHERE s.captured_at IS NOT NULL' : ''}`,
+  onlyTrk ? [onlyTrk] : []);
   /* Alerts, and the distance they are allowed to be divided by.
      ─────────────────────────────────────────────────────────────────────────
      Alerts take the same fleet filter as the trips beside them; without it a
@@ -1275,6 +1284,20 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
 
      `to` in the past means the live half matches nothing and costs nothing. */
   const TODAY = "(now() AT TIME ZONE 'Asia/Dubai')::date";
+  /* ONE FLEET, for a reader whose access covers one fleet (api/access/
+     one_fleet.js). The day figures already follow the fleet the gate writes
+     into ?fleet= (the rollup is kept per fleet). The SILENT-SOURCE columns did
+     not: source_day_coverage counts each channel's rows over both fleets, so
+     an Egari reader would be told "every source reported" on a day only
+     Ecosine's channels did — the other fleet's collection standing in for
+     theirs. Narrowed, each channel's daily rows are counted from that fleet's
+     trips alone ($5), by the same definition the view uses (sql/schema_v9.sql).
+     Everyone else reads the view, as before. */
+  const only = typeof req.query._fmfleet === 'string' && req.query._fmfleet ? req.query._fmfleet : null;
+  const SRC = only
+    ? `(SELECT platform AS source, (requested_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int AS rows
+          FROM trip WHERE requested_at IS NOT NULL AND fleet_id = $5 GROUP BY 1, 2)`
+    : 'source_day_coverage';
   /* Served at the precision it is stored at, not rounded again here. A page
      that sums thirty daily buckets was summing thirty roundings: the overview
      said 157,709 km and its own chart said 157,712, which is a rounding
@@ -1347,7 +1370,7 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
      norm AS (
        SELECT source, percentile_cont(0.5) WITHIN GROUP (ORDER BY rows) AS median_rows,
               min(day) AS first_day, max(day) AS last_day
-       FROM source_day_coverage GROUP BY source
+       FROM ${SRC} GROUP BY source
      ),
      silent AS (
        SELECT cal.d,
@@ -1356,7 +1379,7 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
               array_agg(n.source ORDER BY n.source) FILTER (WHERE coalesce(c.rows, 0) = 0) AS silent_sources
        FROM cal
        JOIN norm n ON cal.d BETWEEN n.first_day AND n.last_day AND n.median_rows > 0
-       LEFT JOIN source_day_coverage c ON c.source = n.source AND c.day = cal.d
+       LEFT JOIN ${SRC} c ON c.source = n.source AND c.day = cal.d
        GROUP BY cal.d
      )
      SELECT to_char(cal.d, 'YYYY-MM-DD') AS d,
@@ -1375,7 +1398,7 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
      FROM cal
      LEFT JOIN agg ON agg.d = cal.d
      LEFT JOIN silent ON silent.d = cal.d
-     ORDER BY cal.d`, p);
+     ORDER BY cal.d`, only ? [...p, only] : p);
   /* Bucketed at the END, not by grouping the query differently.
      ─────────────────────────────────────────────────────────────────────────
      The rows above are a COMPLETE calendar: every day in the window, with the
@@ -4545,7 +4568,15 @@ app.get('/api/rollups', wrap(async (_req, res) => res.json(await rollupState()))
    day. Never cached itself, for the same reason /api/rollups is not. */
 app.get('/api/cache-stats', wrap(async (_req, res) => res.json(cache.stats())));
 
-app.get('/api/settings/jobs', wrap(async (_req, res) => {
+app.get('/api/settings/jobs', wrap(async (req, res) => {
+  /* ONE FLEET'S JOBS, for a reader whose access covers one fleet (api/access/
+     one_fleet.js): collector_job records the fleet a job was queued for, and
+     a narrowed reader is shown those jobs, their total and their queued and
+     running counts — never a job queued for every fleet (fleet unset), which
+     acts on the other fleet's accounts too. The fleet comes back on each job
+     so the shaper can check it. Everyone else: the statements as they were. */
+  const only = typeof req.query._fmfleet === 'string' && req.query._fmfleet ? req.query._fmfleet : null;
+  const ONE = only ? ' WHERE fleet = $1' : '';
   const jobs = await q(
     /* attempts and progress are both here for the same reason: a job that says
        'running' tells you nothing. attempts counts how many times a container
@@ -4563,8 +4594,8 @@ app.get('/api/settings/jobs', wrap(async (_req, res) => {
             /* The true size of the set, carried on the rows the cap let
                through. A window over the ordered query counts every job
                without a second scan. */
-            count(*) OVER ()::int AS _total
-     FROM collector_job ORDER BY requested_at DESC LIMIT 40`);
+            count(*) OVER ()::int AS _total${only ? ', fleet' : ''}
+     FROM collector_job${ONE} ORDER BY requested_at DESC LIMIT 40`, only ? [only] : []);
   /* The cap said nothing, and this is the page an operator opens to find out
      whether a job ran. bin/cap-audit.mjs found it returning exactly 40 of a
      larger set with no disclosure — the last silent cap in 49 handlers, the
@@ -4581,7 +4612,7 @@ app.get('/api/settings/jobs', wrap(async (_req, res) => {
   const [counts] = await q(
     `SELECT count(*) FILTER (WHERE status = 'queued')::int AS pending,
             count(*) FILTER (WHERE status = 'running')::int AS running
-       FROM collector_job`);
+       FROM collector_job${ONE}`, only ? [only] : []);
   res.json({
     jobs,
     total, shown: jobs.length, truncated: total > jobs.length,
@@ -6220,14 +6251,22 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
    the list IS the population and the sentence over it cannot be truncated.
    History is still in the table for anyone who wants it; this endpoint answers
    "what are we being asked for now". */
-app.get('/api/recommendations', wrap(async (_, res) => {
+app.get('/api/recommendations', wrap(async (req, res) => {
+  /* ONE FLEET'S RECOMMENDATIONS, for a reader whose access covers one fleet
+     (api/access/one_fleet.js): platform_recommendation files each one under
+     the fleet whose platform account it came from, so the newest per
+     platform and type is that fleet's newest, the history count is that
+     fleet's, and each row says its fleet so the shaper can check it ($1).
+     Everyone else: the statements as they were. */
+  const only = typeof req.query._fmfleet === 'string' && req.query._fmfleet ? req.query._fmfleet : null;
   const rows = await q(
     `SELECT DISTINCT ON (platform, rec_type)
             platform, rec_type, period_start, period_end, org_value, target_value,
-            flagged_count, flagged, updated_at
-     FROM platform_recommendation
-     ORDER BY platform, rec_type, period_end DESC NULLS LAST`);
-  const [n] = await q('SELECT count(*)::int history FROM platform_recommendation');
+            flagged_count, flagged, updated_at${only ? ', fleet_id' : ''}
+     FROM platform_recommendation${only ? ' WHERE fleet_id = $1' : ''}
+     ORDER BY platform, rec_type, period_end DESC NULLS LAST`, only ? [only] : []);
+  const [n] = await q(`SELECT count(*)::int history FROM platform_recommendation${only ? ' WHERE fleet_id = $1' : ''}`,
+    only ? [only] : []);
   res.json({ rows, shown: rows.length, truncated: false, history: n?.history ?? rows.length });
 }));
 

@@ -55,7 +55,9 @@ for (const e of allEntries()) {
   }
   for (const c of e.whole) if (!CLASS_CODES.includes(c)) bad.push(`${k}: whole ${c}`);
   if (!['record', 'list', 'aggregate', 'none'].includes(e.grain)) bad.push(`${k}: grain ${e.grain}`);
-  if (!['param', 'rows', 'global', 'mixed'].includes(e.fleet)) bad.push(`${k}: fleet ${e.fleet}`);
+  /* 'narrow' (2026-11-12, api/access/one_fleet.js): mixed for an
+     unrestricted reader, narrowed in the handler for a one-fleet reader. */
+  if (!['param', 'rows', 'global', 'mixed', 'narrow'].includes(e.fleet)) bad.push(`${k}: fleet ${e.fleet}`);
   if (e.fleet === 'rows' && !e.fleetRows.length) bad.push(`${k}: rows without paths`);
   if (e.cap && !CAP_CODES.includes(e.cap)) bad.push(`${k}: cap ${e.cap}`);
   if (e.method !== 'GET' && !e.cap) bad.push(`${k}: a write with no action`);
@@ -88,9 +90,11 @@ check('the park ledger follows the fleet asked for (it ignored it until 2026-09-
 /* A route narrowed by row must carry nothing counted over every fleet beside
    those rows: the HR roster's totals and upload history and the feeds'
    totals did, so a one-fleet reader was shown the other fleet's counts as
-   theirs. REVERSION: set either back to fleet 'rows' — this fails. */
+   theirs. REVERSION: set either back to fleet 'rows' — this fails. Since
+   2026-11-12 both are 'narrow': their handlers count the totals for the one
+   fleet too (test/access_one_fleet.test.mjs proves it) — still never 'rows'. */
 check('answers that count every fleet beside their rows are not narrowed by row',
-  ['/api/hr-roster', '/api/vehicles/feeds'].every((p) => lookupEntry('GET', p)?.fleet === 'mixed'),
+  ['/api/hr-roster', '/api/vehicles/feeds'].every((p) => ['mixed', 'narrow'].includes(lookupEntry('GET', p)?.fleet)),
   ['/api/hr-roster', '/api/vehicles/feeds'].map((p) => `${p}:${lookupEntry('GET', p)?.fleet}`).join(' '));
 check('four-eyes routes are declared', Object.keys(FOUR_EYES).every((k) => { const [m, p] = k.split(' '); return lookupEntry(m, p)?.fourEyes; }));
 

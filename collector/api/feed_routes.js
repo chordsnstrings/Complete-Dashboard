@@ -70,6 +70,7 @@
    read — counted through /api/driver/profile, whose fold is not the spine's
    but draws on the same register and link table. */
 import { config } from '../src/config.js';
+import { onlyFleet } from './access/one_fleet.js';
 
 /* THE WINDOW, and why it is a day and not a poll.
    ─────────────────────────────────────────────────────────────────────────
@@ -180,6 +181,11 @@ export const FEEDS_SQL = `
          (h.fms_seat_at > now() - make_interval(hours => $1::int)) IS TRUE AS fms_seat_receiving,
          nullif(btrim(cd.driver_ext_id), '') AS custody_id,
          nullif(btrim(cd.driver_name), '') AS custody_name,
+         /* The fleet the current-driver record is filed under, so a reader
+            narrowed to one fleet is not handed the other fleet's driver for
+            one of their cars (api/access/one_fleet.js). Read by the handler,
+            never sent. */
+         cd.fleet_id AS custody_fleet,
          /* Text, not a DATE: node-postgres hands a DATE back as a Date at the
             server's local midnight, and the page slices the first ten
             characters of whatever it receives. */
@@ -735,9 +741,25 @@ export function cabmanSeat({ rosterRows = [], last = [], fixes = [], bookings = 
 }
 
 export function feedRoutes(app, { q, wrap }) {
-  app.get('/api/vehicles/feeds', wrap(async (_req, res) => {
-    const rows = await q(FEEDS_SQL, [FEED_WINDOW_H]);
-    const accounts = feedAccounts();
+  app.get('/api/vehicles/feeds', wrap(async (req, res) => {
+    /* ONE FLEET'S CARS, for a reader whose access covers one fleet
+       (api/access/one_fleet.js). Refused to such a reader until now because
+       its rows carried a fleet while its totals, its per-fleet counts and the
+       "is any car of this fleet receiving" test that decides a dark feed were
+       counted over every fleet. Narrowed, the cars are that fleet's before
+       anything is counted, so every total, every no-data count and every
+       verdict is computed from them alone; the accounts list names that fleet
+       only; and a current-driver record filed under the other fleet is not
+       named beside the car. Null for everyone else: nothing changes. */
+    const only = onlyFleet(req);
+    let rows = await q(FEEDS_SQL, [FEED_WINDOW_H]);
+    if (only) {
+      rows = rows.filter((r) => r.fleet_id === only).map((r) => (r.custody_fleet && r.custody_fleet !== only
+        ? { ...r, custody_id: null, custody_name: null, custody_as_of: null } : r));
+    }
+    const all = feedAccounts();
+    const accounts = only
+      ? Object.fromEntries(Object.entries(all).map(([k, v]) => [k, v.filter((f) => f === only)])) : all;
 
     /* Uber's assignment where it names somebody, custody where it does not. */
     const ids = [...new Set(rows.flatMap((r) => (r.assigned && r.assigned.length
