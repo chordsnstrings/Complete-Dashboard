@@ -213,8 +213,14 @@ console.log('\nand the VIN is on the list, not one page at a time');
     /new Set\(rows\.map\(\(r\) => r\.vin\)\.filter\(Boolean\)\)/.test(ui));
   check('…and says how many plates carry none rather than implying the rest are duplicates',
     /plates carry'\)\} no VIN/.test(ui) || /no VIN, so/.test(ui));
+  /* "Searchable": the register's search haystack carries the VIN, however it
+     is spelled — a template string until 2026-11-12, then WIRE's joined
+     `hay` list (which also stopped a missing make printing "undefined" into
+     it). Either way the filter must actually use it. */
   check('the VIN is a column and is searchable',
-    /label: 'VIN', key: 'vin'/.test(ui) && /r\.vin \|\| ''/.test(ui));
+    /label: 'VIN', key: 'vin'/.test(ui)
+      && (/r\.vin \|\| ''/.test(ui)
+        || (/const hay = \(r\) => \[[^\]]*\br\.vin\b/.test(ui) && /rows\.filter\(\(r\) => hay\(r\)\.includes\(t\)\)/.test(ui))));
   /* The row cap that sat under "this is the whole fleet". */
   check('the directory\'s row cap is above anything this register can reach',
     /const DIR_LIMIT = (\d+);/.test(routes) && Number(/const DIR_LIMIT = (\d+);/.exec(routes)[1]) >= 2000,
