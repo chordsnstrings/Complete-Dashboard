@@ -62,13 +62,17 @@ jobs:
         working-directory: collector
     steps:
       - uses: actions/checkout@v4
+      # BEFORE setup-node: its npm cache is keyed on collector/package-lock.json,
+      # and with that file missing setup-node fails first, with an error about
+      # cache paths that never says the lockfile is gone — so a check placed
+      # after it could never be the one that reports it (review, 2026-11-12).
+      - name: The lockfile is committed
+        run: test -f package-lock.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: collector/package-lock.json
-      - name: The lockfile is committed
-        run: test -f package-lock.json
       - name: Install exactly the lockfile
         run: npm ci --no-audit --no-fund
         env:

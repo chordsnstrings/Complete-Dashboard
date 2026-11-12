@@ -151,6 +151,15 @@ console.log('\n.github/workflows/ci.yml says what it runs');
   check('Node 22 everywhere', steps.filter((s) => s.uses?.startsWith('actions/setup-node')).every((s) => s.with['node-version'] === 22));
   check('the lockfile must be committed, and is installed with npm ci',
     runs.includes('test -f package-lock.json') && runs.filter((r) => r.startsWith('npm ci')).length === 2);
+  /* setup-node's npm cache is keyed on the lockfile and fails first, with an
+     error about cache paths, when it is missing — a check after it is dead. */
+  {
+    const first = ci.jobs['install-and-parse'].steps;
+    const iCheck = first.findIndex((s) => s.run === 'test -f package-lock.json');
+    const iNode = first.findIndex((s) => s.uses?.startsWith('actions/setup-node'));
+    check('…and the lockfile is checked BEFORE setup-node, whose cache would fail on its absence first',
+      iCheck >= 0 && iNode >= 0 && iCheck < iNode, `check@${iCheck} setup-node@${iNode}`);
+  }
   check('every file under src, api and bin is parsed', runs.some((r) => /^find src api bin .*'\*\.mjs'.*node --check$/.test(r)));
   const test = runs.find((r) => r.startsWith('node test/run-all.mjs'));
   check('the tests skip the browser, allow exactly the three known failures, and shard by the matrix',
