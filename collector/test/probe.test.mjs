@@ -238,6 +238,31 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
     /described_n: Math\.min\(Array\.isArray\(arr\) \? arr\.length : 0, 300\)/.test(src));
 }
 
+/* ── a collected surface is not "never delivered" ──────────────────────────
+   getFleetOrders was labelled "the trips this channel has never delivered" for
+   as long as only the probe called it. src/sources/bolt_orders.js collects it
+   every run now (2026-11-12), and a probe page that keeps the old label sends
+   the next reader to build it again — and, with no aliases, it listed all 35
+   of the route's fields as "nowhere to put" while the collector puts most of
+   them on trip rows and bolt_fi_order. */
+{
+  process.env.BOLT_CLIENT_ID = 'probe-test-client';
+  const fo = surfaces({ from: new Date(Date.now() - 3 * 864e5), to: new Date() })
+    .find((s) => s.surface === 'egari:getFleetOrders');
+  delete process.env.BOLT_CLIENT_ID;
+  check('getFleetOrders is described as collected, not as never delivered',
+    !!fo && /collected every run by src\/sources\/bolt_orders\.js/.test(fo.note || '')
+    && !/never delivered/.test(fo.note || ''), fo?.note);
+  const fields = ['order_reference', 'order_created_timestamp', 'vehicle_license_plate', 'driver_uuid',
+    'pickup_address', 'destination_address', 'order_status', 'payment_method', 'category_info.name',
+    'ride_distance', 'order_price.ride_price', 'order_price.commission', 'order_price.net_earnings',
+    'order_drop_off_timestamp', 'is_scheduled', 'order_price.tip', 'predicted_ride_distance']
+    .map((key) => ({ key, fill_pct: 100 }));
+  const left = fo ? unmappedAgainst(fields, fo.cols, fo.aliases || {}) : null;
+  check('…and only what the collector keeps in raw alone is listed as unmapped',
+    JSON.stringify(left) === JSON.stringify(['order_price.tip', 'predicted_ride_distance']), JSON.stringify(left));
+}
+
 /* ── a helper referenced but never imported ────────────────────────────────
    The history probe called probeEarnerWindow and the import line was never
    added. node --check passed, because the file's syntax was fine. Importing the

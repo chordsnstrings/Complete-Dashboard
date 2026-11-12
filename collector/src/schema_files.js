@@ -361,4 +361,9 @@ export const SCHEMA_FILES = [
   /* v114: charging_link's 'held' tier (a fold's contradictory decisions,
      never recomputed) and one confirmation per customer (a unique index). */
   'schema_v114.sql',
+  /* v116: Bolt's fleet-integration orders (getFleetOrders) — one row per
+     order with what the collector did with it: filled a portal trip row,
+     stood in for a trip the portal had not answered for, or was held
+     (src/sources/bolt_orders.js). */
+  'schema_v116.sql',
 ];

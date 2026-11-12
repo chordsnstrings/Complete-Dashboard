@@ -10754,3 +10754,108 @@ it again.
   - platform bookings (167);
   - the five dataset-coverage counts (154 each). These are one per `/api/coverage` computation, roughly every 7.4 min.
 - `/api/coverage` measured 16.9 s, 19.3 s and 32.7 s cold.
+
+## Bolt's fleet-integration orders (getFleetOrders) — collected from 2026-11-12 (BFO)
+
+Bolt's trips now come from two surfaces: the portal's orderHistory (seven-day refresh token, both
+fleets) and the fleet-integration client's `getFleetOrders` (no expiry, Egari only). The code is
+`src/sources/bolt_orders.js`; what each order became is in `bolt_fi_order` (`sql/schema_v116.sql`);
+FIX-STATUS BFO has the rows. This section is what was learned about the provider.
+
+**Bolt's own spec.** `https://apidocs.bolt.eu/fleetIntegration/fleetIntegrationGatewayAuth/open-api.json`
+is public (no credential; 40.6 KB, read 2026-11-12). It is the authority for this gateway:
+
+- Six paths: `test`, `getFleetOrders`, `getFleetStateLogs`, `getDrivers`, `getVehicles` (POST) and
+  `getCompanies` (**GET**). There is no `getCompanyEarnings` — the audit's 404 is a route that
+  does not exist, not an empty one.
+- `getFleetOrders` takes `company_ids` (required, an ARRAY), `company_id` (optional), `offset`,
+  `limit` (1–1000), `start_ts`/`end_ts` (unix seconds) and `time_range_filter_type` (`created`, the
+  default, or `price_review` — filter by when the fare was finalised). It answers
+  `{code, message, data: {company_id, company_name, total_orders, orders[]}}`, sorted by creation
+  time. Its own refusals: **498805** INVALID_START_DATE (before what Bolt keeps), **498806**
+  INVALID_DATE_RANGE (getDrivers words it "maximum allowed date range is 31 days"), **498809**
+  COMPANY_NOT_ACTIVE, **498810** COMPANY_NOT_ALLOWED.
+- An order: `order_reference` (Bolt's order id — the portal sends none), `driver_uuid` and
+  `partner_uuid` (the roster's ids, not the portal's numeric driver id), `driver_name`,
+  `driver_phone`, `vehicle_license_plate`, `vehicle_model`, `pickup_address`,
+  `destination_address`, `order_stops[]` (`type` pickup|dropoff|waypoint|change_point, `address`,
+  `lat`/`lng`, nullable `real_lat`/`real_lng`), `order_status` (the portal's own vocabulary:
+  finished, client_cancelled, driver_did_not_respond, driver_rejected, client_did_not_show,
+  driver_cancelled_after_accept, the in-progress states …), eight timestamps (created, accepted,
+  pickup, drop_off, finished, payment_confirmed, cancelled, no_show), `ride_distance`,
+  `predicted_ride_distance`, `road_distance_at_matching`, `order_price` (`ride_price`,
+  `booking_fee`, `toll_fee`, `cancellation_fee`, `tip`, `net_earnings`, `cash_discount`,
+  `in_app_discount`, `commission` — all nullable), `is_scheduled`, `is_optional`,
+  `category_info` (`name`, `seats`, `vehicle_type`).
+- `getFleetStateLogs` (not collected) gives each driver's state (inactive / waiting_orders /
+  has_order / busy) with a position and the active order — Bolt's online hours, which nothing
+  collected from Bolt supplies today.
+- `getCompanies` is a **GET** returning the `company_ids` the client may read. The table above
+  ("`getCompanies` answers 404") is what a POST gets; untested here (no credential reaches Bolt
+  from this sandbox), but it is the one call that would say which companies the client is entitled
+  to without a refusal.
+
+**What production returned.** The nightly probe (2026-11-11 22:20Z, a three-day window): Egari 24
+orders — statuses finished, driver_cancelled_after_accept, client_cancelled, driver_did_not_respond;
+payment in_app and cash; categories Comfort and Bolt; `order_price.*`, `ride_distance` and
+`order_finished_timestamp` filled on 50% (the finished rides), `order_stops` on every order.
+Timestamps are unix seconds (the narrow sample shows `order_cancelled_timestamp` 1794370437 =
+2026-11-10). Ecosine: `503 NOT_AUTHORIZED, error_hint COMPANIES_NOT_ALLOWED` — the same refusal
+`getDrivers` gets; the client is not entitled to company 142868 for orders either.
+
+**Traps:**
+
+* **The two Bolt trip feeds share no key.** The portal sends no order id, so its trip key is
+  synthesised as `<numeric driver id>|<created>`; this feed's driver id is a uuid. The same ride is
+  recognised by what both carry: the same fleet, the same creation second, and the same car (plate
+  digits — the portal drops the letter code) or the same driver (`partner_identifier` against
+  `partner_uuid`/`driver_uuid`, or a portal id learned from an earlier match). One candidate
+  exactly, or nothing: a missed match costs an empty column, a wrong one writes one ride's
+  coordinates onto another. A second-level key on any new feed has to say how it meets the
+  portal's.
+* **"No match" is not "a new ride".** An order the portal answered for and did not return could be
+  a duplicate the rule failed to see, so it is HELD (in `bolt_fi_order`, not in `trip`). Only an
+  order created after the portal last answered for the fleet (`source_state`
+  `portal_answered_through`, moved by the portal harvest on every complete window) becomes a row
+  of its own, and the portal's next answer for that day retires it. A source that inserts
+  everything it cannot match doubles a fleet's trips the day its match rule stops holding.
+* **The portal is not asked for Dubai's today between 20:00Z and 24:00Z.** `harvestPortal` ends
+  its windows at the UTC date of the scheduler's Date (`midnight()` reads `iso()`), clamped to
+  Dubai's today; from 20:00Z the UTC date is Dubai's yesterday, so rides created 00:00–04:00 Dubai
+  are not fetched until the 00:00Z run. Measured on production `/api/status` (2026-11-12): the
+  catch-up that finished 21:30Z (01:30 Dubai on the 12th) had its newest window ending
+  2026-11-11. `getFleetOrders` is asked up to now, so it stands in for those hours. The portal
+  harvest itself is unchanged.
+* **The portal's date clock is not established — and cannot be from outside.** For the same
+  reason, the portal is never handed a date that is in the future on one clock and not the other.
+  The retirement of stand-ins assumes Dubai days, and every complete window is checked: a row
+  created after the window's last Dubai day ended is evidence of UTC days, and the run says so
+  (`portalDayEvidence`).
+* **`ride_distance` has no unit in the spec.** The portal's `distance` is kilometres (10.7 on a
+  48-dirham ride in `test/fixtures/bolt_order_table.json`). The unit is decided per batch: against
+  the portal's kilometres on matched rides, else from the magnitude of finished rides (a median of
+  12,000 is metres, of 12 kilometres); undecided is a NULL distance with the value in raw.
+* **Null and zero mean different things on the two feeds.** This feed writes NULL for money a ride
+  did not carry (50% fill, finished rides only) — a stated 0 commission is a real zero. The portal
+  writes 0 for "did not happen" (`portalRow`'s `money()`), and that 0 must become NULL. Read each
+  feed's absence in its own convention.
+* **jsonb hands keys back in its own order** (shorter keys first), so comparing a stored jsonb
+  object with a JS object by `JSON.stringify` reads every row as changed and rewrites it on every
+  pass. Compare key-order-free (`canon` in `src/sources/bolt_orders.js`).
+* **A stand-in row is told apart by `raw ? 'created'`.** Every portal row's raw carries `created`
+  (its key is built from it); a stand-in's raw carries only `fleet_integration`. Nothing may write
+  a top-level `created` into a stand-in's raw.
+
+**Open — to measure once deployed** (no credential reaches Bolt from this sandbox):
+
+- Whether the two APIs stamp the same creation second — the match rule's premise. Every run logs
+  `fleet-integration orders egari … matched_of_answered: N/M`, and the run row says so when fewer
+  than half of at least ten match.
+- Whether `partner_identifier` is the order's `partner_uuid` or its `driver_uuid` (both are
+  accepted), and what `real_lat`/`real_lng` are (read as where the stop happened; each row records
+  `pickup_basis` real or requested).
+- The gateway's rate limit and how far back it keeps orders: 429 is waited out; the walk logs
+  `too_old_from` the first time Bolt refuses a start date.
+- After the tokens lapse (2026-11-14 15:06Z): `/api/status` bolt/egari should read `partial` with
+  "fleet-integration getFleetOrders answered …" and its windows `kind: fleet-integration`, and
+  Egari's Bolt trips keep arriving; Ecosine's stop, and its row says it is not entitled.
