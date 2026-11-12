@@ -33,7 +33,7 @@ import { hbars, barChart, donut } from './charts.js';
    worse than no control: it tells the reader a figure is bounded when it is
    not. */
 import { q, qAll, windowLabel } from './data.js';
-import { lineFor } from './history.js';
+import { lineFor, historyFailed } from './history.js';
 
 /* Declining an offer and abandoning an accepted job are different behaviours
    and only the second leaves a rider standing in the street. They used to be
@@ -103,7 +103,7 @@ export async function renderCancellations(root) {
      both fleets whatever the chips say — and a line narrowed by them would
      disagree with its own figure. docs/COVERAGE.md records the route's
      defect; when the route honours the chips this becomes q(). */
-  const histP = contract() ? qAll('/api/history', { page: 'cancellations' }).catch(() => ({ failed: true })) : null;
+  const histP = contract() ? qAll('/api/history', { page: 'cancellations' }).catch(historyFailed) : null;
   let d;
   try {
     d = await q('/api/cancellations');

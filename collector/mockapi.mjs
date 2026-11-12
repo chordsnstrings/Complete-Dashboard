@@ -3452,7 +3452,7 @@ app.get('/api/history', (req, r) => {
   const today = dubaiDay(new Date());
   const w = historyWindow(req, P, today);
   const meta = (m) => ({ metric: m, label: H_METRICS[m].label, unit: H_METRICS[m].unit, grain: H_METRICS[m].grain,
-    source: H_METRICS[m].source, basis: H_METRICS[m].basis });
+    source: H_METRICS[m].source, basis: H_METRICS[m].basis, class: H_METRICS[m].cls });
   const absent = (m, why) => ({ ...meta(m), absent: why, points: [], measured: 0, of: 0 });
   const base = { page, grain: P.grain, from: w.from, to: w.to, today, fleet: req.query.fleet || null,
     platform: req.query.platform || null, cut: w.cut };
@@ -3486,8 +3486,10 @@ app.get('/api/history', (req, r) => {
       }
       if (i === 3) {
         p.why = m === 'late' ? 'no Uber account has an online event on this day — the timeline did not reach it, so nobody can be judged late or on time'
-          : m === 'money' ? '6 bookings this week, and no statement or priced fare covers them yet'
+          : m === 'money' ? 'bookings this week, and no statement or priced fare covers them yet'
             : 'no booking channel reported anything on this day';
+        /* The count rides beside the sentence, as the route sends it. */
+        if (m === 'money') p.bookings = 6;
         return p;
       }
       p.v = m === 'late' ? 4 + ((i * 7) % 9)

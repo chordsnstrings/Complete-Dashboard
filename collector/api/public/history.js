@@ -19,9 +19,23 @@
    · A request that failed says so, and says the figure above it is not
      affected: the hero figure came from the page's own endpoint, and a reader
      must not take a missing line for a missing number.
+   · WITHHELD IS NOT UNMEASURED, AND NOT "DID NOT LOAD" (review of SPK,
+     2026-11-12). The access gate answers a role without a series' class
+     with its values nulled and the class named in `_withheld`
+     (api/access/shape.js), and refuses a request outright with a 403 the
+     pages' api() turns into a WithheldError. Read as data, the first drew a
+     line of gaps captioned by whatever true gaps were left — "No daily line.
+     Today is still being collected" over fourteen days the reader is simply
+     not shown — and the second printed "the history did not load for this
+     tile just now", which is what the Cash desk read on #deposits, its own
+     page, until the route's subject was moved off BK. Each is now said in
+     the gate's own words: the refusal's detail, or withheldSentence() for the
+     class the series names (`series.class`, api/history_routes.js METRICS).
 
-   No imports: the pages pass in what they fetched, so this is testable in
-   Node without a DOM and costs nothing to load. */
+   One import, access_model.js, which has none of its own and touches no DOM:
+   the pages pass in what they fetched, so this is testable in Node and costs
+   nothing to load. */
+import { withheldSentence } from './access_model.js';
 
 const NOUN = { day: 'day', week: 'week' };
 const LEAD = { day: 'No daily line.', week: 'No weekly line.' };
@@ -42,13 +56,18 @@ export function gapReasons(series) {
 }
 
 /** The tile's `spark`: an array to draw, or the sentence that stands in for it.
-    `failed` — the request itself did not answer. */
-export function sparkOf(series, { failed = false } = {}) {
+    `failed` — the request itself did not answer. `refused` — the access gate
+    refused it, in the gate's own words. `withheld` — the gate nulled this
+    series' values for this role: the level `_withheld` names for its class
+    ('' none, 'A' totals only, 'M' masked). */
+export function sparkOf(series, { failed = false, refused = null, withheld = null } = {}) {
+  if (refused) return `No line. ${sentence(refused)}`;
   if (!series) {
     return failed ? 'No line. The history did not load for this tile just now — the figure above is unaffected.' : null;
   }
   const lead = LEAD[series.grain] || 'No line.';
   if (series.absent) return `${lead} ${sentence(series.absent)}`;
+  if (withheld != null) return `${lead} ${withheldSentence(series.class, { level: withheld })}`;
   const v = (series.points || []).map((p) => (p.v == null || !Number.isFinite(Number(p.v)) ? null : Number(p.v)));
   const measured = v.filter((x) => x != null).length;
   if (measured >= 2) return v;
@@ -84,12 +103,21 @@ export const sparkFields = (series, opts) => {
 
 /** The line for one tile from a page's /api/history answer. Whatever the
     answer lacks — the request failed (the pages remember that as
-    `{ failed: true }`), or it arrived without this series — the tile says the
-    line did not load, rather than drawing nothing and saying nothing. */
+    `{ failed: true, error }`), or it arrived without this series — the tile
+    says the line did not load, rather than drawing nothing and saying
+    nothing; unless the failure was the access gate's refusal, or the series
+    arrived with its values withheld, and then it says that instead. */
 export const lineFor = (hist, metric) => {
   const series = hist?.series?.[metric];
-  return sparkFields(series, { failed: !series });
+  const e = hist?.error;
+  const refused = e?.name === 'WithheldError' ? (e.message || 'Not shown to your role.') : null;
+  const held = series?.class && hist?._withheld ? hist._withheld[series.class] : undefined;
+  return sparkFields(series, { failed: !series, refused, withheld: held ?? null });
 };
+
+/** What a page remembers when its /api/history request throws: `.catch(historyFailed)`.
+    The error is kept so lineFor can tell the gate's refusal from a failure. */
+export const historyFailed = (error) => ({ failed: true, error });
 
 /* Calendar arithmetic on a YYYY-MM-DD, for the spans the pages ask for.
    Anchored at noon UTC, the codebase's documented way (test/timezone.test.mjs):

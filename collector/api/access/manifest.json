@@ -3635,7 +3635,7 @@
  {
   "method": "GET",
   "path": "/api/history",
-  "subject": "BK",
+  "subject": "SYS",
   "carries": [
    "BK",
    "CASH",
@@ -3665,13 +3665,23 @@
     "class": "COND",
     "paths": [
      "series.late.points[].v",
-     "series.late.points[].reported"
+     "series.late.points[].reported",
+     "series.cancelled.points[].v"
     ]
    },
    {
     "class": "REV",
     "paths": [
      "series.revenue.points[].v"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "series.bookings.points[].v",
+     "series.completed.points[].v",
+     "series.km.points[].v",
+     "series.money.points[].bookings"
     ]
    },
    {
@@ -3687,7 +3697,7 @@
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "api/history_routes.js. The daily or weekly series behind one page's hero tile, from roll-ups only: {page, grain, from, to, today, fleet, platform, cut, series{<metric>{metric, label, unit, source, basis, grain, absent, points[]{d, v, why, ...}, measured, of, built}}}. ?page= one of online-time (late: counts of people, COND), performer (money: ONE person's weekly money from driver_day, EARN; ?id= account), deposits (cash_ceiling, cash_carriers: running totals of cash fares, CASH), cancellations (cancelled, BK), overview (bookings, km, revenue: REV, completed). Aggregates only: no names, ids, phones or plates in the answer. Honours ?fleet= on every series (rollup_day fleet rows, driver_platform_state/driver_day/driver_first_online fleet_id, driver_day.fleet_id, cash_fare_day.fleet_id) and ?platform= where the series has channels."
+  "notes": "api/history_routes.js. The daily or weekly series behind one page's hero tile, from roll-ups only: {page, grain, from, to, today, fleet, platform, cut, series{<metric>{metric, label, unit, source, basis, grain, class, absent, points[]{d, v, why, ...}, measured, of, built}}}. ?page= one of online-time (late: counts of people, COND), performer (money: ONE person's weekly money from driver_day, EARN; ?id= account), deposits (cash_ceiling, cash_carriers: running totals of cash fares, CASH), cancellations (cancelled, BK), overview (bookings, km, revenue: REV, completed). Aggregates only: no names, ids, phones or plates in the answer. Honours ?fleet= on every series (rollup_day fleet rows, driver_platform_state/driver_day/driver_first_online fleet_id, driver_day.fleet_id, cash_fare_day.fleet_id) and ?platform= where the series has channels. Subject SYS, not BK (review of SPK, 2026-11-12): one route serves four pages whose readers hold different classes, and under BK the Cash desk (ID CASH SYS) was refused the history on #deposits, its own page, and the HR officer (no BK) on #online-time and #cancellations - each page then said the line did not load. Every role holds SYS; each series value is masked by its own class below (series.<m>.class in the answer names it, so the page tells withheld from unmeasured): late and cancelled COND (cancelled follows /api/cancellations, a COND route), money EARN, the cash series CASH, revenue REV, bookings/completed/km BK. One person's weekly booking count is its own field (series.money.points[].bookings, BK), never inside a sentence."
  },
  {
   "method": "GET",

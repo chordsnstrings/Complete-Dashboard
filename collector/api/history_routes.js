@@ -90,25 +90,44 @@ const ddmmm = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB',
 /* ── what each series is ───────────────────────────────────────────────── */
 /* `basis` is printed by the page beside the line (the tile's tooltip), so it
    is written for the operator: what the line counts, from where, and where it
-   can part company with the figure above it. */
+   can part company with the figure above it.
+
+   `cls` IS WHO MAY SEE THE LINE (review of SPK, 2026-11-12). One route serves
+   four pages whose readers hold different classes, and the manifest entry
+   first said subject BK — so the Cash desk (ID CASH SYS, no BK) was refused
+   the history on #deposits, the page built for it, and the HR officer (no BK)
+   on #online-time and #cancellations; each page then printed "the history did
+   not load for this tile just now", a reason that was not the true one. The
+   entry's subject is now SYS, which every role holds, and each series' values
+   are masked by the class named here (api/access/manifest.json, `fields`), so
+   a reader gets the lines their role may see and the gate nulls the rest,
+   naming the class in `_withheld`. The class travels in the answer
+   (`series.<m>.class`) so the page can tell a withheld line from an
+   unmeasured one (api/public/history.js lineFor) — the same rule
+   api/public/driverday.js states as "withheld is not absent".
+   `cancelled` is COND, not BK: it is drawn under #cancellations' tile, whose
+   route (/api/cancellations) is a COND route that shows its total to every
+   COND reader, BK or not — a line masked harder than the figure above it
+   would withhold from the HR officer a count the tile already shows. Test:
+   test/history_routes.test.mjs §6. */
 export const METRICS = {
-  bookings: { grain: 'day', label: 'Bookings', unit: 'bookings', source: 'rollup_day', col: 'bookings',
+  bookings: { grain: 'day', cls: 'BK', label: 'Bookings', unit: 'bookings', source: 'rollup_day', col: 'bookings',
     basis: 'Bookings per Dubai day on every booking channel (telematics journeys excluded), from the day roll-up — the series /api/trips/daily serves. Complete days only.' },
-  completed: { grain: 'day', label: 'Completed', unit: 'bookings', source: 'rollup_day', col: 'completed',
+  completed: { grain: 'day', cls: 'BK', label: 'Completed', unit: 'bookings', source: 'rollup_day', col: 'completed',
     basis: 'Bookings that completed, per Dubai day, from the day roll-up. Complete days only.' },
-  cancelled: { grain: 'day', label: 'Cancellations', unit: 'bookings', source: 'rollup_day', col: 'not_completed',
+  cancelled: { grain: 'day', cls: 'COND', label: 'Cancellations', unit: 'bookings', source: 'rollup_day', col: 'not_completed',
     basis: 'Bookings that did not complete (outcome not_completed), per Dubai day, from the day roll-up — the outcome /api/cancellations totals over its window. Complete days only.' },
-  km: { grain: 'day', label: 'Distance', unit: 'km', source: 'rollup_day', col: 'km',
+  km: { grain: 'day', cls: 'BK', label: 'Distance', unit: 'km', source: 'rollup_day', col: 'km',
     basis: 'Booked distance per Dubai day over the bookings that carry one, from the day roll-up. Complete days only.' },
-  revenue: { grain: 'day', label: 'Trip value', unit: 'AED', source: 'rollup_day', col: 'revenue',
+  revenue: { grain: 'day', cls: 'REV', label: 'Trip value', unit: 'AED', source: 'rollup_day', col: 'revenue',
     basis: 'Fares on priced bookings per Dubai day, from the day roll-up. Complete days only.' },
-  late: { grain: 'day', label: 'Late', unit: 'people', source: 'driver_first_online',
+  late: { grain: 'day', cls: 'COND', label: 'Late', unit: 'people', source: 'driver_first_online',
     basis: 'People whose first ONLINE event on Uber’s timeline that day came after the expected start — counted the way /api/online-time counts its Late tile: everyone holding an Uber account on the roster plus anyone who drove Uber that day, folded to the person, judged on the minute. From driver_first_online, built after each collection. Complete days only.' },
-  money: { grain: 'week', label: 'Money', unit: 'AED', source: 'driver_day',
+  money: { grain: 'week', cls: 'EARN', label: 'Money', unit: 'AED', source: 'driver_day',
     basis: 'This person’s money per Monday-to-Sunday week from the driver-day record (driver_day.money): the platform statement’s net where a statement covers the day, the trip fares where none does — every account folded into the person. The hero figure above is the economics ledger’s choice per channel, so a week it counts on a payout can differ from this line. Whole weeks only.' },
-  cash_ceiling: { grain: 'week', label: 'Ceiling on cash outstanding', unit: 'AED', source: 'cash_fare_day',
+  cash_ceiling: { grain: 'week', cls: 'CASH', label: 'Ceiling on cash outstanding', unit: 'AED', source: 'cash_fare_day',
     basis: 'Every cash fare on record by the end of each week, over the people the ledger lists — the ceiling the hero states, cut at each week’s end (the last point is as of the roll-up’s last build). A running total: it only rises, and how steeply is how much cash came in.' },
-  cash_carriers: { grain: 'week', label: 'Drivers carrying a ceiling', unit: 'drivers', source: 'cash_fare_day',
+  cash_carriers: { grain: 'week', cls: 'CASH', label: 'Drivers carrying a ceiling', unit: 'drivers', source: 'cash_fare_day',
     basis: 'People on the ledger with a valued cash fare on record by the end of each week — the tile’s count, cut at each week’s end.' },
 };
 
@@ -162,7 +181,7 @@ export function historyWindow(req, P, today) {
 const absentSeries = (metric, why) => ({ metric, ...meta(metric), absent: why, points: [], measured: 0, of: 0 });
 function meta(metric) {
   const m = METRICS[metric];
-  return { label: m.label, unit: m.unit, grain: m.grain, source: m.source, basis: m.basis };
+  return { label: m.label, unit: m.unit, grain: m.grain, source: m.source, basis: m.basis, class: m.cls };
 }
 const finish = (metric, points, extra = {}) => ({
   metric, ...meta(metric), absent: null, ...extra, points,
@@ -386,9 +405,16 @@ async function moneySeries(q, { from, to, today, fleet, platform, id }) {
       p.why = `this week is still running — ${n} of its 7 days so far`;
     } else if (end >= builtTo) p.why = notBuiltWhy('driver-day roll-up', finished).replace('this day was', 'this week was');
     else if (r.money == null) {
+      /* The count is its own field, not part of the sentence. A sentence is
+         nobody's class — the gate passes it to every reader of the route,
+         which since the review is every role — and "7 bookings this week" is
+         one person's bookings (BK), which the Cash desk and the HR officer
+         are not shown anywhere else. As a field it is masked like any other
+         booking count (manifest: series.money.points[].bookings, BK). */
       p.why = r.bookings
-        ? `${r.bookings} booking${r.bookings === 1 ? '' : 's'} this week, and no statement or priced fare covers ${r.bookings === 1 ? 'it' : 'them'} yet`
+        ? 'bookings this week, and no statement or priced fare covers them yet'
         : 'no booking and no money on record for this person this week';
+      if (r.bookings) p.bookings = r.bookings;
     } else {
       p.v = r2(r.money);
       p.money_days = r.money_days;

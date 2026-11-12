@@ -10799,3 +10799,17 @@ rollup pass: `driver_first_online` (each Uber account's first ONLINE event per D
   a hero tile. The glance tiles ask for `dot: 'cap'`, a zero-length path with a round,
   non-scaling cap. The phone's lines keep the circle, held byte for byte by
   `test/page_contract.test.mjs` §3b.
+* **A route that serves several pages needs a subject every one of those pages' readers holds.**
+  The gate refuses a route outright to a role without its `subject`, so `/api/history` as built
+  (subject BK) was refused to the Cash desk (`ID CASH SYS`) on #deposits, its own page, and to the
+  HR officer on #online-time and #cancellations — and each page said its line "did not load".
+  Subject SYS, with each series masked by its own class in `fields`, is the shape that works;
+  `test/history_routes.test.mjs` §6 checks every role template against every line's page subject
+  (`api/public/access.js` VIEW_SUBJECT) so a new series or a new role cannot reopen it (review of
+  SPK, 2026-11-12).
+* **A withheld value arrives as `null`, which is also what an unmeasured one looks like.** The gate
+  names the class in `_withheld`; a page that does not read it captions the nulls with whatever
+  real reason is left over ("No weekly line. No valued cash fare is on record…"). Each history
+  series carries its `class` so `api/public/history.js` can ask first. And a sentence is nobody's
+  class: a count inside a `why` reaches every reader of the route, so one person's weekly booking
+  count is its own field (`series.money.points[].bookings`, BK).

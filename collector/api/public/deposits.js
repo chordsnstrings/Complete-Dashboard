@@ -30,7 +30,7 @@ import { ledgerBand, ceiling, ceilingWho, ceilingCol, lastCashCol, ceilingRanked
   firstReason, booksRecorded } from './ledger_ak.js';
 import { entryForm } from './entry_form.js';
 import { aed, loadPeople } from './deposit_core.js';
-import { lineFor } from './history.js';
+import { lineFor, historyFailed } from './history.js';
 
 /* One type, and it needs a photograph: money physically changed hands. The
    form itself is ./entry_form.js, shared with #advances and the driver tab —
@@ -65,7 +65,7 @@ export async function renderDeposits(root) {
      page's subject is the whole record, and the endpoint's default span is
      the line's. A failure is remembered as one, so the tile can say the line
      did not load rather than that there is no history. */
-  const histP = ak ? api('/api/history?page=deposits').catch(() => ({ failed: true })) : null;
+  const histP = ak ? api('/api/history?page=deposits').catch(historyFailed) : null;
   if (ak) { root.append(AK.band, head.panel, top.panel, listPanel.panel, after); loading(AK.tiles); }
   else root.append(head.panel, listPanel.panel);
   loading(listPanel.body);

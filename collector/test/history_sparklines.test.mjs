@@ -28,7 +28,8 @@
    Synthetic data only: mockapi.mjs, whose /api/history uses the route's own
    registry and window rule. ONLY=online-time,deposits,absences narrows a run
    (section 0 always runs). */
-import { sparkOf, sparkNote, sparkFields, lineFor, gapReasons, shiftDay, mondayOf } from '../api/public/history.js';
+import { sparkOf, sparkNote, sparkFields, lineFor, gapReasons, shiftDay, mondayOf, historyFailed } from '../api/public/history.js';
+import { withheldSentence } from '../api/public/access_model.js';
 import { harness } from './arkiv_pages.mjs';
 
 const { check, start, open, done } = harness('Hero sparklines from /api/history');
@@ -65,6 +66,24 @@ console.log('\n0 · history.js, in Node');
   check('calendar arithmetic is noon-anchored and lands on the right days',
     shiftDay('2026-03-31', 1) === '2026-04-01' && shiftDay('2026-01-01', -1) === '2025-12-31'
       && mondayOf('2026-11-12') === '2026-11-09' && mondayOf('2026-11-09') === '2026-11-09' && mondayOf('2026-11-15') === '2026-11-09');
+  /* WITHHELD IS NOT UNMEASURED, AND NOT "DID NOT LOAD" (review of SPK,
+     2026-11-12). The gate nulls a class's values and names it in
+     `_withheld`, or refuses the request outright (a WithheldError). Read as
+     data, the first drew gaps captioned by whatever real gap was left, and
+     the second said the history did not load. */
+  const held = { ...s, class: 'COND', points: s.points.map((p) => ({ ...p, v: null })) };
+  const heldLine = lineFor({ series: { late: held }, _withheld: { COND: '' } }, 'late').spark;
+  check('values the gate withheld: its own sentence for the class, not the gaps\' reasons',
+    heldLine === `No daily line. ${withheldSentence('COND', { level: '' })}`, heldLine);
+  check('…and at the totals-only level, its sentence for that',
+    lineFor({ series: { late: held }, _withheld: { COND: 'A' } }, 'late').spark === `No daily line. ${withheldSentence('COND', { level: 'A' })}`);
+  check('a class withheld elsewhere in the answer leaves this line alone',
+    Array.isArray(lineFor({ series: { late: { ...s, class: 'COND' } }, _withheld: { BK: '' } }, 'late').spark));
+  const refusal = Object.assign(new Error('That fleet is outside your access.'), { name: 'WithheldError' });
+  check('a request the gate refused: the refusal\'s own words, never "did not load"',
+    lineFor(historyFailed(refusal), 'late').spark === 'No line. That fleet is outside your access.', lineFor(historyFailed(refusal), 'late').spark);
+  check('…while any other failure still says the line did not load',
+    /did not load for this tile just now/.test(lineFor(historyFailed(new Error('500')), 'late').spark || ''));
 }
 
 await start();
@@ -175,6 +194,30 @@ if (want('absences')) {
   const v = await page.evaluate(() => [...document.querySelectorAll('#view .kpis.glance > .kpi')]
     .find((k) => k.querySelector('.t-l')?.textContent.trim() === 'Cancellations')?.querySelector('.t-v')?.textContent.trim());
   check('…and the figure is there', /\d/.test(v || ''), v);
+  await ctx.close();
+}
+if (want('absences')) {
+  /* The Cash desk's view of its own page, as the gate would shape it for a
+     role without CASH: the values nulled and the class named. The tile says
+     so in the gate's words — not "no week is measured", not "did not load". */
+  const { ctx, page } = await open('arkiv', 'deposits', { fixtures: { '/api/history': (_, real) => ({ ...real, _withheld: { CASH: '' },
+    series: Object.fromEntries(Object.entries(real.series).map(([k, s]) => [k, { ...s, points: s.points.map((p) => ({ ...p, v: null })) }])) }) } });
+  const L = await lineOf(page, 'Ceiling on cash outstanding');
+  check('values the gate withheld: the tile says so in the gate\'s words, and draws no line',
+    !L?.has && L?.na === `No weekly line. ${withheldSentence('CASH', { level: '' })}`, JSON.stringify(L));
+  await ctx.close();
+}
+if (want('absences')) {
+  /* history.js loads on #online-time's first draw (onlinetime.js); served
+     here as something that is not a module, the import fails. The figures
+     must still be drawn — the line is decoration — and Late must say its
+     line did not load, rather than the page sitting on its skeleton. */
+  const { ctx, page } = await open('arkiv', 'online-time', { fixtures: { '/history.js': { not: 'a module' } } });
+  const L = await lineOf(page, 'Late');
+  const v = await page.evaluate(() => [...document.querySelectorAll('#view .kpis.glance > .kpi')]
+    .find((k) => k.querySelector('.t-l')?.textContent.trim() === 'Late')?.querySelector('.t-v')?.textContent.trim());
+  check('history.js failing to load: the tiles still draw, and Late says its line did not load',
+    /\d/.test(v || '') && !L?.has && /did not load for this tile just now/.test(L?.na || ''), JSON.stringify([v, L]));
   await ctx.close();
 }
 if (want('absences')) {

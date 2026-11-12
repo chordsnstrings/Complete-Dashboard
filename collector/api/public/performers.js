@@ -41,7 +41,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
 import { CHANNEL_ORDER } from './tokens.js';
 import { TZ } from './tz.js';
 import { q, href, state } from './data.js';
-import { lineFor, shiftDay, mondayOf } from './history.js';
+import { lineFor, historyFailed, shiftDay, mondayOf } from './history.js';
 import { dubaiDay } from './tz.js';
 /* In pagemeta.js, with why only a Monday is a week: the header checks it
    before this module has loaded. */
@@ -752,7 +752,7 @@ async function performerGlance(AKB, tiles, p, id) {
      tile's caption says so. */
   const w0 = wk ? String(wk).slice(0, 10) : mondayOf(dubaiDay());
   const histP = q('/api/history', { page: 'performer', id, from: shiftDay(w0, -77), to: weekEnd(w0) })
-    .catch(() => ({ failed: true }));
+    .catch(historyFailed);
   try { d = await q('/api/economics/drivers', wk ? { from: String(wk).slice(0, 10), to: weekEnd(wk) } : {}); } catch { d = null; }
   const hist = await histP;
   const rows = (d?.rows || []);

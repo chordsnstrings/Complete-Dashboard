@@ -28,7 +28,12 @@ import { mountAll } from './mount.mjs';
 import { refreshRollups } from '../src/rollup.js';
 import { refreshFirstOnline, refreshCashFareDay } from '../src/history_rollup.js';
 import { dubaiIso } from '../src/util.js';
-import { historyWindow, PAGES, DAY_CAP, WEEK_CAP, addDays, mondayOf } from '../api/history_routes.js';
+import { historyWindow, PAGES, METRICS, DAY_CAP, WEEK_CAP, addDays, mondayOf } from '../api/history_routes.js';
+/* §6: the shipped access entry, role templates, page subjects and shaping. */
+import { lookupEntry } from '../api/access/manifest.js';
+import { shapeBody } from '../api/access/shape.js';
+import { ROLE, ROLES } from '../api/public/access_model.js';
+import { VIEW_SUBJECT } from '../api/public/access.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -338,6 +343,7 @@ console.log('\n#deposits: the ceiling and who carries one, week by week');
 
 /* ══ 5. one person's money, week by week ═════════════════════════════════ */
 console.log('\n#performer: the person\'s weekly money from the day record');
+let perfAnswer = null;   // kept for §6, which shapes it for a role without earnings
 {
   const db2 = new PGlite();
   await applySchema(db2);
@@ -367,9 +373,13 @@ console.log('\n#performer: the person\'s weekly money from the day record');
   check('7 Sep: both accounts of the person, folded — 150', p['2026-09-07']?.v === 150, JSON.stringify(p['2026-09-07']));
   check('…carrying which kind of money it is', JSON.stringify((p['2026-09-07']?.sources || []).sort()) === '["fares","statement"]',
     JSON.stringify(p['2026-09-07']?.sources));
-  check('14 Sep: seven bookings and no money yet is a gap that says exactly that',
-    p['2026-09-14']?.v === null && /7 bookings this week, and no statement or priced fare covers them yet/.test(p['2026-09-14']?.why || ''),
+  /* The count beside the sentence, never in it (review of SPK): a sentence
+     reaches every reader of the route, and this is one person's bookings. */
+  check('14 Sep: seven bookings and no money yet is a gap that says exactly that — the count its own field',
+    p['2026-09-14']?.v === null && p['2026-09-14']?.bookings === 7
+      && /^bookings this week, and no statement or priced fare covers them yet$/.test(p['2026-09-14']?.why || ''),
     JSON.stringify(p['2026-09-14']));
+  perfAnswer = h.body;
   check('21 Sep: no booking and no money is a gap, never AED 0',
     p['2026-09-21']?.v === null && /no booking and no money on record/.test(p['2026-09-21']?.why || ''), JSON.stringify(p['2026-09-21']));
   check('28 Sep: a statement on a day with no booking still counts — 80', p['2026-09-28']?.v === 80, JSON.stringify(p['2026-09-28']));
@@ -393,6 +403,62 @@ console.log('\n#performer: the person\'s weekly money from the day record');
   check('an account no day record holds: absent, saying so', /never seen it/.test(nobody.body.series.money.absent || ''),
     nobody.body.series.money.absent);
   m2.server.close();
+}
+
+/* ══ 6. who may see the line ═════════════════════════════════════════════ */
+/* The review of SPK (2026-11-12) found the manifest entry's subject was BK.
+   The gate refuses a route outright to a role that lacks its subject, so the
+   Cash desk (ID CASH SYS) was refused the history on #deposits — the page
+   built for it, whose ceiling it is shown — and the HR officer (no BK) on
+   #online-time and #cancellations; each page then printed "the history did
+   not load", a reason that was not the true one. One route, four pages,
+   four page subjects: the only subject every page's reader holds is SYS, and
+   each series' values are masked by their own class instead. These checks
+   use the shipped manifest entry, the shipped role templates, the shipped
+   page subjects and the gate's own shaping code on real answers. */
+console.log('\nwho may see the line');
+{
+  const entry = lookupEntry('GET', '/api/history');
+  const LINE_PAGES = ['online-time', 'performer', 'deposits', 'cancellations'];
+  const refusedTo = [];
+  for (const pg of LINE_PAGES) {
+    for (const r of ROLES) if (r.levels[VIEW_SUBJECT[pg]] && !r.levels[entry.subject]) refusedTo.push(`${r.name} on #${pg}`);
+  }
+  check('every role that can open a page with a line can ask for the line', refusedTo.length === 0, refusedTo.join(', '));
+  const unmasked = Object.entries(METRICS).filter(([m, x]) => !x.cls
+    || !(entry.fields || []).some((f) => f.class === x.cls && f.paths.includes(`series.${m}.points[].v`)));
+  check('every series names its class, and the manifest masks its values by that class', unmasked.length === 0,
+    unmasked.map(([m]) => m).join(', '));
+  check('…and one person\'s weekly booking count is masked as bookings',
+    (entry.fields || []).some((f) => f.class === 'BK' && f.paths.includes('series.money.points[].bookings')));
+
+  /* The gate's shaping, for real roles, on real answers. */
+  const as = (body, code) => shapeBody(JSON.parse(JSON.stringify(body)), entry, ROLE[code].levels).body;
+  const measured = (s) => (s?.points || []).filter((p) => p.v != null).length;
+  const dep = (await H(`page=deposits&from=2026-09-07&to=${TODAY}`)).body;
+  const depClk = as(dep, 'CLK');
+  check('the Cash desk on #deposits: both cash lines whole, nothing withheld',
+    measured(dep.series.cash_ceiling) > 1 && measured(depClk.series.cash_ceiling) === measured(dep.series.cash_ceiling)
+      && measured(depClk.series.cash_carriers) === measured(dep.series.cash_carriers) && !depClk._withheld,
+    JSON.stringify(depClk._withheld));
+  check('…and each series says which class it is', depClk.series.cash_ceiling.class === 'CASH' && depClk.series.cash_carriers.class === 'CASH');
+  const canc = (await H(`page=cancellations&from=${D[0]}&to=${QUIET}`)).body;
+  const cancHro = as(canc, 'HRO');
+  check('the HR officer on #cancellations: the line whole — a COND line, as its tile\'s route is',
+    measured(canc.series.cancelled) > 1 && measured(cancHro.series.cancelled) === measured(canc.series.cancelled) && !cancHro._withheld,
+    JSON.stringify(cancHro._withheld));
+  const late = (await H(`page=online-time&from=${D[0]}&to=${QUIET}&start=06:00`)).body;
+  const lateHro = as(late, 'HRO');
+  const lateClk = as(late, 'CLK');
+  check('the HR officer on #online-time: Late whole', measured(lateHro.series.late) === measured(late.series.late) && measured(late.series.late) > 1);
+  check('the Cash desk, who holds no conduct: every Late value withheld, and the class named for the page to say so',
+    measured(lateClk.series.late) === 0 && lateClk._withheld?.COND === '' && lateClk.series.late.class === 'COND',
+    JSON.stringify(lateClk._withheld));
+  const perfClk = as(perfAnswer, 'CLK');
+  const gap = (perfClk.series.money.points || []).find((p) => p.d === '2026-09-14');
+  check('one person\'s money for the Cash desk: withheld as earnings, the booking count withheld as bookings, no figure left in a sentence',
+    measured(perfClk.series.money) === 0 && perfClk._withheld?.EARN === '' && perfClk._withheld?.BK === ''
+      && gap?.bookings == null && !/\d/.test(gap?.why || ''), JSON.stringify([perfClk._withheld, gap]));
 }
 
 server.close();

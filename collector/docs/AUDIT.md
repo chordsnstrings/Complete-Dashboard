@@ -2917,3 +2917,16 @@ To repeat the checks without a server: `node test/history_sparklines.test.mjs` (
 one request per draw, the runs, the end mark, the caption, 390, dark, Classic, every absence) and
 `node test/history_routes.test.mjs` (the route against `/api/online-time`, `/api/cancellations`,
 `/api/trips/daily` and #deposits' own sum, 62 checks).
+
+**The review's pass (2026-11-12).** The same four pages against `mockapi.mjs` on :8357, Chromium
+through `test/browser.mjs`, Arkiv, 1280 and 390, light and dark — 16 renders on the builder's
+head and 16 after the review's fixes, plus #deposits with its cash values withheld by the gate at
+both widths. Every render: no page error, exactly one `/api/history` request, no sideways scroll,
+no `NaN`, `undefined` or `null` in the text, no glance-band target under 44 px, the end mark round.
+The withheld render prints the gate's sentence where the line would be ("No weekly line. Not shown
+to your role: driver cash. …"), wrapping inside the tile at 390. Tile sub-lines clamped to one line
+are the focus layer's long-sub rule (`focus.js`, with the full text as its title), not this
+change. The two defects the review fixed were not visible to a reader with every class: the
+history refused to the Cash desk and the HR officer, and a failed load of `history.js` holding
+#online-time's tiles back (FIX-STATUS SPK15, SPK16). Now 64 checks in `history_sparklines` and 71 in
+`history_routes`.

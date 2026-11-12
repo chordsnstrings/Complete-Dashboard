@@ -183,11 +183,13 @@ export async function renderOnlineTime(root) {
        request per day … or a history endpoint"): the fourteen days ending on
        the chosen day, judged against the same start, in ONE request beside
        this one and only under the contract (api/history_routes.js counts Late
-       the way this endpoint does). A failure is remembered as one, so the
-       tile says the line did not load rather than that there is none. */
+       the way this endpoint does). A failure is remembered as one, with its
+       error, so the tile says the line did not load rather than that there
+       is none — or, when the access gate refused it, says that (history.js
+       historyFailed, written out here because that module loads lazily). */
     const histP = ak
       ? api(`/api/history?page=online-time&from=${lineFrom(day)}&to=${encodeURIComponent(day)}`
-        + `&start=${encodeURIComponent(start)}`).catch(() => ({ failed: true }))
+        + `&start=${encodeURIComponent(start)}`).catch((error) => ({ failed: true, error }))
       : null;
     let d;
     try {
@@ -281,9 +283,19 @@ export async function renderOnlineTime(root) {
          tile whose value is a bare dash as {label, na} and nothing else,
          so the line goes with the figure (test/history_sparklines pins it). */
       const hist = histP ? await histP : null;
-      const { lineFor } = await historyLib();
+      /* THE MODULE ITSELF CAN FAIL TO LOAD (review of SPK, 2026-11-12). This
+         awaited the import bare, so a history.js that did not arrive — a
+         dropped connection, a deploy that replaced the file between the page
+         and its import — threw out of draw() here, before a single tile was
+         drawn: the page sat on its skeleton for want of a decoration, the
+         opposite of "a failure never holds the figure back" above. Caught, it
+         becomes the line's reason like any other failure; the sentence is
+         history.js's own, written out because that module is what failed. */
+      const lib = hist ? await historyLib().catch(() => null) : null;
       if (mine !== gen) return;
-      const line = hist ? lineFor(hist, 'late') : {};
+      const line = !hist ? {}
+        : lib ? lib.lineFor(hist, 'late')
+          : { spark: 'No line. The history did not load for this tile just now — the figure above is unaffected.' };
       AKB.tilesHost.innerHTML = '';
       glance(AKB.tilesHost, bandTiles([...OT_TILES.map((x, i) => (i === 0 ? { ...x, hero: true, ...line } : x)), otWaitTile(d.rows)],
         { reasons: { Late: d.start_why || 'no start time to judge against', 'On time': d.start_why || 'no start time to judge against' } }).tiles);
