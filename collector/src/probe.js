@@ -40,6 +40,7 @@ import { fiToken } from './sources/bolt.js';
 import { dotDate, iso, daysAgo } from './util.js';
 import { log } from './log.js';
 import { probeEarnerWindow } from './sources/uber.js';
+import { probeTransactions, TXN_COLS, TXN_ALIASES } from './sources/uber_transactions.js';
 import { YANGO_SURFACES, consoleGate } from './sources/yango.js';
 /* Whether a FIELD NAME is one whose values must not be sampled. api/redact.js
    is the single authority on that line and on why phone and email stay the
@@ -349,14 +350,12 @@ export function surfaces({ from, to }) {
       drivers: (org) => `https://api.uber.com/v1/vehicle-suppliers/drivers?org_id=${encodeURIComponent(org)}&limit=50`,
       'driver-actions': (org) => `https://api.uber.com/v1/vehicle-suppliers/drivers/actions?org_id=${encodeURIComponent(org)}&limit=50`,
       vehicles: (org) => `https://api.uber.com/v1/vehicle-suppliers/vehicles?org_id=${encodeURIComponent(org)}&limit=50`,
-      transactions: (org) => `https://api.uber.com/v1/vehicle-suppliers/transactions?${qs({ org_id: org, limit: 50,
-        start_time: new Date(from).getTime(), end_time: new Date(to).getTime() })}`,
       // The one surface that might carry the money the trip export omits.
       'earner-payments': (org) => `https://api.uber.com/v1/vehicle-suppliers/earners/payments?${qs({ org_id: org,
         start_time: new Date(from).getTime(), end_time: new Date(to).getTime(), page_size: 50 })}`,
     };
     const cols = { drivers: DRIVER_COLS, 'driver-actions': DRIVER_COLS, vehicles: VEHICLE_COLS,
-      transactions: TRIP_COLS, 'earner-payments': ['category', 'amount', 'parent', 'driver_ext_id'] };
+      'earner-payments': ['category', 'amount', 'parent', 'driver_ext_id'] };
     for (const [name, url] of Object.entries(rest)) {
       add('uber', name, cols[name], 'OAuth REST', async () => {
         const token = await uberOAuthToken();
@@ -365,6 +364,31 @@ export function surfaces({ from, to }) {
         return { data, status };
       });
     }
+
+    /* THE LIVE TRANSACTIONS FEED, ASKED THE WAY IT ANSWERS.
+       ─────────────────────────────────────────────────────────────────────
+       This sat in `rest` above and was asked with GET, like its neighbours —
+       but Uber documents it as POST, and a GET draws `404 page not found`. So
+       every night this row recorded {http_status: 404, record_count: 0}, and
+       for months the product's record of the surface was "the provider has
+       nothing here" about a feed that serves per-trip money at sub-minute
+       freshness (docs/COVERAGE.md "Uber's live per-trip feed WORKS").
+
+       Asked now through src/sources/uber_transactions.js — the collector's
+       own request builder, so the probe and the collector describe one
+       request: POST, the snake_case envelope, timeRange IN_RANGE over epoch
+       milliseconds as strings, the newest legal 15-minute window (ending at
+       least six minutes ago). Not the probe's three-day window, which this
+       surface cannot serve: it answers 15 minutes at a time from the last 24
+       hours. The surface keeps its name, so its provider_probe row is
+       corrected in place rather than joined by a second one. Its fields are
+       measured against the columns they land in, uber_live_transaction. */
+    add('uber', 'transactions', TXN_COLS,
+      'OAuth REST — POST, the newest legal 15-minute window (the feed serves only the last 24 h)',
+      async () => {
+        const { data, status } = await probeTransactions({ org: config.uber.org });
+        return { data, status };
+      }, TXN_ALIASES);
 
     /* Does the provider still hold what we are missing?
        ─────────────────────────────────────────────────────────────────────

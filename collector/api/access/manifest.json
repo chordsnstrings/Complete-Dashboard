@@ -6341,6 +6341,44 @@
  },
  {
   "method": "GET",
+  "path": "/api/status/uber-live-money",
+  "subject": "SYS",
+  "carries": [
+   "BK",
+   "REV",
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "REV",
+    "paths": [
+     "fleets[].provisional.aed",
+     "fleets[].agreement.worst_gap_aed"
+    ]
+   },
+   {
+    "class": "BK",
+    "paths": [
+     "fleets[].last_24h.transactions",
+     "fleets[].last_24h.trips",
+     "fleets[].provisional.trips",
+     "fleets[].agreement.confirmed",
+     "fleets[].agreement.agreed"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [
+   "fleets[]"
+  ],
+  "fleetKey": "fleet",
+  "cap": null,
+  "notes": "api/uber_live_money_routes.js:36 handler. Honours ?fleet= (ecosine or egari; anything else reads both), so a one-fleet reader has it rewritten by the gate. Body: {fleets[{fleet, absent?, last_run{status, finished_at, written, error, windows[{from,to,rows,error}]}, last_ok_at, last_24h{transactions, trips, newest, why?}, provisional{trips, aed}, agreement{confirmed, agreed, pct, worst_gap_aed, why?}}], source, basis}. Per-fleet counts and AED totals of Uber's live transactions feed (src/sources/uber_transactions.js) against the payments report: no names, no driver, trip or transaction ids."
+ },
+ {
+  "method": "GET",
   "path": "/api/supply/areas",
   "subject": "LOC",
   "carries": [

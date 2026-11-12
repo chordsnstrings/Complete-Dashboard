@@ -578,6 +578,28 @@ export function* fareTasks(orgs, weeks) {
   for (const w of weeks) for (const o of orgs) yield { w, o };
 }
 
+/* The write the fare walk makes per trip — lifted to a constant so a test can
+   run the statement that ships (test/uber_transactions.test.mjs).
+
+   PRICE_SOURCE (v117). Uber's live transactions feed
+   (src/sources/uber_transactions.js) now prices a trip minutes after it ends,
+   provisionally, and fills only a price that is NULL or its own. This walk is
+   the statement-grade answer and outranks it: when the payments report
+   carries a fare ($3), the price becomes that fare and says so. Without the
+   stamp the row would keep reading 'uber_live' under a figure this walk wrote,
+   and the next live pass — told it may correct its own — would put the
+   provisional figure back over the statement's.
+
+   When $3 is NULL (a trip whose only row in this week's report is an
+   adjustment or a tip) the price is held, and so is whatever source it had:
+   a held price is not a price this walk stated. */
+export const FARE_WRITE_SQL =
+  `UPDATE trip SET price = coalesce($3, price),
+          price_source = CASE WHEN $3::numeric IS NULL THEN price_source ELSE 'uber_payments' END,
+          currency = coalesce(currency, 'AED'),
+          raw = coalesce(raw, '{}'::jsonb) || $4::jsonb
+     WHERE platform = 'uber' AND external_id = $2 AND fleet_id = $1`;
+
 /* One fleet, one week. The caller owns the accumulation because the
    accumulation is per fleet and the walk is not. */
 async function collectFareWeek(w, onStep, checkpoint, state) {
@@ -638,11 +660,7 @@ async function collectFareWeek(w, onStep, checkpoint, state) {
          merged for a trip whose price is held — that blob is the evidence the
          derivation above runs on, and dropping the write would throw away the
          only record that the fee existed. */
-      const { rowCount } = await pool.query(
-        `UPDATE trip SET price = coalesce($3, price),
-                currency = coalesce(currency, 'AED'),
-                raw = coalesce(raw, '{}'::jsonb) || $4::jsonb
-           WHERE platform = 'uber' AND external_id = $2 AND fleet_id = $1`,
+      const { rowCount } = await pool.query(FARE_WRITE_SQL,
         [org().fleet, t.external_id, t.fare,
           JSON.stringify({ uber_payments: {
             fare: t.fare, fare_base: t.fare_base, earnings: t.earnings,

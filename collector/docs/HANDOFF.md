@@ -262,7 +262,7 @@ export (`/api/export/lowperf.xlsx`) now cover the same ground.
 - **C18, half done:** `api/fleet_roster.js` is imported by nothing, so no route reads the departed-plate set.
 - **AED 0 for unmeasured money, the root cause:** `api/public/charts.js:1177,1182` (`hbars()`/`barChart()`) coerce `null` to 0.
 - **H19 / H91:** an Uber payments download timeout throws the `reportId` away (`src/sources/uber.js:142`). The data has healed (100% of chargeable bookings priced, 2025-04 → 2026-10); the code has not.
-- **Not collected:** the Uber live transactions feed (request shape solved, no collector; the nightly probe still sends a GET and gets 404), `analytics-data/query` and `getPerformanceReport`.
+- **Not collected:** `analytics-data/query` and `getPerformanceReport`. ~~The Uber live transactions feed~~ — collected and the three probes fixed to POST on branch `fix/uber-transactions` (FIX-STATUS UTX, reviewed 2026-11-12), **written, not deployed**: production still runs the GET probe until that branch ships.
 - **H5:** no CompanyName check in `cabman.js`.
 - **H82:** the "ever seen" channel-veto rule is unchanged, although Yango now delivers.
 - **Same person card:** prints "Both filed a phone ending …" even when the numbers disagree (`src/name_proposals.js:132`, `api/public/sameperson.js:82-83`).

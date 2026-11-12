@@ -372,6 +372,11 @@ export const SCHEMA_FILES = [
      stood in for a trip the portal had not answered for, or was held
      (src/sources/bolt_orders.js). */
   'schema_v116.sql',
+  /* v117: Uber's live per-trip money — one row per transaction from POST
+     /v1/vehicle-suppliers/transactions (src/sources/uber_transactions.js), a
+     per-trip view over them, and trip.price_source, which says where a price
+     came from so the live feed can fill only where nothing better exists. */
+  'schema_v117.sql',
   /* v121: passkeys and single sign-on (ULM-DESIGN §5.1, §14 decision 3) —
      access_passkey (credential id, public key, sign count, transports, the
      person), access_sso_identity (the provider's subject for a person) and
