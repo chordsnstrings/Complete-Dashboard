@@ -3816,9 +3816,16 @@ app.get('/api/status', wrap(async (_, res) => res.json((await q(
     detail: undefined,
     cadence,
     silence: say ? say(r) : null,
+    /* `kind` names the surface that served (or failed) the window, where the
+       source collects more than one: Bolt's trips now come from the portal
+       AND from fleet-integration getFleetOrders, and "which source served
+       this window" is the question a dead portal token raises. logRun has
+       always stored it (src/db.js); this is where it stopped. Omitted where
+       the source never sets it, so every other row is unchanged. */
     failed_windows: (detail || []).filter((c) => c.error)
-      .map((c) => ({ from: c.from, to: c.to, error: c.error })),
-    windows: (detail || []).map((c) => ({ from: c.from, to: c.to, rows: c.rows, ok: !c.error })),
+      .map((c) => ({ from: c.from, to: c.to, error: c.error, ...(c.kind ? { kind: c.kind } : {}) })),
+    windows: (detail || []).map((c) => ({ from: c.from, to: c.to, rows: c.rows, ok: !c.error,
+      ...(c.kind ? { kind: c.kind } : {}) })),
   };
 }))));
 

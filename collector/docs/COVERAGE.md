@@ -11020,3 +11020,139 @@ from the environment only (`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`
 * **A passkey counter regression is seen by the SECOND copy to sign in**, so the session the first
   one opened may be the attacker's: disabling the credential alone leaves it signed in. Every session
   of the person ends (PKY20).
+## Bolt's fleet-integration orders (getFleetOrders) — collected from 2026-11-12 (BFO)
+
+Bolt's trips now come from two surfaces: the portal's orderHistory (seven-day refresh token, both
+fleets) and the fleet-integration client's `getFleetOrders` (no expiry, Egari only). The code is
+`src/sources/bolt_orders.js`; what each order became is in `bolt_fi_order` (`sql/schema_v116.sql`);
+FIX-STATUS BFO has the rows. This section is what was learned about the provider.
+
+**Bolt's own spec.** `https://apidocs.bolt.eu/fleetIntegration/fleetIntegrationGatewayAuth/open-api.json`
+is public (no credential; 40.6 KB, read 2026-11-12). It is the authority for this gateway:
+
+- Six paths: `test`, `getFleetOrders`, `getFleetStateLogs`, `getDrivers`, `getVehicles` (POST) and
+  `getCompanies` (**GET**). There is no `getCompanyEarnings` — the audit's 404 is a route that
+  does not exist, not an empty one.
+- `getFleetOrders` takes `company_ids` (required, an ARRAY), `company_id` (optional), `offset`,
+  `limit` (1–1000), `start_ts`/`end_ts` (unix seconds) and `time_range_filter_type` (`created`, the
+  default, or `price_review` — filter by when the fare was finalised). It answers
+  `{code, message, data: {company_id, company_name, total_orders, orders[]}}`, sorted by creation
+  time. Its own refusals: **498805** INVALID_START_DATE (before what Bolt keeps), **498806**
+  INVALID_DATE_RANGE (getDrivers words it "maximum allowed date range is 31 days"), **498809**
+  COMPANY_NOT_ACTIVE, **498810** COMPANY_NOT_ALLOWED.
+- An order: `order_reference` (Bolt's order id — the portal sends none), `driver_uuid` and
+  `partner_uuid` (the roster's ids, not the portal's numeric driver id), `driver_name`,
+  `driver_phone`, `vehicle_license_plate`, `vehicle_model`, `pickup_address`,
+  `destination_address`, `order_stops[]` (`type` pickup|dropoff|waypoint|change_point, `address`,
+  `lat`/`lng`, nullable `real_lat`/`real_lng`), `order_status` (the portal's own vocabulary:
+  finished, client_cancelled, driver_did_not_respond, driver_rejected, client_did_not_show,
+  driver_cancelled_after_accept, the in-progress states …), eight timestamps (created, accepted,
+  pickup, drop_off, finished, payment_confirmed, cancelled, no_show), `ride_distance`,
+  `predicted_ride_distance`, `road_distance_at_matching`, `order_price` (`ride_price`,
+  `booking_fee`, `toll_fee`, `cancellation_fee`, `tip`, `net_earnings`, `cash_discount`,
+  `in_app_discount`, `commission` — all nullable), `is_scheduled`, `is_optional`,
+  `category_info` (`name`, `seats`, `vehicle_type`).
+- `getFleetStateLogs` (not collected) gives each driver's state (inactive / waiting_orders /
+  has_order / busy) with a position and the active order — Bolt's online hours, which nothing
+  collected from Bolt supplies today.
+- `getCompanies` is a **GET** returning the `company_ids` the client may read. The table above
+  ("`getCompanies` answers 404") is what a POST gets; untested here (no credential reaches Bolt
+  from this sandbox), but it is the one call that would say which companies the client is entitled
+  to without a refusal.
+
+**What production returned.** The nightly probe (2026-11-11 22:20Z, a three-day window): Egari 24
+orders — statuses finished, driver_cancelled_after_accept, client_cancelled, driver_did_not_respond;
+payment in_app and cash; categories Comfort and Bolt; `order_price.*`, `ride_distance` and
+`order_finished_timestamp` filled on 50% (the finished rides), `order_stops` on every order.
+Timestamps are unix seconds (the narrow sample shows `order_cancelled_timestamp` 1794370437 =
+2026-11-10). Ecosine: `503 NOT_AUTHORIZED, error_hint COMPANIES_NOT_ALLOWED` — the same refusal
+`getDrivers` gets; the client is not entitled to company 142868 for orders either.
+
+**Traps:**
+
+* **The two Bolt trip feeds share no key.** The portal sends no order id, so its trip key is
+  synthesised as `<numeric driver id>|<created>`; this feed's driver id is a uuid. The same ride is
+  recognised by what both carry: the same fleet, the same creation second, and the same car (plate
+  digits — the portal drops the letter code) or the same driver (`partner_identifier` against
+  `partner_uuid`/`driver_uuid`, or a portal id learned from an earlier match). One candidate
+  exactly, or nothing: a missed match costs an empty column, a wrong one writes one ride's
+  coordinates onto another. A second-level key on any new feed has to say how it meets the
+  portal's.
+* **"No match" is not "a new ride".** An order the portal answered for and did not return could be
+  a duplicate the rule failed to see, so it is HELD (in `bolt_fi_order`, not in `trip`). Only an
+  order created after the portal last answered for the fleet (`source_state`
+  `portal_answered_through`, moved by the portal harvest on every window it answers) becomes a row
+  of its own, and the portal's next answer for that day retires it. A source that inserts
+  everything it cannot match doubles a fleet's trips the day its match rule stops holding.
+* **A short answer is still an answer, for retiring stand-ins.** The first draft retired them
+  only on windows the portal answered in full (no shortfall against `total_rows`), which reads
+  as caution. It is the opposite: the portal's rows for a short window are written anyway, so
+  a stand-in it does not retire sits beside the portal's own row for the same ride — two rows,
+  for as long as no later window answers in full, whenever the match rule is not there to tidy
+  up (`bolt_fi_orders_db` G proves it: `fi:ref-g` beside `900001|…`). Retiring on a short
+  answer costs only what the shortfall already costs. When deciding which of two feeds stands,
+  ask which failure is a double count.
+* **The portal is not asked for Dubai's today between 20:00Z and 24:00Z.** `harvestPortal` ends
+  its windows at the UTC date of the scheduler's Date (`midnight()` reads `iso()`), clamped to
+  Dubai's today; from 20:00Z the UTC date is Dubai's yesterday, so rides created 00:00–04:00 Dubai
+  are not fetched until the 00:00Z run. Measured on production `/api/status` (2026-11-12): the
+  catch-up that finished 21:30Z (01:30 Dubai on the 12th) had its newest window ending
+  2026-11-11. `getFleetOrders` is asked up to now, so it stands in for those hours. The portal
+  harvest itself is unchanged.
+* **The portal's date clock is not established — and cannot be from outside.** For the same
+  reason, the portal is never handed a date that is in the future on one clock and not the other.
+  The retirement of stand-ins assumes Dubai days, and every answered window is checked: a row
+  created after the window's last Dubai day ended is evidence of UTC days, and the run says so
+  (`portalDayEvidence`).
+* **`ride_distance` has no unit in the spec.** The portal's `distance` is kilometres (10.7 on a
+  48-dirham ride in `test/fixtures/bolt_order_table.json`). The unit is decided per batch: against
+  the portal's kilometres on matched rides, else from the magnitude of finished rides (a median of
+  12,000 is metres, of 12 kilometres); undecided is a NULL distance with the value in raw.
+* **Null and zero mean different things on the two feeds.** This feed writes NULL for money a ride
+  did not carry (50% fill, finished rides only) — a stated 0 commission is a real zero. The portal
+  writes 0 for "did not happen" (`portalRow`'s `money()`), and that 0 must become NULL. Read each
+  feed's absence in its own convention.
+* **jsonb hands keys back in its own order** (shorter keys first), so comparing a stored jsonb
+  object with a JS object by `JSON.stringify` reads every row as changed and rewrites it on every
+  pass. Compare key-order-free (`canon` in `src/sources/bolt_orders.js`).
+* **A stand-in row is told apart by `raw ? 'created'`.** Every portal row's raw carries `created`
+  (its key is built from it); a stand-in's raw carries only `fleet_integration`. Nothing may write
+  a top-level `created` into a stand-in's raw.
+* **A cancelled order still carries a pick-up and a drop-off stamp** (independent review,
+  2026-11-12). The probe's fill rates on the 24 Egari orders: `order_drop_off_timestamp` 71%,
+  `order_pickup_timestamp` 75%, `order_accepted_timestamp` 71%, against `order_finished_timestamp`,
+  `payment_confirmed_timestamp`, `order_price.*` and `ride_distance` at 50% — the finished rides.
+  So the orders accepted and then not finished (driver_cancelled_after_accept is among the four
+  statuses seen) carry both stamps. Read as an end, that gave a cancelled portal row (the portal
+  writes no end for one) an `ended_at` and a `duration_s`, and reconcile's `bookingWindow()` reads
+  `ended_at` before it asks whether the booking was cancelled. An end or a duration is now taken
+  only from `finished` / `arrived_to_destination` (`RAN_STATUSES`). A test that cancels an order by
+  nulling its stamps first tests a shape production does not send — build fixtures from the
+  probe's fill rates, not from what a field's name suggests.
+* **`total_orders` has no stated meaning.** The spec types it as a number; whether it counts the
+  window or the page is not measured, and the probe's 24-order window cannot tell the two apart.
+  Stopping the page walk when offset reaches it cuts every window at one full page on the second
+  reading, with the shortfall check reading "1,000 of 1,000" — silent. A short page ends a window on
+  either reading; `total_orders` only feeds the shortfall report (FIX-STATUS BFO12).
+* **A verdict computed per batch is gone exactly when a lapse needs it.** The ride_price agreement
+  check needs matched rides, and a batch has none when the portal token is dead. The verdict of
+  the last batch that could measure (≥5 matched rides priced on both feeds) is kept in
+  `source_state` (`bolt`, fleet, `fi_price_agreement`), used by thinner batches with its date, and
+  replaced only by a measurement over newer rides (FIX-STATUS BFO13). Any check that compares the
+  two feeds has the same shape: decide what it falls back to when one feed is dark.
+
+**Open — to measure once deployed** (no credential reaches Bolt from this sandbox):
+
+- Whether the two APIs stamp the same creation second — the match rule's premise. Every run logs
+  `fleet-integration orders egari … matched_of_answered: N/M`, and the run row says so when fewer
+  than half of at least ten match.
+- Whether `partner_identifier` is the order's `partner_uuid` or its `driver_uuid` (both are
+  accepted), and what `real_lat`/`real_lng` are (read as where the stop happened; each row records
+  `pickup_basis` real or requested).
+- The gateway's rate limit and how far back it keeps orders: 429 is waited out; the walk logs
+  `too_old_from` the first time Bolt refuses a start date.
+- What `total_orders` counts (the window or the page), and what Bolt means by a pick-up and a
+  drop-off stamp on an order that did not finish. Neither changes what is written now.
+- After the tokens lapse (2026-11-14 15:06Z): `/api/status` bolt/egari should read `partial` with
+  "fleet-integration getFleetOrders answered …" and its windows `kind: fleet-integration`, and
+  Egari's Bolt trips keep arriving; Ecosine's stop, and its row says it is not entitled.
