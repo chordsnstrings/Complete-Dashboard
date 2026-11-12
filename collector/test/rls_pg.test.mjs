@@ -55,11 +55,15 @@ const urlFor = (base, { user, password, db }) => {
 const admin = new pg.Client({ connectionString: ADMIN_URL, connectionTimeoutMillis: 3000 });
 try { await admin.connect(); } catch (e) {
   console.log(`  - skipped: no Postgres at ${ADMIN_URL.replace(/\/\/[^@]*@/, '//')} (${String(e.message || e).slice(0, 80)})`);
+  /* The tally test/run-all.mjs reads: a skip is a file that ran and asserted
+     nothing, not one that never reported (events.test.mjs does the same). */
+  console.log('\n0 passed, 0 failed');
   process.exit(0);
 }
 const me = (await admin.query('SELECT rolsuper, version() AS v FROM pg_roles WHERE rolname = current_user')).rows[0];
 if (!me?.rolsuper) {
   console.log('  - skipped: the connection is not a superuser, and this test has to play the administrator who creates the role');
+  console.log('\n0 passed, 0 failed');
   await admin.end(); process.exit(0);
 }
 console.log(`  (on ${String(me.v).split(' on ')[0]})`);
@@ -71,6 +75,7 @@ const cleanup = async () => {
 await cleanup();
 if ((await admin.query(`SELECT 1 FROM pg_roles WHERE rolname = 'fleet_request'`)).rows.length) {
   console.log('  - skipped: this cluster already has a fleet_request role with rights elsewhere; run against a throwaway cluster');
+  console.log('\n0 passed, 0 failed');
   await admin.end(); process.exit(0);
 }
 await admin.query(`CREATE ROLE rls_app_user LOGIN NOSUPERUSER NOCREATEROLE NOBYPASSRLS PASSWORD '${pw.user}'`);
