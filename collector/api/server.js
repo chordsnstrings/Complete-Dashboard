@@ -53,6 +53,8 @@ import { responseCache } from './cache.js';
 import { platformFares, platformPayouts, platformStatements, payoutPeople, fleetIncome } from './income_sql.js';
 import { resolveOpenFill, applyFillToPlatforms } from './statement_fill_sql.js';
 import { teslaRoutes } from './tesla_routes.js';
+import { fleetRosterRoutes } from './fleet_roster_routes.js';
+import { wageSheetRoutes } from './wage_sheet_routes.js';
 import { cancellationRoutes } from './cancellation_routes.js';
 import { startWarmer } from './warm.js';
 import { startAlerts } from './alerts.js';
@@ -407,7 +409,12 @@ function logPlan(text, params, ms) {
    quote. The real fix for this class of bug is test/route_smoke.test.mjs,
    which executes every route rather than grepping for it. */
 import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount, peopleCountStored, personKeyStored, NAMED, JOIN_TRIP, personFold, custodyRefs, custodyNames } from './custody_sql.js';
-import { TELEMETRY_PLATES, LATEST_FIX, REAL_FIX } from './telemetry_sql.js';
+import { TELEMETRY_PLATES, LATEST_FIX, REAL_FIX, ROSTER_KEEP } from './telemetry_sql.js';
+/* The tracker roster's read side (FIXLIST C18): which CABMAN plates the
+   collector has set aside, and the sentence a page prints about it. Also in
+   test/mount.mjs's injected list — the harness evaluates this file's routes
+   as a function body, and a name it omits is a ReferenceError there. */
+import { fleetRoster, rosterFor, excludedPlates, exclusionNote } from './fleet_roster.js';
 import { spanGaps } from './coverage_gaps.js';
 /* The one place the alerts-per-distance rule lives. Every page that prints a
    safety rate reads it from here, so the fleet headline and the per-vehicle
@@ -783,19 +790,42 @@ app.get('/api/kpis', wrap(async (req, res) => {
      Narrowed ($1), a plate counts when that fleet filed a fix for it, and its
      newest fix is that fleet's newest. Everyone else: the statement as it was. */
   const onlyTrk = typeof req.query._fmfleet === 'string' && req.query._fmfleet ? req.query._fmfleet : null;
+  /* AND ONLY THE PLATES THE TRACKER STILL LISTS (FIXLIST C18, 2026-11-12).
+     Measured on production that morning: tracked_vehicles 268 and
+     silent_vehicles 162, with 132 CABMAN plates whose last poll was more
+     than a day old — plates the provider stopped listing, frozen at their
+     last fix and counted as fleet. The Alerts page divides its events by this
+     tracked count, so its per-vehicle rate was about half what it is.
+     A set-aside plate's CABMAN fixes no longer count (api/telemetry_sql.js
+     ROSTER_KEEP); a plate whose every fix was CABMAN's is left with no fix and
+     falls out of all three counts, and `tracked_set_aside` counts exactly
+     those, so the note printed beside the figure names the plates taken out
+     of THIS figure and not the roster's whole list. count(captured_at) rather
+     than count(*): with nothing set aside no plate's captured_at is null and
+     the two are the same number. */
+  /* Integration of ONE and WIRE (2026-11-12): both rewrote this statement.
+     Narrowed, the roster is the reader's fleet's own (rosterFor), so the
+     note printed beside the count names only their plates, and a plate is
+     counted when that fleet filed ANY fix for it (`filed`) — a plate whose
+     only fixes in that fleet are set aside is then `tracked_set_aside`, not
+     silently "the other fleet's". The exclusion stays $1; the fleet is $2. */
+  const roster = rosterFor(await fleetRoster(q), onlyTrk);
   const [v] = await q(`WITH RECURSIVE ${TELEMETRY_PLATES}
       SELECT
         count(*) FILTER (WHERE now() - captured_at < ${FIX_FRESH})::int live_vehicles,
         count(*) FILTER (WHERE now() - captured_at < ${FIX_FRESH})::int fresh,
         count(*) FILTER (WHERE now() - captured_at >= interval '1 day')::int silent_vehicles,
-        count(*)::int tracked_vehicles
+        count(captured_at)::int tracked_vehicles,
+        count(*) FILTER (WHERE captured_at IS NULL)::int tracked_set_aside
       /* Each plate's newest captured_at, future included — what the
          DISTINCT ON this replaced kept. See api/telemetry_sql.js. */
       FROM (SELECT p.plate,
-                   (SELECT max(t.captured_at) FROM telemetry_snapshot t WHERE t.plate = p.plate${
-                     onlyTrk ? ' AND t.fleet_id = $1' : ''}) AS captured_at
-              FROM plates p WHERE p.plate IS NOT NULL) s${onlyTrk ? ' WHERE s.captured_at IS NOT NULL' : ''}`,
-  onlyTrk ? [onlyTrk] : []);
+                   (SELECT max(t.captured_at) FROM telemetry_snapshot t WHERE t.plate = p.plate
+                       AND ${ROSTER_KEEP('t.')}${onlyTrk ? ' AND t.fleet_id = $2' : ''}) AS captured_at${
+                     onlyTrk ? `,
+                   EXISTS (SELECT 1 FROM telemetry_snapshot t WHERE t.plate = p.plate AND t.fleet_id = $2) AS filed` : ''}
+              FROM plates p WHERE p.plate IS NOT NULL) s${onlyTrk ? ' WHERE s.filed' : ''}`,
+  onlyTrk ? [excludedPlates(roster), onlyTrk] : [excludedPlates(roster)]);
   /* Alerts, and the distance they are allowed to be divided by.
      ─────────────────────────────────────────────────────────────────────────
      Alerts take the same fleet filter as the trips beside them; without it a
@@ -962,6 +992,10 @@ app.get('/api/kpis', wrap(async (req, res) => {
   const workedDays = Math.max(0, ...fareRows.map((r) => r.booking_days || 0));
   res.json({
     ...t, ...v, ...a, ...ak,
+    /* What the three tracker counts above left out, and why, in the words a
+       page prints beside them (api/fleet_roster.js). `n` is the plates this
+       figure dropped (tracked_set_aside), `held` the roster's whole list. */
+    fleet_roster: exclusionNote(roster, { removed: v.tracked_set_aside }),
     /* The safety headline, computed here rather than left for a page to divide
        `alerts` by `km` — which is how it came to be wrong: those two columns
        describe different sets of days whenever the feed has a hole, and every
@@ -1991,6 +2025,20 @@ app.get('/api/vehicles', wrap(async (req, res) => {
     truncated: (t?.vehicles ?? 0) > rows.length });
 }));
 
+/* NOT THE PLATES THE TRACKER HAS STOPPED LISTING (FIXLIST C18, 2026-11-12).
+   Measured on production that morning: 268 rows, 177 of them CABMAN, and 132
+   of those with a last poll more than a day old — plates the provider stopped
+   listing, frozen at their last fix and position. 29 of the 60 rows the page
+   called Moving were among them, moving at a speed recorded days before.
+   ROSTER_KEEP takes a set-aside plate's CABMAN fixes out of the candidates
+   for its newest fix: a plate another feed still reports shows that feed's
+   fix, and one only CABMAN ever reported has none left and drops out.
+   STILL A BARE ARRAY, deliberately. The access manifest shapes this route by
+   path — '[].lat', '[].lng', '[].place' are withheld from a role without
+   locations, and rows are narrowed by '[]'.fleet_id for a one-fleet reader —
+   so wrapping it in an object would have handed every role every position.
+   The sentence saying what was set aside is GET /api/fleet/roster, which the
+   Live and Map pages read beside this one (api/fleet_roster_routes.js). */
 app.get('/api/live', wrap(async (_, res) => res.json(await q(
   `WITH RECURSIVE ${TELEMETRY_PLATES}
    SELECT s.plate, s.fleet_id, s.source, s.captured_at, s.polled_at, s.lat, s.lng, s.speed, s.status,
@@ -2060,10 +2108,10 @@ app.get('/api/live', wrap(async (_, res) => res.json(await q(
       polled_at breaks the remaining ties, so the result is deterministic.
       One plate at a time through the index — see api/telemetry_sql.js. */
    FROM plates p
-   CROSS JOIN LATERAL ${LATEST_FIX('p.plate')} s
+   CROSS JOIN LATERAL ${LATEST_FIX('p.plate', ROSTER_KEEP('t.'))} s
    LEFT JOIN vehicle_current_driver cd ON cd.plate = s.plate
    WHERE p.plate IS NOT NULL
-   ORDER BY s.plate`))));
+   ORDER BY s.plate`, [excludedPlates(await fleetRoster(q))]))));
 
 // Breadcrumb trail. Only GPS-bearing sources: Uber writes driver-status rows into
 // the same table with no coordinates, and those would otherwise punch holes in a path.
@@ -6975,6 +7023,10 @@ dayRoutes(app, { q, wrap });
 onlineRoutes(app, { q, wrap });
 cancellationRoutes(app, { q, wrap });
 teslaRoutes(app, { q, wrap });
+/* What the tracker roster set aside, in words (FIXLIST C18) — and the
+   wage-sheet classifier's write-free preview. See each file's header. */
+fleetRosterRoutes(app, { q, wrap });
+wageSheetRoutes(app, { wrap });
 /* One booking as an address — reached from every trip table in the product. */
 tripRoutes(app, { q, wrap });
 authRoutes(app, { q, wrap });

@@ -259,7 +259,7 @@ export (`/api/export/lowperf.xlsx`) now cover the same ground.
 - **C21:** `api/supply_routes.js:183-186` builds `bounded` on UTC `iso()`, not `dubaiIso`.
 - **C22:** the `#compare` auto-cut (`api/compare_routes.js:88`) ignores collection lag, so a lagging collector still reads as a collapse.
 - **C26 / H13 / H26:** one in-memory promise queue (`src/run.js:92`), and the cron `catchUp(30)` / `backfill()` calls pass no `jobId`, so they get no checkpoint and no requeue after a restart. Latency-plan steps 1–3 are not started.
-- **C18, half done:** `api/fleet_roster.js` is imported by nothing, so no route reads the departed-plate set.
+- ~~**C18, half done:** `api/fleet_roster.js` is imported by nothing, so no route reads the departed-plate set.~~ Wired by WIRE (branch `fix/wire-modules`, 2026-11-12): `/api/live`, the `/api/kpis` tracker counts and the register read the roster, `GET /api/fleet/roster` says what they set aside — written and reviewed, **not deployed** (FIX-STATUS WIRE).
 - **AED 0 for unmeasured money, the root cause:** `api/public/charts.js:1177,1182` (`hbars()`/`barChart()`) coerce `null` to 0.
 - **H19 / H91:** an Uber payments download timeout throws the `reportId` away (`src/sources/uber.js:142`). The data has healed (100% of chargeable bookings priced, 2025-04 → 2026-10); the code has not.
 - **Not collected:** `analytics-data/query` and `getPerformanceReport`. ~~The Uber live transactions feed~~ — collected and the three probes fixed to POST on branch `fix/uber-transactions` (FIX-STATUS UTX, reviewed 2026-11-12), **written, not deployed**: production still runs the GET probe until that branch ships.

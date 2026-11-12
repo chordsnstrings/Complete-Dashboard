@@ -15,6 +15,7 @@
 import { peopleCount, personKey, custodyNames } from './custody_sql.js';
 import { CABMAN_MOVE_DAYS, PARKED_SPOTS_SQL, TRACKER_SOURCES_SQL, QUIET_SQL, TRACKER_STATE_SQL, REAL_FIX } from './telemetry_sql.js';
 import { placeAt } from './place_sql.js';
+import { fleetRoster, excludedPlates } from './fleet_roster.js';
 import { winDays, dubaiSpanSql } from './window.js';
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 import { fleetIncome, COMPLETED_SQL } from './income_sql.js';
@@ -561,6 +562,50 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
     /* The rate, and enough beside it for the column to say which days it is
        about. The whole coverage record is not repeated onto 500 rows; the two
        counts it takes to write "22 of 30 days" are. */
+    /* THE PLATES THE TRACKER HAS STOPPED LISTING, AND NOTHING ELSE KNOWS
+       (FIXLIST C18, wired 2026-11-12).
+       ─────────────────────────────────────────────────────────────────────
+       Measured on production that morning, /api/vehicles/directory?days=30:
+       273 rows, and 132 of them are CABMAN plates whose last poll is more
+       than a day old. Not one of the 132 carries a trip in the window, a trip
+       ever (last_trip_ever), a VIN, a make, a document or another tracker —
+       plates the provider listed on a handful of polls and then stopped
+       listing, which the register counted as vehicles because it unions the
+       plates of telemetry_snapshot. The headline verdict already counts only
+       cars with a VIN (FIXLIST V2, api/public/vehicle.js), so its percentage
+       had stopped carrying them; the "Vehicles" tile and the search count had
+       not, and nothing on the page said WHY a third of the register was there.
+
+       The roster says which plates CABMAN has stopped listing. It does NOT say
+       the car has left the fleet — a car whose tracker was moved can still
+       earn on Uber — so the row is set aside only when the roster's word is
+       the only word: no booking or FMS journey ever, no other feed's fix, no
+       document, no channel's vehicle record and no custody day. That is the
+       predicate FIXLIST C18 asked for, in SQL, against the roster's list.
+
+       The rows STAY in the array, flagged. This is the register; a plate that
+       was once reported is a fact, and the page names them as set aside rather
+       than serving a register that quietly shrank overnight. `set_aside` is
+       'departed' or 'pending' (the roster's word for which), and null for
+       every row it does not apply to. The plain-English reason comes from GET
+       /api/fleet/roster — this route is a bare array, which the access
+       manifest shapes and filters by '[]', and four other files read as one. */
+    const roster = await fleetRoster(q);
+    const ex = excludedPlates(roster);
+    const setAside = new Map();
+    if (ex) {
+      for (const r of await q(
+        `SELECT p.plate FROM unnest($1::text[]) AS p(plate)
+          WHERE NOT EXISTS (SELECT 1 FROM trip x WHERE x.plate = p.plate)
+            AND NOT EXISTS (SELECT 1 FROM telemetry_snapshot t
+                             WHERE t.plate = p.plate AND t.source <> 'cabman')
+            AND NOT EXISTS (SELECT 1 FROM vehicle_document d WHERE d.plate = p.plate)
+            AND NOT EXISTS (SELECT 1 FROM vehicle v WHERE v.plate = p.plate)
+            AND NOT EXISTS (SELECT 1 FROM vehicle_profile vp WHERE vp.plate = p.plate)
+            AND NOT EXISTS (SELECT 1 FROM vehicle_driver_day vd WHERE vd.plate = p.plate)`, [ex])) {
+        setAside.set(r.plate, roster.departed.has(r.plate) ? 'departed' : 'pending');
+      }
+    }
     /* The list, and whether it is all of it. An array was the shape before,
        and a caller that reads `.rows` gets the same array with the one fact it
        could not otherwise have. */
@@ -645,6 +690,8 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
             tracked: r.telematics_journeys ?? null }),
         device_alerts: r.device_alerts ?? 0,
         alert_days: cov.covered_days, alert_window_days: cov.window_days,
+        /* See the roster block above: 'departed' | 'pending' | null. */
+        set_aside: setAside.get(r.plate) || null,
       };
     }));
   }));

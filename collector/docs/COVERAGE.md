@@ -11328,3 +11328,91 @@ rollup pass: `driver_first_online` (each Uber account's first ONLINE event per D
   series carries its `class` so `api/public/history.js` can ask first. And a sentence is nobody's
   class: a count inside a `why` reaches every reader of the route, so one person's weekly booking
   count is its own field (`series.money.points[].bookings`, BK).
+## The CABMAN roster, read by the API — measured 2026-11-12 (WIRE)
+
+What production served that morning, before `api/fleet_roster.js` was wired in (GET, counts only):
+
+- `/api/live`: 268 rows — 177 CABMAN, 76 FMS, 15 Uber. The CABMAN `polled_at` takes five values:
+  45 plates on the current poll, 43 at 2026-11-10 23:20Z, 65 at 10-14 12:35Z, 2 at 09-04 and 22 at
+  08-30. 132 CABMAN plates have a last poll more than a day old; 153 of the 177 are stale.
+  - CABMAN now answers for two fleets: 172 rows carry `fleet_id` ecosine and 5 egari.
+  - Moving (speed > 3 km/h) 60, of which 29 are those 132 plates; Engaged 36 → 14 without them.
+- `/api/kpis?days=30`: tracked_vehicles 268, silent_vehicles 162, live_vehicles 92.
+- `/api/vehicles/directory?days=30`: 273 rows, 110 with a booking. All 132 plates are in it, and
+  not one has a trip in the window or ever, a VIN, a make, a document or another tracker — the
+  predicate the register now sets aside on (they all have `fleet_id` null there, too).
+- The 43 plates last polled 11-10 23:20Z are newer than the cohorts FIXLIST C18 measured in
+  September: the provider's list keeps changing, which is what the roster is for.
+
+### Traps this added to the list
+
+* **`plate = ANY($1)` with a NULL list is NULL, not false.** `excludedPlates()` returns null when
+  nothing is set aside, and `NOT (source = 'cabman' AND plate = ANY(NULL))` is NULL for every CABMAN
+  row — the plain form would have dropped the whole CABMAN fleet the day the roster was empty or
+  missing. `ROSTER_KEEP` (api/telemetry_sql.js) coalesces the comparison to false;
+  `fleet_roster_wiring` §5 and §7 hold it.
+* **`/api/live` and `/api/vehicles/directory` must stay bare arrays.** The access manifest shapes
+  them by path (`[].lat`, `[].lng`, `[].place` withheld from a role without locations; rows
+  filtered by `[]`.fleet_id for a one-fleet reader). Wrapping either in `{rows, note}` to carry a
+  sentence would have handed every role every position. A sentence that belongs beside a bare
+  array goes on its own route (`/api/fleet/roster`).
+* **A clause on a verdict's sub-line is not on the page under the contract.** focus.js folds a
+  long `.vdct-sub` out of sight; a `.note.warn` is flagged (one line on the face). An exclusion
+  that must be read goes in a warn note.
+* **The Classic skin is byte-frozen against the mock.** A page change that draws nothing for the
+  mock's answer leaves `arkiv_classic_frozen` green; one that changes what the mock's data draws
+  (for example "Moving" requiring a fresh fix: the mock's stale row 7 moves at 35 km/h) needs a
+  re-record and a sentence in the commit.
+
+## The wage-sheet reader as an upload path — measured 2026-11-12 (WIRE)
+
+`src/salary/xlsx.js` was written for files the operator chose. `POST /api/wage-sheet/preview` is
+its first caller that takes a file from a browser, and two of its properties matter there:
+
+- **Its cell pattern is quadratic over unclosed tags.** The pattern is lazy and correct (trap 7 in
+  the file's own header), but from every `<c` it scans forward for a `>` or `</c>`. A sheet of
+  repeated `<c r="A1" ` with nothing closing them: 5,000 / 10,000 / 20,000 repeats (50 / 100 /
+  200 KB of XML, under 1.2 KB zipped) took 85 / 348 / 1,545 ms; 40,000 took about 6 s. Linear
+  input, quadratic time — in the API's thread that is every page waiting.
+- **`unzip` inflated with no limit.** Deflate packs a run of one byte about a thousand to one, so
+  a 4 MB body could unpack to gigabytes, allocated outside the V8 heap where a worker's heap limit
+  cannot see it. `maxBytes` (zlib's `maxOutputLength`, member by member) refuses it mid-way: a
+  31 KB file of 30 MB of zeros is refused at the 24 MB cap.
+
+### Traps this added to the list
+
+* **A worker thread does not bound Buffer memory.** `resourceLimits` caps the worker's V8 heap;
+  `inflateRawSync` output is external memory. Bound the inflation itself (`maxOutputLength`).
+* **A same-process test cannot see a blocked event loop from inside it.** The client and the
+  server share the loop, so a ping sent after a timer is never late — the timer itself waits. Time
+  the ping from the START of the slow request (`wage_sheet_preview` §3 does).
+* **`/api/hr-roster/preview` and `/commit` have both properties today**: `src/hr_roster.js:332`
+  calls `readWorkbook(bytes)` in-thread with no cap, behind an admin gate that is open while
+  `ADMIN_TOKEN` is unset. Recorded in FIX-STATUS WIRE as found, not fixed.
+* **The classifier reads an explicit range as `kind: 'range'`**, even when it is the first half of
+  a month ("01 November 2025 to 15 November 2025"); `first-half`/`second-half` come only from the
+  half-month spellings after "Salary Sheet -" or "month of" ("Salary Sheet - April 1-15, 2025",
+  "for the month of January Dated 16 to 31, 2025"), and a bare "April 1-15, 2025" is refused as
+  not understood. A page or import that files by `kind` must allow all three.
+
+### The review of WIRE — traps it added (2026-11-12)
+
+* **`a + b.toLowerCase().includes(t)` is a string plus a boolean.** A member call binds tighter
+  than `+`, so `` `${plate} ${model} ` + `${driver}`.toLowerCase().includes(t) `` is
+  `"L45235 Tesla Y false"` — truthy for every row and every term. The #vehicles search box kept
+  the whole register for every search from 2026-08-21 to this review, and nothing failed: a filter
+  that never filters looks like a filter on every row that should match. Join the haystack first,
+  search it once, and test a term that must match NOTHING.
+* **A worker thread's heap is the API's memory.** `resourceLimits` bounds the worker, not the
+  container: the worker lives in the API's process, on a basic-xxs whose API alone peaked at 81.9%
+  of 512 MB (93 MB left). Size the worker against that headroom, never against 512 MB — the first
+  draft of the wage-sheet preview allowed ~210 MB, enough to OOM-kill the whole API on one upload.
+  Measured: a real wage tab (500 × 30) costs the worker +23 MB; 5,000 rows +45 MB.
+* **A count printed beside a list must be the list's own drop.** `/api/fleet/roster` first said
+  "132 plates set aside" above `/api/live` while some of the 132 were still on it (a departed
+  CABMAN plate keeps its FMS fix; a pending plate was never written). `n` is now what the list
+  lost — the same predicate as `/api/kpis` `tracked_set_aside`; `held` is the roster's own count.
+* **Under the contract a plain `.note` can leave the face after render.** The focus pass folds it
+  within a second or two (the register's "No vehicle matches" note is in the DOM and not visible);
+  a browser test that reads `innerText` for a plain note passes or fails on timing. Read the
+  note's `textContent` when the wording is the question, and use a warn note when it must be seen.
