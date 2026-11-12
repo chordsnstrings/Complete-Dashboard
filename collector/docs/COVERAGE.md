@@ -11476,3 +11476,46 @@ its first caller that takes a file from a browser, and two of its properties mat
   trip-goal runs (`cash_run`, `target_run`) write their own lines into `sms_outbox` with status
   `sent` and no text, so "status = sent" counts them as texts with no delivery report. Use the
   server's own list: cash_deposit, trip_register, target_nudge.
+
+## ANS — traps found building the answer line (2026-11-12)
+
+* **`ui.js panel(title, cap, key)` stamps `key` as `data-panel`, not as a class.** A selector
+  `.payout-diff` finds nothing; `[data-panel="payout-diff"]` finds the panel. Hand-built bands
+  (`section.cband.tp-month`, `.lp-head`) DO carry their key as a class. The first in-page actions
+  of the answer strip used the class form and scrolled nowhere on every page;
+  `answerline.js findTarget()` now tries `data-panel` first, then the class, and a heading by its
+  opening words.
+* **A module on the phone's static import graph cannot statically import a new module** without
+  that module joining `sw.js`'s precache list (`test/tokens.test.mjs` §8 walks the graph from
+  `/m/app.js`). `targetpage.js` and `lowperf.js` are on it (m/screens.js imports them for the Today
+  card and the low-performer screens), so their answer hooks load `answers.js` with `import()`,
+  which the walker does not follow and the phone never runs.
+* **Anything placed between `.topbar` and `#view` changes `arkiv_shell` §3's main-column order**
+  — it names every child of `.main` in order. The answer host is there by design; that check now
+  includes `pageAnswer`. Anything placed INSIDE `#view` before the page's first band breaks
+  `page_contract` §7, `arkiv_pages` and `arkiv_money`, which read `#view.firstElementChild`.
+* **`ui.js`'s formatters print an unread figure as "—"** — right in a table cell, wrong in a
+  sentence, and no pattern can tell it from the house's punctuation dash. Sentences built from
+  `fmt`/`money`/`countOf`/`pct` need a strict wrapper that refuses a non-number (answers.js `F`,
+  `M`, `C`, `P`); `Math.abs(null)` is 0, so an absolute value needs the same guard.
+* **`payout_routes.js` answers an empty register over 2000-01-01 → 2100-01-01** with
+  `scope:'window'`. Any sentence that prints the response's `window` must treat that range as "the
+  whole record".
+* **`pkill -f test/preview.mjs` matches every worktree's preview server**, not only one's own — on
+  a machine shared by several builders, stop a server by the PID it started with.
+* **A field withheld from the reader's role arrives as null, and a page that counts rows by it
+  counts zero.** `api/access/shape.js` nulls a withheld value (and masks an `M` one: a number
+  becomes "•••", a boolean null); `#drivers` then counted "0 drove … 330 never have" for a reader
+  without bookings. Ask before counting: an OBJECT body carries `_withheld` ({ class: level }); an
+  ARRAY body cannot, and only the `x-fm-withheld` header says it — gathered per render by data.js
+  `api()` into `access.js withheldNow()`. **But `api()` hands back a stale-while-revalidate copy
+  without reading that header** (it notes the header only when the live answer lands), so on a
+  revisit `withheldNow()` can be empty for a storable route. A route carrying a NO_STORE class
+  (CT, DOC, CASH, HR, MRG, PAX, AUDIT, RAW, CRED — `access/middleware.js`) is never stored, so its
+  header is always read first; for any other route, rely on the body's own `_withheld`.
+* **A "nothing to act on" sentence is a claim.** Built as a constant, it names checks whether or
+  not their data arrived: #payouts said "every transfer is checked" under its own "the comparison
+  … did not load". Build it from the checks made and passed (answers.js `noneOf()`).
+* **A page that catches a failed call into an empty answer** (`.catch(() => ({ rows: [] }))`) turns
+  the failure into a zero for everything downstream of it. Keep the failure beside the empty answer
+  (`_err`) so a sentence can tell "no rows" from "no answer" (`V.compliance`, ANS16).

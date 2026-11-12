@@ -6583,3 +6583,245 @@ whose answer), `arkiv_plumbing` 95 (was 90), `lazy_pages` 27 (the first screen s
 `type_scale` 11, and `arkiv_classic_frozen` over compare, performer, same-person, messages,
 approvals, access and fleet-names 12/0. Not run, by the run's rules: the full suite and the four
 `:8099` browser files.
+
+## ANS - Per-page answer line and Act-on strip (2026-11-12)
+
+The second half of FOCUS (HANDOFF 0.9; AUDIT.md "Verbosity" and "ANS"): the per-page answer the
+operator reviewed in the 106-page demo of 2026-10-22, now computed live. Every page with a rule
+opens with ONE line answering its own question, from the data the page has already fetched, with
+its basis under it, and an **Act on** strip of at most three actions, each a link to where the
+action happens: another page, a cohort list (`#cohort/<key>`, the same predicate as the page's
+tile) or a panel further down the same page. Branch `fix/answer-line`.
+
+Where it sits: between the title block and `#view`, in a shell-owned host (`#pageAnswer`), the
+demo's place. Not inside `#view`: the page contract pins `#view`'s first child to the 00 band
+(`page_contract` §7, `arkiv_pages`, `arkiv_money`), and focus.js and motion.js walk `#view`. Arkiv
+only (Classic is byte-frozen; the skin is read as a token, `contract()`), desktop build only (the
+phone build `/m/` never reaches it).
+
+| # | what | file:line | test | state |
+|---|---|---|---|---|
+| ANS1 | **The component.** `answerBlock()` draws the line (or "Not answered" and the true reason, `data-absent`), the basis, and the strip (≤ 3 actions, or the `none` sentence on a grey ground). `mountAnswer()` puts it before `#view` only when the skin is Arkiv and the view is the live `#view` (an abandoned render or the phone's fallback host draws nothing) and keeps the box when the same answer comes again (the minute redraws). `findTarget()` finds an in-page action's panel by its key (`data-panel`) or its heading; a plain click scrolls there, rings it and moves focus to it; a modified click follows the link. `clearAnswer()` empties the host | `api/public/answerline.js:64` (findTarget), `:89` (answerBlock), `:173` (mountAnswer), `:194` (clearAnswer) | `answers` §4 | written, not deployed |
+| ANS2 | **The rules**, one pure function per page over the data the page fetched (no request is possible: no fetch/api/q/import in the file). `answerFor()` runs one: a rule that throws is drawn absent with the error; a sentence carrying NaN/undefined/null/Infinity is refused; every figure in a sentence goes through a strict formatter (`F`/`M`/`C`/`P`) that refuses a value that is not a number, so an unread figure is "a figure it needs is missing", never the table dash ("— earned") and never a zero; at most three actions | `api/public/answers.js:108` (RULES), `:92` (strict figures), `:732` (BAD), `:733` (answerFor), `:759` (the hook) | `answers` §1, §2 | written, not deployed |
+| ANS3 | **render() empties the box on every navigation**, beside `clearPageFoot()`: the arriving page draws its own, and a page with no rule, a closed page or a failed one shows none | `api/public/app.js:9613` | `answers` §3, §4 "navigating away clears it" | written, not deployed |
+| ANS4 | **The hooks in app.js** — one line each where the page's data is in hand: #overview, #vehicles, #unauthorized (with the page's own seat-pad counts), #live (and its failure), #sources (with the page's `collectionDebt()`), #compliance (the page's people/records counts) | `api/public/app.js:1379, 3173, 5306, 5724, 5752, 7172, 7970` | `answers` §3, §4 | written, not deployed |
+| ANS5 | **The hooks in the page modules**: #drivers (the toolbar line's own counts, drawn again when the pairs backlog arrives), #month-target (every minute), #payouts, #compare, #supply, #providers (and the never-probed case), #analyst, #roster, #retention, #revenue | `driver.js:4302`, `targetmonth.js:587`, `payouts.js:183`, `compare.js:710`, `supply.js:125`, `providers.js:136, 166`, `analyst.js:358`, `roster.js:113`, `retention.js:107`, `revenue.js:84` | `answers` §3, §4 | written, not deployed |
+| ANS6 | **#target and #low-performers load answers.js when used** (`import()`), not at the top: both modules are on the PHONE's static import graph (m/screens.js), the phone never draws an answer, and every statically reachable phone module must be on sw.js's precache list (`tokens` §8). On the desktop app.js has already loaded it, so it resolves at once | `targetpage.js:392`, `lowperf.js:676` | `answers` §3; `tokens` 150/0 (§8 unchanged: no new phone module) | written, not deployed |
+| ANS7 | **The look** — arkiv.css, at the end, every selector under the skin, every colour a token: the line at `--d1` 600, the basis `--t5` grey, the strip on `--w-pos` (grey `--paper-2` when nothing fired), each action a whole-row link with its arrow; the label in `--ink-2` because `--sem-pos` on the wash measures 4.24:1 light and 3.87:1 dark (under AA at that size; `--ink-2` is 11.12 and 10.62); under 720px each action is at least 44px tall | `api/public/arkiv.css:1589` | `answers` §4 (AA for every text in the box, light and dark; 44px at 390, including a one-line action); `arkiv_skin` 119/0 | written, not deployed |
+| ANS8 | **A test changed for a stated reason**: `arkiv_shell` §3's main-column order now includes `pageAnswer` between `topbar` and `view` (#overview has a rule) | `test/arkiv_shell.test.mjs:206` | `arkiv_shell` 77/0 | written, not deployed |
+| ANS9 | **#live counts "moving" among fixes under 30 minutes old.** The page's Moving tile counts every row's LAST speed, so a car silent for a week that was doing 40 when it went quiet is "moving" there (the preview read "0 of 5 reported … 5 moving"). The answer says "N of them moving" of the cars that reported; the tile is left as it was (AUDIT ANS finding 1) | `answers.js:515` (live) | `answers` §1 "a silent car's last speed is not moving now" | written, not deployed |
+| ANS10 | **#payouts names the span the server answered over** (`window`), not the window chosen for other pages — and the server's sentinel range for an empty register (2000-01-01 → 2100-01-01) is the whole record ("No transfer has been collected from any platform yet"; under a chip, "No transfer is on record for Yango only, both fleets") | `answers.js:352` (payouts) | `answers` §1, three checks | written, not deployed |
+| ANS11 | **`test/answers.test.mjs`** — new: the 18 rules with every absent case (§1), the guard (§2), the wiring read from source (§3), and Chromium on mockapi at 1280 and 390, light and dark, Arkiv and Classic (§4) | `test/answers.test.mjs` | 223/0 | written, not deployed |
+| ANS12 | **An action to a page the reader's role does not open is plain text** (`access-shut`, ULM-DESIGN §7 rule 6), as every link inside `#view` is — app.js `markShutLinks()` reads `#view` only and the box sits above it, so the box marks its own | `api/public/answerline.js:158` `markShut()`, called from `mountAnswer()` | `answers` §4 "drawn as plain text, as inside #view" | written, not deployed |
+
+### The rules, for the operator's review
+
+Slots in `{braces}`; where each comes from in brackets. `{window}` is the control bar's window as a
+phrase ("this month", "in the last 30 days", "in August 2026"); `{chips}` is "every channel, both
+fleets" or the chips chosen ("Uber only, Ecosine only") on pages whose requests carry them. Every
+line ends with its basis; when a rule cannot answer, the line reads **Not answered** and the reason.
+Actions are listed in rank order; at most three show.
+
+**#target** — "Are we on target this month, and what does today ask?" [`/api/target` t, `/api/target/hours` h]
+- Line: "{month} so far: both fleets {AED |ahead|} {ahead of / behind} plan in gross fares, {under} of {past days} days under[ and {unsettled} not settled yet]; today asks {AED today_needs}." [t.month_name, t.summary.ahead, .under, .unsettled, .today_needs; past days = t.days with state past]. Met: "{month}'s target is met: {AED earned} earned against {AED month_target}." First day: "{month} has just begun: today asks {AED today_needs} in gross fares, and nothing is judged until tomorrow."
+- Not answered: the call failed → "The month could not be read: {error}."; no summary → the server's `why` ("No target is set for November 2026. The Owner sets it in Set up › Access."); plan to date unread → "{month}'s plan to date could not be read."
+- Act on: "Right now [≈] {AED −h.revenue.ahead}[ and {−h.trips.ahead} trips] behind the usual day at {h.clock}" → the Today panel · "This hour ({label}) must bring {AED catch_up}[ and {trips} trips] to land the day" → Revenue, hour by hour · "Yesterday, {label}, came in {AED −diff} under its target — open the day" → #day/{date} · "{drove − reached} of the {drove} who drove yesterday did under {trips_min} trips — see who is behind this month" → #month-target.
+- Basis: "the month's plan against gross fares before platform commission, both fleets; a past day is called over or under once it has settled."
+
+**#overview** — "How much work did the fleet do, and where did it come from?" [`/api/kpis` k, `/api/trips/daily`, `/api/mix?by=platform`, `/api/compare/period`]
+- Line: "{k.trips} bookings {window}, {per day} a day[: {|change|}% more/fewer than {previous span}][. {lead channel} is {lead %}% of the work]." [per day, lead and lead % from verdicts.js `fleetVerdict`, the page verdict's own function; the change from `cmp.change_pct.trips`; the lead sentence left out under a channel chip].
+- Not answered: "The booking counts did not load." / "The booking count for this window could not be read." / withheld from the role: "The booking count is not shown to your role."
+- Act on: "{n} of {days} days were never collected — drawn absent, not zero; see which source failed" → #coverage · "{n} of {days} days had a source silent, so their bars read low — see which" → #coverage · "{cancel %}% of bookings did not complete — the acceptance funnel says whose failure each was" (at 15% or more) → #platforms.
+- Basis: "bookings from the booking table — {chips} — in the window; the change is per driver-day, against the same number of days just before."
+
+**#month-target** — "Where does the month land at this pace, and who is behind?" [`/api/target/month`]
+- Line: "At the pace so far, {month} ends at {AED trajectory.avg.month_end} in gross fares: {trajectory.avg.pct}% of the {AED month_target} target." Month over: "{month} ended on target / short of target: {AED earned} earned, {%} of the {AED target} target; {over} of {days gone} days on target."
+- Not answered: failed → "The month could not be read: …"; no summary → the server's `why`; target withheld → "The month's target is not shown to your role."; nothing finished → "Nothing of {month} has finished yet, so there is no pace to carry to the month's end."
+- Act on: "{n} of {active} active drivers are behind their money target — the furthest first" → Drivers behind target · "{n} of {active} active drivers are behind their trip target over the counted days" → same panel · "Every day left must bring {AED per_day_left}; the last {n} settled days averaged {AED}" (only when short) → Where the month lands.
+- Basis: "the month's plan against gross fares before commission, both fleets; the pace is the average settled day so far, carried over the days left by weekday."
+
+**#drivers** — "Who is on the books, who is working, and who may not?" [the directory toolbar's own counts, driver.js]
+- Line: "{total} drivers on the books: {active} drove {window}, {idle} did not and {never} never have[; {expired} hold an expired licence]."
+- Not answered: "The driver directory did not load." / "The driver directory holds nobody for this reader."
+- Act on: "{n} drivers cannot legally drive: the licence has expired — check them" → #compliance · "{n} drivers have no real licence date on file — whether they may drive cannot be judged" → #hr-roster · "{n} pairs of records await review — one person may be counted twice" → #same-person.
+- Basis: "one row per person in the driver directory (reviewed merges only); licence dates from the roster, a placeholder date shared by half the roster excluded."
+
+**#vehicles** — "Which cars are not working?" [`/api/vehicles/directory`, counted with cohorts.js]
+- Line: "{earning} of {cars} cars took a booking {window}; {moved} moved without one and {still} did not move at all." (zero parts left out; all earning: "All {cars} cars took a booking {window}.")
+- Not answered: "The vehicle directory did not load." / "None of the {n} plates on record carries a VIN, so no car can be counted." / "No vehicle has any record in this window."
+- Act on: "{n} cars moved with nothing paying for it — review their journeys" → #cohort/vehicles-moved-no-booking · "{n} cars did not move at all — find them" → #cohort/vehicles-still · "{n} trackers have gone quiet — check them" → #cohort/vehicles-stale · "{n} cars have a document expiring within 30 days" → #cohort/vehicles-docs-due.
+- Basis: "every plate with a VIN in the vehicle directory, over the window; a plate with no VIN is set aside, not counted."
+
+**#unauthorized** — "Did cars move with no booking behind them, and what did it cost?" [`/api/unauthorized/summary`; the page's ranked-vehicle and seat-pad counts]
+- Line: "{unauthorized} of {segments} journeys examined {window} had no booking behind them: {unauth_km} km, {AED value.forgone_aed} revenue forgone." No rate: "…; revenue forgone is not valued: {value.basis}." None found: "None of the {segments} journeys examined {window} was found without a booking[; {needs_a_human} still wait on a person]."
+- Not answered: "The unauthorized-trip summary did not load." / "No telematics journey was examined {window}, so nothing can be said about movement without a booking."
+- Act on: "{unverifiable} journeys could not be verified: a revenue channel was unreadable at the time — review them" → #segments/verdict/unverifiable · "{n} cars carried an unexplained journey — the worst are ranked" → Vehicles with unexplained trips · "Seat sensors: {stuck} stuck, {dead} dead — every count on this page leans on them" → Seat-sensor health.
+- Basis: "every telematics journey in the window ({chips}), matched against the bookings of every channel; a journey cut by a telemetry gap is not judged."
+
+**#payouts** — "Did the money that arrived match what we say was earned?" [`/api/finance/payouts` d, `/api/finance/payouts/reconcile` rec]
+- Line: "{AED sum of amounts} has reached the bank in {n} transfers {on record / between {from} and {to}}; the latest checked wire, {date}, was {AED |delta|} above/under our figure ({|delta_pct|}%)." Comparison failed: "…; the comparison with our own figures did not load, so no wire is checked." Nothing checkable: "…; no transfer can be checked against our own figure yet." Empty: "No transfer has been collected from any platform yet." / under a chip "No transfer is on record for {chips}." / "No transfer reached the bank between {from} and {to}."
+- Not answered: "The payout register did not answer."
+- Act on: "{date}: the wire is {%} above/below our figure — check that transfer" (the largest, at 5% or more) → The difference, per transfer · "{rows − comparable_rows} transfers cannot be checked: no stated period, or no driver-day figure of ours for it" → Every transfer · "{platforms} publishes no transfer — its money is checked nowhere on this page" → What each platform publishes.
+- Basis: "the transfers each platform's own books record over the whole record / over that span ({chips}), each set against our driver-day figure for the week the wire names."
+
+**#low-performers** — "Who is below target, by how much, and why?" [`/api/lowperf`, the page's hotel words]
+- Line: "{rows} of {totals.population} drivers are below target over the {counted_days} days counted, earning {below_gross ÷ below_target}% of what they were asked." (one fleet: the reader's rows only, no population). Nobody: "Nobody is below target over the {n} days counted."
+- Not answered: failed → "The list could not be read: …"; the server's `why` ("No day of the period can be judged yet — each is named below with its reason.").
+- Act on: "{n} drivers are under half of their target — start with them" → The list · "{n} drivers slipped last week against the week before" → Week by week · "{totals.no_cause} drivers below target carry no measured cause — ask them why" → Why they are below target.
+- Basis: "each active driver's gross against their own daily target, {from} – {to}, {fleet or both fleets}; {hotel setting, the page's words}."
+
+**#compare** — "Is today running ahead of or behind yesterday?" [`/api/compare`]
+- Line: "To {cut_label} Dubai, {day a} has {a bookings} bookings against {b bookings} on {day b}: {|d|} more/fewer, {±%}." (in full: "{day a} took …"; equal: "the same number"; against none: "a change against none is not a percentage").
+- Not answered: "The comparison did not load." / "The booking counts for the two days could not be read."
+- Act on: "{stopped} people drove on {day b} and have not on {day a} [so far] — worth a call" → Started and stopped · "{n} sources last succeeded over a day ago — a thin day may be a collection gap" → Was everything collected?
+- Basis: "both days cut at the same Dubai minute, {cut_label} / both days in full; bookings on the channels and fleets chosen above."
+
+**#supply** — "When are drivers online with nobody in the car?" [`/api/supply/balance`, `/api/supply/areas`]
+- Line: "{Window}, {idle_h} of {online_h} online driver-hours carried nobody ({idle_pct}%); an online hour sold {jobs_per_online_h} jobs[, over the {n} days availability covers]."
+- Not answered, by the server's `uncovered.reason`: no-feed → "This selection has no availability feed, so there are no online hours to measure idle time against."; not-yet → "This window is in the future, so nothing has been collected for it yet."; no-span → "Availability was recorded here but no shift closes, so there are no online hours to divide by."; otherwise → "Driver availability was not collected inside this window: Uber serves the last 31 days and nothing older."; no idle split → "The availability feed gave no idle split for this window, so no idle share can be stated."
+- Act on: "{weekday} {hh}:00 sells {x} jobs an online hour against {rate} — at the average, about {n} more jobs this window" (the worst hour with ≥ 3 online hours) → Which hours sell… · "Waiting between jobs, area by area: {n} areas measured — see where drivers wait longest" → Where the waiting happens.
+- Basis: "drivers' online and on-job hours from the availability feed, against the jobs they completed, in the window ({chips})."
+
+**#live** — "Where is every car, and which ones have gone quiet?" [`/api/live`, the page's count of usable fixes]
+- Line: "{fresh} of {rows} cars reported within 30 minutes[, {moving} of them moving]; {stale} are stale[, {silent} of them silent over a day]." (moving = above 3 km/h at a fix that is not stale — ANS9)
+- Not answered: "The live feed could not be read: {error}." / "No feed reports a position for any car right now."
+- Act on: "{silent} cars silent over a day — the tracker, not the car, is the first suspect" → feeds by freshness · "{stale} cars with a stale fix — sort the table by fix age to bring them together" → Live vehicles · "{n} cars report no usable fix — counted, never placed on a map" → Live vehicles.
+- Basis: "the latest position from every feed that reports one; stale means no fix in 30 minutes, moving means above 3 km/h at a fix that is not stale."
+
+**#sources** — "Which collector has stopped?" [`/api/status` as the page reads it, its `collectionDebt()`]
+- Line: "{bad} collectors failed on their last run, {partial} runs left windows unfetched, {quietOk} reported success and wrote nothing; {days} days still owed from {entries} refused windows; the stalest scheduled source, {source}, last finished {h} h ago / within the hour." All clean: "All {n} collector runs last ran clean; the stalest …".
+- Not answered: "The collectors' status did not load." / "No collector run is on record."
+- Act on: "{bad} collectors failed on the last run — each row says why" → Collector health · "{blank} runs refused every window and wrote nothing — a dead source, not a partial one" → Why the windows were lost · "{quietOk} runs reported success and wrote nothing — check them" → Collector health · "{days} days still owed from {n} refused windows — see which days each source covered" → #coverage · "{source} has not finished a scheduled run in {h} h — a feed that has stopped" (24 h or more) → When each feed last wrote.
+- Basis: "the last run of every collector, per source, fleet and mode, as each one recorded it."
+
+**#providers** — "Which provider refuses us, and what do we throw away?" [`/api/probe/results` as the page reads it]
+- Line: "{answered} of {probed} surfaces answered on the last probe[; {refused} refused][, and {n} fields that providers send have no column on our side]."
+- Not answered: "No provider has been probed yet: the probe runs from the collector, where the credentials live, once a day or from Settings."
+- Act on: "{n} surfaces refused on the last probe — read each status code" → Feeds that did not answer · "{n} fields sent with no column — {provider}'s {surface} alone has {m}" → Fields not kept · "{providers} have no credentials at all" → #settings.
+- Basis: "the collector's last probe of every provider surface — a 2xx with something in it counts as answered."
+
+**#analyst** — "What did the model claim, and what survived the check?" [`/api/analyst/findings`]
+- Line: "{confirmed} judgements survived the check over {runs} passes; {refuted} were contradicted by the data and {immaterial} were true but too small to act on."
+- Not answered: the last pass failed and nothing is judged → "The analyst's last pass could not reach the model ({date time} Dubai): {the model's own error}. Nothing has been judged since." (production, 2026-11-12: the Token Plan limit) — not "has not run yet"; no model → "No model is configured for the analyst, so no pass runs and nothing is judged."; never run → "No analyst pass has run yet, so no claim has been made or checked."
+- Act on: the failed pass → #sources ("See what the collector can reach") · "{n} confirmed judgements to review — nothing records whether any was acted on" → #analyst · no model → "Set the model credential" → #settings.
+- Basis: "every claim the model made ({model}), each checked against the database before it is shown."
+
+**#roster** [`/api/roster`] — Line: "{people} people on the books: {working} drove {window}, {idle} could earn and did not, {never} never have[; {blocked} cannot work on any platform they hold]." Not answered: "The roster did not load." / "Nobody is on any platform's roster for this selection." Act on: "{n} people stopped everywhere still hold a car — take it back" → #cohort/roster-blocked-holding · "{blocked} people refused by every platform they hold — see which refused" → #cohort/roster-blocked · "{idle} people could earn and did not — a licence and a slot standing still" → #cohort/roster-idle · "{never} recruits never drove — a pipeline that stalled" → #cohort/roster-never-started. Basis: "every person on each platform's roster ({chips}), with the standing each platform reports, over the window."
+
+**#retention** [`/api/retention`] — Line: "In {last complete month}, {joined + returning} drivers arrived and {left} stopped: {active} earning, {±net} on the month before." Not answered: the server's `reason` ("Fewer than two complete months of booking history, so there is no cohort to follow…"); "No complete month is on record yet." Act on: "{n} drivers worked the month before and stopped — ask why" → #cohort/retention-stopped · "{n} drivers took a first booking — keep them" → #cohort/retention-started. Basis: "the month each driver first and last took a booking on any channel; the month in progress is left out."
+
+**#revenue** [`/api/revenue`, verdicts.js `revenueVerdict`] — Line: "{AED accounted} is accounted for {window}: {accounted_bookings} of {bookings} bookings are on a channel whose money we hold, {priced_bookings} with a fare on the trip itself." Not answered: "No fare and no payout statement covers {window}, so no money is accounted for against its {n} bookings." / "The money by platform did not load." Act on: "{channels} report {n} bookings and no money anywhere — see what they send" → #providers · "{channels}: no fare on the trip, money only in the weekly statement — check it against the bank" → #reconcile. Basis: "every fare and payout statement on record for the window ({chips}); a booking on a channel that files neither is counted, with no money."
+
+**#compliance** [the page's own counts: people when the spine placed them, licence RECORDS when it did not] — Line: "{n} drivers hold an expired licence and {n} vehicle documents have expired[; {n} more documents expire within a week]." (records: "{n} licence records have expired"); nothing lapsed: "Nothing has lapsed; {n} documents expire within a week." / "No licence or vehicle document has lapsed, and none expires within a week." Not answered: "The compliance record did not load." Act on: "{n} drivers cannot legally work — soonest first" → Driver licences · "{n} vehicle documents expired — those cars cannot legally work" → Vehicle documents · "{n} drivers have records that disagree about a document — a filing error or a wrong merge" → Driver licences · "{n} records carry no licence date — whether they may drive cannot be answered" → #hr-roster. Basis: by person, "one row per person, each with every account's documents; a default date a source writes for an empty field is not an expiry"; by record, "licence records, not people — the person spine could not place these accounts; vehicle papers by plate."
+
+### Checked against production's own data
+
+Twelve GETs to production (2026-11-12 ~09:31 Dubai, one at a time, cache-busted), each body piped
+straight into its rule and never stored; only the sentences printed. All twelve worded without a
+refusal, e.g. #target "November 2026 so far: both fleets AED 12,577.24 ahead of plan in gross
+fares, 4 of 11 days under; today asks AED 61,869.11."; #month-target "…ends at AED 1,665,941.57 …
+102.1% of the AED 1,631,309.73 target."; #low-performers "46 of 103 drivers are below target over
+the 11 days counted, earning 66.5% of what they were asked."; #live "88 of 268 cars reported within
+30 minutes, 28 of them moving; 180 are stale, 162 of them silent over a day."; #analyst **Not
+answered** with the model's own Token Plan error (the phone still says "has not run yet", AUDIT
+2026-11-12 finding 5).
+
+### Revert proofs (each file copied first and restored byte for byte, md5 checked)
+
+| reverted | `answers` result |
+|---|---|
+| `clearAnswer()` taken out of render() | 211/2 — §3 "render() empties the box" and §4 "navigating away clears it" |
+| the payouts hook taken out | 208/5 — §3 the hook, §4 payouts (box, line, dark contrast, 390) |
+| the BAD guard disabled | 211/2 — "a sentence carrying NaN", "an action carrying undefined" |
+| the strict figure check disabled | 220/1 — the line read "May ended short of target: — earned, 0.0% of the AED 5.00 target" |
+| `markShut()` taken out of mountAnswer() | 222/1 — "an action to a page the role does not open is drawn as plain text" |
+| the 44px floor taken out of arkiv.css | first try **213/0 — the test did not catch it**: every real action wraps to two lines at 390 (about 50px), so the floor was never what was measured. A one-line action drawn through the component was added to §4; reverted again: 213/1 — "a one-line action at 390 is still a 44px target (29.8px)" |
+
+Also found by the test while writing it: in-page actions first named their panel as a class
+(`.payout-diff`); `ui.js panel()` stamps the key as `data-panel`, so every such action scrolled
+nowhere. §4 now resolves every in-page action on every page (`findTarget`), and an action's click is
+checked to scroll, ring and focus its panel (COVERAGE trap, ANS).
+
+Also run, all green: `tokens` 150, `arkiv_skin` 119, `arkiv_shell` 77, `page_contract` 95,
+`focus_layout` 58, `payout_scope` 42, `interlinking` 11, `arkiv_motion` 56, `arkiv_today` 103,
+`arkiv_people` 241, `arkiv_fleet` 259, `arkiv_work` 137, `arkiv_finance` 130, `arkiv_money` 84.
+
+**Not done:** the phone build (`/m/`, the MOB workstream's) draws no answer; the remaining pages
+(#playbook, #finance, #reconcile, #settlement, #platforms, #demand, #trips, #corporate, #unit,
+#coverage, #feeds, #performance, #top-performers, #cancellations, #identity, #same-person and the
+detail pages) have no rule yet — the component takes one by adding a rule to `RULES` and one hook
+line. Not deployed.
+
+### ANS — the independent review (2026-11-12, branch `fix/answer-line`)
+
+An adversarial review of `90d76da...54d64de`: every rule traced to the route that feeds it, every
+slot to the field the server sends, and every rule asked what it says for a reader who does not see
+everything (`api/access/manifest.json` × the fourteen roles) and for a call that failed. The
+component, the placement, the hooks, the styles and the guards held; so did the rendering (below).
+What did not hold was one class of defect, across nine rules: **saying what was never seen.** The house
+rule is "absent with the true reason, never a zero for an unknown"; these were zeros, false
+reasons, or a "Nothing to act on" naming a check that was never made.
+
+| # | finding | fix | file:line | test | state |
+|---|---|---|---|---|---|
+| ANS13 | **#drivers printed zeros for withheld bookings.** The directory's counts are `.filter()` over `active_in_window` / `ever_driven` (BK) and `licence_days_left` (DOC); the server sends a withheld field as null (`access/shape.js`), so for a Cash desk, HR officer or Fleet technician reader (no BK, or BK as totals only) the line read "330 drivers on the books: 0 drove this month, 0 did not and 330 never have". For every role without DOC in full — Finance, Operations, Dispatcher, Technician, Analyst (withheld); Management, Safety, Auditor (masked, "•••") — the strip claimed "no licence has expired, every driver has a licence date" | `answer()` now hands every rule the render's withheld classes (`access.js withheldNow()`, gathered from x-fm-withheld) as `ctx.withheld`; #drivers says "who drove {window} is not shown to your role", judges no licence when DOC is withheld or masked, and says so in its basis. The directory is no-store (it carries DOC), so its header is always read before the rule runs — a stale-while-revalidate copy would skip it | `answers.js:313` (drivers), `:90` (`withheld()`), `:906` (the hook) | `answers` §1b (4 checks), §4 "#drivers in Chromium, bookings and licence dates withheld" (the real hook, with the server's null rows and header replayed) | written, not deployed |
+| ANS14 | **#drivers claimed "no pair of records awaits review" when the backlog was never counted.** `/api/same-person?counts=1` is refused below MRG (most roles), can fail, and arrives after the first draw; the rule read null as 0 | driver.js hands the rule `pairsCount` — null until a NUMBER arrives, redrawn on any count; the strip names the pairs only on a counted 0 | `driver.js:4307`, `:4319`; `answers.js:313` | `answers` §1b, §3 (the hook) | written, not deployed |
+| ANS15 | **#unauthorized gave a false reason for withheld revenue.** HR officer and Safety open the page (COND) without REV; `value.forgone_aed` and `value.basis` both arrive null, and the rule printed its own fallback "revenue forgone is not valued: there is no rate to value the distance at" | "…; revenue forgone is not shown to your role." from the response's `_withheld` stamp. Also: a summary with no `segments` (or no `unauthorized`) count is now absent with that reason, not "No telematics journey was examined" — mockapi's summary has no `segments` key and the line said exactly that beside a page of 23 unauthorized journeys | `answers.js:394` | `answers` §1b (3 checks) | written, not deployed |
+| ANS16 | **#compliance read two failed calls as "nothing has lapsed".** `V.compliance` catches each call into `{ rows: [], totals: {} }`, so both failing gave 0 and 0, and the line read "No licence or vehicle document has lapsed, and none expires within a week." | The page keeps each failure (`_err`) and hands it over (`vErr`, `dErr`): both failed → **Not answered** "Neither the vehicle documents nor the driver licences could be read: {error}."; one failed → the half that answered is said, the other named unread ("…; the driver licences could not be read (timeout), so no driver is counted here."), and no "Nothing to act on". The page's own tiles still show 0 on a failed call — a page defect outside this workstream (AUDIT ANS review, R1) | `app.js:7037`, `:7175`; `answers.js:838` | `answers` §1b (3 checks), §3 (the hook), §4 "#compliance in Chromium, both calls failing" | written, not deployed |
+| ANS17 | **"Nothing to act on" named checks that were never made.** #payouts printed "the comparison with our own figures did not load, so no wire is checked" and under it "Nothing to act on: every transfer is checked"; #target said "today is not behind the usual day" with `/api/target/hours` failed, and "yesterday met its target" of an unsettled day; #month-target "no active driver is behind" before any driver was measured (`drivers.why`) and for a reader without the money flags (EARN); #overview "fewer than 15% failed" with no share sent; #compare "every source collected" with no collector list | `noneOf()` builds the sentence from the checks MADE AND PASSED only, and draws none when nothing could be checked | `answers.js:95` (`noneOf`), and each rule's return | `answers` §1b (8 checks) | written, not deployed |
+| ANS18 | **#revenue for the wall screen** (REV in full, BK as totals only): bookings null → "0 of 0 bookings are on a channel whose money we hold" | "{AED} is accounted for {window}; how many bookings that covers is not shown to your role." — no channel judged by bookings it cannot see, and no "Nothing to act on" | `answers.js:792` | `answers` §1b | written, not deployed |
+| ANS19 | **#unauthorized's seat action counted readings as sensors.** It read "Seat sensors: 23 stuck, 0 dead"; the 23 is the summary's `sensor_suspect` — occupancy READINGS excluded as implausible — while "dead" counts SENSORS. The page's tile ("Seat-pad faults") captions the two units; the action had dropped the caption | "{n} seat readings excluded as stuck on, {m} seat sensors that never read a passenger — every count on this page leans on them" | `answers.js` (unauthorized, the seat action) | `answers` §1b | written, not deployed |
+| ANS20 | **Grammar at one**: "1 record carry", "1 car report", "1 pair … await", "1 of 46 drivers are", "1 more document expire", "1 still wait", "find them" (one car), "review them" (one journey), "Yango, Bolt … its money" | each verb and pronoun agrees | `answers.js` (the rules) | `answers` §1b; §1 #live tightened (it accepted "1 car report") | written, not deployed |
+
+**The rules' wording, as changed** (for the operator's review; every other template above stands):
+
+- **#drivers** — bookings withheld: "{total} drivers on the books; who drove {window} is not shown to
+  your role." Licence dates withheld or masked: no licence clause or action, and the basis ends
+  "…; licence dates are not shown to your role, so no licence is judged here." Nothing to act on:
+  "no licence has expired" / "every driver has a licence date" only where the dates were seen, and
+  "no pair of records awaits review" only on a counted 0.
+- **#unauthorized** — revenue withheld: "{n} of {segments} journeys examined {window} had no booking
+  behind them: {km} km; revenue forgone is not shown to your role." New Not answered: "The summary
+  does not say how many journeys were examined, so no share of them can be stated." / "The summary
+  does not say how many journeys had no booking behind them." The seat action: "{sensor_suspect}
+  seat readings excluded as stuck on, {dead} seat sensors that never read a passenger — every count
+  on this page leans on them" → Seat-sensor health.
+- **#compliance** — both calls failed: Not answered "Neither the vehicle documents nor the driver
+  licences could be read: {error}."; one failed: "{the half that answered}; the {driver licences /
+  vehicle documents} could not be read ({error}), so no {driver / car} is counted here."
+- **#revenue** — bookings withheld: "{AED accounted} is accounted for {window}; how many bookings
+  that covers is not shown to your role."
+- **Every page's "Nothing to act on"** lists only the checks made and passed, joined "a, b and c";
+  with none, it is not drawn.
+
+**Revert proofs** (app.js, answers.js and driver.js copied first; four of the review's fixes and two
+of the builder's reverted together, each check below targeting one of them; then restored byte for
+byte, md5 checked): **242/15**. The builder's: the BAD guard disabled → §2 "a sentence carrying NaN"
+and "an action carrying undefined"; `clearAnswer()` out of render() → §3 "render() empties the box"
+and §4 "navigating away clears it". The review's: #drivers' withheld handling off → §1b four checks
+and §4 both Chromium checks (the page read "10 drivers on the books: 0 drove this month, 0 did not
+and 10 never have"); #unauthorized's → §1b "revenue withheld"; #payouts' old constant → §1b two
+checks; V.compliance's old catches → §3 the hook and §4 "#compliance in Chromium" (the line read "No
+licence or vehicle document has lapsed, and none expires within a week"). The seat-unit check, added after that run, alone: the old wording put back → §1b "the seat action names its two units" fails ("Seat sensors: 23 stuck, 1 dead"); restored, md5 checked.
+
+**Checked on production's data** (7 GETs, one at a time, cache-busted, bodies deleted after the run,
+only the sentences printed): #target, #month-target, #unauthorized, #payouts and #revenue word on
+real shapes — e.g. #unauthorized "475 of 9,743 journeys examined this month had no booking behind
+them: 8,064 km, AED 37,094.40 revenue forgone."; #payouts "AED 12,258,851.86 has reached the bank in
+361 transfers on record; the latest checked wire, Nov 9, 2026, was AED 275.01 above our figure
+(0.37%)." with no "Nothing to act on" (three actions fired).
+
+**Rendered** (Chromium, mockapi on :8359, all 18 pages × 1280/390 × light/dark = 72 loads, Arkiv):
+no page error; no NaN/undefined/null in any box; the box never widens a page (the scroll width is
+the same with and without it on every page — #target and #month-target at 390 are 985 px wide
+either way, AUDIT ANS finding 3); nothing in the box clipped or outside the viewport; every action at
+390 is 44 px or taller.
+
+Tests, final code: `answers` **258/0** (was 223; §1b and the new §3/§4 checks are the review's), `arkiv_shell` 77/0, `page_contract` 95/0, `tokens` 150/0, `arkiv_people` 241/0, `arkiv_classic_frozen` with `ONLY=compliance,drivers` 9/0 (the two pages whose code the review touched; the Classic DOM did not move). The revert run above was taken at 257 checks, before the seat-unit check was added.
+
+**Still not done** (beyond the builder's list): a page whose fetch THROWS before its hook (#supply,
+#retention, #roster, #revenue, #compare, #analyst, #providers, #vehicles, #overview, #unauthorized,
+#sources) shows its own error and no answer box — absent, but without the box's "Not answered"
+line. The bases say "both fleets" from the chips, which is not true for a one-fleet reader on a
+`fleet: param` route (the gate rewrites `?fleet=` without saying so) — the access model's one-fleet
+phase.

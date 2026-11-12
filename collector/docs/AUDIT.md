@@ -2989,3 +2989,84 @@ the driver header (Uber, Yango; the fleet Egari without), row marks on the five 
 
 To repeat the offline opens: `node test/sw_desktop.test.mjs` (§5: one online visit, then every
 socket refused and the page reloaded; then three rounds of an online visit and an offline open).
+
+## ANS — the answer line and Act-on strip, rendered (2026-11-12)
+
+The per-page half of FOCUS (FIX-STATUS ANS). How the pass was done: Chromium (`test/browser.mjs`
+launchChromium, service workers blocked, Asia/Dubai), desktop build, Arkiv, at 1280×900 and
+390×900, light and dark — first against `mockapi.mjs` (the fourteen main pages and four more), then
+against `test/preview.mjs` on :8309 (the real route handlers over the seeded fixture, August 2026),
+then the rules alone over twelve production responses piped in one at a time (FIX-STATUS ANS,
+"Checked against production's own data"). The scratch script reads each page's `#pageAnswer` and
+prints the line, the basis, every action with its address and target, `#view`'s first child and
+the page's scroll width.
+
+| measure | result |
+|---|---|
+| where the box sits | between `.topbar` and `#view` on all 18 pages; never inside `#view`, whose first child is unchanged (`cband`, `cband tp-month`, `stack lp-page`, `toolbar`, `tabs` — whatever the page drew before) |
+| absent lines | each with the server's own reason where it sent one — preview: #target and #month-target "No target is set for November 2026. The Owner sets it in Set up › Access."; #supply "This selection has no availability feed…"; #vehicles "None of the 5 plates on record carries a VIN…"; #retention the server's "Fewer than two complete months…"; #analyst "No model is configured…"; production: #analyst the model's own Token Plan error |
+| actions | at most three on every page; every address a real route; every in-page action finds its panel (`answers` §4) |
+| contrast | every text in the box at AA or better, light and dark (the test computes it against the colour each text sits on) |
+| 390 | no page widened by the box (scroll width 390 on every page the box is on, except #target on the mock, which was already 985 — finding 3 below); every action 44px or taller |
+| Classic | no box, no class: the old skin's DOM does not move |
+
+Findings — not fixed here (outside this workstream), each with what the answer does about it:
+
+1. **#live's Moving tile counts a stale car's last speed.** On the preview "0 of 5 cars reported
+   within 30 minutes" sat above a tile reading Moving 5: all five were silent over a day, and the
+   tile counts every row whose last fix had speed > 3. The verdict uses > 5 km/h, the tile > 3.
+   The answer counts only cars whose fix is under 30 minutes old ("28 of them moving", production)
+   and says so in its basis; the tile is unchanged.
+2. **#payouts on an empty register answers over the sentinel range.** `payout_routes.js`
+   `payoutRange` returns `scope:'window'` with `window:['2000-01-01','2100-01-01']` when the
+   register is empty; a sentence built from it read "between 1 Jan 2000 and 1 Jan 2100". The answer
+   treats the sentinel as the whole record ("No transfer has been collected from any platform yet").
+3. **#target and #month-target at 390 are still 985–1012 px wide** (the audit of 2026-11-12,
+   MEDIUM 3: `table.hp` in a non-scrolling `.tablewrap`). The answer box itself fits; the page does
+   not.
+4. **The preview server answers /api/auth/me with 404** on every page (one console error per
+   load): `test/preview.mjs` does not mount the access routes. Harmless to the pages; it is noise in
+   any error count taken there.
+5. **#retention on the mock**: the last month's `flow.left` (0) and `stopped_last_month` (5)
+   disagree — mockapi's two fields are independent. On production they agree (60 and 60), as the
+   route computes both from the same months.
+
+To repeat: `PORT=8309 node test/preview.mjs &`, then for each page read
+`document.getElementById('pageAnswer')` (line, basis, `.ans-act-i` hrefs and `data-to`) at 1280 and
+390 under `?ui=desktop&skin=arkiv`, in both colour schemes; `node test/answers.test.mjs` does the
+same on mockapi and asserts it. Stop the preview by its PID.
+
+### ANS — the review's rendering pass (2026-11-12)
+
+Repeated independently of the builder's: Chromium (`test/browser.mjs` launchChromium, service
+workers blocked, Asia/Dubai), `mockapi.mjs` on :8359, `?ui=desktop&skin=arkiv`, every page with a
+rule × 1280 and 390 × light and dark — 72 loads. Per load the script read `#pageAnswer` (line,
+basis, every action's height and address, the `none` sentence), the page's scroll width with the box
+shown and with it hidden, any element in the box clipped or past the viewport's edge, and any
+NaN/undefined/null in its text.
+
+| measure | result |
+|---|---|
+| page errors | none on any of the 72 |
+| the box widening a page | never: the scroll width is the same with and without the box everywhere; #target and #month-target at 390 are 985 px wide either way (finding 3 above) |
+| clipped or off-screen inside the box | nothing, including on the two over-wide pages at 390 |
+| touch targets at 390 | every action 44 px or taller, in all 34 boxes that carry actions (the other two are #unauthorized's absent line, R2) |
+| NaN / undefined / null | none |
+
+Findings — the defects behind R0 are fixed on the branch (FIX-STATUS ANS13–ANS20); R1 and R2 are not:
+
+- **R0. The pass draws only what a full-access reader sees.** The defects the review found — zeros
+  for withheld bookings on #drivers, a false no-rate reason on #unauthorized, a failed #compliance
+  read as "nothing has lapsed", "Nothing to act on" naming checks never made — do not show on
+  mockapi, which answers everything for everyone. They are proved in `answers` §1b and in two §4
+  Chromium checks that replay the server's withheld rows and header (#drivers) and fail both
+  compliance calls (#compliance).
+- **R1. #compliance's own tiles read a failed call as zero.** `V.compliance` catches each call into
+  an empty answer, and the tiles count it: "Vehicle docs expired 0", "Drivers who cannot legally
+  work 0" over two calls that never answered. The answer line now says so (ANS16); the tiles are
+  the page's and are unchanged. The same pattern holds on #drivers for a reader without bookings:
+  the toolbar reads "0 drove in this window · 330 never have" (the answer line no longer repeats it,
+  ANS13).
+- **R2. mockapi's `/api/unauthorized/summary` has no `totals.segments`** (the server always sends
+  it), so the §4 pass on #unauthorized only ever exercises an absent line. The present line is
+  proved by §1 and by production's data (FIX-STATUS ANS review).

@@ -32,6 +32,8 @@ import { CHANNEL_ORDER } from './tokens.js';
 import { qAll, href, currentGen, alive, windowLabel,
   personAddr, personIdOf, rewriteParam } from './data.js';
 import { driversVerdict } from './verdicts.js';
+/* ANS: the directory's answer line and Act-on strip (answers.js 'drivers'). */
+import { answer } from './answers.js';
 import { renderDriverDay } from './driverday.js';
 /* One driver against their own record, week by week and month by month. Its
    own module for the same reason driverday.js is: this file is already the
@@ -4302,6 +4304,17 @@ export async function renderDriverDirectory(root) {
         + (notFilled.length ? ` · ${fmt(notFilled.length)} with no real licence date on file` : '')
       : '');
   bar.querySelector('#dn').textContent = summary(rows.length);
+  /* ANS: the same counts the toolbar line above prints, so the answer and the
+     line cannot disagree; drawn again when the backlog of pairs arrives.
+     The backlog goes to the rule as `pairsCount`, which stays null until
+     /api/same-person answers with a number — and stays null when it is
+     refused (below MRG) or fails. `pendingPairs` above folds a 0 into null
+     for the toolbar's sake; the rule must not, because "no pair awaits
+     review" is a claim only a counted 0 supports (review, 2026-11-12). */
+  let pairsCount = null;
+  const answerDrivers = () => answer(root, 'drivers', { total: rows.length, active: active.length,
+    idle: idle.length, never: never.length, expired: expired.length, notFilled: notFilled.length, pendingPairs: pairsCount });
+  answerDrivers();
   /* Fetched after the count is on screen and never blocking it: a backlog
      figure is context, and a directory that waited for it would be slower for
      everybody to tell them something only sometimes true. */
@@ -4310,6 +4323,11 @@ export async function renderDriverDirectory(root) {
       if (!alive(gen) || !c) return;
       pendingPairs = c.pending || null;
       spinePeople = c.people ?? null;
+      pairsCount = c.pending != null && Number.isFinite(Number(c.pending)) ? Number(c.pending) : null;
+      /* Redrawn whatever the count: a 0 now lets the strip say "no pair of
+         records awaits review"; the same answer again leaves the box alone
+         (answerline.js mountAnswer). */
+      answerDrivers();
       if (!pendingPairs && spinePeople === rows.length) return;
       const host = bar.querySelector('#dn');
       if (host) host.textContent = summary(rows.length);

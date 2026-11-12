@@ -16,6 +16,8 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, dtStr, dateStr,
   absenceBand, pageFoot, swatch, sourceToken } from './ui.js';
 import { api, href, state, store } from './data.js';
 import { dubaiDay } from './tz.js';
+/* ANS: the page's answer line and Act-on strip (answers.js). */
+import { answer } from './answers.js';
 
 /* Whether a surface actually ANSWERED.
    ─────────────────────────────────────────────────────────────────────────
@@ -131,6 +133,7 @@ export async function renderProviders(root) {
   const d = await api('/api/probe/results');
   root.innerHTML = '';
   if (!d.surfaces.length) {
+    answer(root, 'providers', { probed: [] });
     root.append(note('No provider has been probed yet. The probe runs from the collector, because that '
       + 'is where the credentials live — a page load must never be able to spend an API quota. Trigger '
       + 'one from Settings, or wait for the daily pass.'));
@@ -160,6 +163,7 @@ export async function renderProviders(root) {
      talk to us at all. */
   {
     const worst = [...live].sort((a, b) => (b.unmapped_n || 0) - (a.unmapped_n || 0))[0];
+    answer(root, 'providers', { probed, live, refused, unmapped, worst, unconfigured });
     verdict(ak ? AKB.vHost : root, {
       claim: refused.length
         ? `${countOf(refused.length, 'surface')} would not answer`

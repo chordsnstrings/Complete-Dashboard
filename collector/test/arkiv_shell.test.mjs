@@ -203,8 +203,12 @@ console.log('\n3 · the sheet, under the skin');
       on: document.querySelector('#nav a.on .lb')?.textContent,
     };
   }, SHELL_IDS);
-  check('the order: masthead, section row, view row, banner, controls, strip, title, page, footer',
-    o.order.join(' ') === 'mast secRow sectabs authBanner filters todayNow topbar view pageFoot', o.order.join(' '));
+  /* ANS (2026-11-12): the page's answer line and Act-on strip sit between the
+     title and the page, in a host of their own (answerline.js #pageAnswer) —
+     #overview has a rule, so its box is in the order. Outside #view on
+     purpose: the page contract pins #view's first child (page_contract §7). */
+  check('the order: masthead, section row, view row, banner, controls, strip, title, the answer, page, footer',
+    o.order.join(' ') === 'mast secRow sectabs authBanner filters todayNow topbar pageAnswer view pageFoot', o.order.join(' '));
   check('every shell id is in the document exactly once, #fRangeLabel and #pageFoot included', o.ids.length === 0,
     JSON.stringify(o.ids));
   check('the section row holds the sections, then Set up, then freshness',

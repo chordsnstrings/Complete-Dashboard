@@ -26,6 +26,11 @@ import { startFocus } from './focus.js';
 /* MOTION (motion.js): the Arkiv skin's movement — inert unless index.html
    stamped data-motion="on" (Arkiv, desktop, not under automation). */
 import { startMotion, motionView, motionEntered } from './motion.js';
+/* ANS (answers.js, answerline.js): each page's answer line and Act-on strip,
+   above #view under the Arkiv skin — the rules in answers.js, the box in
+   answerline.js, emptied by render() on every navigation. */
+import { answer } from './answers.js';
+import { clearAnswer } from './answerline.js';
 /* Sign-in and access (collector/docs/ULM-DESIGN.md). The server decides; these
    only draw what it decided — which pages open, and the true reason where
    something is not shown. */
@@ -1372,6 +1377,7 @@ async function overviewContract(root) {
 
   /* ── 00 · the statement, then the tiles ──────────────────────────────── */
   verdict(vHost, overviewVerdict(k, daily, byPlat, cmp));
+  answer(root, 'overview', { k, daily, byPlat, cmp });
   const base = Object.fromEntries(overviewTiles(k).map((t) => [t.label, t]));
   const trips = { ...base.Trips, hero: true, channel: ch, hl: ch || 'ink', spark: series('trips'), delta: dl('trips') };
   /* Telematics journeys are the trackers', not a channel's: under a channel
@@ -3180,6 +3186,7 @@ V.vehicles = async (root) => {
   const tierP2 = q('/api/product/by-vehicle').catch(() => []);
   const rows = (await dirP) || [];
   if (!alive(gen)) return;
+  answer(root, 'vehicles', { rows });
   const spread = panel('Fleet spread', 'How trips are spread across the fleet. A long tail means cars carrying no work.');
   root.append(spread.panel); loading(spread.body);
   const tierP = panel('Which assets serve which tier',
@@ -5320,6 +5327,8 @@ V.unauthorized = async (root) => {
   const deadPads = flagged.filter((f) => f.verdict === 'never triggers').length;
   const deadLive = fmsLiveRows.filter((r) => r.dead).length;
   const deadTrip = fmsTripRows.filter((r) => r.dead).length;
+  answer(root, 'unauthorized', { sum, vehicles: vehRows.length,
+    stuck: +t.sensor_suspect || 0, dead: deadPads + deadLive + deadTrip });
   /* Five tiles accounted for 299 of 382 segments. `stationary` and
      `unverifiable` were in the donut beside them and had no tile, so the
      numbers on the page did not add up to the page — and `needs_a_human`, a
@@ -5755,6 +5764,7 @@ V.live = async (root) => {
     if (!alive(gen)) return;
     kh.innerHTML = ''; p.body.innerHTML = '';
     p.body.append(note(`The live feed could not be read: ${e.message}`, 'err'));
+    answer(root, 'live', { err: e });
     return;
   }
   const aside = rosterSentence(await rosterP);
@@ -5783,6 +5793,7 @@ V.live = async (root) => {
   const engaged = rows.filter((r) => r.seat_occupied === true || /engag/i.test(r.status || '')).length;
   const located = rows.filter(hasFix);
   const noLock = rows.length - located.length;
+  answer(root, 'live', { rows, fixed: located.length });
   const feeds = [...new Set(rows.map((r) => r.source).filter(Boolean))];
   /* "Fresh 80 of 130" invites the reading that the other fifty are a few
      minutes behind. Measured live, 23 of them last reported more than a DAY
@@ -7074,9 +7085,12 @@ V.compliance = async (root) => {
   const dueAk = (n) => (n < 0
     ? `<span style="color:var(--sem-neg);white-space:nowrap" title="expired ${fmt(Math.abs(n))} days ago">expired · −${fmt(Math.abs(n))} d</span>`
     : n <= 45 ? `<b style="white-space:nowrap">${fmt(n)} d</b>` : `<span class="dim">${fmt(n)} d</span>`);
+  /* Each failure is kept (`_err`) beside the empty answer the page draws
+     from: the answer line must not read a call that never answered as a
+     record with nothing in it (answers.js compliance; review, 2026-11-12). */
   const [vehPage, drvPage] = await Promise.all([
-    api('/api/compliance/vehicles').catch(() => ({ rows: [], totals: {} })),
-    api('/api/compliance/drivers').catch(() => ({ drivers: [], totals: {} })),
+    api('/api/compliance/vehicles').catch((e) => ({ rows: [], totals: {}, _err: e })),
+    api('/api/compliance/drivers').catch((e) => ({ drivers: [], totals: {}, _err: e })),
   ]);
   const veh = vehPage.rows || [];
   const drv = drvPage.drivers || [];
@@ -7213,6 +7227,8 @@ V.compliance = async (root) => {
     });
   }
 
+  answer(root, 'compliance', { vExpired, vWeek, dExpired, dWeek: dt.within_7 || 0, byPerson, dNoDate, pConflict,
+    vErr: vehPage._err || null, dErr: drvPage._err || null });
   const COMP_TILES = [
     ['Vehicle docs expired', fmt(vExpired), 'cannot legally work', vExpired ? 'err' : 'ok'],
     ['Expiring in 7 days', fmt(vWeek), 'renew now', vWeek ? 'err' : 'ok'],
@@ -8010,6 +8026,7 @@ V.sources = async (root) => {
         : null,
     });
     if (ak) sourcesGlance(AKB, { rows, bad, partial, quietOk, oldest, ageH, coverage, status });
+    answer(root, 'sources', { rows, bad, partial, quietOk, blank, oldest, ageH, debt: collectionDebt(status) });
   }
   if (ak) sourcesWhy(whyP.body, whenP.body, status);
 
@@ -9660,6 +9677,10 @@ async function render() {
   /* The shell footer's basis and colophon belong to the page that wrote them
      (ui.js pageFoot); the principle line is the shell's and stays. */
   clearPageFoot();
+  /* …and so does the answer line above it (answerline.js): the arriving page
+     draws its own, and a page with no rule, a closed page or a failed one
+     shows none rather than the last page's. */
+  clearAnswer();
   resetWithheld();
   resetRetention();
   accountBox();
