@@ -47,6 +47,8 @@
    ui.js PRINCIPLE). It carries data-absent, so ui.js highlight() can never
    emphasise it. */
 import { el, esc, contract } from './ui.js';
+import { parseHash } from './data.js';
+import { gated, canOpenView } from './access.js';
 
 export const ACTS_MAX = 3;
 const HOST_ID = 'pageAnswer';
@@ -149,6 +151,21 @@ export function answerBlock(result, view = null) {
   return box;
 }
 
+/* An action leading to a page this reader's role does not open is drawn as
+   plain text — still readable, not a door (ULM-DESIGN §7 rule 6) — exactly
+   as app.js markShutLinks() treats every link inside #view. That pass reads
+   #view only, and this box sits above it, so the box does its own. */
+function markShut(box) {
+  if (!gated()) return;
+  for (const a of box.querySelectorAll('a[href^="#"]')) {
+    const r = parseHash(a.getAttribute('href').slice(1));
+    if (!r.view || canOpenView(r.view, r.sub || '', r.param || '')) continue;
+    a.classList.add('access-shut');
+    a.setAttribute('aria-disabled', 'true');
+    a.title = 'Not shown to your role';
+  }
+}
+
 /* Draw `result` above `view`, replacing whatever answer is there. Returns the
    section, or null when nothing may be drawn: the old skin, a detached or
    replaced view (a render the reader has left), or a host that is not the
@@ -165,6 +182,7 @@ export function mountAnswer(view, result) {
   if (old && old.dataset.sig === sig && old.nextElementSibling === view) return old;
   const box = answerBlock(result, view);
   box.dataset.sig = sig;
+  markShut(box);
   if (old) old.remove();
   view.parentElement.insertBefore(box, view);
   return box;

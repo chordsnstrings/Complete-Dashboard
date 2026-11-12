@@ -166,7 +166,12 @@ export const RULES = {
   overview({ k, daily = [], byPlat = [], cmp = null } = {}, ctx) {
     if (!k) return absent('The booking counts did not load.');
     const trips = num(k.trips);
-    if (trips == null) return absent('The booking count for this window could not be read.');
+    if (trips == null) {
+      /* A role the server withholds bookings from gets null with a
+         `_withheld` stamp (access.js): that is a reason of its own. */
+      return absent(k._withheld && Object.keys(k._withheld).length ? 'The booking count is not shown to your role.'
+        : 'The booking count for this window could not be read.');
+    }
     const v = fleetVerdict({ kpis: k, daily, byPlatform: byPlat });
     const ch = num(cmp?.change_pct?.trips);
     const prev = cmp?.previous ? `${dayLabel(cmp.previous.from)} – ${dayLabel(cmp.previous.to)}` : null;

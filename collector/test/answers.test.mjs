@@ -89,6 +89,8 @@ console.log('1 · the rules, page by page — the answer, and every absent case 
   check('#overview: no counts → absent', run('overview', {}).absent === 'The booking counts did not load.');
   check('#overview: a booking count that is not a number → absent, not "0 bookings"',
     /could not be read/.test(run('overview', { k: { trips: null } }).absent || ''));
+  check('…and withheld from the role → said as withheld, not as unread',
+    run('overview', { k: { trips: null, _withheld: { BK: 'A' } } }).absent === 'The booking count is not shown to your role.');
 }
 
 /* ── #month-target ── */
@@ -468,6 +470,27 @@ for (const r of ['drivers', 'payouts', 'low-performers']) {
   await o.page.evaluate(() => { location.hash = '#settings'; });
   await o.page.waitForTimeout(1500);
   check('navigating away clears it: #settings, which has no rule, shows no answer', await o.page.evaluate(() => !document.getElementById('pageAnswer')));
+  await o.c.close();
+}
+{
+  /* ULM-DESIGN §7 rule 6: a link to a page the role does not open is plain
+     text. app.js markShutLinks() reads #view only; the box is above it. */
+  const o = await open('drivers');
+  const shut = await o.page.evaluate(async () => {
+    const acc = await import('/access.js');
+    const { mountAnswer } = await import('/answerline.js');
+    /* Two different sentences: the same answer twice keeps the box it has
+       (mountAnswer's minute-redraw rule), and this asks for a fresh one. */
+    const probe = (text) => mountAnswer(document.getElementById('view'), { page: 'probe', text, basis: 'Basis: a probe.',
+      acts: [{ text: 'Who may see what', href: '#access' }] }).querySelector('.ans-act-i').classList.contains('access-shut');
+    const was = { signedIn: acc.who.signedIn, access: acc.who.access };
+    const open = probe('Signed out.');
+    acc.who.signedIn = true; acc.who.access = { ...(acc.who.access || {}), capsAny: [] };
+    const closed = probe('Signed in, without access.manage.');
+    acc.who.signedIn = was.signedIn; acc.who.access = was.access;
+    return { open, closed };
+  });
+  check('an action to a page the role does not open is drawn as plain text, as inside #view', !shut.open && shut.closed, J(shut));
   await o.c.close();
 }
 {
