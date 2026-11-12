@@ -105,6 +105,8 @@ import { compareRoutes } from './compare_routes.js';
 import { performanceRoutes } from './performance_routes.js';
 import { statusRoutes } from './status_routes.js';
 import { onlineHoursRoutes } from './online_hours_routes.js';
+/* The series behind a page's hero tile, in one request (the sparklines). */
+import { historyRoutes } from './history_routes.js';
 /* Where a car was at a moment or over a stretch, in the gazetteer's words —
    the assistant's "historical location based on time" (2026-10-13). */
 import { whereRoutes } from './where_routes.js';
@@ -7072,6 +7074,11 @@ statusRoutes(app, { q, wrap });
 /* Uber online by hour, one day or a range — api/online_hours_routes.js, the
    hours kept in driver_online_hour (sql/schema_v106.sql). */
 onlineHoursRoutes(app, { q, wrap });
+
+/* The daily or weekly series behind a page's hero tile — #online-time's
+   Late, #performer's money, #deposits' ceiling, #cancellations — read from
+   the roll-ups only, one request per page (api/history_routes.js). */
+historyRoutes(app, { q, wrap });
 
 /* Where a car was, when — api/where_routes.js. */
 whereRoutes(app, { q, wrap });

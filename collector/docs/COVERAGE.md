@@ -10754,3 +10754,38 @@ it again.
   - platform bookings (167);
   - the five dataset-coverage counts (154 each). These are one per `/api/coverage` computation, roughly every 7.4 min.
 - `/api/coverage` measured 16.9 s, 19.3 s and 32.7 s cold.
+
+## The history endpoint's two roll-ups — built 2026-11-12 (SPK)
+
+`/api/history` (`api/history_routes.js`) draws the hero sparklines from roll-ups only. Two series
+had none, so `sql/schema_v119.sql` adds them, built by `src/history_rollup.js` inside the ordinary
+rollup pass: `driver_first_online` (each Uber account's first ONLINE event per Dubai day) and
+`cash_fare_day` (cash fares by account, channel and day, from the `trip_cash` view).
+
+### Traps this added to the list
+
+* **driver_online_hour's first hour is not when somebody came online.** Its spans merge ONLINE
+  heartbeats with job spans (`api/online_span_sql.js`), so its first minute can be a trip's start.
+  `/api/online-time` judges Late on the first ONLINE *status event* only. A Late line built from
+  the hours would disagree with the Late tile above it; that is why `driver_first_online` exists.
+* **A Late line must use the page's people, not every account with an event.** The page judges
+  the roster's Uber accounts plus whoever drove Uber that day, folded to the person: one person
+  with two accounts is judged on the earlier, and an account that came online but is on neither
+  list is on no call list. Counted per account, 5 Oct in the test fixture reads 3 late where the
+  page says 1.
+* **A day's Late is final only when every fleet's timeline has been read past it.** Uber's
+  timeline is fetched every three hours, two days at a time; the evening of the last day can still
+  be arriving. The line takes the earliest fleet's last read before the roll-up ran.
+* **`cash_fare_day` can trail the live ceiling by up to a day.** Uber's weekly payments report
+  re-prices cash trips weeks or months after the fact, which changes `trip_cash.cash_amount`; the
+  quarter-hourly pass rebuilds only the last 14 days, and the nightly full pass catches the rest.
+  The ceiling line's last point is "as of the last build" and says so (`as_of`).
+* **A running total from a part-built table is wrong at every point, not just the early ones.**
+  The ceiling and carrier lines are drawn only once `history_rollup_build.built_from` is
+  1900-01-01 — after the first full pass (boot, or 22:40).
+* **`/api/cancellations` ignores `platform` and `fleet`.** The #cancellations page shows the
+  channel chips and sends them, and the route reads the window alone (`api/cancellation_routes.js:16`),
+  so the page's figures do not move with the chips. The page's sparkline therefore asks
+  `/api/history` for the same scope as its tile (the window, no chips) so the two agree; the
+  endpoint itself honours both chips for any caller that sends them. Not fixed here — it is the
+  route's defect, and a fix changes every figure on the page.

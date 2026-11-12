@@ -99,6 +99,10 @@ import { recordSaved } from '../api/save_check.js';
 import { normaliseFiles, crossFile, silentFiles, fileReport,
   boltFollowUp } from '../src/credfiles.js';
 import { SETTING_DEFS } from '../src/settings.js';
+/* server.js imports it; the route itself is mounted by the *_routes.js
+   discovery below like every module's, and the name is injected so a slice
+   that ever calls it resolves (CLAUDE.md: a server.js import goes here too). */
+import { historyRoutes } from '../api/history_routes.js';
 
 export const START = "/* ───────────────────────── overview ───────────────────────── */";
 export const END = '/* ───────────────── per-driver detail pages ───────────────── */';
@@ -192,7 +196,7 @@ export async function mountAll(db, { serverRoutes = true, inject = {}, pre = nul
     /* The credential paste queue, real. A route that is mounted but throws
        ReferenceError the first time it is called is a route no test can
        reach, and /api/settings/paste was in exactly that state. */
-    recognise, unrecognised, checkAll, proposeKeys, SETTING_DEFS, recordSaved,
+    recognise, unrecognised, checkAll, proposeKeys, SETTING_DEFS, recordSaved, historyRoutes,
     normaliseFiles, crossFile, silentFiles, fileReport, boltFollowUp,
     /* LAST, so a test can replace any of the above.
        ─────────────────────────────────────────────────────────────────────

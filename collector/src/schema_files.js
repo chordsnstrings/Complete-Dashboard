@@ -361,4 +361,11 @@ export const SCHEMA_FILES = [
   /* v114: charging_link's 'held' tier (a fold's contradictory decisions,
      never recomputed) and one confirmation per customer (a unique index). */
   'schema_v114.sql',
+  /* v119: two day roll-ups the hero sparklines read through /api/history
+     (api/history_routes.js) — each Uber account's first ONLINE instant per
+     Dubai day (the #online-time Late series, for any expected start) and cash
+     fares by account and day (the #deposits ceiling, cut at each week's end)
+     — and when each was last built (src/history_rollup.js). v115–v118 belong
+     to the other builders of the same batch. */
+  'schema_v119.sql',
 ];
