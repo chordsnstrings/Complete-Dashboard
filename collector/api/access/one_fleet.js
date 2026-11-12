@@ -88,13 +88,13 @@ const WHY = {
     + 'its counts are not split by fleet yet.' + ASK,
   hr: 'An HR export is one workbook holding both fleets\' employees: reading or importing it acts on '
     + 'every fleet at once.' + ASK,
-  messages: 'Driver messages are listed and previewed company-wide, one outbox for both fleets; '
-    + 'narrowing it by fleet is not built yet.' + ASK,
+  messages: 'This previews the next run of driver messages, and a run is worked out over both fleets\' '
+    + 'drivers at once; a one-fleet preview is not offered.' + ASK,
   charging: 'PowerDrive charging is one company account: its wallets, sessions and the people they are '
     + 'linked to are not filed by fleet.' + ASK,
   tesla: 'The Tesla connection is one company account, not one per fleet.' + ASK,
   watch: 'A low-performer watch list may follow both fleets, and its export and edits act on the list '
-    + 'as saved; narrowing the lists by fleet is not built yet.' + ASK,
+    + 'as saved, whichever fleet its members are in; narrowing them by fleet is not built yet.' + ASK,
   /* api/lowperf.js populationOf(): with a fleet chosen it still counts the
      other fleet's drivers it leaves out (hidden_other_fleet), and a file
      cannot be shaped after it is built. */
@@ -153,12 +153,12 @@ const BY_ROUTE = {
     'GET /api/schema/raw-values'],
   system: ['GET /api/coverage', 'GET /api/coverage/calendar'],
   hr: ['POST /api/hr-roster/commit', 'POST /api/hr-roster/preview'],
-  messages: ['GET /api/sms/log', 'GET /api/sms/preview'],
+  messages: ['GET /api/sms/preview'],
   charging: ['GET /api/charging/driver', 'GET /api/charging/sessions', 'GET /api/charging/vehicle',
     'GET /api/charging/wallets', 'GET /api/charging/review', 'POST /api/charging/link'],
   tesla: ['GET /api/tesla/status', 'GET /api/tesla/vehicles'],
   lowperf: ['GET /api/export/lowperf.xlsx'],
-  watch: ['GET /api/lowperf/watch', 'POST /api/lowperf/watch',
+  watch: ['POST /api/lowperf/watch',
     'POST /api/lowperf/watch/:id', 'GET /api/export/lowperf-watch.xlsx'],
   day: ['GET /api/day', 'GET /api/slot', 'GET /api/online-time'],
   trip: ['GET /api/trip'],

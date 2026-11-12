@@ -6178,12 +6178,14 @@
    }
   ],
   "whole": [],
-  "fleet": "mixed",
-  "fleetRows": [],
-  "fleetKey": "",
+  "fleet": "narrow",
+  "fleetRows": [
+   "rows"
+  ],
+  "fleetKey": "fleet_id",
   "cap": null,
   "auditRead": true,
-  "notes": "api/sms_routes.js: sms_outbox \u2014 every driver message and code sent, queued, failed or held with its reason. destination is a mobile (CT, the subject); message_text is what was texted (an amount of cash, a route). Refuses a caller who is not signed in, whatever the mode."
+  "notes": "api/sms_routes.js: sms_outbox \u2014 every driver message and code sent, queued, failed or held with its reason. destination is a mobile (CT, the subject); message_text is what was texted (an amount of cash, a route). Refuses a caller who is not signed in, whatever the mode. NARROW (2026-11-12, api/access/one_fleet.js): for a reader whose access covers one fleet the gate writes that fleet into _fmfleet and fleet, and the handler narrows every row, total and count to it; an unrestricted reader is judged exactly as mixed was."
  },
  {
   "method": "GET",
@@ -8835,10 +8837,12 @@
   "grain": "list",
   "fields": [],
   "whole": [],
-  "fleet": "mixed",
-  "fleetRows": [],
-  "fleetKey": "",
-  "notes": "api/lowperf_routes.js (2026-10-19). The saved watch lists: name, the day saved, the period and settings it was drawn from, how many members. No member is named here and no figure; who saved a list is not part of the answer."
+  "fleet": "narrow",
+  "fleetRows": [
+   "lists"
+  ],
+  "fleetKey": "fleet",
+  "notes": "api/lowperf_routes.js (2026-10-19). The saved watch lists: name, the day saved, the period and settings it was drawn from, how many members. No member is named here and no figure; who saved a list is not part of the answer. NARROW (2026-11-12, api/access/one_fleet.js): for a reader whose access covers one fleet the gate writes that fleet into _fmfleet and fleet, and the handler narrows every row, total and count to it; an unrestricted reader is judged exactly as mixed was."
  },
  {
   "method": "POST",

@@ -5791,7 +5791,7 @@ Test: `test/access_one_fleet.test.mjs` — the real gate, the response cache and
 | id | what | where | test | state |
 |---|---|---|---|---|
 | ONE1 | **The `narrow` class.** For a one-fleet reader the gate writes the fleet into `_fmfleet` and `fleet`, keys the cache on both, refuses another fleet named in `?fleet=` ("That fleet is outside your access"), and refuses a reader holding some but not all of three or more fleets with that reason. An unrestricted reader is judged exactly as `mixed` was (levels over every fleet, no rewrite) | `api/access/middleware.js:226`, `:433` | `access_one_fleet` §2–13, §11 the cache; reverted (branch disabled): the narrowed routes refuse again and the run stops in §2 | written, not deployed |
-| ONE2 | **The true reason, per route still refused** — 98 routes under 22 reasons. The one generic sentence stays only as a fallback, and the test fails if any mixed route has no reason of its own, or a reason is kept for a route no longer mixed | `api/access/one_fleet.js:171`; `middleware.js:258` | §1, §14; reverted (reasons ignored): 4 fail | written, not deployed |
+| ONE2 | **The true reason, per route still refused** — 96 routes under 22 reasons. The one generic sentence stays only as a fallback, and the test fails if any mixed route has no reason of its own, or a reason is kept for a route no longer mixed | `api/access/one_fleet.js:171`; `middleware.js:258` | §1, §14; reverted (reasons ignored): 4 fail | written, not deployed |
 | ONE3 | The shaper drops another fleet's row from a `narrow` answer whose rows carry their fleet (`fleetRows` on segments, coverage/verified, recommendations, settings/jobs, hr-roster, feeds) — a second line behind the handler, as on `rows` routes | `api/access/shape.js:129` | §1 shaper check; reverted: 1 fails | written, not deployed |
 | ONE4 | **`/api/segments` narrowed** — the list that ignored the fleet chip (system audit, 2026-11-12). Rows, total, every facet, each provider's count and its absent-reason follow `_fmfleet`; who held the car is read from that fleet's custody records only (`custodyNames`/`custodyRefs` take an optional fleet bind; without it their SQL is unchanged) | `api/segment_routes.js:118`; `api/custody_sql.js:88` | §2, §11, §13; reverted to 90d76da: 10 fail; the custody bind alone: 4 fail | written, not deployed |
 | ONE5 | **`/api/cancellations` narrowed** at the bookings themselves, so each person's row and every total are that fleet's | `api/cancellation_routes.js:59` | §3; reverted: 3 fail | written, not deployed |
@@ -5803,12 +5803,14 @@ Test: `test/access_one_fleet.test.mjs` — the real gate, the response cache and
 | ONE11 | **`/api/hr-roster` narrowed**: the fleet's HR rows; every total counted from them (`by_fleet` names that fleet alone, never the other's as a zero); an account HR matched that the database files under the other fleet is left off; each upload's `rows_read` is that fleet's rows and `byte_len` is null with the reason — one workbook holds both fleets | `api/hr_roster.js:686`; `api/hr_roster_routes.js:55` | §9; reverted: 4 fail | written, not deployed |
 | ONE12 | **`/api/vehicles/feeds` narrowed**: the fleet's cars before anything is counted, so totals, no-data counts and dark-feed verdicts are theirs; the accounts list names that fleet; a current-driver record filed under the other fleet is not named beside the car | `api/feed_routes.js:754` | §10; reverted: 4 fail | written, not deployed |
 | ONE13 | **`/api/breaks` kept refused, although its handler filters on `?fleet=`.** `src/sources/events.js` writes every break with `fleet_id` null and `metric_break`'s key has no fleet, so a one-fleet list would be empty — "nothing changed" where nothing was measured. Open-mode finding, not changed here: the #causes fleet chip already shows that empty list to anyone who picks a fleet | `api/access/one_fleet.js` (reason `breaks`) | §14 | written, not deployed |
+| ONE15 | **`/api/sms/log` narrowed** (the Messages page): the messages and the seven-day counts are the fleet's; a message filed under no fleet (a staff sign-in code) is left out; the switches are company settings, not records | `api/sms_routes.js:42` | §10b; reverted: the counts leak, 1 fails (the shaper still dropped the rows) | written, not deployed |
+| ONE16 | **`GET /api/lowperf/watch` narrowed**: the lists saved for that fleet, never one that follows both fleets, and each list's member count counts that fleet's members | `api/lowperf_routes.js:117` | §10b; reverted: 1 fails | written, not deployed |
 | ONE14 | Tests that pinned the old refusal now pin the narrowing: `agent_access` (an Egari manager's fleet totals are Egari's — 2 completed, not 5 — and the company target is still refused, with its own reason); `access_manifest` (`narrow` is a known class; the HR roster and the feeds are never `rows`) | `test/agent_access.test.mjs`; `test/access_manifest.test.mjs` | 14/0; 17/0 | written, not deployed |
 
-**Per route.** Narrowed (12): `GET /api/segments`, `/api/cancellations`, `/api/kpis`,
+**Per route.** Narrowed (14): `GET /api/segments`, `/api/cancellations`, `/api/kpis`,
 `/api/trips/daily`, `/api/recommendations`, `/api/settings/jobs`, `/api/coverage/verified`,
 `/api/funnel/drivers`, `/api/tiers/by-vehicle`, `/api/analyst/brief`, `/api/hr-roster`,
-`/api/vehicles/feeds`. Still refused (98), under the reason in brackets — the authoritative list is
+`/api/vehicles/feeds`, `/api/sms/log`, `/api/lowperf/watch`. Still refused (96), under the reason in brackets — the authoritative list is
 `BY_ROUTE` in `api/access/one_fleet.js`:
 - *(person)* the 17 `/api/driver/*` person routes, `/api/performer`, `/api/status/driver` — one
   person's accounts can sit in both fleets; counting only one fleet's accounts is not built.
@@ -5825,9 +5827,10 @@ Test: `test/access_one_fleet.test.mjs` — the real gate, the response cache and
   `/api/probe/results`; *(raw)* `/api/probe/uber/timeline`, `/api/probe/zero-distance`,
   `/api/schema/raw-{fields,values}`; *(tesla)* `/api/tesla/{status,vehicles}`.
 - *(system)* `/api/coverage`, `/api/coverage/calendar`; *(breaks)* `/api/breaks` (ONE13).
-- *(hr)* `POST /api/hr-roster/{commit,preview}`; *(messages)* `/api/sms/{log,preview}`;
+- *(hr)* `POST /api/hr-roster/{commit,preview}`; *(messages)* `/api/sms/preview` (a run is worked
+  out over both fleets' drivers at once);
   *(charging)* the 5 `/api/charging/*` reads and `POST /api/charging/link`.
-- *(lowperf)* `/api/export/lowperf.xlsx`; *(watch)* `GET`/`POST /api/lowperf/watch`,
+- *(lowperf)* `/api/export/lowperf.xlsx`; *(watch)* `POST /api/lowperf/watch`,
   `POST /api/lowperf/watch/:id`, `/api/export/lowperf-watch.xlsx`.
 - *(day)* `/api/day`, `/api/slot`, `/api/online-time`; *(compare)* `/api/cohort/{drivers,vehicles}`;
   *(cabman)* `/api/vehicles/feeds/cabman`.
@@ -5837,7 +5840,8 @@ company target, the company-wide settings and credentials, the runs and probes t
 fleet, the HR workbook files and the identity decisions. The rest are **possible and not done in
 this run**: each needs its handler filtered part by part, as ONE4–12 were — the driver and vehicle
 pages (about 30 routes), the cash pages, the day, slot, online-time, cohort, segment and trip
-pages, source coverage, charging, messages, the CABMAN table and the watch lists. Their reasons
+pages, source coverage, charging, the message preview, the CABMAN table and the watch-list
+export and edits. Their reasons
 say "not built yet", which is the true one. No migration was needed: every narrowed answer reads
 a `fleet_id` (or `fleet`) column that already exists, and production carries it on every sampled
 row (2026-11-12: 500/500 segments, 128/128 feed rows, 268/268 live vehicles).

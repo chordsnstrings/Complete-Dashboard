@@ -45,6 +45,7 @@ import { hashPassword } from '../api/access/crypto.js';
 import { responseCache } from '../api/cache.js';
 import { shapeBody } from '../api/access/shape.js';
 import { ROLE } from '../api/public/access_model.js';
+import { smsRoutes } from '../api/sms_routes.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -137,15 +138,38 @@ await q(`INSERT INTO vehicle_profile (platform, vehicle_ext_id, plate, fleet_id,
          VALUES ('uber', 'v-eg-1', 'EG-101', 'egari', 'ACTIVE'), ('uber', 'v-ec-1', 'EC-201', 'ecosine', 'ACTIVE'),
                 ('uber', 'v-ec-2', 'EC-202', 'ecosine', 'ACTIVE')`);
 
+await q(`INSERT INTO sms_outbox (kind, dedupe_key, fleet_id, destination, message_text, status, plate, created_at)
+         VALUES ('cash_deposit', 'k-eg-1', 'egari', '+971500000011', 'Test message to Egari driver', 'sent', 'EG-101', now() - interval '1 day'),
+                ('cash_deposit', 'k-ec-1', 'ecosine', '+971500000022', 'Test message to Ecosine driver', 'sent', 'EC-201', now() - interval '1 day'),
+                ('trip_register', 'k-ec-2', 'ecosine', '+971500000022', 'Test second message to Ecosine driver', 'held', 'EC-201', now() - interval '2 days'),
+                ('reset_code', 'k-staff-1', NULL, '+971500000033', 'Test staff code', 'sent', NULL, now() - interval '3 days')`);
+const [wEg] = await q(`INSERT INTO lowperf_watch (name, saved_day, hotel, fleet) VALUES ('Test list Egari', current_date, 'hide', 'egari') RETURNING id`);
+const [wEc] = await q(`INSERT INTO lowperf_watch (name, saved_day, hotel, fleet) VALUES ('Test list Ecosine', current_date, 'hide', 'ecosine') RETURNING id`);
+const [wBoth] = await q(`INSERT INTO lowperf_watch (name, saved_day, hotel, fleet) VALUES ('Test list both fleets', current_date, 'hide', NULL) RETURNING id`);
+/* The Egari list also holds a member filed under ECOSINE (a driver who
+   moved): the list is Egari's, its count of that member is not. */
+await q(`INSERT INTO lowperf_watch_member (watch_id, pk, name, fleet) VALUES ($1, 'eg-d1', 'Test Driver Egari', 'egari'),
+           ($1, 'ec-x1', 'Test Driver Crossfleet', 'ecosine'),
+           ($2, 'ec-d1', 'Test Driver Ecosine', 'ecosine'), ($3, 'eg-d1', 'Test Driver Egari', 'egari'), ($3, 'ec-d1', 'Test Driver Ecosine', 'ecosine')`,
+  [wEg.id, wEc.id, wBoth.id]);
+
 /* Anything of Ecosine's that a narrowed answer must not contain, anywhere. */
 const ECOSINE_MARKS = ['EC-201', 'EC-202', 'ec-d1', 'ec-b1d', 'ec-x1', 'Test Driver Ecosine', 'Test Driver Crossfleet',
-  'ec-acct-9', 'Test Hr Ecosine', 'r-ec-', 'ecosine only reason', '"ecosine"'];
+  'ec-acct-9', 'Test Hr Ecosine', 'r-ec-', 'ecosine only reason', '"ecosine"', 'Ecosine driver', '+971500000022',
+  'Test list Ecosine', 'Test list both fleets'];
 const leaks = (body) => ECOSINE_MARKS.filter((m) => JSON.stringify(body ?? null).includes(m));
 
 /* ── the application, as production mounts it ──────────────────────────── */
 const layer = accessLayer({ db });
 const cache = responseCache({ pool: db, ttlMs: 0 });
-const { port } = await mountAll(pg, { pre: (app) => { app.use(layer.identify); app.use(layer.gate); app.use('/api', cache); } });
+/* The Messages routes take the access settings as a dependency, as server.js
+   mounts them (smsAccess); the harness's generic mount has none, so they are
+   mounted here first, with it, and answer before the harness's copy. */
+const wrapT = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: 'internal', detail: String(e) }));
+const { port } = await mountAll(pg, { pre: (app) => {
+  app.use(layer.identify); app.use(layer.gate); app.use('/api', cache);
+  smsRoutes(app, { q, wrap: wrapT, access: { getConfig: () => svc.getConfig(db) } });
+} });
 cache.setPort(port);
 const base = `http://127.0.0.1:${port}`;
 await svc.setConfig(db, 'mfa', 'none', null);
@@ -194,7 +218,8 @@ console.log('\n1. the manifest: which routes narrow, and every route still mixed
   const mixed = allEntries().filter((e) => e.fleet === 'mixed').map((e) => `${e.method} ${e.path}`);
   const NARROWED = ['GET /api/analyst/brief', 'GET /api/cancellations', 'GET /api/coverage/verified',
     'GET /api/funnel/drivers', 'GET /api/hr-roster', 'GET /api/kpis', 'GET /api/recommendations', 'GET /api/segments',
-    'GET /api/settings/jobs', 'GET /api/tiers/by-vehicle', 'GET /api/trips/daily', 'GET /api/vehicles/feeds'];
+    'GET /api/settings/jobs', 'GET /api/tiers/by-vehicle', 'GET /api/trips/daily', 'GET /api/vehicles/feeds',
+    'GET /api/sms/log', 'GET /api/lowperf/watch'];
   check('the narrowed routes are re-classed narrow — these and no others', JSON.stringify([...narrow].sort())
     === JSON.stringify([...NARROWED].sort()), narrow.join(', '));
   const noReason = mixed.filter((k) => !MIXED_WHY[k]);
@@ -315,6 +340,19 @@ console.log('\n10. /api/vehicles/feeds');
   check('…its current driver is not one filed under the other fleet',
     !(eg.rows[0].driver_refs || []).some((d) => /Crossfleet/.test(d.name || '')), JSON.stringify(eg.rows[0].driver_refs));
   check('…and the accounts list names Egari\'s alone', Object.values(eg.accounts).every((v) => v.every((f) => f === 'egari')));
+}
+
+console.log('\n10b. /api/sms/log and /api/lowperf/watch');
+{
+  const m = await narrowed('/api/sms/log', 'sms/log');
+  check('messages: Egari\'s, never a staff code filed under no fleet; the seven-day counts Egari\'s',
+    m.eg.rows.length === 1 && m.eg.rows[0].fleet_id === 'egari' && m.eg.last7days.sent === 1 && m.eg.last7days.held === 0
+      && m.all.rows.length === 4 && m.all.last7days.held === 1, JSON.stringify({ rows: m.eg.rows.length, c: m.eg.last7days }));
+  const w = await narrowed('/api/lowperf/watch', 'lowperf/watch');
+  check('watch lists: the one saved for Egari, never one that follows both fleets; its members Egari\'s',
+    w.eg.lists.length === 1 && w.eg.lists[0].fleet === 'egari' && w.eg.lists[0].members === 1 && w.all.lists.length === 3
+      && w.all.lists.find((l) => l.fleet === 'egari')?.members === 2,
+    JSON.stringify(w.eg.lists));
 }
 
 console.log('\n11. the cache keeps the narrowed answer apart');

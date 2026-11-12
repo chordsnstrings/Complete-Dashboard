@@ -43,6 +43,7 @@ import { lowperfWorkbookOf, watchWorkbookOf, LOWPERF_FILE_CLASSES } from './lowp
 import { dubaiDay } from './window.js';
 import { addDays, validDay } from './revenue_target.js';
 import { loadDriverDays } from './target_month.js';
+import { onlyFleet } from './access/one_fleet.js';
 
 const FLEETS = ['ecosine', 'egari'];
 const params = (req) => ({
@@ -108,7 +109,16 @@ export function lowperfRoutes(app, { q, wrap, log = null }) {
   app.get('/api/lowperf/watch', wrap(async (req, res) => {
     res.set('Cache-Control', 'private, no-store');
     const all = req.query.archived === '1';
-    const rows = await q(`${LIST_SQL} ${all ? '' : 'WHERE w.archived_at IS NULL'} ORDER BY w.saved_day DESC, w.id DESC`);
+    /* ONE FLEET'S LISTS, for a reader whose access covers one fleet
+       (api/access/one_fleet.js): a list saved for that fleet, never one that
+       follows both fleets (fleet unset) — its members would include the other
+       fleet's drivers — and its member count counts that fleet's members. Null
+       for everyone else: the statement as it was. */
+    const only = onlyFleet(req);
+    const rows = only
+      ? await q(`${LIST_SQL.replace('AND m.removed_at IS NULL)', 'AND m.removed_at IS NULL AND m.fleet = $1)')}
+                 WHERE w.fleet = $1 ${all ? '' : 'AND w.archived_at IS NULL'} ORDER BY w.saved_day DESC, w.id DESC`, [only])
+      : await q(`${LIST_SQL} ${all ? '' : 'WHERE w.archived_at IS NULL'} ORDER BY w.saved_day DESC, w.id DESC`);
     return res.json({ lists: rows.map(listRow) });
   }));
 

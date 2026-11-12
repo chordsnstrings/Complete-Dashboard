@@ -1409,12 +1409,12 @@ two outcomes; the per-route record is docs/FIX-STATUS.md, section ONE.
   was; an anonymous visitor in open mode is never handed `_fmfleet`. So this changes nothing until
   sign-in is used — including, deliberately, the routes where the fleet CHIP is half-ignored for
   everyone (recorded in FIX-STATUS ONE as an open-mode finding, not silently fixed here).
-- **Narrowed (12):** the Overview's `/api/kpis` and `/api/trips/daily`, `/api/segments`,
+- **Narrowed (14):** the Overview's `/api/kpis` and `/api/trips/daily`, `/api/segments`,
   `/api/cancellations`, `/api/funnel/drivers`, `/api/tiers/by-vehicle`, `/api/analyst/brief`,
   `/api/recommendations`, `/api/settings/jobs`, `/api/coverage/verified`, `/api/hr-roster`,
-  `/api/vehicles/feeds`. Where their rows carry the fleet the shaper also drops any row of another
+  `/api/vehicles/feeds`, the Messages log `/api/sms/log` and the watch lists `GET /api/lowperf/watch`. Where their rows carry the fleet the shaper also drops any row of another
   fleet (`fleetRows`), a second line behind the handler.
-- **Still refused (98), each with its own true reason** (api/access/one_fleet.js MIXED_WHY: a
+- **Still refused (96), each with its own true reason** (api/access/one_fleet.js MIXED_WHY: a
   person's page, cash, identity decisions, one car's record, the company target, settings, runs,
   probes, raw records, source coverage, HR files, messages, charging, Tesla, watch lists, the
   low-performer workbook, one day, cohorts, one booking, one journey, CABMAN's lists, trend
@@ -1424,8 +1424,11 @@ two outcomes; the per-route record is docs/FIX-STATUS.md, section ONE.
   empty list reading "nothing changed"), the company revenue target, company-wide settings and
   credentials (§3.3 settings per connection is still unbuilt), the runs and probes that act on
   every fleet, the HR workbook files, and the identity decisions. Everything else still refused —
-  the driver and vehicle pages above all — is possible route by route, as the twelve were.
+  the driver and vehicle pages above all — is possible route by route, as the fourteen were.
 - **No migration.** Every narrowed answer reads a fleet column that already exists; production
   carried it on every row sampled (500/500 segments, 128/128 feed rows, 268/268 live vehicles).
-- §4's "a figure never mixes in a fleet outside the caller's scope" now holds on the twelve, in
+- §4's "a figure never mixes in a fleet outside the caller's scope" now holds on the fourteen, in
   the API. Row-level security (§4, the backstop) is a separate workstream.
+
+The deferral in §16 now reads: one-fleet readers are answered for their fleet on the fourteen
+`narrow` routes and refused, each with its own reason, on the 96 still `mixed`.

@@ -449,8 +449,11 @@ check('a Finance manager (no conduct) is told the verdicts are withheld, not "no
   finSt.rows?.find((r) => r.driver_id === A)?.late === 'withheld' && finSt.values?.late === undefined, JSON.stringify(finSt.values));
 const OPS = harness(fetchVia(gated.port, await person('ops-reach@example.test', 'OPS', ['egari'])));
 const opsCar = await OPS('live_cars', { driver_id: A });
+/* The refusal carries the route's own reason since 2026-11-12 (api/access/
+   one_fleet.js): a person's page, whose accounts can sit in both fleets —
+   no longer the one sentence "this combines the records of every fleet". */
 check('a one-fleet reader refused the driver lookups is told so, not "no car is on record"',
-  /combines the records of every fleet/.test(opsCar.withheld || '') && !opsCar.error, JSON.stringify(opsCar).slice(0, 300));
+  /accounts can sit in both fleets/.test(opsCar.withheld || '') && !opsCar.error, JSON.stringify(opsCar).slice(0, 300));
 const CLK = harness(fetchVia(gated.port, await person('clk-reach@example.test', 'CLK')));
 const clkShift = await CLK('driver_shift', { driver_id: A, day: D });
 const clkHours = await CLK('driver_hours', { driver_id: A, from: D0, to: D });
