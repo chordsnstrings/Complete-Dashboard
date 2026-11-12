@@ -72,10 +72,24 @@ export function retentionBanner() {
   return el;
 }
 
+/* Each fact on a line of its own and under 15 words: the Arkiv focus pass
+   folds a longer block into the panel's notes (api/public/focus.js
+   LEAD_WORDS), and "dry run — removes nothing" is the one line on this panel
+   nobody should have to open a fold to read. Measured: the first draft put
+   all four facts in one 50-word line, and it was folded out of sight. */
 const MODE_WORDS = {
-  dry_run: 'dry run — the nightly pass counts what it would remove and removes nothing',
-  on: 'on — the nightly pass removes what the rules below allow',
+  dry_run: 'dry run — counts what it would remove; removes nothing',
+  on: 'on — removes what the rules below allow',
   off: 'off — the nightly pass is skipped',
+};
+const DUBAI_MS = 4 * 3600e3;
+/* The first Dubai day left whole, as api/data_retention_notes.js computes it. */
+export const wholeDayAfter = (t) => {
+  const ms = new Date(t).getTime();
+  if (!Number.isFinite(ms)) return null;
+  const day = new Date(ms + DUBAI_MS).toISOString().slice(0, 10);
+  return (ms + DUBAI_MS) % 864e5 === 0 ? day
+    : new Date(Date.parse(`${day}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
 };
 const POLICY_WORDS = { thin: 'thinned', remove: 'removed', keep: 'kept', failed: 'failed' };
 const num = (v) => (v == null ? null : Number(v).toLocaleString('en-US'));
@@ -92,19 +106,20 @@ export function retentionPanel(h) {
     catch (e) { p.body.innerHTML = ''; h.empty(p.body, `The retention record could not be read: ${e.message}`); return; }
     p.body.innerHTML = '';
     const n = d.next || {};
-    const head = document.createElement('p');
-    head.className = 'dim';
     const tele = n.telemetry_cutoff;
-    head.innerHTML = [
-      `<b>Mode:</b> ${esc(MODE_WORDS[n.mode] || n.mode || 'not read')}`,
-      `<b>Schedule:</b> nightly at ${esc(n.schedule?.utc || '19:53')} UTC (${esc(n.schedule?.dubai || '23:53')} Dubai)`,
-      tele ? `<b>Positions:</b> thinned before ${esc(dayWords(tele.day))}${tele.floored
-        ? ` — the setting asks for ${esc(dayWords(tele.asked))}, held back to a week before the weekly backfill’s window` : ''}`
-        : '<b>Positions:</b> never thinned (RETENTION_TELEMETRY_DAYS is 0)',
-      n.alert_cutoff ? `<b>Alerts:</b> removed before ${esc(dayWords(n.alert_cutoff.day))}`
-        : '<b>Alerts:</b> kept for ever (RETENTION_ALERT_DAYS is 0)',
-    ].join(' · ');
-    p.body.append(head);
+    /* One box for the facts, so .pbody's panel gap falls around it and not
+       between every line; each line stays its own short block for focus.js. */
+    const facts = document.createElement('div');
+    facts.className = 'ret-facts';
+    p.body.append(facts);
+    const line = (html) => { const e = document.createElement('p'); e.style.margin = '0'; e.innerHTML = html; facts.append(e); };
+    line(`<b>Mode:</b> ${esc(MODE_WORDS[n.mode] || n.mode || 'not read')}`);
+    line(`<b>Runs</b> nightly at ${esc(n.schedule?.utc || '19:53')} UTC (${esc(n.schedule?.dubai || '23:53')} Dubai)`);
+    line(tele ? `<b>Positions</b> thinned past ${esc(dayWords(tele.day))}`
+      : '<b>Positions</b> never thinned (RETENTION_TELEMETRY_DAYS is 0)');
+    if (tele?.floored) line(`held back from ${esc(dayWords(tele.asked))}: never inside the weekly backfill’s window`);
+    line(n.alert_cutoff ? `<b>Alerts</b> removed past ${esc(dayWords(n.alert_cutoff.day))}`
+      : '<b>Alerts</b> kept for ever (RETENTION_ALERT_DAYS is 0)');
     if (!d.last) { h.empty(p.body, d.absent || 'No retention pass has run yet'); return; }
     const l = d.last;
     const status = document.createElement('p');
@@ -125,11 +140,10 @@ export function retentionPanel(h) {
       { label: 'Why', key: 'note', render: (r) => esc(r.note || '') },
     ]));
     for (const s of d.state || []) {
-      const line = document.createElement('p');
-      line.className = 'dim';
-      line.textContent = `${s.tbl}: ${s.action} by retention before ${h.dtStr(s.done_before)}`
-        + `${s.bucket_min ? ` (one fix per car per ${s.bucket_min} min, plus every change)` : ''}.`;
-      p.body.append(line);
+      const e = document.createElement('p');
+      e.textContent = `${s.action === 'removed' ? 'Removed' : 'Thinned'} for real: ${s.tbl} before `
+        + `${dayWords(wholeDayAfter(s.done_before))}`;
+      p.body.append(e);
     }
   };
   fill();
