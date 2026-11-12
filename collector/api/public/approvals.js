@@ -137,10 +137,16 @@ function contractTail(host, all, open, done) {
   const absHost = el('div');
   host.append(absHost);
   absenceBand(absHost, [
+    /* The server cuts its list at the newest 200 BEFORE it keeps the ones
+       this reader's role may see (api/access/routes.js /api/access/proposals:
+       LIMIT 200, then proposalVisible), so a reader who sees fewer than 200
+       cannot tell whether the cut was reached. The first draft said the cap
+       only when this reader saw 200, and otherwise described the list as
+       complete — a claim the page cannot make (the ARK review, 2026-11-12).
+       The cap is stated always; that it WAS reached, only when it shows. */
     { label: 'Decided more than 30 days ago', fig: null, none: 'Not listed',
-      why: all.length >= 200
-        ? 'The server lists what is still open and what was prepared in the last 30 days, and at most 200 of them — this list reached that limit. Older decisions are in the audit log (Access → Audit).'
-        : 'The server lists what is still open and what was prepared in the last 30 days. Older decisions are in the audit log (Access → Audit).' },
+      why: `The server lists what is still open and what was prepared in the last 30 days — at most the newest 200, counted before your role’s share is kept${
+        all.length >= 200 ? ', and this list reached that limit' : ''}. Older decisions are in the audit log (Access → Audit).` },
     { label: 'Proposals your role may not see', fig: null, none: 'Not counted',
       why: 'The server sends each reader only the proposals their role may see, and does not say how many others there are.' },
   ]);

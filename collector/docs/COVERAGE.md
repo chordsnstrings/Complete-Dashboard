@@ -10791,3 +10791,27 @@ it again.
   a block that declares a name the script already uses reassigns it: the first draft of the
   theme-colour collapse declared `var pick`, which is the phone/desktop choice a few lines up. It
   was harmless only because nothing read `pick` after it. Give a new block its own names.
+
+#### …and what the ARK review added (2026-11-12)
+
+- **A service-worker test that never opens the page with the server gone proves nothing about
+  offline.** Every check of the first draft ran on a page already open and listening. Opened
+  offline — reload with every socket refused, `test/sw_desktop.test.mjs` §5 — the desktop showed
+  two faults no other check could see: a blank page, and kept figures with no offline line.
+- **Skipping the reload on the first claim also skips filling the cache.** A page's first-screen
+  modules load before any worker controls it, so they never pass through it; the phone's reload is
+  what sends them through, and its own modules are precached besides. A build that skips the reload
+  must send what it loaded through the worker some other way (swreg.js `warmShell`), or its first
+  offline open is index.html with no app.js — a blank white page.
+- **A worker's `postMessage` to a page with no listener is lost.** The browser holds them only
+  until the document has parsed; after that, a message with no listener is dropped. A listener in a
+  module loaded on demand misses everything said before it arrived — on an offline open, all of the
+  first page's answers. Listen while the shell boots and hand the messages over (app.js `swHeld`).
+- **A queued Cache Storage write must check whose data it is when it runs, not when the answer
+  arrived.** A keep that waits its turn can run after another reader's first answer has emptied
+  the cache for them, and open the NEW cache. Carry the scope with the keep, re-check it just
+  before the put, and name the new scope before emptying the old (sw.js `keepOne`, `startScope`).
+- **A count of "texts" from the SMS outbox must name its kinds.** The 05:00 cash run and the
+  trip-goal runs (`cash_run`, `target_run`) write their own lines into `sms_outbox` with status
+  `sent` and no text, so "status = sent" counts them as texts with no delivery report. Use the
+  server's own list: cash_deposit, trip_register, target_nudge.

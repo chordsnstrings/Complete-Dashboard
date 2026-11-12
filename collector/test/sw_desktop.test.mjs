@@ -39,6 +39,26 @@
      · data.js: drop `|| swOffline(r)` and the swOffline branch in failure()
        → "…not retried, and not called a slow server" fails.
 
+   5. AN OFFLINE OPEN (added by the ARK review, 2026-11-12). The four checks
+      above all ran on a page that was already open and listening; none
+      opened the page with the server gone, which is what offline is. Done
+      that way, two faults showed: after ONE online visit the offline open
+      was a blank white page (the desktop's app.js and five modules only it
+      imports were never in the worker's cache: the phone puts its first
+      screen there by reloading on the first claim, which the desktop skips),
+      and with the answers kept, the page painted them with NO offline line
+      (#overview: 6 opens of 6), because they all came back before swreg.js
+      was listening. Reversions, each run and seen to fail:
+     · swreg.js: drop `warmShell(win);` from the first-claim branch → "after
+       ONE online visit, an offline open draws the page" fails (blank page).
+     · app.js: hand swreg.js nothing (`registerWorker()` without `held`) →
+       "every offline open … says so (3 of 3)" fails.
+   2b. WHOSE ANSWER WHEN THE KEEP RUNS (the same review). Keeps are queued,
+      so one can run after the next reader's first answer has emptied the
+      cache for that reader. Reversion: sw.js keepOne without its two scope
+      checks → "none of the earlier reader's answers is kept in the next
+      reader's cache" fails.
+
    Synthetic data only (mockapi.mjs and generated JSON). */
 import { readFileSync } from 'node:fs';
 import express from 'express';
@@ -62,7 +82,11 @@ check('both wait for the page to load first', /addEventListener\('load'/.test(ph
 check('both reload once on a takeover, guarded', /controllerchange[\s\S]{0,120}reloading[\s\S]{0,80}location\.reload\(\)/.test(phone)
   && /controllerchange[\s\S]{0,240}reloading[\s\S]{0,120}location\.reload\(\)/.test(desk));
 check('the desktop shell registers it, after the first render is under way, without a first-screen import',
-  /import\('\.\/swreg\.js'\)\.then\(\(m\) => m\.registerWorker\(\)\)/.test(appJs) && !/^import[^;]*swreg/m.test(appJs));
+  /import\('\.\/swreg\.js'\)\.then\(\(m\) => m\.registerWorker\(\{ held: swHeld \}\)\)/.test(appJs) && !/^import[^;]*swreg/m.test(appJs));
+check('…and listens for the worker’s word from before sign-in is asked, handing it over at registration',
+  appJs.indexOf("sw.addEventListener('message', keep)") > 0
+  && appJs.indexOf("sw.addEventListener('message', keep)") < appJs.indexOf('const whoReady = loadWho()')
+  && /if \(!controlled\) \{ controlled = true; warmShell\(win\); return; \}/.test(desk));
 const srvJs = readFileSync(new URL('../api/server.js', import.meta.url), 'utf8');
 const sw0 = read('sw.js');
 check('VERSION is still the one line the server rewrites, and the first fingerprint-shaped string a reader greps',
@@ -73,8 +97,10 @@ check('VERSION is still the one line the server rewrites, and the first fingerpr
 const BUILD = '0123456789ab';
 let build = BUILD;                  // what the server is "deployed" at now
 let refuse = false;                 // /api/test/* unreachable
+let down = false;                   // the whole server unreachable (section 5)
 const hits = new Map();
 const web = express();
+web.use((req, _res, next) => { if (down) { req.socket.destroy(); return; } next(); });
 web.get('/sw.js', (_q, r) => {
   r.set({ 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-cache, max-age=0, must-revalidate',
     'Service-Worker-Allowed': '/' });
@@ -88,7 +114,10 @@ web.get('/api/test/:kind/:i', (req, res) => {
   const k = `${req.params.kind}/${req.params.i}`;
   hits.set(k, (hits.get(k) || 0) + 1);
   if (refuse) { req.socket.destroy(); return; }
-  const pad = req.params.kind === 'big' ? 'x'.repeat(3_900_000) : req.params.kind === 'huge' ? 'x'.repeat(5_000_000) : '';
+  /* Whose answer (§2b): the server stamps x-fm-scope for a signed-in reader. */
+  if (req.query.scope) res.set('x-fm-scope', String(req.query.scope));
+  const pad = req.params.kind === 'big' ? 'x'.repeat(3_900_000) : req.params.kind === 'huge' ? 'x'.repeat(5_000_000)
+    : req.params.kind === 'mid' ? 'x'.repeat(400_000) : '';
   res.json({ i: Number(req.params.i), pad });
 });
 web.use(mock);
@@ -159,6 +188,29 @@ try {
   check('answers past 24 MB evict the oldest until the total fits', bytes <= 24 * 1024 * 1024 && big.includes('/api/test/big/6')
     && !big.includes('/api/test/big/0'), `${(bytes / 1048576).toFixed(1)} MB, held ${big.join(' ')}`);
   check('…and one answer over 4 MB is never kept', (await held('/api/test/huge/')).length === 0);
+
+  /* ── 2b · whose answer, when the keep finally runs (the ARK review) ──
+     Keeps queue behind one another, so one can run after the next reader's
+     first answer has emptied the cache for them. Thirty answers for reader
+     A, then — with their keeps still queued — one for reader B: none of A's
+     may be found in B's cache once the queue has drained (B's own answer,
+     queued last, is the sign it has). */
+  console.log('\n2b · a keep that runs after the scope moved on is dropped');
+  const leak = await page.evaluate(async (name) => {
+    await Promise.all(Array.from({ length: 30 }, (_, i) => fetch(`/api/test/mid/${i}?scope=reader-a`)));
+    await fetch('/api/test/n/7000?scope=reader-b');
+    const c = await caches.open(name);
+    let done = false;
+    for (let i = 0; i < 300 && !done; i++) {
+      done = !!(await c.match('/api/test/n/7000?scope=reader-b'));
+      if (!done) await new Promise((r) => setTimeout(r, 100));
+    }
+    const keys = (await c.keys()).map((r) => new URL(r.url).pathname);
+    const scope = await (await c.match('/__fm-data-scope'))?.text();
+    return { done, scope, a: keys.filter((k) => k.startsWith('/api/test/mid/')).length, n: keys.length };
+  }, DATA);
+  check('none of the earlier reader’s answers is kept in the next reader’s cache', leak.done && leak.scope === 'reader-b' && leak.a === 0,
+    JSON.stringify(leak));
 
   /* ── 3 · the deploy check ── */
   console.log('\n3 · HEAD answers for the copy this tab runs; another deploy’s module is never kept');
@@ -242,6 +294,59 @@ try {
     `reloaded ${did}, loads ${loads - loadsBefore}, mark ${after.mark}`);
   check('…and its activation retired the old deploy’s caches', keys.every((k) => k.startsWith('fleet-fedcbafedcba')), keys.join(' '));
   await ctx.close();
+
+  /* ── 5 · an offline open ── (a fresh browser profile: no worker yet) */
+  console.log('\n5 · an offline open: the page draws from the worker, and says its figures are kept copies');
+  const ctx2 = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: 'allow',
+    timezoneId: 'Asia/Dubai', colorScheme: 'light', reducedMotion: 'reduce' });
+  const p2 = await ctx2.newPage();
+  p2.on('pageerror', (e) => errors.push(`offline: ${String(e.message).slice(0, 200)}`));
+  const SHELL2 = `fleet-${build}-shell`;
+  await p2.goto(`${base}/?ui=desktop&skin=arkiv&motion=off#overview`, { waitUntil: 'load' });
+  await p2.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 20000 });
+  /* The first claim asks the worker for what the page had already loaded;
+     held once app.js is in the shell cache (bounded wait, then measured). */
+  const warmed = await p2.evaluate(async (name) => {
+    for (let i = 0; i < 100; i++) {
+      if (await (await caches.open(name)).match('/app.js')) return true;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    return false;
+  }, SHELL2);
+  down = true;
+  await p2.reload({ waitUntil: 'load' });
+  await p2.waitForTimeout(3500);
+  const once = await p2.evaluate(() => ({ nav: document.querySelectorAll('#nav a').length,
+    view: (document.getElementById('view')?.innerText || '').trim().length,
+    line: document.getElementById('swStale')?.textContent || null }));
+  check('after ONE online visit, an offline open draws the page from the worker (it was a blank white page)',
+    warmed && once.nav > 0 && once.view > 0, JSON.stringify({ warmed, ...once, line: undefined }));
+  check('…and says, above the page, that the server is not answering', /^Offline\./.test(once.line || ''), JSON.stringify(once.line));
+  /* Answers kept too (an online visit through the worker), then offline,
+     three times over: every open must carry the line. Its first page's
+     answers all come back before swreg.js has loaded. */
+  const lines = [];
+  for (let i = 0; i < 3; i++) {
+    down = false;
+    await p2.reload({ waitUntil: 'load' });
+    await p2.waitForTimeout(2500);
+    down = true;
+    await p2.reload({ waitUntil: 'load' });
+    await p2.waitForTimeout(3500);
+    lines.push(await p2.evaluate(() => document.getElementById('swStale')?.textContent || null));
+  }
+  down = false;
+  check('every offline open of a page whose answers were kept says they are kept copies, in Dubai time (3 of 3)',
+    lines.every((l) => /^Offline\. The figures on this page are copies this browser kept/.test(l || '') && /\(Dubai time\)/.test(l || '')),
+    JSON.stringify(lines));
+  const box = await p2.evaluate(() => {
+    const n = document.getElementById('swStale');
+    const v = document.getElementById('view');
+    return n && v ? { line: Math.round(n.getBoundingClientRect().left),
+      page: Math.round(v.getBoundingClientRect().left + parseFloat(getComputedStyle(v).paddingLeft)) } : null;
+  });
+  check('…standing on the page’s own gutter, not on the window’s edge', box && box.line === box.page, JSON.stringify(box));
+  await ctx2.close();
 } catch (e) {
   fail++; console.log(`  ✗ the browser half threw: ${e.stack || e}`);
 }

@@ -64,6 +64,17 @@ check('…the HR roster account link: the same <a class="pill plat" href title>'
   ui.chanChip('bolt', { label: 'Bolt · phone', title: 'Bolt account x — matched by phone', href: '#driver/p7' })
     === '<a class="pill plat" href="#driver/p7" title="Bolt account x — matched by phone">Bolt · phone</a>');
 check('…the driver ledger, whose label is the raw key', ui.chanChip('uber', { label: 'uber' }) === '<span class="pill plat">uber</span>');
+/* The ARK review (2026-11-12): three platform pills were still drawn under
+   the contract with no swatch — #compare's driver table (compareContract
+   reuses driverCols), #performer's week table and #same-person's sides —
+   all plain pills with no 'plat' tone. chanChip(…, { tone: null }) is that
+   plain pill byte for byte under the old skin. */
+check('…a plain platform pill (no tone): #compare, #performer, #same-person',
+  ui.chanChip('bolt', { tone: null }) === ui.pill('Bolt') && ui.chanChip('hotel', { tone: null }) === ui.pill(ui.sourceLabel('hotel')));
+check('…and none of the three draws a platform as a bare pill any more',
+  !/pill\(sourceLabel\(x\)\)\)\.join/.test(read('compare.js').slice(0, read('compare.js').indexOf('function channelCols')))
+  && !/render: \(r\) => pill\(sourceLabel\(r\.platform\)\)/.test(read('performers.js'))
+  && !/const platPill = \(p\) => \(p \? pill\(/.test(read('sameperson.js')));
 {
   const real = { d: globalThis.document, g: globalThis.getComputedStyle };
   globalThis.document = { documentElement: {} };
@@ -345,6 +356,26 @@ await (async () => {
     await ctx.close();
   }
   {
+    /* The trip-goal run's own line (target_run) is written 'sent' when the
+       run finishes and is never a text, so it never has a delivery report:
+       counted as a text, "Delivered to the phone" read "1 of 2 sent" here
+       (the ARK review, 2026-11-12). One delivered cash text and one run line:
+       every TEXT reported. */
+    const base0 = { id: 0, status: 'sent', hold_reason: null, person_id: null, person_name: null, user_id: null, user_email: null,
+      fleet_id: 'ecosine', destination: null, sender: null, message_text: null, not_before: null, cost: null, error: null,
+      plate: null, trip_start: null, trip_end: null, business_day: '2026-11-11', detail: null, why: null };
+    const fx = { ...SIGNED, '/api/sms/log': { rows: [
+      { ...base0, id: 7, kind: 'target_run', provider_status: null, detail: { finished: true, slot: '13:00', mode: 'dry' }, created_at: iso(3), sent_at: null },
+      { ...base0, id: 8, kind: 'cash_deposit', person_id: 2, person_name: 'Test Driver 2', destination: '971500000002',
+        message_text: 'Test text', provider_status: 'Delivered', cost: 0.1, created_at: iso(5), sent_at: iso(5) },
+    ], last7days: { sent: 1, held: 0, queued: 0, failed: 0, cost: 0.1 }, switches: {}, hold_why: {} } };
+    const { ctx, page } = await open('arkiv', 'messages', { fixtures: fx });
+    const s = await shape(page);
+    const cell = s.abs.find((c) => c.label === 'Delivered to the phone');
+    check('#messages: a run’s own line is not a text with no delivery report', cell && cell.none && /^Every one reported$/.test(cell.fig), JSON.stringify(cell));
+    await ctx.close();
+  }
+  {
     const { ctx, page } = await open('arkiv', 'messages/next', { fixtures: SIGNED });
     const s = await shape(page);
     check('#messages/next: the dry run says what it cannot know, and has its colophon',
@@ -367,6 +398,21 @@ await (async () => {
       && /1 committed/.test(s.subs['Decided in the last 30 days']) && /1 withdrawn/.test(s.subs['Decided in the last 30 days']), JSON.stringify({ v: s.values, s: s.subs }));
     check('#approvals: the two lists are numbered sections', s.heads.includes('Waiting for a second person') && s.heads.includes('Decided in the last 30 days'), s.heads.join(' | '));
     check('…and the waiting card still offers Commit', await page.locator('#view .ap-card .ap-commit').count() === 1);
+    /* The server cuts at 200 BEFORE the role filter, so the cap is stated
+       whatever this reader sees (the ARK review, 2026-11-12: the first draft
+       called a 3-item list complete). */
+    check('#approvals: † states the server’s 200 cap even when this reader sees fewer',
+      /at most the newest 200, counted before your role’s share is kept\./.test(s.abs.find((c) => c.label === 'Decided more than 30 days ago')?.why || ''),
+      JSON.stringify(s.abs[0]));
+    await ctx.close();
+  }
+  {
+    /* At 390 the decided list (a nowrap table) pushed the page 112px sideways
+       (the ARK review, 2026-11-12; pre-existing, now inside its panel). */
+    const { ctx, page } = await open('arkiv', 'approvals', { width: 390, fixtures: SIGNED });
+    const r = await page.evaluate(() => ({ x: document.documentElement.scrollWidth - window.innerWidth,
+      table: !!document.querySelector('#view .ap-done table.ap-rows') }));
+    check('#approvals at 390: the decided list scrolls in its own box, the page does not', r.table && r.x <= 0, JSON.stringify(r));
     await ctx.close();
   }
   {

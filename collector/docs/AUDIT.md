@@ -2913,3 +2913,24 @@ unreachable, a kept answer paints and one line above #view says it is a kept cop
 Dubai time, not live, and goes when the page is redrawn from live answers; a missing answer says
 the browser is offline instead of "the server took too long". To repeat: `node
 test/sw_desktop.test.mjs` (23 checks).
+
+### The ARK review's pass (2026-11-12)
+
+The mock on :8356, Chromium, Arkiv light and dark, `timezoneId` Asia/Dubai, a synthetic signed-in
+Owner (`@example.test`). Desktop build at 1280 and 390: #trips, #driver/drv-0 (and its trips and
+ledger tabs), #corporate/properties, #day/2026-08-14, #drivers, #unit/drivers, #hr-roster,
+#messages, #access, #approvals, #fleet-names, sign-in; phone build at 390: #driver/drv-0/overview,
+#fleet-names, #access, #messages, #approvals, sign-in. No page error; no NaN, `undefined` or
+`null` in any page's text; no phone touch target under 44px inside a page; chips with swatches on
+the driver header (Uber, Yango; the fleet Egari without), row marks on the five marked tables.
+
+| Page | Width / theme | Found | Done |
+|---|---|---|---|
+| the offline line | 1280, 390 | ran edge to edge outside #view, its dot on the window's edge, 36px (18px at 390) left of every panel | ARK-R6a: #view's gutter |
+| `#approvals` | 390 desktop build | sideways scroll 112px: the decided list, a nowrap table (the same 112px at `90d76da` in both skins, from the old layout) | ARK-R6b: scrolls in its own box under Arkiv |
+| `#messages`, `#approvals` | phone 390 | "Built for a bigger screen", as before — the phone has no screen for either, so no contract there | — |
+| desktop, offline after ONE online visit | 1280 | a blank white page | ARK-R1 |
+| desktop, offline after two online visits | 1280 | #overview's kept figures with no offline line, 6 opens of 6 (#trips 2 of 3) | ARK-R2 |
+
+To repeat the offline opens: `node test/sw_desktop.test.mjs` (§5: one online visit, then every
+socket refused and the page reloaded; then three rounds of an online visit and an offline open).

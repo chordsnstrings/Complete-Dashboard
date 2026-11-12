@@ -800,6 +800,12 @@
    swatch first — 8px, so it sits inside the chip's cap height at --t2 — and
    the word in ink. The pill is a flex box, so its 6px gap spaces the two. */
 :root[data-skin="arkiv"] .pill.chan .sw{width:8px;height:8px}
+/* #approvals' decided list (approvals.js) is a nowrap table of four columns,
+   484px wide with a typical summary: under the contract it sits in its own
+   panel, and at 390 it pushed the whole page 112px sideways. It scrolls in
+   its own box instead, as every tableFrom table does (the ARK review,
+   2026-11-12; Classic is frozen and keeps its old overflow). */
+:root[data-skin="arkiv"] .ap-done{overflow-x:auto;max-width:100%}
 :root[data-skin="arkiv"] a.pill.chan{text-decoration:none}
 :root[data-skin="arkiv"] a.pill.chan:hover{color:var(--ink);box-shadow:inset 0 0 0 1px var(--grey-2)}
 :root[data-skin="arkiv"] .pill.ok,:root[data-skin="arkiv"] .tag.ok{background:var(--w-pos);color:var(--ink)}

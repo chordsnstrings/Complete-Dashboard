@@ -17,13 +17,18 @@
    dates, the cars — and make both answers one click. A reviewer who has to go
    and look something up will not use this twice. */
 import { el, esc, panel, loading, note, kpiRow, entity, pill, sourceLabel,
-  dateStr, fmt, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, foldChildren, countOf } from './ui.js';
+  dateStr, fmt, contract, glance, glanceBand, bandTiles, absenceBand, pageFoot, foldChildren, countOf, chanChip } from './ui.js';
 import { hbars } from './charts.js';
 import { api, href } from './data.js';
 import { fleetLabel } from './access.js';
 import { readReview, drawReview } from './charging_review.js';
 
-const platPill = (p) => (p ? pill(sourceLabel(p)) : '');
+/* Each side's channel, as a channel chip (ui.js chanChip): the old skin's
+   plain pill exactly (tone null), and under the page contract the channel's
+   swatch beside the word — it was the one platform pill on the review pages
+   still drawn without it (the ARK review, 2026-11-12). The fleets beside it
+   are not channels and stay plain pills. */
+const platPill = (p) => (p ? chanChip(p, { tone: null }) : '');
 
 /* One side of the pair, as the block a reviewer reads. Deliberately identical
    for both sides: a layout that presents the survivor more prominently than

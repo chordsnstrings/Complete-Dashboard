@@ -183,7 +183,7 @@ async function renderLog(root, kind) {
   }
   hold.append(p.panel);
   return { rows: rows.length, listed: list.length, kind,
-    sent: list.filter((r) => r.status === 'sent' && r.kind !== 'reset_code' && r.kind !== 'phone_code'),
+    sent: list.filter((r) => r.status === 'sent' && DRIVER_TEXTS.has(r.kind)),
     asked: LOG_LIMIT };
 }
 
@@ -306,6 +306,16 @@ export async function renderMessages(root, param, sub) {
          a staff code said;
      the colophon. The old skin draws exactly what it drew before. */
 const LOG_LIMIT = 300;
+/* The texts that go to a DRIVER's phone — the kinds api/sms_routes.js counts
+   as "Texted to drivers". Not the 05:00 cash run's line nor the trip-goal
+   run's (target_run): those are the runs' own records, written 'sent' when a
+   run finishes, never a text, so they never carry a delivery report. Counted
+   in, the first draft printed "Delivered to the phone: N of M sent" with the
+   13:00 and 18:00 run lines among the N — two false "no report" lines on
+   every day the trip-goal texts run, their dry run (the default) included
+   (the ARK review, 2026-11-12; src/target_sms.js writes them). Nor a staff
+   code: † says what is kept of those. */
+const DRIVER_TEXTS = new Set(['cash_deposit', 'trip_register', 'target_nudge']);
 function contractTiles(c) {
   if (!c) {
     const why = 'the outbox did not report its 7-day counts';

@@ -187,21 +187,38 @@ const stamp = async (res) => {
 
 /* Keeping an answer, one at a time: the ledger is read, changed and written
    back by each, and two writers interleaved would each drop the other's
-   line. A failed keep never stops the next. */
+   line. A failed keep never stops the next.
+
+   WHOSE ANSWER, checked again when it is kept. A keep waits its turn behind
+   the ones before it, so it can run well after its answer arrived — after
+   another reader's first answer has emptied the cache for THEIR scope
+   (startScope below). As first written, a keep opened the cache when its
+   turn came and put its answer in whatever it found there: measured (the
+   ARK review, 2026-11-12, test/sw_desktop.test.mjs §2b), thirty answers
+   for one scope and then one under another left 28 of the thirty in the
+   new scope's cache, under its name — one reader's figures, painted
+   for the next on an offline open: the exact thing the scope exists to
+   prevent (ULM-DESIGN §9.2). Before the queue, the put followed the scope
+   check by one await. So each keep carries the scope it was answered under
+   and is dropped when the cache has moved on: checked before the work, and
+   again just before the put; startScope names the new scope FIRST, so a
+   keep in flight sees the change the moment it begins. */
 let keeping = Promise.resolve();
-function keepData(request, res) {
-  const job = keeping.then(() => keepOne(request, res));
+function keepData(request, res, scope) {
+  const job = keeping.then(() => keepOne(request, res, scope));
   keeping = job.catch(() => {});
   return job;
 }
 /* The two lines the cache keeps about itself are not answers. A function, not
    a Set built here: SCOPE_KEY is declared further down. */
 const isMeta = (u) => { const p = new URL(u).pathname; return p === SCOPE_KEY || p === LEDGER_KEY; };
-async function keepOne(request, res) {
+async function keepOne(request, res, scope) {
+  if (scope !== await currentScope()) return;          // the cache belongs to someone else now
   const c = await caches.open(DATA);
   const stamped = await stamp(res);
   const bytes = Number(stamped.headers.get('x-sw-bytes')) || 0;
   if (bytes > DATA_CAP.entry) return;
+  if (scope !== lastScope) return;                     // …and it moved on while the body was read
   await c.put(request, stamped);
   let ledger = {};
   try { const l = await c.match(LEDGER_KEY); if (l) ledger = await l.json(); } catch { ledger = {}; }
@@ -253,9 +270,15 @@ async function currentScope() {
   return lastScope;
 }
 async function startScope(scope) {
-  await caches.delete(DATA);
-  await (await caches.open(DATA)).put(SCOPE_KEY, new Response(scope));
+  /* Named before the cache is emptied, so a keep still queued for the old
+     scope drops its answer instead of putting it in the new cache (keepOne).
+     A switch that fails part-way forgets the name again: the next answer
+     reads the scope back from the cache, finds the old one, and retries. */
   lastScope = scope;
+  try {
+    await caches.delete(DATA);
+    await (await caches.open(DATA)).put(SCOPE_KEY, new Response(scope));
+  } catch (err) { lastScope = undefined; throw err; }
 }
 
 self.addEventListener('fetch', (e) => {
@@ -309,7 +332,7 @@ self.addEventListener('fetch', (e) => {
           || url.pathname.startsWith('/api/auth') || url.pathname.startsWith('/api/access');
         /* Kept within the bound (keepData), after the answer has gone to the
            page: waitUntil holds the worker open for the write. */
-        if (fresh.ok && !noStore) e.waitUntil(keepData(request, fresh.clone()).catch(() => {}));
+        if (fresh.ok && !noStore) e.waitUntil(keepData(request, fresh.clone(), scope).catch(() => {}));
         return fresh;
       } catch {
         /* The cache only ever holds ONE scope's answers (startScope empties it
