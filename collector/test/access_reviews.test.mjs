@@ -25,7 +25,10 @@
      reviews.js dormantSweep: exempt every Owner again → "a dormant second
        Owner is suspended" fails.
      findings.js: take the fleet from the request body instead of the
-       finding → "the finding's own fleet decides" fails. */
+       finding → "the finding's own fleet decides" fails.
+     reviews.js reviewSweep: open the month's review before ending what is
+       due → "the due grant ended, and the review that opened in the same
+       pass does not list it" fails. */
 import { PGlite } from '@electric-sql/pglite';
 import express from 'express';
 import { readFileSync } from 'node:fs';
@@ -436,6 +439,31 @@ console.log('\n8. an Owner\u2019s unattested access ends only while another Owne
     (await grantOf(o2)).status === 'revoked' && lines[0].state === 'expired', JSON.stringify(ex));
   check('the last Owner is never ended by a review — kept, saying why',
     (await grantOf(ownerId)).status === 'active' && lines[1].state === 'kept' && /only active Owner/.test(lines[1].reason), JSON.stringify(lines));
+}
+
+/* ══ 9. one pass: what ends first, then what opens ═══════════════════════
+   The hourly sweep ends due access before it opens the month's review, so
+   the new review never lists a line that ends in the same pass.
+   REVERSION: open before expiring in reviewSweep — the new review lists
+   the grant that ended a moment later. */
+console.log('\n9. the sweep ends what is due before it opens the month’s review');
+{
+  await invite('sens', 'CLK', { name: 'Test Sensitive' });
+  const g = (await db.query(`SELECT id FROM access_grant WHERE user_id = $1 AND role_code = 'CLK'`, [people.sens.id])).rows[0];
+  const feb1 = new Date('2027-02-01T06:00:00Z');
+  const c = await db.query(`INSERT INTO access_review_cycle (kind, period, due_at, closed_at, expires_at, items)
+    VALUES ('adhoc', 'test-9', now(), now(), now(), 1) RETURNING id`);
+  await db.query(`INSERT INTO access_review_item (cycle_id, kind, grant_id, user_id, roles, state, expires_at)
+    VALUES ($1, 'grant', $2, $3, '{CLK}', 'unattested', $4)`, [c.rows[0].id, g.id, people.sens.id, new Date(feb1.getTime() - 60_000)]);
+  await svc.setConfig(db, 'mode', 'enforced', ownerId);
+  const r = await reviewSweep(db, { now: feb1 });
+  await svc.setConfig(db, 'mode', 'open', ownerId);
+  await svc.getConfig(db, { fresh: true });
+  const { rows: lines } = await db.query('SELECT grant_id FROM access_review_item WHERE cycle_id = $1', [r.opened?.cycle ?? -1]);
+  const st = (await db.query('SELECT status FROM access_grant WHERE id = $1', [g.id])).rows[0].status;
+  check('the due grant ended, and the review that opened in the same pass does not list it',
+    r.expired?.grants?.includes(Number(g.id)) && st === 'revoked' && r.opened?.period === '2027-02'
+      && !lines.some((l) => Number(l.grant_id) === Number(g.id)), JSON.stringify({ r, lines }));
 }
 
 server.close();

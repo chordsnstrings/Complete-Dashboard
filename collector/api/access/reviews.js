@@ -354,18 +354,19 @@ export async function expireUnattested(db, { now = new Date() } = {}) {
 }
 
 /* ── the hourly sweep ──────────────────────────────────────────────────── */
+/* In this order: what is due to END first, then reviews past their due
+   date CLOSED, then this month's review OPENED. Opening first snapshotted
+   access the same pass was about to end, and listed it in the new review
+   as a line that would read "already ended" a minute later. */
 export async function reviewSweep(db, { now = new Date(), log = { info() {} } } = {}) {
   const out = { opened: null, closed: [], expired: null };
-  const cfg = await svc.getConfig(db, { fresh: true });
-  if (cfg.mode === 'enforced') {
-    const kind = scheduledKind(now);
-    const r = await openCycle(db, { kind, by: null, now });
-    if (r.opened) {
-      out.opened = { cycle: r.cycle.id, kind, period: r.period, items: r.items };
-      await appendAudit(db, { actorLabel: 'system:schedule', action: 'access.review_opened', subjectType: 'review',
-        subjectId: r.cycle.id, detail: { kind, period: r.period, items: r.items, grants: r.grants, memberships: r.memberships } });
-      log.info('access', 'review opened', out.opened);
-    }
+  const ex = await expireUnattested(db, { now });
+  if (ex.grants.length || ex.memberships.length || ex.keptOwner.length || ex.gone.length) {
+    out.expired = ex;
+    svc.bumpAccess();
+    await appendAudit(db, { actorLabel: 'system:schedule', action: 'access.review_expired', subjectType: 'system',
+      detail: { grants_ended: ex.grants, memberships_ended: ex.memberships, kept_last_owner: ex.keptOwner, already_gone: ex.gone } });
+    log.info('access', 'unattested access ended', { grants: ex.grants.length, memberships: ex.memberships.length });
   }
   const { rows: due } = await db.query(
     'SELECT id, period, kind FROM access_review_cycle WHERE closed_at IS NULL AND due_at <= $1 ORDER BY id', [now]);
@@ -377,13 +378,16 @@ export async function reviewSweep(db, { now = new Date(), log = { info() {} } } 
       subjectId: num(c.id), detail: { kind: c.kind, period: c.period, unattested: r.unattested, gone: r.gone,
         kept_last_owner: r.keptOwner, ends: r.expires_at } });
   }
-  const ex = await expireUnattested(db, { now });
-  if (ex.grants.length || ex.memberships.length || ex.keptOwner.length || ex.gone.length) {
-    out.expired = ex;
-    svc.bumpAccess();
-    await appendAudit(db, { actorLabel: 'system:schedule', action: 'access.review_expired', subjectType: 'system',
-      detail: { grants_ended: ex.grants, memberships_ended: ex.memberships, kept_last_owner: ex.keptOwner, already_gone: ex.gone } });
-    log.info('access', 'unattested access ended', { grants: ex.grants.length, memberships: ex.memberships.length });
+  const cfg = await svc.getConfig(db, { fresh: true });
+  if (cfg.mode === 'enforced') {
+    const kind = scheduledKind(now);
+    const r = await openCycle(db, { kind, by: null, now });
+    if (r.opened) {
+      out.opened = { cycle: r.cycle.id, kind, period: r.period, items: r.items };
+      await appendAudit(db, { actorLabel: 'system:schedule', action: 'access.review_opened', subjectType: 'review',
+        subjectId: r.cycle.id, detail: { kind, period: r.period, items: r.items, grants: r.grants, memberships: r.memberships } });
+      log.info('access', 'review opened', out.opened);
+    }
   }
   return out;
 }
@@ -490,7 +494,10 @@ export function reviewRoutes(app, { db, layer, wrap, h }) {
       const no = mayDecide(it, actor, now);
       return {
         id: num(it.id), cycle_id: num(it.cycle_id), kind: it.kind, grant_id: num(it.grant_id), team_id: num(it.team_id),
-        team_name: it.team_name || null, user_id: num(it.user_id), user_name: it.user_name, user_email: it.user_email,
+        /* A lead is shown the name; the email only where there is no name
+           to show — they attest people, they do not manage accounts. */
+        team_name: it.team_name || null, user_id: num(it.user_id), user_name: it.user_name,
+        user_email: actor.manager || !it.user_name ? it.user_email : null,
         user_status: it.user_status, roles: it.roles || [], fleets: it.fleets || null,
         /* The line's owner as the review opened (null: any Access admin or
            the Owner), and the team's lead now — who may also decide it. */
