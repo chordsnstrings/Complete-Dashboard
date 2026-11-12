@@ -31,7 +31,9 @@
        pass does not list it" fails.
      schema_v122.sql: the two ALTERs on access_user bare, outside their DO
        block → "v122 runs for a user that does not own access_user" fails
-       ("must be owner of table access_user"). */
+       ("must be owner of table access_user").
+     schema_v122.sql: the backfill's WHERE made false → "the old sweep's
+       suspensions learn when they happened" fails. */
 import { PGlite } from '@electric-sql/pglite';
 import express from 'express';
 import { readFileSync } from 'node:fs';
@@ -490,6 +492,24 @@ console.log('\n10. v122 runs even where access_user is not this user’s to alte
   await fresh.exec('RESET ROLE');
   const made = (await fresh.query(`SELECT count(*)::int AS n FROM pg_tables WHERE tablename IN ('access_review_cycle', 'access_review_item', 'finding_owner')`)).rows[0].n;
   check('v122 runs for a user that does not own access_user, and still makes its tables', !err && made === 3, String(err?.message || made));
+  /* The backfill, run by the owner: an account the 2026-09-28 sweep
+     suspended gets its dormant_since from the audit row that recorded it,
+     or — with no such row — from the day it became 60 days dormant. */
+  const u1 = (await fresh.query(`INSERT INTO access_user (email, email_norm, status, suspended_reason, created_at, last_login_at)
+    VALUES ('old1@example.test', 'old1@example.test', 'suspended', 'no sign-in for 60 days', '2026-06-01T00:00:00Z', '2026-07-01T00:00:00Z')
+    RETURNING id`)).rows[0].id;
+  const u2 = (await fresh.query(`INSERT INTO access_user (email, email_norm, status, suspended_reason, created_at)
+    VALUES ('old2@example.test', 'old2@example.test', 'suspended', 'no sign-in for 60 days', '2026-06-01T00:00:00Z') RETURNING id`)).rows[0].id;
+  const u3 = (await fresh.query(`INSERT INTO access_user (email, email_norm, status, suspended_reason, created_at)
+    VALUES ('old3@example.test', 'old3@example.test', 'suspended', 'left the company', '2026-06-01T00:00:00Z') RETURNING id`)).rows[0].id;
+  await fresh.query(`INSERT INTO access_audit (at, actor_label, action, subject_type, detail, hash)
+    VALUES ('2026-08-30T10:00:00Z', 'system:housekeeping', 'access.housekeeping', 'system', $1, 'x')`,
+  [JSON.stringify({ suspended: [Number(u1)], grants_ended: [] })]);
+  await fresh.exec(readFileSync(new URL('../sql/schema_v122.sql', import.meta.url), 'utf8'));
+  const ds = Object.fromEntries((await fresh.query('SELECT id, dormant_since FROM access_user')).rows
+    .map((r) => [Number(r.id), r.dormant_since ? new Date(r.dormant_since).toISOString() : null]));
+  check('the old sweep’s suspensions learn when they happened — from the audit log, else from the 60th day',
+    ds[Number(u1)] === '2026-08-30T10:00:00.000Z' && ds[Number(u2)] === '2026-07-31T00:00:00.000Z' && ds[Number(u3)] === null, JSON.stringify(ds));
   await fresh.close();
 }
 

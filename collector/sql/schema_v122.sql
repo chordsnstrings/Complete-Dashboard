@@ -98,10 +98,22 @@ CREATE INDEX IF NOT EXISTS access_review_item_reviewer ON access_review_item (re
 -- missing privilege is therefore reported and passed, never raised. Without
 -- the columns the dormancy sweep fails (logged; the rest of the housekeeping
 -- still runs) and sign-in says the plain "This account is suspended".
+-- The backfill: an account the 2026-09-28 sweep already suspended carries
+-- only its reason ('no sign-in for 60 days', the text that sweep wrote).
+-- Its dormant_since is the moment the sweep recorded it — the
+-- access.housekeeping audit row listing its id — or, where no such row is
+-- found, the moment it became 60 days dormant. Inside the block, so a
+-- refused ALTER skips it rather than failing on a column that is not there.
 DO $$
 BEGIN
   ALTER TABLE access_user ADD COLUMN IF NOT EXISTS reinstated_at timestamptz;
   ALTER TABLE access_user ADD COLUMN IF NOT EXISTS dormant_since timestamptz;
+  UPDATE access_user u SET dormant_since = COALESCE(
+      (SELECT min(a.at) FROM access_audit a
+        WHERE a.action = 'access.housekeeping' AND a.detail -> 'suspended' @> to_jsonb(u.id)
+          AND a.at >= COALESCE(u.last_login_at, u.created_at)),
+      COALESCE(u.last_login_at, u.created_at) + interval '60 days')
+   WHERE u.status = 'suspended' AND u.suspended_reason = 'no sign-in for 60 days' AND u.dormant_since IS NULL;
 EXCEPTION WHEN insufficient_privilege THEN
   RAISE NOTICE 'v122: access_user.reinstated_at/dormant_since not added: %', SQLERRM;
 END $$;
