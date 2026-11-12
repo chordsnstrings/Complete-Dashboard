@@ -10754,3 +10754,37 @@ it again.
   - platform bookings (167);
   - the five dataset-coverage counts (154 each). These are one per `/api/coverage` computation, roughly every 7.4 min.
 - `/api/coverage` measured 16.9 s, 19.3 s and 32.7 s cold.
+
+## Operations basics — health, client address, deploy, CI (2026-11-12, branch fix/ops)
+
+What the OPS workstream learned that is not written down above. FIX-STATUS "OPS" has the rows.
+
+### Traps this added to the list
+
+* **A memory-only route is only as fast as the middleware in front of it.**
+  `/api/health` never touched the database, yet it waited on it: it was
+  registered below `app.use(access.identify)`, and identify() runs
+  `svc.getConfig(db)` for every `/api` path before any route. Anything that
+  must answer while the pool is full (the platform's probe above all) has to
+  be registered ABOVE the access layer — it now is, in api/server.js — and a
+  test of it must stand a stuck identify() behind it
+  (test/ops_health_budget.test.mjs), because a test with a fast database
+  cannot tell the two orders apart.
+* **On production `req.ip` is not the reader.** Responses carry
+  `server: cloudflare` and `cf-ray` (measured 2026-11-12), so a request passes
+  Cloudflare and then App Platform's router before it reaches the container,
+  and `trust proxy` 1 makes `req.ip` the address the nearest proxy reported —
+  possibly a Cloudflare edge shared by unrelated readers. The request budget
+  keys on `do-connecting-ip`, then `cf-connecting-ip`, then `req.ip`.
+  **Assumed, not verified:** that App Platform sets `do-connecting-ip` to the
+  reader's address and overwrites a client-sent one. Nothing reachable from
+  the sandbox echoes request headers. `/api/health`'s `rate_limit` block
+  reports, by header NAME only, which source keyed the last request
+  (`key_source_last`), this one (`key_source_this_request`) and every request
+  since boot (`key_sources_since_boot`): after the deploy, read it through the
+  public URL. A stream of `req.ip` means neither header arrives.
+* **Express routes case-insensitively and ignores one trailing slash,** so
+  anything that classifies a request by its path (a budget, a gate) must
+  lower-case it and drop the slash first: `/api/Probe/uber/rest/` reaches the
+  probe handler. The access gate refuses a capitalised `/API` prefix and a
+  trailing slash, but not capitals after the prefix.

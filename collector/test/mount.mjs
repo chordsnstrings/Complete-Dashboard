@@ -99,6 +99,15 @@ import { recordSaved } from '../api/save_check.js';
 import { normaliseFiles, crossFile, silentFiles, fileReport,
   boltFollowUp } from '../src/credfiles.js';
 import { SETTING_DEFS } from '../src/settings.js';
+/* server.js imports the liveness handler and the request budget from
+   api/ops.js. They are mounted ABOVE the START/END slice (they must run
+   before the access layer), so the slice does not reference them today; they
+   are imported and injected all the same, under the house rule that every
+   server.js import is here, so a later edit that moves a reference into the
+   slice meets a defined name instead of a ReferenceError before the first
+   assertion of every route test. test/ops_health_budget.test.mjs mounts them
+   for real. */
+import { makeHealth, makeRateLimiter } from '../api/ops.js';
 
 export const START = "/* ───────────────────────── overview ───────────────────────── */";
 export const END = '/* ───────────────── per-driver detail pages ───────────────── */';
@@ -194,6 +203,7 @@ export async function mountAll(db, { serverRoutes = true, inject = {}, pre = nul
        reach, and /api/settings/paste was in exactly that state. */
     recognise, unrecognised, checkAll, proposeKeys, SETTING_DEFS, recordSaved,
     normaliseFiles, crossFile, silentFiles, fileReport, boltFollowUp,
+    makeHealth, makeRateLimiter,
     /* LAST, so a test can replace any of the above.
        ─────────────────────────────────────────────────────────────────────
        Two of the paste route's dependencies call a provider over the
