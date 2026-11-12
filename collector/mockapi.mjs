@@ -2,6 +2,8 @@
 // Not shipped — used only to render and screenshot the dashboard during development.
 import { custodyWindows, carRuns, movementSegments, movementTotals } from './api/day_movement.js';
 import express from 'express';
+import { retentionSettings, telemetryCutoff, alertCutoff } from './src/data_retention.js';
+import { RETENTION_SCHEDULE } from './api/data_retention_routes.js';
 import { foldGrain, grainOf, previousWindow, PERIODS, dubaiDay } from './api/window.js';
 /* The HR roster's own parser and status rule — real, so the page's import
    panel is refused in the mock for exactly the reasons production refuses it,
@@ -7526,6 +7528,25 @@ app.get('/api/admin-mode', (req, r) => r.json({
   detail: 'ADMIN_TOKEN is not set on this service, so write endpoints accept a request without '
     + 'one. Reads stay redacted either way.',
 }));
+
+/* The Settings page's Data retention panel (api/data_retention_routes.js), in
+   the state production is in from the deploy until the first nightly pass:
+   the policy that would apply, computed by the real helpers from their
+   defaults, and no run yet — said, not left blank. route_smoke demands a
+   fixture for every route the UI calls (integration, 2026-11-12). */
+app.get('/api/settings/retention', (_, r) => {
+  const settings = retentionSettings((_k, d) => d);
+  const tele = telemetryCutoff(settings);
+  const alert = alertCutoff(settings);
+  r.json({
+    next: { ...settings, schedule: RETENTION_SCHEDULE,
+      telemetry_cutoff: tele ? { day: tele.day, asked: tele.asked, floor: tele.floor, floored: tele.floored } : null,
+      alert_cutoff: alert ? { day: alert.day } : null },
+    last: null, history: [], state: [],
+    absent: `no retention pass has run yet; the first is at ${RETENTION_SCHEDULE.utc} UTC `
+      + `(${RETENTION_SCHEDULE.dubai} Dubai), or by hand with \`node src/index.js retention dry-run\``,
+  });
+});
 
 app.get('/api/settings', (_, r) => r.json([
   /* Unset in the API's own environment but held by the collector — the case

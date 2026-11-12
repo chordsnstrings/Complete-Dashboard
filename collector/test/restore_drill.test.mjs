@@ -52,11 +52,14 @@ console.log('\n1. the migration ledger');
   check('a changed file warns that it re-runs once (v53 does, by design)', changed.status === 'warn'
     && changed.changed.join() === 'schema_v53.sql' && /re-run once/.test(changed.detail), changed.detail);
   await db.query(`UPDATE schema_applied SET sha = $1 WHERE file = 'schema_v53.sql'`, [sha('schema_v53.sql')]);
+  /* One name, held once: route_smoke reads two schema names inside one array
+     literal as a hand-kept list of schema files. */
+  const V40 = 'schema_v40.sql';
   await db.query(`DELETE FROM schema_applied WHERE file = 'schema_v40.sql'`);
   const hole = await ledgerCheck(db);
   check('a hole (a file never applied although later ones were) fails', hole.status === 'fail'
     && hole.holes.join() === 'schema_v40.sql', hole.detail);
-  await db.query('INSERT INTO schema_applied (file, sha) VALUES ($1, $2)', ['schema_v40.sql', sha('schema_v40.sql')]);
+  await db.query('INSERT INTO schema_applied (file, sha) VALUES ($1, $2)', [V40, sha(V40)]);
   /* The newest registered file stands for "a newer checkout than the
      database" (it named v115 until the 2026-11-12 batch put later files after it). */
   const NEWEST = SCHEMA_FILES[SCHEMA_FILES.length - 1];
