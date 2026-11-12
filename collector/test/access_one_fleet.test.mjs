@@ -125,11 +125,16 @@ await q(`INSERT INTO collector_job (mode, status, requested_by, fleet)
                 ('incremental', 'running', 'test', NULL)`);
 const [up] = await q(`INSERT INTO hr_roster_upload (sha256, export_date, export_date_from, filename, byte_len, rows_read, uploaded_by, summary)
                       VALUES ('feedfacefeedface', '2026-10-01', 'entered', 'test-roster.xlsx', 4321, 3, 'test', '{}') RETURNING id`);
-await q(`INSERT INTO hr_roster_row (upload_id, fleet_id, employee_id, full_name, phone, match_basis, matched_accounts)
+/* E1's Bolt id is on HR's row itself (bolt_id), as a platform-id match is:
+   the account it matched is filed under ECOSINE. (Review, 2026-11-12: the
+   narrowed roster listed it as unmatched, "not held in anything collected"
+   — false, and the other fleet's account id printed — see §9.) */
+await q(`INSERT INTO hr_roster_row (upload_id, fleet_id, employee_id, full_name, phone, match_basis, matched_accounts, bolt_id)
          VALUES ($1, 'egari', 'E1', 'Test Hr Egari', '0500000001', 'platform_id',
-                 '[{"platform":"uber","ext_id":"eg-d1","fleet_id":"egari","via":"uber_id"},{"platform":"bolt","ext_id":"ec-acct-9","fleet_id":"ecosine","via":"bolt_id"}]'),
-                ($1, 'ecosine', 'E2', 'Test Hr Ecosine', '0500000002', 'none', '[]'),
-                ($1, 'ecosine', 'E3', 'Test Hr Ecosine Two', '0500000003', 'none', '[]')`, [up.id]);
+                 '[{"platform":"uber","ext_id":"eg-d1","fleet_id":"egari","via":"uber_id"},{"platform":"bolt","ext_id":"ec-acct-9","fleet_id":"ecosine","via":"bolt_id"}]',
+                 'ec-acct-9'),
+                ($1, 'ecosine', 'E2', 'Test Hr Ecosine', '0500000002', 'none', '[]', NULL),
+                ($1, 'ecosine', 'E3', 'Test Hr Ecosine Two', '0500000003', 'none', '[]', NULL)`, [up.id]);
 await q(`INSERT INTO telemetry_snapshot (source, plate, captured_at, fleet_id, seat_occupied)
          VALUES ('cabman', 'EG-101', now() - interval '2 minutes', 'egari', true),
                 ('cabman', 'EC-201', now() - interval '3 minutes', 'ecosine', true),
@@ -326,6 +331,13 @@ console.log('\n9. /api/hr-roster');
     && all.totals.on_list === 3, JSON.stringify(eg.totals));
   check('…an account HR matched under the other fleet is not shown', !eg.people[0].accounts.some((a) => a.fleet_id !== 'egari')
     && eg.people[0].accounts.length === 1, JSON.stringify(eg.people[0].accounts));
+  /* Review, 2026-11-12. REVERSION: build heldIds from the narrowed
+     `accounts` again (api/hr_roster.js) — this fails, and so does the
+     "naming nothing of the other fleet" check above ('ec-acct-9'). */
+  check('…nor is HR\'s id for it reported as unmatched — it is held, under the other fleet; "not held in anything collected" would be false',
+    !(eg.people[0].unmatched_ids || []).some((u) => u.ext_id === 'ec-acct-9')
+      && !(all.people.find((p) => p.employee_id === 'E1')?.unmatched_ids || []).some((u) => u.ext_id === 'ec-acct-9'),
+    JSON.stringify(eg.people[0].unmatched_ids));
   check('…the upload says how many of its rows are Egari\'s, and withholds its both-fleet size with the reason',
     eg.latest.rows_read === 1 && eg.uploads[0].rows_read === 1 && eg.uploads[0].byte_len === null
       && /both fleets/.test(eg.uploads[0].byte_len_absent || '') && all.uploads[0].rows_read === 3 && all.uploads[0].byte_len === 4321,
@@ -339,6 +351,11 @@ console.log('\n10. /api/vehicles/feeds');
     && JSON.stringify(eg.totals.fleets) === '{"egari":1}' && all.totals.vehicles === 3, JSON.stringify(eg.totals));
   check('…its current driver is not one filed under the other fleet',
     !(eg.rows[0].driver_refs || []).some((d) => /Crossfleet/.test(d.name || '')), JSON.stringify(eg.rows[0].driver_refs));
+  /* Review, 2026-11-12: the driver left off is not "nobody". REVERSION:
+     drop the custody_other_fleet branch of driver_absent — this fails. */
+  check('…and the reason given for no driver is the true one — the latest driver on record is filed under another fleet',
+    eg.rows[0].driver_refs.length === 0 && /filed under another fleet/.test(eg.rows[0].driver_absent || '')
+      && !/no trip on record names one/.test(eg.rows[0].driver_absent || ''), eg.rows[0].driver_absent);
   check('…and the accounts list names Egari\'s alone', Object.values(eg.accounts).every((v) => v.every((f) => f === 'egari')));
 }
 
@@ -411,6 +428,90 @@ console.log('\n14. routes still mixed refuse with their own reason');
     b.status === 403 && /detected over both fleets together/.test(b.body.detail), JSON.stringify(b.body));
   const allT = await get(ALL, '/api/target');
   check('…and the unrestricted reader is not refused any of them', allT.status !== 403, String(allT.status));
+}
+
+console.log('\n15. the Messages log is never served from the cache (review, 2026-11-12)');
+{
+  /* api/sms_routes.js refuses anyone not signed in — in the HANDLER. The
+     response cache answers before any handler runs, so a log once opened by
+     a signed-in reader (§10b opened both) was handed to an anonymous visitor
+     in open mode asking the same address: mobile numbers and the texts. A
+     one-fleet reader's address is predictable — the gate's own key.
+     REVERSION: take '/api/sms/' off NEVER in api/cache.js — both fail. */
+  const mine = await get(EG, '/api/sms/log');
+  const anonMine = await get(null, `/api/sms/log?fleet=egari&${NARROW_PARAM}=egari`);
+  check('a one-fleet reader\'s log, at the gate\'s own cache address, is refused to an anonymous visitor',
+    mine.status === 200 && anonMine.status === 401 && !JSON.stringify(anonMine.body ?? null).includes('+971'),
+    `${mine.status} ${anonMine.status} ${JSON.stringify(anonMine.body).slice(0, 120)}`);
+  const full = await get(ALL, '/api/sms/log');
+  const anonFull = await get(null, '/api/sms/log');
+  check('…and so is the whole log, once an unrestricted reader has opened it',
+    full.status === 200 && anonFull.status === 401 && !JSON.stringify(anonFull.body ?? null).includes('+971'),
+    `${full.status} ${anonFull.status}`);
+}
+
+console.log('\n16. a car listed ACTIVE in both fleets\' Uber accounts (review, 2026-11-12)');
+{
+  /* EG-101 is Egari's car, and Egari's Uber account assigns it to Egari's
+     driver; Ecosine's account still lists it ACTIVE (a car that moved) and
+     assigns it an Ecosine driver. FEEDS_SQL folded a plate's records into
+     one row filed under the LEAST fleet with every driver either record
+     assigns: the Egari reader's own car vanished from their list (filed
+     'ecosine'), and an Ecosine reader was handed Egari's assignments.
+     REVERSION: drop the $2 line from FEEDS_SQL's active CTE — the first
+     check fails (the car is missing). */
+  await q(`UPDATE vehicle_profile SET assigned_driver_ext_id = 'eg-d1' WHERE vehicle_ext_id = 'v-eg-1'`);
+  await q(`INSERT INTO vehicle_profile (platform, vehicle_ext_id, plate, fleet_id, compliance_status, assigned_driver_ext_id)
+           VALUES ('uber', 'v-ec-9', 'EG-101', 'ecosine', 'ACTIVE', 'ec-d1')`);
+  cache.clear();
+  const eg = await get(EG, '/api/vehicles/feeds');
+  const car = (eg.body?.rows || []).find((r) => r.plate === 'EG-101');
+  check('the Egari reader still has their car, filed as Egari\'s, with only the driver Egari\'s account assigns',
+    eg.status === 200 && car?.fleet_id === 'egari' && car?.driver_basis === 'uber_assignment'
+      && car?.driver_refs?.length === 1 && leaks(eg.body).length === 0, `${eg.status} ${JSON.stringify(car)}`);
+  const all = await get(ALL, '/api/vehicles/feeds');
+  const allCar = (all.body?.rows || []).find((r) => r.plate === 'EG-101');
+  check('…while the unrestricted list folds both records exactly as it always has',
+    allCar?.fleet_id === 'ecosine' && allCar?.driver_refs?.length === 2, JSON.stringify(allCar));
+}
+
+console.log('\n17. the gate\'s narrow branch: three fleets, and a fleet id no handler can narrow by (review, 2026-11-12)');
+{
+  /* Straight through the gate with a principal built by computeAccess —
+     the database holds two fleets, and these cases need a third. */
+  const { computeAccess } = await import('../api/access/principal.js');
+  const fakeRes = () => ({ statusCode: 200, body: null, headers: {},
+    set(k, v) { this.headers[k] = v; return this; }, status(c) { this.statusCode = c; return this; },
+    json(b) { this.body = b; return this; }, send(b) { this.body = b; return this; },
+    setHeader() {}, getHeader() {}, on() {} });
+  const through = async (access, query) => {
+    const qs = new URLSearchParams(query).toString();
+    const req = { method: 'GET', path: '/api/segments', originalUrl: `/api/segments${qs ? `?${qs}` : ''}`,
+      query: { ...query }, get: () => '', fmCookies: {},
+      fm: { kind: 'user', mode: 'enforced', user: { id: 1, email: 'gate@example.test' }, access, session: null, grants: [] } };
+    const res = fakeRes();
+    let passed = false;
+    await layer.gate(req, res, () => { passed = true; });
+    return { passed, req, res };
+  };
+  /* REVERSION: refuse whenever scope.length > 1 again — this fails. */
+  const three = computeAccess({ grants: [{ role_code: 'OWN', fleets: ['egari', 'third'] }],
+    allFleets: ['ecosine', 'egari', 'third'] });
+  const chose = await through(three, { fleet: 'third' });
+  check('a reader holding two of three fleets who chooses one is narrowed to it — "choose one" is then true',
+    chose.passed && chose.req.query[NARROW_PARAM] === 'third' && chose.req.query.fleet === 'third'
+      && (chose.req.fmCacheKey || '').includes(`${NARROW_PARAM}=third`),
+    `${chose.passed} ${chose.res.statusCode} ${JSON.stringify(chose.res.body)}`);
+  const none = await through(three, {});
+  check('…and one who names none is refused, and told to choose', !none.passed && none.res.statusCode === 403
+    && /Choose one of your fleets/.test(none.res.body?.detail || ''), JSON.stringify(none.res.body));
+  /* REVERSION: drop the onlyFleet() guard in the narrow branch — the gate
+     passes the reader with _fmfleet set, every handler reads it back as
+     null, and the answer is every fleet's. */
+  const odd = computeAccess({ grants: [{ role_code: 'OWN', fleets: ['odd.fleet'] }], allFleets: ['ecosine', 'odd.fleet'] });
+  const o = await through(odd, {});
+  check('a fleet id the handlers cannot read back is refused, never answered for every fleet',
+    !o.passed && o.res.statusCode === 403 && o.res.body?.error === 'fleet_scope', `${o.passed} ${JSON.stringify(o.res.body)}`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -981,6 +981,16 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A route that checks the CALLER in its handler must not be cached by address** (2026-11-12,
+  review of ONE, FIX-STATUS ONE-R1). `api/cache.js` serves a hit before any handler runs, and in
+  open mode the gate lets an anonymous visitor through to it. `/api/sms/log` refused visitors in
+  its handler only (`signedIn()`), so once anyone signed in had opened Messages, an anonymous GET
+  of the same address was handed the log — mobile numbers and texts. Third time for this class,
+  after `/api/compliance/drivers` (2026-09-05) and `/api/driver/profile` (2026-09-28): a handler
+  that reads `req.fm`, `isAdmin()` or any other fact about the caller goes on `NEVER` in
+  `api/cache.js` or `VARIES_BY_CALLER` in `api/server.js` in the same commit. A narrowed answer
+  (`_fmfleet`) is keyed by the gate and safe; a handler-side check is not.
+
 * **Under Arkiv, focus.js decides what a row IS from its loose text** (2026-11-11, FIX-STATUS
   UBJ1). Text with no prose block around it (`p`, `.cap`, `.note`, `.why`…) is judged by the
   nearest div, so a list row whose only loose text was its "open ↗" link was judged as one

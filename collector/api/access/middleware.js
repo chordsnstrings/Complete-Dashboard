@@ -24,7 +24,7 @@ import { lookupEntry } from './manifest.js';
 import { appendAudit } from './audit.js';
 import * as svc from './service.js';
 import { isInternal } from './internal.js';
-import { NARROW_PARAM, mixedReason } from './one_fleet.js';
+import { NARROW_PARAM, mixedReason, onlyFleet } from './one_fleet.js';
 import { safeEqual, newToken } from './crypto.js';
 import { createHash } from 'node:crypto';
 import { rank, withheldSentence, CLASS, ROLE } from '../public/access_model.js';
@@ -235,13 +235,28 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
       const asked = String(req.query.fleet || '');
       if (asked && !all.includes(asked)) return { refuse: withheldBody(null, '', { error: 'bad_fleet', detail: `There is no fleet called ${asked}.` }) };
       if (asked && !scope.includes(asked)) return { refuse: withheldBody(null, '', { error: 'fleet_scope', detail: 'That fleet is outside your access.' }) };
-      if (scope.length > 1) {
+      /* A reader holding some but not all of three or more fleets CAN choose
+         one: the fleet they ask for is narrowed to (review, 2026-11-12). The
+         refusal below said "choose one of your fleets" and then refused the
+         choice too — a reason that was not the true one. Only a reader who
+         names none of them is refused. */
+      if (!asked && scope.length > 1) {
         return { refuse: withheldBody(null, '', { error: 'fleet_scope',
           detail: 'Choose one of your fleets: this page can be narrowed to one fleet, not to some of them.' }) };
       }
-      targets = scope.slice(0, 1);
+      targets = asked ? [asked] : scope.slice(0, 1);
       if (targets.length) {
         narrow = targets[0];
+        /* FAIL CLOSED. The handlers read the fleet back through onlyFleet(),
+           which accepts a plain id and nothing else; a fleet id it would not
+           accept would come back as null — "every fleet, as before" — while
+           the gate believed the answer narrowed. Refused here instead, so
+           the gate and the handler can never disagree about it. */
+        if (onlyFleet({ query: { [NARROW_PARAM]: narrow } }) !== narrow) {
+          return { refuse: withheldBody(null, '', { error: 'fleet_scope',
+            detail: 'This page is narrowed to one fleet by the fleet\'s id, and this fleet\'s id is not one it can '
+              + 'narrow by — so it is refused rather than shown with every fleet\'s records.' }) };
+        }
         if ((entry.fleetRows || []).length) filterRows = targets;
       }
     } else if (!access.allScope) {

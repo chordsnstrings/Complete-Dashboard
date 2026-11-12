@@ -747,11 +747,19 @@ export async function rosterView(q, { today = null, fleet = null } = {}) {
         prev = v;
       }
     }
-    const accounts = accountsOf(last.matched_accounts)
+    const matched = accountsOf(last.matched_accounts);
+    const accounts = matched
       .filter((a) => !fleet || a.fleet_id === fleet)
       .map((a) => ({ ...a, person_id: spine.ok ? (spine.byAccount.get(a.ext_id) ?? null) : null }));
     const pids = [...new Set(accounts.map((a) => a.person_id).filter((x) => x != null))];
-    const heldIds = new Set(accounts.map((a) => `${a.platform}\u0000${String(a.ext_id).toLowerCase()}`));
+    /* Held means matched to an account in ANY fleet — from every match, not
+       only the ones shown. Built from the narrowed list, an HR id that
+       matched an account filed under the other fleet came back as
+       "unmatched", with the reason "no … account with this id is held in
+       anything collected": false — it is held, outside the reader's access
+       — and it printed the other fleet's account id (review, 2026-11-12).
+       Unnarrowed, `accounts` IS every match, so nothing changes there. */
+    const heldIds = new Set(matched.map((a) => `${a.platform}\u0000${String(a.ext_id).toLowerCase()}`));
     const unmatched = Object.entries(PLATFORM_COLUMNS).filter(([col, plat]) => last[col]
       && !heldIds.has(`${plat}\u0000${String(last[col]).toLowerCase()}`))
       .map(([col, plat]) => ({ platform: plat, ext_id: last[col], column: col,
