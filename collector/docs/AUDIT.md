@@ -2877,7 +2877,7 @@ To repeat: `node bin/prod-mirror.mjs &` then `node bin/focus-rows-audit.mjs http
 
 ## Focus and motion on the phone — a rendering pass (2026-11-12, FIX-STATUS MOB)
 
-The phone build had neither Arkiv layer (HANDOFF 0.9, 0.11). After bringing both to it, three passes
+The phone build had neither Arkiv layer (HANDOFF 0.9, 0.11). After bringing both to it, four passes
 in Chromium at 390×844 with a coarse pointer, Arkiv, light and dark; nothing here touched
 production (its read budget for this batch was 30 GETs, one at a time, which a page sweep through
 `bin/live-ui.mjs` would spend on two screens).
@@ -2920,6 +2920,12 @@ pen, the tiles 4 px low and fading up; at rest, every block where it stands with
 the pixel (Today, Money, To the bank, a driver, More). A redraw (the refresh button) replays nothing;
 content after a watched 1.8 s skeleton fades up; Today's minute refresh washes the one figure that
 moved ("Done so far").
+
+**4 · First paint, before and after.** The base tree (90d76da) and this one served side by side by
+the harness, Today opened 11 times each, interleaved: 36 → 39 static files (40 with motion on —
+the sheet, appended, never render-blocking), the shell at 90 / 94 / 110 ms and the first card at
+189 / 185 / 204 ms (medians; before / after under automation / after with motion on). No API call is
+added; Today's 10 s on production is its live calls, untouched.
 
 **Found on the way, not changed:**
 

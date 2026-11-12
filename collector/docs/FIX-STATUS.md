@@ -5842,6 +5842,18 @@ Fleet, Optimise, Online time — measured) or draws a figure twice on its way to
 `:active` for neither a held mouse nor a held touch (COVERAGE, end), so the pressed styles are proved
 with the state forced through DevTools (§11).
 
+**The phone's first paint.** No render-blocking file and no API call is added: the phone's sheet is
+appended (§12 holds it back 1.5 s and the first paint does not wait), and neither layer asks the
+server anything. Three modules join the phone's graph (36 → 39 static files for Today; a 40th, the
+sheet, with motion on), fetched in the same wave as `m/screens.js` — `m/focus-m.js` and
+`m/motion-m.js` at depth 1, `focus.js` at depth 2 beside `screens.js`'s own imports — so the deepest
+chain is unchanged. Measured hermetically at 390×844 (the front end's own cost; the API answers at
+once), medians of 11 interleaved runs of Today from the base tree (90d76da) and this one: the shell
+at 90 / 94 / 110 ms and the first card at 189 / 185 / 204 ms — before / after as under automation /
+after with motion on (first-card ranges 160–413, 165–357, 172–371). Against the 10 s the audit
+measured for a cold Today on production, which is its four live API calls, the layer's cost is
+inside the noise.
+
 **Existing suites, each run alone with the change:** `phone_focus_motion` 98/0, `phone_arkiv` 271/0,
 `phone_classic` 34/0, `phone` 159/0, `tokens` 150/0, `arkiv_skin` 119/0, `arkiv_shell` 77/0,
 `arkiv_motion` 56/0, `focus_layout` 58/0, `boot_order` 5/0, `payout_mobile` 39/0, `deposit_ui` 43/0,
