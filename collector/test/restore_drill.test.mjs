@@ -57,13 +57,16 @@ console.log('\n1. the migration ledger');
   check('a hole (a file never applied although later ones were) fails', hole.status === 'fail'
     && hole.holes.join() === 'schema_v40.sql', hole.detail);
   await db.query('INSERT INTO schema_applied (file, sha) VALUES ($1, $2)', ['schema_v40.sql', sha('schema_v40.sql')]);
-  await db.query(`DELETE FROM schema_applied WHERE file = 'schema_v115.sql'`);
+  /* The newest registered file stands for "a newer checkout than the
+     database" (it named v115 until the 2026-11-12 batch put later files after it). */
+  const NEWEST = SCHEMA_FILES[SCHEMA_FILES.length - 1];
+  await db.query('DELETE FROM schema_applied WHERE file = $1', [NEWEST]);
   const pend = await ledgerCheck(db);
   check('newer files not applied yet fail by default (the first boot applies them)',
-    pend.status === 'fail' && pend.pending.join() === 'schema_v115.sql', pend.detail);
+    pend.status === 'fail' && pend.pending.join() === NEWEST, pend.detail);
   const allowed = await ledgerCheck(db, { allowPending: true });
   check('and warn when allowed, before cutover', allowed.status === 'warn' && /will apply on first boot/.test(allowed.detail), allowed.detail);
-  await db.query('INSERT INTO schema_applied (file, sha) VALUES ($1, $2)', ['schema_v115.sql', sha('schema_v115.sql')]);
+  await db.query('INSERT INTO schema_applied (file, sha) VALUES ($1, $2)', [NEWEST, sha(NEWEST)]);
 }
 
 console.log('\n2. row counts against what was recorded');

@@ -30,8 +30,11 @@ const sql = (f) => readFileSync(new URL(`../sql/${f}`, import.meta.url), 'utf8')
 
 const db = new PGlite();
 const V115 = 'schema_v115.sql';
-check('v115 is registered, and registered last', SCHEMA_FILES[SCHEMA_FILES.length - 1] === V115,
-  SCHEMA_FILES.slice(-2).join(' '));
+/* Registered in numeric order, straight after v114 — production applies it
+   there. It was "registered last" until the 2026-11-12 batch merged v116–v124
+   after it; this file applies v115 last regardless, to measure its effect. */
+check('v115 is registered, straight after v114', SCHEMA_FILES.indexOf(V115) === SCHEMA_FILES.indexOf('schema_v114.sql') + 1
+  && SCHEMA_FILES.indexOf(V115) > 0, SCHEMA_FILES.slice(SCHEMA_FILES.indexOf('schema_v114.sql'), SCHEMA_FILES.indexOf('schema_v114.sql') + 3).join(' '));
 for (const f of SCHEMA_FILES) { if (f !== V115) await db.exec(sql(f)); }
 
 const telemIdx = async () => (await db.query(
