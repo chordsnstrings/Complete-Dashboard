@@ -10790,3 +10790,34 @@ What production served that morning, before `api/fleet_roster.js` was wired in (
   mock's answer leaves `arkiv_classic_frozen` green; one that changes what the mock's data draws
   (for example "Moving" requiring a fresh fix: the mock's stale row 7 moves at 35 km/h) needs a
   re-record and a sentence in the commit.
+
+## The wage-sheet reader as an upload path — measured 2026-11-12 (WIRE)
+
+`src/salary/xlsx.js` was written for files the operator chose. `POST /api/wage-sheet/preview` is
+its first caller that takes a file from a browser, and two of its properties matter there:
+
+- **Its cell pattern is quadratic over unclosed tags.** The pattern is lazy and correct (trap 7 in
+  the file's own header), but from every `<c` it scans forward for a `>` or `</c>`. A sheet of
+  repeated `<c r="A1" ` with nothing closing them: 5,000 / 10,000 / 20,000 repeats (50 / 100 /
+  200 KB of XML, under 1.2 KB zipped) took 85 / 348 / 1,545 ms; 40,000 took about 6 s. Linear
+  input, quadratic time — in the API's thread that is every page waiting.
+- **`unzip` inflated with no limit.** Deflate packs a run of one byte about a thousand to one, so
+  a 4 MB body could unpack to gigabytes, allocated outside the V8 heap where a worker's heap limit
+  cannot see it. `maxBytes` (zlib's `maxOutputLength`, member by member) refuses it mid-way: a
+  31 KB file of 30 MB of zeros is refused at the 24 MB cap.
+
+### Traps this added to the list
+
+* **A worker thread does not bound Buffer memory.** `resourceLimits` caps the worker's V8 heap;
+  `inflateRawSync` output is external memory. Bound the inflation itself (`maxOutputLength`).
+* **A same-process test cannot see a blocked event loop from inside it.** The client and the
+  server share the loop, so a ping sent after a timer is never late — the timer itself waits. Time
+  the ping from the START of the slow request (`wage_sheet_preview` §3 does).
+* **`/api/hr-roster/preview` and `/commit` have both properties today**: `src/hr_roster.js:332`
+  calls `readWorkbook(bytes)` in-thread with no cap, behind an admin gate that is open while
+  `ADMIN_TOKEN` is unset. Recorded in FIX-STATUS WIRE as found, not fixed.
+* **The classifier reads an explicit range as `kind: 'range'`**, even when it is the first half of
+  a month ("01 November 2025 to 15 November 2025"); `first-half`/`second-half` come only from the
+  half-month spellings after "Salary Sheet -" or "month of" ("Salary Sheet - April 1-15, 2025",
+  "for the month of January Dated 16 to 31, 2025"), and a bare "April 1-15, 2025" is refused as
+  not understood. A page or import that files by `kind` must allow all three.

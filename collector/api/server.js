@@ -54,6 +54,7 @@ import { platformFares, platformPayouts, platformStatements, payoutPeople, fleet
 import { resolveOpenFill, applyFillToPlatforms } from './statement_fill_sql.js';
 import { teslaRoutes } from './tesla_routes.js';
 import { fleetRosterRoutes } from './fleet_roster_routes.js';
+import { wageSheetRoutes } from './wage_sheet_routes.js';
 import { cancellationRoutes } from './cancellation_routes.js';
 import { startWarmer } from './warm.js';
 import { startAlerts } from './alerts.js';
@@ -6903,9 +6904,10 @@ dayRoutes(app, { q, wrap });
 onlineRoutes(app, { q, wrap });
 cancellationRoutes(app, { q, wrap });
 teslaRoutes(app, { q, wrap });
-/* What the tracker roster set aside, in words (FIXLIST C18). See
-   api/fleet_roster_routes.js. */
+/* What the tracker roster set aside, in words (FIXLIST C18) — and the
+   wage-sheet classifier's write-free preview. See each file's header. */
 fleetRosterRoutes(app, { q, wrap });
+wageSheetRoutes(app, { wrap });
 /* One booking as an address — reached from every trip table in the product. */
 tripRoutes(app, { q, wrap });
 authRoutes(app, { q, wrap });

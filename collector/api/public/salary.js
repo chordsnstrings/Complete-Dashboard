@@ -62,6 +62,10 @@ export async function renderSalary(root) {
 
   const gridPanel = panel('The month', null, 'salary-grid');
   root.append(gridPanel.panel);
+  /* Under the contract only: the old skin is held byte for byte by
+     test/arkiv_classic_frozen.test.mjs, and this panel is new rather than a
+     fix to anything that skin draws. Arkiv is the default skin. */
+  if (ak) root.append(sheetPreviewPanel());
   const after = ak ? el('div') : null;
   if (ak) root.append(after);
 
@@ -296,4 +300,106 @@ function salaryContract(AK, after, root, people, { ym, prev, already, before, pa
       why: firstReason(people, (p) => p.earned_absent_reason) || 'Every driver here has a generated figure.' },
   ]);
   pageFoot({ colophon: [`The grid: ${ym}`, 'Generated: the whole record', `${fmt(n)} on the payroll`] }, root);
+}
+
+/* ── read a wage sheet: the classifier, with nothing behind it ──────────────
+   src/salary/sheet.js decides which of the five wage-sheet families a workbook
+   tab is, where its table starts, what period and company it states and which
+   fleet it belongs to — and refuses where those signals disagree. The import
+   it was built for waits on the operator's answers about payslips, so this
+   panel is the classifier alone: choose a workbook, see what every tab was
+   recognised as, or why it was refused. POST /api/wage-sheet/preview keeps
+   nothing (api/wage_sheet_routes.js) and answers with no person in it — no
+   name, no id, no amount — so this table has nothing to mask.
+
+   Its own fetch rather than api(): every refusal arrives as a non-2xx with a
+   reason in the body (400 not a workbook, 413 too large, 422 could not finish,
+   429 one at a time, 504 too slow, 403 not your role), and api() would turn
+   each into a bare error message. */
+const FAMILY_LABEL = {
+  'ecosine-payslip': 'Ecosine payslip',
+  'working-sheet': 'Driver salary working sheet',
+  'hotel-working': 'Hotel driver salary working sheet',
+  'portal-wages': 'Portal wages export',
+  'hotel-supervisors': 'Hotel supervisors’ salary sheet',
+  unknown: 'none of the five known families',
+};
+const PERIOD_KIND = { month: 'the whole month', 'first-half': 'first half', 'second-half': 'second half', range: 'a stated range' };
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+function sheetPreviewPanel() {
+  const p = panel('Read a wage sheet',
+    'Which kind of wage sheet a workbook is — where its table starts, its period, company and fleet — '
+    + 'or why it is refused. Nothing is stored.', 'salary-sheet');
+  const form = el('div', 'depform');
+  const file = el('input', 'depinput');
+  file.type = 'file';
+  file.accept = '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  const go = el('button', 'btn', 'Read the workbook');
+  go.type = 'button'; go.disabled = true;
+  form.append(file, go);
+  const out = el('div', 'stack');
+  p.body.append(form, out);
+  file.onchange = () => { out.innerHTML = ''; go.disabled = !(file.files && file.files[0]); };
+  go.onclick = async () => {
+    const f = file.files && file.files[0];
+    if (!f) return;
+    go.disabled = true;
+    loading(out);
+    let body = null, status = 0;
+    try {
+      const r = await fetch(`/api/wage-sheet/preview?filename=${encodeURIComponent(f.name)}`,
+        { method: 'POST', headers: { 'content-type': XLSX_TYPE }, body: await f.arrayBuffer() });
+      status = r.status;
+      try { body = await r.json(); } catch { body = null; }
+    } catch (e) {
+      body = { refusals: [`the workbook could not be sent: ${e.message}`] };
+    }
+    go.disabled = false;
+    drawSheetPreview(out, body, status);
+  };
+  return p.panel;
+}
+
+function drawSheetPreview(out, b, status) {
+  out.innerHTML = '';
+  if (!b) { out.append(note(`The server answered ${status} with no reason.`, 'bad')); return; }
+  /* A refusal of the request itself: not signed in, not this role, too large. */
+  const top = [...(b.refusals || [])];
+  if (!top.length && !b.sheets && (b.detail || b.error)) top.push(b.detail || b.error);
+  if (b.note) out.append(note(b.note));
+  if (!b.sheets || !b.sheets.length) {
+    (top.length ? top : ['nothing in this workbook could be read']).forEach((t) => out.append(note(t, 'bad')));
+    return;
+  }
+  top.forEach((t) => out.append(note(t, 'warn')));
+  const ok = b.sheets.filter((s) => s.ok).length;
+  out.append(el('p', 'cap', esc(`${b.filename || 'This workbook'}: ${fmt(b.sheets.length)} `
+    + `tab${b.sheets.length === 1 ? '' : 's'} read, ${fmt(ok)} recognised cleanly, `
+    + `${fmt(b.sheets.length - ok)} refused.`)));
+  const dash = (why) => `<span class="ent-off" title="${esc(why)}">—</span>`;
+  out.append(tableFrom(b.sheets, [
+    { label: 'Tab', key: 'name', render: (s) => esc(s.name) + (s.state && s.state !== 'visible' ? ` <span class="dim">(${esc(s.state)})</span>` : '') },
+    { label: 'Recognised as', key: 'family', render: (s) => esc(FAMILY_LABEL[s.family] || s.family || '—') },
+    { label: 'Table starts', key: 'header_row', num: true,
+      render: (s) => (s.header_row != null
+        ? esc(`row ${s.header_row}${s.id_column ? `, “${s.id_header}” in ${s.id_column}` : ', no id column'}`)
+        : dash('no header row was found on this tab')) },
+    { label: 'Period', key: 'period',
+      render: (s) => (s.period
+        ? esc(`${s.period.from} to ${s.period.to} · ${PERIOD_KIND[s.period.kind] || s.period.kind}`)
+        : dash(s.period_text ? `the period line reads “${s.period_text}”, which could not be understood` : 'the tab states no period')) },
+    { label: 'Company line', key: 'company', render: (s) => (s.company ? esc(s.company) : dash('nothing in the first rows')) },
+    { label: 'Fleet', key: 'fleet',
+      render: (s) => (s.fleet
+        ? esc(`${s.fleet} · from the ${String(s.fleet_basis || '').split('+').join(' and ')}`)
+        : dash('no single fleet: see the refusal below')) },
+    { label: 'Rows', key: 'rows', num: true,
+      render: (s) => (s.rows != null ? fmt(s.rows) + (s.placeholder_rows ? ` <span class="dim">· ${fmt(s.placeholder_rows)} with no id</span>` : '') : '—') },
+    { label: 'Verdict', key: 'ok', render: (s) => (s.ok ? '<span class="pill">readable</span>' : '<span class="pill">refused</span>') },
+  ], { cards: true, cardLead: 'name' }));
+  for (const s of b.sheets) {
+    (s.refusals || []).forEach((t) => out.append(note(`${s.name}: ${t}`, 'bad')));
+    (s.period?.anomalies || []).forEach((a) => out.append(note(`${s.name}: the period line says “${a.said}” — ${a.read}`, 'warn')));
+  }
 }

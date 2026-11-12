@@ -7933,6 +7933,22 @@
  },
  {
   "method": "POST",
+  "path": "/api/wage-sheet/preview",
+  "subject": "CASH",
+  "carries": [
+   "CASH"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "cash.import",
+  "notes": "api/wage_sheet_routes.js (WIRE, 2026-11-12). The wage-sheet classifier (src/salary/sheet.js via src/salary/preview.js) as a WRITE-FREE preview: raw .xlsx body up to 4mb (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet or application/octet-stream), ?filename= (last segment only, 200 chars; one of the classifier's fleet signals). Writes nothing and reads no database: the module is handed only wrap, and its worker (src/salary/preview_worker.js) imports no database module. Runs in a worker thread with a heap limit, a 24 MB unpacking cap enforced by zlib, a 15 s clock and one preview at a time. Body {written:false, stored:false, ok, readable, filename, byte_len, sha256, note, sheet_count, sheets[{name, state, ok, family, header_row, id_header, id_column, name_column, company, period_text, period{from,to,kind,month,days,anomalies}, fleet, fleet_basis, fleet_signals[{source,says,detail}], rows, placeholder_rows, refusals[]}], refusals[]}; 400 no body or not a workbook, 413 over the limit, 422 the reader could not finish, 429 another preview running, 504 too slow. CASH because a wage sheet is driver pay (the class names salary lines) and the REQUEST carries it; the response carries no person: no name, id or amount, only the tab's structure, so nothing in it is masked. cash.import is the action 'Preview an imported cash sheet' already names. 'global': it combines no fleet's records, it reads only the upload."
+ },
+ {
+  "method": "POST",
   "path": "/api/import/statement-days",
   "subject": "EARN",
   "carries": [
