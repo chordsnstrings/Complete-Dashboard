@@ -46,8 +46,15 @@ console.log('\n0 · which page is built is a token each skin declares');
 const oldRoot = strip(css).slice(strip(css).indexOf(':root{'), strip(css).indexOf('@media (prefers-color-scheme: dark)'));
 check('the old skin declares --pg-contract:0 in its :root', /--pg-contract:0;/.test(oldRoot));
 check('arkiv.css declares --pg-contract:1 under the skin', /:root\[data-skin="arkiv"\]\{--pg-contract:1\}/.test(ark));
+/* contract() moved to pagemeta.js on 2026-11-12 (the sign-in page asks it and
+   loads no ui.js); ui.js re-exports it, so every caller is unchanged. */
+const metaJs = read('pagemeta.js');
 check('contract() reads the token, and the module never reads the skin',
-  /getPropertyValue\('--pg-contract'\)/.test(uiJs) && !/dataset\.skin|data-skin|fleet\.skin/.test(strip(uiJs)));
+  /getPropertyValue\('--pg-contract'\)/.test(metaJs) && !/dataset\.skin|data-skin|fleet\.skin/.test(strip(metaJs))
+  && !/dataset\.skin|data-skin|fleet\.skin/.test(strip(uiJs)));
+check('…ui.js re-exports that one function, and keeps no second copy',
+  /import \{ contract, PRINCIPLE \} from '\.\/pagemeta\.js';/.test(uiJs) && /export \{ contract, PRINCIPLE \};/.test(uiJs)
+  && !/getPropertyValue\('--pg-contract'\)/.test(uiJs) && ui.contract === (await import('../api/public/pagemeta.js')).contract);
 check('with no stylesheet (node, a detached document) the answer is the old skin', ui.contract() === false);
 
 /* ══ 1 · the delta ════════════════════════════════════════════════════════ */

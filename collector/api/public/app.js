@@ -2693,7 +2693,10 @@ V.drivers = async (root) => {
     { label: 'Statement', key: 'earnings', num: true, render: (x) => money(x.earnings) },
     { label: 'Counted', key: 'counted', num: true, render: (x) => money(x.counted ?? x.earnings) },
   ], { sortable: true, sortId: 'perf', defaultSort: { key: 'period_start', dir: 'desc' },
-    capped: pfTot.total > pfRows.length ? `all ${fmt(pfTot.total)} records` : null }));
+    capped: pfTot.total > pfRows.length ? `all ${fmt(pfTot.total)} records` : null,
+    /* Plan §4 #drivers: "§06 performance records get a 3px channel row
+       marker in the gutter" — each record is one platform's statement. */
+    rowMark: (r) => r.platform }));
   if (pfTot.total) {
     perf.body.append(el('p', 'cap',
       `Showing 25 of ${fmt(pfTot.total)} records — ${fmt(pfTot.people)} people across `
@@ -10500,6 +10503,11 @@ function applyTheme(mode) {
     b.title = `Theme: ${mode === 'system' ? 'following your device' : mode}. `
       + `Click for ${THEME_NEXT[mode]}.`;
   }
+  /* The browser's bar follows the paper this choice resolves to
+     (themecolor.js; loaded on demand — test/lazy_pages.test.mjs keeps the
+     first screen under 20 modules, and a bar colour is not a first-screen
+     need: index.html's pre-paint script has already set a chosen theme's). */
+  import('./themecolor.js').then((m) => m.followThemeColor()).catch(() => { /* the static metas stand */ });
 }
 applyTheme(['light', 'dark'].includes(store.get('theme')) ? store.get('theme') : 'system');
 $('#themeBtn').onclick = () => {

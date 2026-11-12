@@ -20,7 +20,7 @@
    (api/sms_routes.js), and the manifest makes it a contact-details page: a
    role without contact details never opens it. */
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, entity, dtStr, dayStr, countOf, andList,
-  sourceLabel, money } from './ui.js';
+  sourceLabel, money, contract, glance, glanceBand, absenceBand, pageFoot } from './ui.js';
 import { fmt } from './charts.js';
 import { api, href } from './data.js';
 import { who, closedBlock, toSignIn } from './access.js';
@@ -131,15 +131,17 @@ async function renderLog(root, kind) {
   const hold = el('div'); root.append(hold);
   loading(hold);
   let d;
-  try { d = await api(`/api/sms/log?limit=300${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`); } catch (e) {
+  try { d = await api(`/api/sms/log?limit=${LOG_LIMIT}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`); } catch (e) {
     hold.replaceChildren(e?.name === 'WithheldError'
       ? closedBlock({ view: 'messages', cls: 'CT', title: 'The messages are not shown to your role', detail: e.message })
       : note(`The messages could not be read: ${e.message}`, 'err'));
-    return;
+    return null;
   }
   hold.replaceChildren();
   const c = d.last7days || {};
-  hold.append(kpiRow([
+  const ak = contract();
+  if (ak) glance(glanceBand(hold, 'The last 7 days, counted in the outbox').tilesHost, contractTiles(d.last7days));
+  else hold.append(kpiRow([
     { label: 'Texted to drivers', value: fmt(c.sent || 0), sub: 'last 7 days', tone: 'good' },
     { label: 'Held back', value: fmt(c.held || 0), sub: 'each with its reason below' },
     { label: 'Waiting for 07:00', value: fmt(c.queued || 0), sub: 'found at night' },
@@ -180,6 +182,9 @@ async function renderLog(root, kind) {
     ], { sortable: true, sortId: 'messages', cards: true, cardLead: 'kind' }));
   }
   hold.append(p.panel);
+  return { rows: rows.length, listed: list.length, kind,
+    sent: list.filter((r) => r.status === 'sent' && r.kind !== 'reset_code' && r.kind !== 'phone_code'),
+    asked: LOG_LIMIT };
 }
 
 function decisionRows(r, kind) {
@@ -270,12 +275,88 @@ export async function renderMessages(root, param, sub) {
   const t = TABS.some((x) => x.id === param) ? param : 'log';
   const kind = sub;
   root.append(tabBar(TABS, t, (id) => href('messages', id === 'log' ? null : id)));
+  const ak = contract();
+  let got = null;
   if (t === 'next') await renderNext(root);
-  else await renderLog(root, KIND[kind] ? kind : '');
+  else got = await renderLog(root, KIND[kind] ? kind : '');
   root.append(el('div', 'cap srcline', [
     '<div><b>Cash to deposit:</b> at 05:00 Dubai, each driver who took cash yesterday: Uber’s own cash-collected figure, the fare on the other channels, and the message names the channels it covers. A channel that did not collect, has no amount yet, or is a hotel account matched by name is left out and the rest is still sent; held only when nothing certain is left. Sent once Uber’s figures for yesterday are in; given up at 09:00 if they never are.</div>',
     '<div><b>Register a trip:</b> a journey with no booking, 4 km or more, no booking within 30 minutes, exactly one driver named — the last driver of the car counts, however long ago their last Uber trip — and both places with a readable name. Never the word “unauthorized”. Found between 23:00 and 07:00, it waits until 07:00, and is checked again before it goes.</div>',
     '<div><b>Whose number:</b> Uber’s first, HR’s second. Never a number on two people’s records, never one of two different numbers, never a record held back as possibly the same person as another.</div>',
     '<div><b>Stopping them:</b> Access → Settings has a switch for each.</div>',
   ].join('')));
+  /* Under the page contract the rules above stay this page's source line (as
+     on #feeds: the shell would otherwise stamp "Built from Uber …", a count of
+     bookings this page is not built from), then † and the colophon. */
+  if (ak) contractTail(root, t, got);
+}
+
+/* ── the page contract (HANDOFF §4.5) ─────────────────────────────────────
+   #messages made no contract() call, so under Arkiv it drew the old page: a
+   tile row with a GREEN fill on a count of texts sent (a tone on a level —
+   L3) and a "none reported" printed where the gateway's charge belongs, no
+   † band, no colophon. Under the contract:
+     00  the five 7-day counts from the outbox (/api/sms/log last7days), the
+         count of texts sent the hero; tones dropped; the gateway's charge
+         ABSENT with its reason when the gateway reported none, never "0";
+     01… the panels as they were (the 05:00 run, the list) — numbered by
+         arkiv.css's counter;
+     †   what the page cannot know: rows past the newest LOG_LIMIT, delivery
+         to the phone where no report came back, the charge's currency, what
+         a staff code said;
+     the colophon. The old skin draws exactly what it drew before. */
+const LOG_LIMIT = 300;
+function contractTiles(c) {
+  if (!c) {
+    const why = 'the outbox did not report its 7-day counts';
+    return ['Texted to drivers', 'Held back', 'Waiting for 07:00', 'Refused by the gateway', 'Gateway charge']
+      .map((label, i) => ({ label, na: why, ...(i === 0 ? { hero: true } : {}) }));
+  }
+  const cost = Number(c.cost) || 0;
+  return [
+    { label: 'Texted to drivers', value: fmt(c.sent ?? 0), hero: true,
+      sub: 'last 7 days: the cash reminder, trip requests and goal texts' },
+    { label: 'Held back', value: fmt(c.held ?? 0), sub: 'each with its reason below' },
+    { label: 'Waiting for 07:00', value: fmt(c.queued ?? 0), sub: 'found at night, when nothing is texted' },
+    { label: 'Refused by the gateway', value: fmt(c.failed ?? 0), sub: 'last 7 days' },
+    /* The gateway's own figure, in its account's currency — which it does
+       not state, so none is printed. Zero summed is "it reported none". */
+    cost > 0
+      ? { label: 'Gateway charge', value: cost.toFixed(3), sub: 'last 7 days, in the gateway account’s own currency' }
+      : { label: 'Gateway charge',
+        na: c.sent ? 'the gateway reported no charge for the texts it accepted'
+          : 'no text went to a driver in these 7 days, and the gateway reported no charge' },
+  ];
+}
+function contractTail(root, tab, got) {
+  const absHost = el('div');
+  root.append(absHost);
+  if (tab === 'next') {
+    absenceBand(absHost, [
+      { label: 'Whether the real run will do this', fig: null, none: 'Not knowable now',
+        why: 'A dry run decides from what the database holds this minute. The real run decides when it is due, from what has arrived by then — a late Uber catch-up or a new journey changes it.' },
+    ]);
+    pageFoot({ colophon: ['A dry run', 'nothing written, nothing sent'] }, root);
+    return;
+  }
+  if (!got) { pageFoot({ colophon: ['The SMS outbox', 'not read'] }, root); return; }
+  const full = got.rows >= got.asked;
+  const noReport = got.sent.filter((r) => !r.provider_status).length;
+  absenceBand(absHost, [
+    /* Counted as the list above counts — messages, not the 05:00 run's own
+       lines, which the run panel shows a week of. */
+    { label: 'Older messages', fig: null, none: full ? 'Not listed' : 'None left out',
+      why: full
+        ? `The page asks the outbox for its newest ${fmt(got.asked)} entries${got.kind ? ' of this kind' : ', the 05:00 run’s own lines among them'}; older ones are kept there, but are neither listed nor counted here.`
+        : `Every message the outbox holds${got.kind ? ' of this kind' : ''} is listed above — ${countOf(got.listed, 'message')}.` },
+    { label: 'Delivered to the phone', hl: noReport > 0,
+      fig: noReport ? `${fmt(noReport)} of ${fmt(got.sent.length)} sent` : null,
+      none: got.sent.length ? 'Every one reported' : 'Nothing sent',
+      why: 'The collector asks the gateway for each text’s delivery report for two days after it was sent. A text with no report is known only to have been accepted by the gateway.' },
+    { label: 'The charge’s currency', fig: null, none: 'Not stated',
+      why: 'The gateway reports a cost for each text but not the currency of its account, so the charge is printed without one.' },
+    { label: 'What a staff code said', fig: null, none: 'Never kept',
+      why: 'A six-digit sign-in or mobile-check code is sent and forgotten: only that one went, and to which number, is recorded.' },
+  ]);
+  pageFoot({ colophon: ['The SMS outbox', countOf(got.listed, 'message'), 'tiles: the last 7 days'] }, root);
 }

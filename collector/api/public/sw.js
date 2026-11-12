@@ -68,6 +68,9 @@ const SHELL_FILES = [
      only ever in the cache because a previous online visit had put them there
      one request at a time. */
   '/data.js', '/ui.js', '/charts.js', '/daterange.js', '/tz.js', '/swr.js',
+  /* ui.js imports ./pagemeta.js for the page contract's token (2026-11-12:
+     the sign-in page asks it too, and that page loads no ui.js). */
+  '/pagemeta.js',
   /* ui.js imports ./tokens.js (the colour contract, since the reskin's STEP 0),
      and m/screens.js imports ../deposit_core.js, ../today.js and
      ../onlinetime.js — three modules that were NEVER on this list, found by

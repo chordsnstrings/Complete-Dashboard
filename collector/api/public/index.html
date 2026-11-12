@@ -6,10 +6,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 
 <!-- Installable, and dark before the first paint: a home-screen app that
-     flashes linen and then goes dark reads as a web page in a costume. -->
+     flashes linen and then goes dark reads as a web page in a costume.
+
+     ARKIV'S PAPER, light and dark (tokens.js NEUTRAL.paper #FFFFFF and
+     NEUTRAL_DARK.paper #1E1F22, the grey paper of 2026-10-22). These carried
+     the Classic skin's linen and near-black (#f4f2ed / #14171a) for six weeks
+     after Arkiv became the default on both builds (2026-09-28): the browser's
+     own bar — Safari's tab tint, an installed window's title bar, Android's
+     status bar — was linen over a white sheet. The phone rewrote them at run
+     time (m/app.js akChrome); the desktop never did (HANDOFF §4.5). The
+     pre-paint script below follows a theme the reader CHOSE, as signin.html
+     does, and themecolor.js repaints them from the resolved --paper once the
+     stylesheets are in, so a Classic reader's bar is Classic's paper and a
+     toggle moves it. test/arkiv_plumbing.test.mjs holds the two values to
+     tokens.js. -->
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#14171a" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#f4f2ed" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1E1F22" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="FleetMirror">
@@ -97,7 +110,16 @@
      applyTheme() accepts; anything else follows the OS. */
   try {
     var t = localStorage.getItem('theme');
-    if (t === 'light' || t === 'dark') r.setAttribute('data-theme', t);
+    if (t === 'light' || t === 'dark') {
+      r.setAttribute('data-theme', t);
+      /* …and the browser's bar in the CHOSEN theme's paper, read from its own
+         meta above rather than written a second time (signin.html does the
+         same): the metas answer the OS's scheme, not the reader's choice. */
+      var metas = document.querySelectorAll('meta[name="theme-color"]');
+      var pick = null;
+      for (var j = 0; j < metas.length; j++) if ((metas[j].getAttribute('media') || '').indexOf(t) >= 0) pick = metas[j].getAttribute('content');
+      if (pick) for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', pick);
+    }
   } catch (e) { /* default to the OS preference */ }
   /* FOCUS (focus.js): stamped before the first paint, so a reader who turned
      the folding off never watches a page fold and then unfold. */
@@ -165,9 +187,24 @@
      two DNS lookups and two TLS handshakes to a third party before the stylesheet
      naming the files could be read, then two more before the files arrived — the
      largest fixed delay left in a first paint on a phone, and none of it work.
-     See fonts.css. -->
-<link rel="preload" href="/fonts/fraunces-latin.woff2" as="font" type="font/woff2" crossorigin>
+     See fonts.css.
+
+     WHAT ARKIV DRAWS FIRST, not what Classic did. These preloaded Fraunces and
+     Karla, Classic's two faces. Under Arkiv — the default on both builds since
+     2026-09-28 — Fraunces sets one word, the wordmark, and every label and
+     control is IBM Plex Mono. Measured in Chromium at 1280px on the mock with
+     the preloads taken out, so the list could not bias the answer
+     (2026-11-12): the browser asks for karla-latin, then
+     ibm-plex-mono-400-latin, then fraunces-latin, then Plex Mono 600 and 500,
+     on #target, #overview and #revenue alike; the first screen of #target
+     sets 2,744 characters in Karla, 725 in Plex Mono 400, 286 in Plex Mono
+     600 and 11 in Fraunces ("FleetMirror"). So the two preloads are Karla and
+     Plex Mono 400; Fraunces (67 KB, the largest file) still arrives as soon as
+     the wordmark asks for it, with font-display: swap. A Classic reader's
+     headings wait for that same request. test/assets.test.mjs holds every
+     preload to woff2 + crossorigin + named in fonts.css. -->
 <link rel="preload" href="/fonts/karla-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/ibm-plex-mono-400-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/fonts.css">
 <link rel="stylesheet" href="/app.css">
 <link rel="stylesheet" href="/access.css">

@@ -33,7 +33,7 @@
    ── EMPTY IS A SENTENCE ──────────────────────────────────────────────────
    Every list that can be empty says what would appear in it and how it gets
    there. "No requests" alone reads the same as "requests are broken". */
-import { el, esc, panel, note, tableFrom, tabBar, dtStr, dateStr, kpiRow, money } from './ui.js';
+import { el, esc, panel, note, tableFrom, tabBar, dtStr, dateStr, kpiRow, money, contract, glance, glanceBand, absenceBand, pageFoot } from './ui.js';
 import { who, loadWho, getJson, post, closedBlock, toSignIn } from './access.js';
 import { dubaiDay } from './tz.js';
 import { ROLE, CLASS, CLASSES, CAPS, CAP, LEVEL_NAME, rank, roleIsSensitive } from './access_model.js';
@@ -92,7 +92,13 @@ export async function accessPage(root, param, sub) {
   const bar = h('div');
   const flash = h('div', { class: 'acx-flash', 'data-acx': 'flash' });
   const host = h('div', { class: 'acx-tab', 'data-acx-tab': param === 'person' ? 'person' : tabId });
-  root.append(bar, flash, host);
+  /* Under the page contract: 00 after the tabs, † and the colophon after the
+     tab, both redrawn on every reload from the same overview (accessContract). */
+  const ak = contract();
+  const band = ak ? h('div', { 'data-acx': 'glance' }) : null;
+  const tail = ak ? h('div', { 'data-acx': 'absence' }) : null;
+  if (ak) root.append(bar, band, flash, host, tail);
+  else root.append(bar, flash, host);
 
   const ctx = { flash, host, sub, param };
   /* What a change reports is painted once the tab has been redrawn from the
@@ -115,6 +121,7 @@ export async function accessPage(root, param, sub) {
         (id) => (id === 'people' ? '#access' : `#access/${id}`)));
       host.replaceChildren();
       await (param === 'person' ? personTab : RENDER[tabId])(host, ctx);
+      if (ak) accessContract(band, tail, root, ctx);
     } finally {
       reloading = false;
       paint();
@@ -126,6 +133,53 @@ export async function accessPage(root, param, sub) {
     return { title: u ? (u.name || u.email) : 'Access', sub: u ? `${u.email} — their access, teams and sign-in` : 'No such person' };
   }
   return { title: 'Access', sub: TAB[tabId].sub };
+}
+
+/* ── the page contract (HANDOFF §4.5) ─────────────────────────────────────
+   #access made no contract() call: under Arkiv it drew the old page — the
+   tabs and the tab — with no 00 band, no † and no colophon. Under the
+   contract, from the one overview answer every tab already reads:
+     00  who has an account (the hero, its sub the People tab's status
+         counts, whose tile row it replaces), two-step on the active accounts,
+         the sensitive grants waiting for an Owner, the requests waiting, the
+         wall screens, and whether sign-in is required — all counted from
+         GET /api/access/overview, nothing derived;
+     01… the tab's panels, numbered by arkiv.css;
+     †   what this page cannot know: who reads without an account while
+         sign-in is optional, who stands in front of a wall screen, and the
+         platforms' own portal logins, which are not this product's accounts;
+     the colophon. The old skin draws exactly what it drew before. */
+function accessContract(band, tail, root, ctx) {
+  const users = ctx.users || [];
+  const count = (s) => users.filter((u) => u.status === s).length;
+  const active = users.filter((u) => u.status === 'active');
+  const screens = (ctx.devices || []).filter((d) => !d.revoked_at).length;
+  const pending = (ctx.grants || []).filter((g) => g.status === 'pending').length;
+  const required = ctx.config?.mode === 'enforced';
+  band.replaceChildren();
+  glance(glanceBand(band, 'As the server answered when this page opened').tilesHost, [
+    { label: 'People with an account', value: String(users.length), hero: true,
+      sub: [`${count('active')} active`, `${count('invited')} invited`, `${count('suspended')} suspended`,
+        count('offboarded') ? `${count('offboarded')} offboarded` : null].filter(Boolean).join(' · ') },
+    { label: 'Two-step on', value: `${active.filter((u) => u.totp_enabled).length} of ${active.length}`, sub: 'of the active accounts' },
+    { label: 'Waiting for an Owner', value: String(pending), sub: 'sensitive grants, which an Owner approves' },
+    { label: 'Requests', value: String((ctx.requests || []).length), sub: 'asked for from a page that was not open to them' },
+    { label: 'Wall screens', value: String(screens), sub: 'signed in with a screen link, no person behind them' },
+    { label: 'Sign-in', value: required ? 'Required' : 'Optional',
+      sub: required ? 'every page needs an account' : 'pages open without an account; managing access does not' },
+  ]);
+  tail.replaceChildren();
+  absenceBand(tail, [
+    { label: 'Who reads without an account', fig: null, none: required ? 'Nobody' : 'No name',
+      why: required ? 'Sign-in is required, so every reader has an account and a name.'
+        : 'Sign-in is optional, so a visitor without an account still opens the product, and what they read carries no name.' },
+    { label: 'Who stands at a wall screen', fig: null, none: 'Not known',
+      why: 'A screen signs in with its own link and has no person behind it, so who reads it is not recorded.' },
+    { label: 'The platforms’ own logins', fig: null, none: 'Not managed here',
+      why: 'The Uber, Bolt and Yango portals have their own accounts, kept on each platform; this page neither sees nor changes them.' },
+  ]);
+  pageFoot({ colophon: ['Access', `${users.length} ${users.length === 1 ? 'person' : 'people'}`,
+    required ? 'sign-in required' : 'sign-in optional'] }, root);
 }
 
 function tabLabel(t, ctx) {
@@ -244,7 +298,9 @@ function peopleTab(host, ctx) {
   const users = ctx.users;
   const n = (s) => users.filter((u) => u.status === s).length;
   const active = users.filter((u) => u.status === 'active');
-  host.append(kpiRow([
+  /* Under the page contract these counts are 00's (accessContract): printed
+     here as well they would be the same figures twice, one band apart. */
+  if (!contract()) host.append(kpiRow([
     { key: 'acx-people', label: 'People', value: String(users.length), sub: 'with an account, ever' },
     { key: 'acx-active', label: 'Can sign in', value: String(active.length), sub: 'active accounts' },
     { key: 'acx-invited', label: 'Invited', value: String(n('invited')), sub: 'have not used their link yet' },

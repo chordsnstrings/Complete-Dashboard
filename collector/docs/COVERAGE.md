@@ -10754,3 +10754,14 @@ it again.
   - platform bookings (167);
   - the five dataset-coverage counts (154 each). These are one per `/api/coverage` computation, roughly every 7.4 min.
 - `/api/coverage` measured 16.9 s, 19.3 s and 32.7 s cold.
+
+### Traps this added to the list (ARK, the Arkiv leftovers, 2026-11-12)
+
+- **The first screen is at 19 of its 20 modules.** `test/lazy_pages.test.mjs` fails when
+  app.js's static import graph reaches 20 modules; at `90d76da` it was 19. A new shared helper
+  that a first-screen module must import (here: the page contract's token, wanted by the sign-in
+  page without ui.js) cannot be a new file. It went into `pagemeta.js`, which imports nothing and
+  is already on the first screen; code that is not first-screen code goes behind a dynamic
+  `import()` (themecolor.js), which the test does not count.
+- **Chromium serialises an inset box-shadow colour first**: `rgb(35, 98, 211) 3px 0px 0px 0px
+  inset`. A test matching `/inset 3px/` never matches; match both orders.
