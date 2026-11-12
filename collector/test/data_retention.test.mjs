@@ -16,13 +16,16 @@
      5. every pass is recorded per table, and only a pass that removed rows
         for real moves the boundary pages read.
 
-   REVERSION (each proved by hand, see FIX-STATUS RET):
-     · drop `OR lead(id) OVER w IS NULL` from KEEP_SQL — "each day's last fix
-       is kept" fails;
+   REVERSION (each proved by hand on 2026-11-12, see FIX-STATUS RET):
+     · drop `OR lead(id) OVER w IS NULL` from KEEP_SQL — "steady FMS at 30 s
+       keeps … its last (13 of 360)" fails (12), and the would-remove count
+       with it (P1's last fix survives anyway: it opens the 09:00 bucket);
      · drop the seat_count line — "a change of seat count is kept" fails;
-     · make telemetryCutoff return `asked` instead of the earlier day — "never
-       inside the backfill window" fails;
-     · let writeState run in dry_run — "a dry run moves no boundary" fails. */
+     · make telemetryCutoff use `asked` instead of the earlier day — "asking
+       for 1 day is held back" and "nothing inside the weekly backfill
+       window" fail;
+     · let the boundary be written in dry_run — "a dry run moves no
+       boundary" fails. */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { dataRetentionPass, retentionSettings, telemetryCutoff, alertCutoff, KEEP_SQL }
