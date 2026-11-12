@@ -1507,8 +1507,12 @@ export async function collect({ from, to, mode }) {
        has one: neither half may take the other down. */
     let orders = null;
     try {
-      orders = await pullFiOrders(from, to, { fails, chunks, rowsByFleet, mint: fiToken,
-        plates: await knownPlates().catch(() => null) });
+      /* No client configured is the roster's failure to report, once; a
+         second copy per fleet from this pass would say nothing new. */
+      if (config.bolt.clientId) {
+        orders = await pullFiOrders(from, to, { fails, chunks, rowsByFleet, mint: fiToken,
+          plates: await knownPlates().catch(() => null) });
+      }
     } catch (e) {
       const why = String(e && e.message ? e.message : e).slice(0, 200);
       log.error(SRC, 'fleet-integration orders failed', { err: why });

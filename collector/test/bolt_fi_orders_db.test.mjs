@@ -352,5 +352,21 @@ await q(`DELETE FROM source_state WHERE source = 'bolt'`);
     after.length === 1 && 'created' in (after[0].raw || {}), after.map((r) => r.external_id).join());
 }
 
+/* ══ H. no fleet-integration client configured ════════════════════════════ */
+console.log('\nH. no fleet-integration client: the roster says so once, the orders pass adds nothing');
+{
+  delete process.env.BOLT_CLIENT_ID; delete process.env.BOLT_CLIENT_SECRET;
+  const calls = [];
+  globalThis.fetch = async (url) => { calls.push(String(url)); return new Response('{}', { status: 200,
+    headers: { 'content-type': 'application/json' } }); };
+  await q('DELETE FROM collection_run');
+  await collect({ from: '2026-11-09', to: '2026-11-11', mode: 'incremental' });
+  globalThis.fetch = realFetch;
+  const rr = await q(`SELECT fleet_id, error FROM collection_run WHERE source = 'bolt'`);
+  check('nothing is asked of getFleetOrders, and no second failure per fleet is written',
+    !calls.some((u) => u.includes('getFleetOrders')) && rr.length === 2
+    && rr.every((r) => !/fleet-integration orders/.test(r.error || '')), JSON.stringify(rr.map((r) => r.error)));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
