@@ -1433,3 +1433,9 @@ section REV has one row per change.
   panel on each finding's own page (#action/<rule>/<subject>); the #action and #insights absence
   cells now say what is still not recorded — whether the fact itself changed, and who cleared a
   finding its rule stopped finding.
+- **The migration.** v122's two `ALTER TABLE access_user` statements need the table's owner; they
+  run in a guarded block, so a refused privilege is a notice and the new tables are made regardless
+  (src/db.js runs a schema file as one query). Accounts the 2026-09-28 sweep had already suspended
+  get their `dormant_since` from the audit row that recorded it, so sign-in explains them too.
+- **Not done here:** `test/access_pages.test.mjs` §8 was rewritten for the cycle but not run (it
+  needs a local Postgres, and none runs in the build sandbox).
