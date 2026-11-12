@@ -105,13 +105,25 @@ export function makeAuthenticator({ alg = -7, rpId = 'localhost', origin = 'http
 }
 
 /* ── a mock OpenID provider ────────────────────────────────────────────── */
+/* `host` + `base` + `prefix`: mount the provider under a path of an app that
+   is already listening (the browser test keeps to the one port the brief
+   allows, 8310); otherwise it listens on a free port of its own. */
 export async function mockProvider({ alg = 'RS256', clientId = 'fleet-test-client', clientSecret = 'synthetic-test-secret-1',
-  authMethods = ['client_secret_basic'] } = {}) {
-  const app = express();
+  authMethods = ['client_secret_basic'], host = null, base = '', prefix = '/idp' } = {}) {
+  const app = express.Router();
   app.use(express.urlencoded({ extended: false }));
-  const server = app.listen(0);
-  await new Promise((r) => server.once('listening', r));
-  const issuer = `http://127.0.0.1:${server.address().port}`;
+  let server = null;
+  let issuer;
+  if (host) {
+    host.use(prefix, app);
+    issuer = `${base}${prefix}`;
+  } else {
+    const e = express();
+    e.use(app);
+    server = e.listen(0);
+    await new Promise((r) => server.once('listening', r));
+    issuer = `http://127.0.0.1:${server.address().port}`;
+  }
   let pair = alg === 'RS256' ? crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }) : crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
   let kid = 'k1';
   const p = {
@@ -125,7 +137,7 @@ export async function mockProvider({ alg = 'RS256', clientId = 'fleet-test-clien
     codes: new Map(),      // code → { challenge, redirectUri, nonce }
     rotate() { pair = alg === 'RS256' ? crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }) : crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' }); kid = `k${Date.now()}`; },
     discoveryOverride: {},
-    close: () => new Promise((r) => server.close(r)),
+    close: () => new Promise((r) => (server ? server.close(r) : r())),
   };
   const jwkPublic = () => ({ ...pair.publicKey.export({ format: 'jwk' }), kid, use: 'sig', alg });
   p.makeIdToken = (extra = {}) => {

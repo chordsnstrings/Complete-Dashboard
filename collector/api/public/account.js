@@ -38,6 +38,7 @@
 import { el, esc, panel, note, tableFrom, dtStr, dateStr, contract } from './ui.js';
 import { who, loadWho, getJson, post, signOut, setLook, toSignIn, fleetLabel } from './access.js';
 import { ROLE, ROLES, CLASS, CLASSES, CAP, CAPS, rank } from './access_model.js';
+import { registerPasskey, passkeySupported } from './signin_methods.js';
 
 /* ═════════════════════════ the page ═════════════════════════ */
 
@@ -76,7 +77,7 @@ export async function accountPage(root, _param, _sub) {
 
   root.append(youPanel(), seesPanel());
   if (who.owner) root.append(previewPanel());
-  root.append(passwordPanel(), twoStepPanel(), mobilePanel(), sessionsPanel(), lookPanel(), requestsPanel());
+  root.append(passwordPanel(), twoStepPanel(), passkeysPanel(), mobilePanel(), sessionsPanel(), lookPanel(), requestsPanel());
   return { title: 'Your account', sub: `Signed in as ${who.user?.email || ''}` };
 }
 
@@ -354,6 +355,78 @@ function twoStepPanel({ then = null } = {}) {
     });
     body.append(h('div', { class: 'acx-actions' }, btn, msg));
   };
+  draw();
+  return p.panel;
+}
+
+/* ── passkeys (and the single sign-on link) ─────────────────────────────
+   A passkey is the phone's or laptop's own lock — a fingerprint, a face or
+   its PIN — used in place of a password AND a code (ULM-DESIGN §5.1: it
+   counts as two-step). Added here only: signed in, and re-confirmed (the
+   server asks; post() shows the "confirm it is you" dialog and retries).
+   The panel stays HIDDEN while passkeys are off and the person has none and
+   no single sign-on link — so with the Owner's switches off this page is
+   what it was. With some, it lists them (removable even while the switch is
+   off: a way in can always be taken away) and says when they cannot be used. */
+function passkeysPanel() {
+  const p = panel('Passkeys', null, 'acct-passkeys');
+  p.panel.hidden = true;
+  const host = h('div');
+  const msg = msgLine();
+  p.body.append(host, msg);
+  const draw = async () => {
+    let d;
+    try { d = await getJson('/api/auth/passkeys'); } catch (e) {
+      p.panel.hidden = false;
+      host.replaceChildren(note(`Your passkeys could not be read: ${e.message}`, 'err'));
+      return;
+    }
+    const keys = d.passkeys || [];
+    const links = d.sso || [];
+    p.panel.hidden = !d.on && !keys.length && !links.length;
+    host.replaceChildren();
+    host.append(h('p', { class: 'acx-p' }, 'Sign in with your phone’s or laptop’s own lock — a fingerprint, your face or its PIN — '
+      + 'instead of your password and a code. Nothing to type, and nothing a fake sign-in page could copy.'));
+    if (!d.on && keys.length) host.append(note(`${d.why || 'Passkeys are switched off.'} The ones below cannot sign you in until they are on again; you can still remove them.`, 'warn'));
+    if (keys.length) {
+      host.append(tableFrom(keys, [
+        { label: 'Passkey', key: 'name', render: (k) => `${esc(k.name || 'Passkey')}${k.synced ? ' <span class="pill dim">synced</span>' : ''}`
+          + (k.disabled_at ? ' <span class="pill bad">switched off</span>' : '') },
+        { label: 'Added', key: 'created_at', render: (k) => esc(dateStr(k.created_at)) },
+        { label: 'Last used', key: 'last_used_at', render: (k) => esc(k.last_used_at ? dtStr(k.last_used_at) : 'not yet') },
+        { label: '', key: 'id', render: (k) => `<button type="button" class="btn" data-pk-remove="${Number(k.id)}">Remove</button>` },
+      ], { compact: true, cards: true, cardLead: 'name' }));
+      for (const k of keys.filter((x) => x.disabled_reason)) {
+        host.append(note(`${k.name || 'A passkey'} is switched off: ${k.disabled_reason} Remove it, then add it again.`, 'warn'));
+      }
+    }
+    if (d.on) {
+      const name = h('input', { class: 'depinput acx-in', maxLength: 60, placeholder: 'Work laptop', 'data-acx': 'passkey-name' });
+      const add = h('button', { type: 'button', class: 'btn primary', 'data-acx': 'passkey-add' }, 'Add a passkey');
+      add.addEventListener('click', async () => {
+        if (!passkeySupported()) { msg.set('This browser cannot make passkeys. Use a current Chrome, Edge, Safari or Firefox.', 'bad'); return; }
+        const r = await act(add, msg, () => registerPasskey(post, { name: name.value.trim() }));
+        if (!r) return;
+        await draw();
+        msg.set('Passkey added. Next time, choose “Continue with passkey” on the sign-in page.', 'ok');
+      });
+      host.append(h('div', { class: 'acx-inrow' }, field('Name it, so you know which device it is', name), add));
+    }
+    for (const l of links) {
+      let at = l.issuer;
+      try { at = new URL(l.issuer).host; } catch { /* the issuer as stored */ }
+      host.append(h('p', { class: 'acx-p dim', 'data-acx': 'sso-link' },
+        `Single sign-on: this account is linked to ${l.email} at ${at}, since ${dateStr(l.created_at)}. An Owner or Access admin can unlink it.`));
+    }
+  };
+  host.addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-pk-remove]');
+    if (!b) return;
+    const r = await act(b, msg, () => post('/api/auth/passkeys/remove', { id: Number(b.dataset.pkRemove) }));
+    if (!r) return;
+    await draw();
+    msg.set(`Passkey removed.${r.signedOut ? ` ${plural(r.signedOut, 'other session was', 'other sessions were')} signed out.` : ''}`, 'ok');
+  });
   draw();
   return p.panel;
 }

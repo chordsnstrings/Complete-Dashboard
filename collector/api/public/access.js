@@ -401,7 +401,15 @@ export async function post(path, body = {}, { method = 'POST', retry = true } = 
 
 /* Re-confirming who you are before a sensitive change: the password, or the
    two-step code when it is on. A dialog because it interrupts a change in
-   progress and returns to it — the change itself is on its page. */
+   progress and returns to it — the change itself is on its page.
+   A PASSKEY too, when passkeys are on and the person has one
+   (/api/auth/methods `mine`): "Use a passkey" beside the box. An account
+   single sign-on opened has no password, and without a code the box cannot
+   work at all — then the passkey is the only way offered, or the dialog says
+   there is none, rather than asking for a password that does not exist.
+   The passkey helper is IMPORTED WHEN PRESSED, not with this file: every
+   page and the phone's offline shell load access.js, and sw.js precaches
+   every module the phone reaches statically (test/tokens.test.mjs). */
 export function confirmIdentity() {
   return new Promise((resolve, reject) => {
     const dlg = document.createElement('dialog');
@@ -414,12 +422,31 @@ export function confirmIdentity() {
         <label for="ac-stepup">${code ? 'Six-digit code' : 'Password'}</label>
         <input id="ac-stepup" ${code ? 'inputmode="numeric" autocomplete="one-time-code" maxlength="11"' : 'type="password" autocomplete="current-password"'} required>
         <p class="ac-msg" role="status"></p>
-        <div class="ac-row"><button type="submit" value="ok">Confirm</button><button type="button" class="ghost" value="cancel">Cancel</button></div>
+        <div class="ac-row"><button type="submit" value="ok">Confirm</button><button type="button" class="ghost ac-passkey" value="passkey" hidden>Use a passkey</button><button type="button" class="ghost" value="cancel">Cancel</button></div>
       </form>`;
     document.body.append(dlg);
     const input = dlg.querySelector('input');
     const msg = dlg.querySelector('.ac-msg');
-    dlg.querySelector('button.ghost').addEventListener('click', () => { dlg.close(); dlg.remove(); reject(new Error('Not confirmed.')); });
+    dlg.querySelector('button[value="cancel"]').addEventListener('click', () => { dlg.close(); dlg.remove(); reject(new Error('Not confirmed.')); });
+    const pk = dlg.querySelector('.ac-passkey');
+    pk.addEventListener('click', async () => {
+      pk.disabled = true;
+      try {
+        const { stepUpWithPasskey } = await import('./signin_methods.js');
+        await stepUpWithPasskey(post);
+        dlg.close(); dlg.remove(); resolve();
+      } catch (err) { msg.textContent = err.message; } finally { pk.disabled = false; }
+    });
+    getJson('/api/auth/methods').then((m) => {
+      const mine = m?.mine;
+      const noBox = mine && !mine.password && !mine.totp;
+      if (m?.passkeys && mine?.passkeys > 0) pk.hidden = false;
+      if (!noBox) return;
+      for (const n of dlg.querySelectorAll('label, input, button[type="submit"]')) n.hidden = true;
+      dlg.querySelector('p').textContent = pk.hidden
+        ? 'Your account has no password or two-step code to confirm with. Add a passkey or turn on two-step sign-in on your account page.'
+        : 'This change needs you to re-confirm with your passkey.';
+    }).catch(() => { /* the box still works for a password or a code */ });
     dlg.querySelector('form').addEventListener('submit', async (e) => {
       e.preventDefault();
       try {

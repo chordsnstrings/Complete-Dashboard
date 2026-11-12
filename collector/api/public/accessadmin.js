@@ -41,6 +41,8 @@ import {
   h, field, msgLine, act, oneTimeLink, roleSelect, fleetPicker, endOfDay, roleName, rememberRoles,
   fleetsText, plural, requestWhat, uid, explain,
 } from './account.js';
+/* Passkeys and single sign-on: the Owner's switches and a person's methods. */
+import { signinMethodsPanel, personSigninMethods } from './signin_methods_admin.js';
 
 const TABS = [
   { id: 'people', label: 'People', sub: 'Everyone with an account: their roles, fleets, teams and sign-in' },
@@ -552,6 +554,7 @@ function actionsPanel(u, ctx, { self, isOwner }) {
       + 'If their role requires it they will be asked to set it up again the next time they sign in.',
     [], armedBtn('Reset two-step', 'Press again to reset', run('reset_mfa', {}, () => ctx.say(`Two-step sign-in reset for ${who2}.`)), 'reset-mfa'));
   }
+  p.body.append(personSigninMethods(u, ctx));
 
   if (self) {
     p.body.append(note('This is you. You cannot suspend or offboard yourself; another Owner or Access admin can.', 'warn'));
@@ -1283,6 +1286,7 @@ function settingsTab(host, ctx) {
   const mfaHint = h('span', null, MFA_WORDS[mfa.value]);
   mfa.addEventListener('change', () => { mfaHint.textContent = MFA_WORDS[mfa.value]; });
   one('Who must use two-step sign-in', 'mfa', mfa, mfaHint, () => mfa.value, (v) => `Two-step policy saved: ${MFA_WORDS[v] || v}`, 'Must use it');
+  signinMethodsPanel(host, ctx);
 
   const cash = h('input', { type: 'number', min: '0', step: '100', class: 'depinput acx-in acx-num', value: String(cfg.cash_stepup_aed ?? ''), 'data-acx': 'cash' });
   const cmsg = one('Re-confirming a large cash entry', 'cash_stepup_aed', cash,

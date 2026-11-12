@@ -5816,3 +5816,20 @@ Also run, all green: `access_core` 211, `agent_access` 12, `agent_reach` 74, `fl
 `low_trips_email` 32, `bolt_paste_rotation` 13, `bolt_portal_supersede` 39, `paste_multifile` 43,
 `actor_attribution` 3. `access_pages` and `signin_page` print SKIP here: they need the local
 Postgres on 127.0.0.1:55432, which this sandbox does not run.
+
+**The pages (PKY, second commit).** Each piece is hidden or absent while its switch is off, so with
+both off every page is what it was.
+
+| id | what | where | test | state |
+|---|---|---|---|---|
+| PKY14 | **Sign-in page**: "Continue with passkey" and "Continue with <provider>" above the password form when /api/auth/methods says they are on (§10.1: the passkey first); the passkey ceremony from the button (no email typed); the code step after single sign-on (`/api/auth/sso/code`, the ticket in a cookie, never the address); the return trip's `?sso=` read as a CODE and its sentence looked up (signin_methods.js says why an address must never carry the sentence), then taken out of the address | `api/public/signin.js:329` altWays, `:347` passkeyIn, `:533` stepSsoCode, `:946`–`:967` start; `api/public/signin.html:221` | `signin_methods_browser` 32/0 — Chromium with a CDP virtual authenticator, the harness on :8310. **Reverted**, each caught: altWays empty, the `sso === 'done'` branch | written, not deployed |
+| PKY15 | **The browser half and the sentences**: JSON ↔ bytes for the two ceremonies (no `parseCreationOptionsFromJSON`, which older Safari and Firefox lack), the browser's own failures said as what they were ("closed or timed out", "already holds a passkey"), and SSO_REFUSALS — every code the server sends has a sentence and every sentence is sent (checked both ways) | `api/public/signin_methods.js:21` SSO_REFUSALS, `:74` credentialJson, `:94` passkeyFailure, `:107` registerPasskey | `signin_methods_browser` — Chromium's own credential registers, signs in, counts (server counter = authenticator's), re-confirms. **Reverted** (credentialJson without userHandle): caught; `access_passkey_sso` §11 (both ways) | written, not deployed |
+| PKY16 | **"Confirm it is you" with a passkey**: the shared dialog offers "Use a passkey" to a person who has one; an account with neither password nor code is told so rather than asked for a password that does not exist. The helper is imported when pressed, so the phone's offline shell (sw.js, `tokens.test.mjs`) does not grow | `api/public/access.js:431`, `:440` | `signin_methods_browser` §3; `tokens` 150/0 | written, not deployed |
+| PKY17 | **Account page → Passkeys**: list (name, added, last used, synced, switched off and why), add (named; re-confirmed through the dialog), remove (signs out every other session); the single sign-on link shown. Hidden while passkeys are off and the person has none | `api/public/account.js:371`, `:80` | `signin_methods_browser` §3 (lists, removes, adds with the browser) | written, not deployed |
+| PKY18 | **Access → Settings → Passkeys and single sign-on**: ready or not, in the platform's words (PUBLIC_URL; the OIDC variables — the secret only as set/missing), the redirect address to register at the provider, counts, "Check the provider" (a live discovery read, on request only), and the Owner's switches, domains and provisioning. **A person's page**: their passkeys and link, "Remove their passkeys" and "Unlink single sign-on" (press twice). Two hook lines in accessadmin.js | `api/public/signin_methods_admin.js:28`, `:104`; `api/public/accessadmin.js:1289`, `:557` | `signin_methods_browser` §4 (off and on again through "confirm it is you"; the secret never on the page) | written, not deployed |
+
+Also run after the pages: `arkiv_skin` 119, `class_target_panel` 22, `fleet_name_markup` 7,
+`view_list_needs` 9, `signin_page` 35 (its page-driving half skips without Postgres — which is why
+`signin_methods_browser` drives the sign-in page itself), `tokens` 150. Screenshots of the sign-in
+page at 390/1280 px, light and dark, with both buttons: `PKY_SHOTS=<dir> node
+test/signin_methods_browser.test.mjs`.
