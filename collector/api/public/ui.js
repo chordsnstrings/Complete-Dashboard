@@ -982,6 +982,9 @@ export const SOURCE_LABEL = {
      was printed at a reader — in the Settings collection-debt sentence and in
      the #sources Source column. */
   uber_fleet: 'Uber fleet',
+  /* Uber's live per-trip money feed (src/sources/uber_transactions.js,
+     2026-11-12), named so its runs never reach a reader as the database key. */
+  uber_transactions: 'Uber live money',
 };
 /* One threshold for "how did this go", used by every surface that judges it.
    ─────────────────────────────────────────────────────────────────────────
@@ -1019,6 +1022,7 @@ export const completionTone = (v) => (v == null || v === '' || !Number.isFinite(
 export const SOURCE_TOKEN = Object.freeze(Object.fromEntries([
   ...CHANNEL_ORDER.map((k) => [k, `--c-${k}`]),
   ['uber_fleet', '--c-uber'],
+  ['uber_transactions', '--c-uber'],
 ]));
 export const sourceToken = (s) => SOURCE_TOKEN[String(s || '').toLowerCase()] || null;
 

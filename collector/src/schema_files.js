@@ -361,4 +361,9 @@ export const SCHEMA_FILES = [
   /* v114: charging_link's 'held' tier (a fold's contradictory decisions,
      never recomputed) and one confirmation per customer (a unique index). */
   'schema_v114.sql',
+  /* v117: Uber's live per-trip money — one row per transaction from POST
+     /v1/vehicle-suppliers/transactions (src/sources/uber_transactions.js), a
+     per-trip view over them, and trip.price_source, which says where a price
+     came from so the live feed can fill only where nothing better exists. */
+  'schema_v117.sql',
 ];

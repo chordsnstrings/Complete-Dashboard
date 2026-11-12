@@ -10,6 +10,7 @@ import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
 import { recordCredentialVisibility, withPinnedSettings, get } from './settings.js';
 import { runDiscovery } from './sources/discovery.js';
+import { liveMoneyTick } from './sources/uber_transactions.js';
 import { backfill, incremental, catchUp, fareRefresh, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk, payoutAudit, chargingTick, walletsTick } from './run.js';
 import { clearCheckpoint } from './checkpoint.js';
 import { config } from './config.js';
@@ -64,6 +65,9 @@ async function main() {
      cron because the first thing anyone wants after wiring a new surface is to
      run it once and look. */
   if (cmd === 'profile') return uberProfileTick();
+  /* `live-money`: one pass of Uber's live per-trip money feed, both fleets —
+     the quarter-hourly tick, by hand. */
+  if (cmd === 'live-money') return liveMoneyTick();
   if (cmd === 'charging') return chargingTick();
   if (cmd === 'charging-wallets') return walletsTick();
   if (cmd === 'audit') return uberAuditTick();
@@ -285,6 +289,22 @@ async function main() {
        lands here. The 05:00 Dubai cash texts and the 07:00 report read it. */
     cron.schedule(config.faresCron, () => fareRefresh(2)
       .catch((e) => log.error('scheduler', 'fare refresh', { err: String(e) })));
+    /* UBER'S LIVE PER-TRIP MONEY, every quarter hour — the freshness tier the
+       hourly fare walk above cannot be, because it waits on Uber's report and
+       Uber publishes a ride's fare hours after it. src/sources/uber_
+       transactions.js asks Uber's transactions feed for the last six hours of
+       15-minute windows and prices a trip only where nothing better exists.
+
+       AT 7, 22, 37 AND 52 PAST, which collides with nothing here at any hour:
+       every other job starts on a multiple of five (CABMAN, the SMS flush,
+       the rollups, the incrementals, the fares) or at 12, 17 or 42 — and
+       test/uber_transactions.test.mjs expands every schedule in this file to
+       its minutes and holds the four apart from all of them. Seven past is
+       also the first minute the window that closed on the quarter hour is
+       legal to ask for: Uber refuses a range that is not five minutes old,
+       and the collector waits six. */
+    cron.schedule('7,22,37,52 * * * *', () => liveMoneyTick()
+      .catch((e) => log.error('scheduler', 'uber live money', { err: String(e) })));
     cron.schedule('0 22 * * 0', () => backfill()
       .catch((e) => log.error('scheduler', 'weekly backfill', { err: String(e) })));
 

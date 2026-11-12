@@ -22,6 +22,7 @@ import { http, qs } from '../src/http.js';
 import { pool } from '../src/db.js';
 import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST } from '../src/auth/uber.js';
 import { probeEarnerWindow, auditTripWindow, uberOrgs } from '../src/sources/uber.js';
+import { probeTransactions, txnUrl } from '../src/sources/uber_transactions.js';
 import { loadSettings, get } from '../src/settings.js';
 /* The portal token exchange, borrowed rather than re-implemented. A probe that
    mints its own credential tests its own minting: the Yango check made exactly
@@ -1126,7 +1127,11 @@ export function probeRoutes(app, { wrap }) {
        exactly the string UBER_ORG_ENCRYPTED wants. */
     orgs: () => 'https://api.uber.com/v1/vehicle-suppliers/orgs',
     'driver-actions': (org) => `https://api.uber.com/v1/vehicle-suppliers/drivers/actions?org_id=${encodeURIComponent(org)}`,
-    transactions: (org) => `https://api.uber.com/v1/vehicle-suppliers/transactions?org_id=${encodeURIComponent(org)}&limit=50`,
+    /* POST, not this URL as a GET — the loop below sends it through
+       probeTransactions (src/sources/uber_transactions.js). A GET draws `404
+       page not found`, which this route reported as the surface serving
+       nothing (docs/COVERAGE.md "Uber's live per-trip feed WORKS"). */
+    transactions: (org) => txnUrl(org),
     'earner-payments': (org) => `https://api.uber.com/v1/vehicle-suppliers/earners/payments?org_id=${encodeURIComponent(org)}&limit=50`,
     vehicles: (org) => `https://api.uber.com/v1/vehicle-suppliers/vehicles?org_id=${encodeURIComponent(org)}&limit=50`,
     drivers: (org) => `https://api.uber.com/v1/vehicle-suppliers/drivers?org_id=${encodeURIComponent(org)}&limit=50`,
@@ -1140,9 +1145,11 @@ export function probeRoutes(app, { wrap }) {
     const out = [];
     for (const name of names) {
       try {
-        const { data, status } = await http(REST[name](config.uber.org), {
-          timeoutMs: 30000, retries: 0, headers: { authorization: `Bearer ${token}` },
-        });
+        const { data, status } = name === 'transactions'
+          ? await probeTransactions({ org: config.uber.org, token })
+          : await http(REST[name](config.uber.org), {
+            timeoutMs: 30000, retries: 0, headers: { authorization: `Bearer ${token}` },
+          });
         // Find the first array of objects in the response — providers wrap
         // their lists under varying keys.
         const arr = Array.isArray(data) ? data
@@ -1196,15 +1203,17 @@ export function probeRoutes(app, { wrap }) {
     const windowed = {
       'earner-payments': `https://api.uber.com/v1/vehicle-suppliers/earners/payments?${qs({
         org_id: org, start_time: from, end_time: to, page_size: 50 })}`,
-      transactions: `https://api.uber.com/v1/vehicle-suppliers/transactions?${qs({
-        org_id: org, start_time: from, end_time: to, limit: 50 })}`,
     };
     /* The surface that actually feeds driver_performance. The two REST
        endpoints below are the ones the daily probe already watches, and it
        turns out neither is the source: earner-payments returns an empty list
        even for a month we hold AED 140,379 of earnings for, and transactions
        404s outright. Probing only those would have said "the provider serves
-       nothing" about a window that is demonstrably served. */
+       nothing" about a window that is demonstrably served.
+       (2026-11-12: the transactions 404 was OUR verb — it is a POST, asked
+       below the way it answers. It serves 15-minute windows from the last
+       24 hours, so it still cannot answer for a past day; it is not the source
+       of driver_performance either.) */
     /* `to` is inclusive to whoever typed it and exclusive to Uber, so the day
        asked about has to be pushed past. Without this a probe for a single day
        asks for a zero-length range and reports "the provider serves nothing"
@@ -1232,6 +1241,29 @@ export function probeRoutes(app, { wrap }) {
           fields: arr ? describe(arr) : [] });
       } catch (e) { out.push({ surface: name, error: String(e).slice(0, 220) }); }
     }
+    /* THE LIVE TRANSACTIONS FEED, which cannot answer for most windows a
+       person types here. It serves ranges of at most 15 minutes from the last
+       24 hours, ending at least five minutes ago, and is asked with POST. This
+       asked it with GET over whole days and recorded the 404 as the surface
+       serving nothing. Now: the newest legal quarter hour inside the window,
+       asked the way the collector asks (src/sources/uber_transactions.js) —
+       or, when the window has none, no request at all and the reason why,
+       which is a fact about the feed and not about the provider's data. */
+    try {
+      const t = await probeTransactions({ org, token, from: new Date(from), to: new Date(to) });
+      if (!t.window) {
+        out.push({ surface: 'transactions', status: null, count: 0, asked: false,
+          message: 'not asked — Uber serves this feed only in windows of at most 15 minutes '
+            + 'inside the last 24 hours, and this window holds none', fields: [] });
+      } else {
+        const arr = Array.isArray(t.data?.transactions) ? t.data.transactions : null;
+        out.push({ surface: 'transactions', status: t.status || 200, window: t.window,
+          count: arr ? arr.length : 0,
+          top_level_keys: t.data && typeof t.data === 'object' ? Object.keys(t.data).slice(0, 20) : [],
+          message: t.data?.message || t.data?.error || null,
+          fields: arr && arr.length ? describe(arr) : [] });
+      }
+    } catch (e) { out.push({ surface: 'transactions', error: String(e).slice(0, 220) }); }
     res.json({
       window: [req.query.from, req.query.to],
       // The one that answers the question; the REST pair is context.

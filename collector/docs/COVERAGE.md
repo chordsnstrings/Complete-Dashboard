@@ -10754,3 +10754,98 @@ it again.
   - platform bookings (167);
   - the five dataset-coverage counts (154 each). These are one per `/api/coverage` computation, roughly every 7.4 min.
 - `/api/coverage` measured 16.9 s, 19.3 s and 32.7 s cold.
+
+## Uber's live per-trip feed, collected — 2026-11-12 (FIX-STATUS UTX)
+
+`POST /v1/vehicle-suppliers/transactions` is now collected (`src/sources/uber_transactions.js`)
+and asked by all three probes with POST. The "Uber's live per-trip feed WORKS" section above still
+holds; the table above it that says "all three of our probes issued it as a GET" is history now.
+
+**Re-measured on production 2026-11-12 04:33Z** through `/api/probe/uber/realtime`, structure
+only (nothing personal printed): 1 of 7 shapes answered — POST, `timeRange`,
+`FILTER_OPERATOR_IN_RANGE`, epoch milliseconds as strings. Seconds, ISO and RFC3339 still draw
+`invalid start time`; no filters still draws `No Time Range provided in request`; the GET control
+still draws `404 page not found`. Two months on, nothing about the shape had moved.
+
+**What a row carries, measured:**
+
+```
+driverInfo      { driverUuid, firstName, lastName }          ← names: not stored
+transactionInfo { transactionUuid, tripUuid, processedAt (ISO, 24 chars),
+                  description: "TRIP",
+                  breakDowns: [ { categoryName, categoryLabel,
+                                  amount: { amountE5: <integer NUMBER>, currencyCode: "AED" },
+                                  children: [ ... ] | null } ] }
+```
+
+`amountE5` arrives as a JSON **number**, not a string (the collector reads both). A leaf's
+`children` is `null`, not `[]`. The tree in the sampled row:
+
+```
+paid_to_you
+├── your_earnings
+│   ├── fare                ← the BRANCH: trip.price
+│   │   ├── little_fare
+│   │   └── wait_time
+│   ├── service_fee
+│   └── taxes_earnings
+│       └── tax_on_service_fee
+└── trip_balance
+    └── refunds
+        └── toll
+```
+
+The response's top level held two keys of 12 and 16 characters — read as `transactions` and
+`paginationResult`, the envelope Uber's other REST surfaces here use. The inner cursor key is
+inferred (`nextPageToken`, as `drivers/actions` answers), not seen: a 14-minute window has not been
+observed above 50 rows. The collector stops on a repeated page and reports it if the page was full.
+`cash_collected`'s path (`trip_balance > payouts > cash_collected`) is inferred from the payments
+report's column; the sampled row was not a cash trip.
+
+**How it is collected.** Every quarter hour at 7, 22, 37 and 52 past; per fleet, the 15-minute
+windows of the last 6 hours (`UBER_TXN_HOURS`, capped at 24), aligned to the quarter hour, each
+15 min − 1 ms, ending at least 6 minutes ago, newest first, every page, one request per 1.1 s. That
+is 24 requests per fleet per run, about 53 seconds of paced requests for both fleets, ~4,600 a day.
+Re-asking six hours every pass is what makes a restart, a throttled tick or a late-processed
+transaction cost nothing. It cannot backfill: nothing older than 24 hours is reachable.
+
+**How it fills.** `trip.price` (the rider fare, the same node the payments report states) where the
+price is NULL or the feed's own; `trip.price_source` says `uber_live`. The fare walk now stamps
+`uber_payments` when it states a fare and replaces the provisional figure. `GET /api/uber/live-money`
+measures, on trips both have priced, whether the two agree — the check that the feed is reading the
+node this product thinks it is.
+
+### Traps this added to the list
+
+- **A 429 handed to `authFailure` reads as an expired session.** `authFailure` (src/auth_state.js)
+  files a text body as "answered with text, not JSON" — kind `expired` — and a rate limit's body is
+  often plain text ("Too Many Requests"). Passed through `noteUberRest`, every throttle would turn
+  the Uber credential banner red. Note the credential from a 2xx or a 401/403 only, never a 429 or
+  a 5xx.
+- **A collector of Uber money must not log under source `uber`.** The banner's run clock
+  (`api/auth_routes.js`) and the ntfy watcher's "observed again" (`api/alerts.js`) key Uber's
+  freshness on `source` alone: a quarter-hourly run under `uber` would read as Uber collecting while
+  the trip export was dead. Its own source (`uber_transactions`) and a `SOURCE_LABEL` entry, so
+  `#sources` never prints the database key.
+- **A tick every quarter hour must not move the response-cache version.** `api/cache.js` moves every
+  cached answer on any `collection_run` finish except mode `realtime`; CABMAN's five-minute tick was
+  most of the database's load until it was excluded (2026-09-29). This feed logs `realtime` too, and a
+  rollup or incremental starts eight minutes after each of its runs to carry the price to cached
+  pages (pinned in `test/uber_transactions.test.mjs`).
+- **A NULL `price_source` means "not the live feed", not "unknown, overwrite me".** It is every price
+  written before v117 (the payments walk) and every channel's own price. The live fill writes only a
+  NULL price or its own; do not backfill the column — the rule needs no backfill and the rewrite would
+  double `trip`'s heap.
+- **The fare walk must stamp `uber_payments`, or the live feed undoes it.** The feed may correct its
+  own provisional price; without the stamp the row kept reading `uber_live` under the statement's
+  figure and the next live pass put the provisional one back (shown by reverting it in the test:
+  47.50 → 46.94).
+- **An empty window may come back as `{}`.** proto3 JSON omits an empty repeated field, so "no
+  `transactions` key" is an empty quarter hour, not a shape change. A non-empty answer that yields
+  no readable row is the shape change, and fails the run.
+- **A probe that starts answering starts storing what it describes.** `describe()` (src/probe.js)
+  prints a field's values whenever it has a dozen or fewer, and the nightly probe keeps that in
+  `provider_probe.fields`. While this surface 404'd it stored nothing; answering, a quiet quarter
+  hour's two or three drivers' first and last names would have been kept every night. Fixing a
+  probe's verb is also deciding what its answer may leave behind — `withholdNames` keeps the keys
+  and drops the values.
