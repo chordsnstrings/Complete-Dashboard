@@ -110,6 +110,10 @@ import { SETTING_DEFS, envOnlyReason } from '../src/settings.js';
    assertion of every route test. test/ops_health_budget.test.mjs mounts them
    for real. */
 import { makeHealth, makeRateLimiter } from '../api/ops.js';
+/* server.js imports it; the route itself is mounted by the *_routes.js
+   discovery below like every module's, and the name is injected so a slice
+   that ever calls it resolves (CLAUDE.md: a server.js import goes here too). */
+import { historyRoutes } from '../api/history_routes.js';
 
 export const START = "/* ───────────────────────── overview ───────────────────────── */";
 export const END = '/* ───────────────── per-driver detail pages ───────────────── */';
@@ -203,7 +207,7 @@ export async function mountAll(db, { serverRoutes = true, inject = {}, pre = nul
     /* The credential paste queue, real. A route that is mounted but throws
        ReferenceError the first time it is called is a route no test can
        reach, and /api/settings/paste was in exactly that state. */
-    recognise, unrecognised, checkAll, proposeKeys, SETTING_DEFS, envOnlyReason, recordSaved,
+    recognise, unrecognised, checkAll, proposeKeys, SETTING_DEFS, envOnlyReason, recordSaved, historyRoutes,
     normaliseFiles, crossFile, silentFiles, fileReport, boltFollowUp,
     makeHealth, makeRateLimiter,
     /* LAST, so a test can replace any of the above.

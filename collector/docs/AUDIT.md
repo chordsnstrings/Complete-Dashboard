@@ -2874,3 +2874,59 @@ and 390, against production's own data: every row a grid, none clipped, no sidew
 
 To repeat: `node bin/prod-mirror.mjs &` then `node bin/focus-rows-audit.mjs http://127.0.0.1:8200
 /tmp/fx.json`; compare a working tree on :8100 with the same `SETTLE`.
+
+## SPK — the hero sparklines, rendered at 1280 and 390, light and dark (2026-11-12)
+
+**How.** `/api/history` is not on production yet, so `bin/live-ui.mjs` cannot show it (production
+answers the path 404, which the pages turn into "No line. The history did not load for this tile
+just now — the figure above is unaffected."). The pass ran instead against the REAL handlers
+(`test/mount.mjs`) over PGlite: `test/fixture.mjs`'s fleet, plus 40 days of synthetic Uber roster,
+timeline and trips and 95 days of cash and priced Bolt and hotel work on a named person spine, then
+the real roll-up pass (`refreshRollups`), served on :8307 from a scratch script; Chromium through
+`test/browser.mjs`, service workers blocked, `Asia/Dubai`, Arkiv. Pages: #online-time,
+#performer/‹a Bolt account›/‹last Monday›, #deposits, #cancellations — 16 renders.
+
+**What each drew.**
+
+- Every page made exactly one `/api/history` request, beside its own, and drew its line in ink
+  (rgb(10, 10, 11)) in light and near-white (rgb(240, 240, 241)) in dark. Nothing went sideways at
+  390, and no page threw.
+- #online-time: Late, 30 Oct – 12 Nov, 13 of 14 days drawn; today left out, with its reason in the
+  line's caption.
+- #performer: Money, the 12 weeks ending with the page's week, all 12 drawn, under the economics
+  delta and above the basis line.
+- #deposits: the ceiling and Drivers carrying a ceiling, 12 weeks each. The carriers' line is flat
+  where the count did not move — a true line, not a missing one.
+- #cancellations: 1 – 12 Nov, 11 of 12 days drawn (today out), on the Cancellations tile beside the
+  Dropped-a-job hero.
+
+**Found and fixed: the end mark of every glance-tile line was a dash** (FIX-STATUS SPK10). The svg
+stretches with `preserveAspectRatio="none"` and a circle's radius is geometry, not stroke, so the
+end "dot" measured 14.7 × 4.0 px on a hero tile at 1280, 13.4 × 4.0 at 390 and 6.6 × 4.0 on
+#overview's tiles. It is now a round capped stroke on every glance line — these four pages and
+#overview's, #finance's, #reconcile's, #demand's and #causes' — checked in a 3× close-up before and
+after. The phone keeps its circle.
+
+**Found, not fixed: #cancellations' chips govern nothing.** `/api/cancellations` reads the window
+alone (COVERAGE, the SPK traps); the line therefore asks for the tile's own scope.
+
+**A stale line in the audit.** "Only #overview draws one" — #demand, #finance, #reconcile and #causes
+already drew a hero line from their own payloads; they keep it, and make no extra request.
+
+To repeat the checks without a server: `node test/history_sparklines.test.mjs` (the mock, 57 checks:
+one request per draw, the runs, the end mark, the caption, 390, dark, Classic, every absence) and
+`node test/history_routes.test.mjs` (the route against `/api/online-time`, `/api/cancellations`,
+`/api/trips/daily` and #deposits' own sum, 62 checks).
+
+**The review's pass (2026-11-12).** The same four pages against `mockapi.mjs` on :8357, Chromium
+through `test/browser.mjs`, Arkiv, 1280 and 390, light and dark — 16 renders on the builder's
+head and 16 after the review's fixes, plus #deposits with its cash values withheld by the gate at
+both widths. Every render: no page error, exactly one `/api/history` request, no sideways scroll,
+no `NaN`, `undefined` or `null` in the text, no glance-band target under 44 px, the end mark round.
+The withheld render prints the gate's sentence where the line would be ("No weekly line. Not shown
+to your role: driver cash. …"), wrapping inside the tile at 390. Tile sub-lines clamped to one line
+are the focus layer's long-sub rule (`focus.js`, with the full text as its title), not this
+change. The two defects the review fixed were not visible to a reader with every class: the
+history refused to the Cash desk and the HR officer, and a failed load of `history.js` holding
+#online-time's tiles back (FIX-STATUS SPK15, SPK16). Now 64 checks in `history_sparklines` and 71 in
+`history_routes`.

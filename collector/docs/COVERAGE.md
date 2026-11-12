@@ -11270,3 +11270,61 @@ node this product thinks it is.
   ends the loop after page one with the window marked answered — silent truncation. With the cursor
   key still inferred, a FULL page and no cursor read is examined: a cursor-like key carrying a value
   fails the window and names the key; an empty `paginationResult` is the last page.
+## The history endpoint's two roll-ups — built 2026-11-12 (SPK)
+
+`/api/history` (`api/history_routes.js`) draws the hero sparklines from roll-ups only. Two series
+had none, so `sql/schema_v119.sql` adds them, built by `src/history_rollup.js` inside the ordinary
+rollup pass: `driver_first_online` (each Uber account's first ONLINE event per Dubai day) and
+`cash_fare_day` (cash fares by account, channel and day, from the `trip_cash` view).
+
+### Traps this added to the list
+
+* **driver_online_hour's first hour is not when somebody came online.** Its spans merge ONLINE
+  heartbeats with job spans (`api/online_span_sql.js`), so its first minute can be a trip's start.
+  `/api/online-time` judges Late on the first ONLINE *status event* only. A Late line built from
+  the hours would disagree with the Late tile above it; that is why `driver_first_online` exists.
+* **A Late line must use the page's people, not every account with an event.** The page judges
+  the roster's Uber accounts plus whoever drove Uber that day, folded to the person: one person
+  with two accounts is judged on the earlier, and an account that came online but is on neither
+  list is on no call list. Counted per account, 5 Oct in the test fixture reads 3 late where the
+  page says 1.
+* **A day's Late is final only when every fleet's timeline has been read past it.** Uber's
+  timeline is fetched every three hours, two days at a time; the evening of the last day can still
+  be arriving. The line takes the earliest fleet's last read before the roll-up ran.
+* **`cash_fare_day` can trail the live ceiling by up to a day.** Uber's weekly payments report
+  re-prices cash trips weeks or months after the fact, which changes `trip_cash.cash_amount`; the
+  quarter-hourly pass rebuilds only the last 14 days, and the nightly full pass catches the rest.
+  The ceiling line's last point is "as of the last build" and says so (`as_of`).
+* **A running total from a part-built table is wrong at every point, not just the early ones.**
+  The ceiling and carrier lines are drawn only once `history_rollup_build.built_from` is
+  1900-01-01 — after the first full pass (boot, or 22:40).
+* **`/api/cancellations` ignores `platform` and `fleet`.** The #cancellations page shows the
+  channel chips and sends them, and the route reads the window alone (`api/cancellation_routes.js:16`),
+  so the page's figures do not move with the chips. The page's sparkline therefore asks
+  `/api/history` for the same scope as its tile (the window, no chips) so the two agree; the
+  endpoint itself honours both chips for any caller that sends them. Not fixed here — it is the
+  route's defect, and a fix changes every figure on the page.
+* **A glance tile whose value is a bare dash keeps nothing but its label and reason.**
+  `bandTiles()` (`api/public/ui.js`) rebuilds such a tile as `{label, na}` (plus key and hero), so a
+  `spark`, a `delta` or a `sub` attached to it is dropped without a word. That is what keeps a line
+  off a Late that cannot be judged — and it is why a line, or a delta, put on a tile that might be
+  bare must not be relied on to appear.
+* **A sparkline's end mark is not round unless it is a stroke.** `spark()` stretches a 100-unit
+  box to its host (`preserveAspectRatio="none"`); a `<circle>` stretches with it — 14.7 × 4.0 px on
+  a hero tile. The glance tiles ask for `dot: 'cap'`, a zero-length path with a round,
+  non-scaling cap. The phone's lines keep the circle, held byte for byte by
+  `test/page_contract.test.mjs` §3b.
+* **A route that serves several pages needs a subject every one of those pages' readers holds.**
+  The gate refuses a route outright to a role without its `subject`, so `/api/history` as built
+  (subject BK) was refused to the Cash desk (`ID CASH SYS`) on #deposits, its own page, and to the
+  HR officer on #online-time and #cancellations — and each page said its line "did not load".
+  Subject SYS, with each series masked by its own class in `fields`, is the shape that works;
+  `test/history_routes.test.mjs` §6 checks every role template against every line's page subject
+  (`api/public/access.js` VIEW_SUBJECT) so a new series or a new role cannot reopen it (review of
+  SPK, 2026-11-12).
+* **A withheld value arrives as `null`, which is also what an unmeasured one looks like.** The gate
+  names the class in `_withheld`; a page that does not read it captions the nulls with whatever
+  real reason is left over ("No weekly line. No valued cash fare is on record…"). Each history
+  series carries its `class` so `api/public/history.js` can ask first. And a sentence is nobody's
+  class: a count inside a `why` reaches every reader of the route, so one person's weekly booking
+  count is its own field (`series.money.points[].bookings`, BK).

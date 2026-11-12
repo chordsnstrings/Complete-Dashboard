@@ -694,7 +694,12 @@ function glanceExtras(k) {
   let sp = '';
   if (Array.isArray(k.spark)) {
     const ch = k.channel ? channelKey(k.channel) : null;
-    sp = `<div class="t-s">${spark(k.spark, { h: 30, fill: false, cls: 'tspark',
+    /* `sparkTitle`: the line's own caption (api/public/history.js sparkNote —
+       what it counts, over which span, how much is drawn and why the rest is
+       not). The svg is aria-hidden, so without it a screen reader met a line
+       with no words and a pointer met one with no explanation. */
+    const cap = k.sparkTitle ? ` title="${esc(k.sparkTitle)}" role="img" aria-label="${esc(k.sparkTitle)}"` : '';
+    sp = `<div class="t-s"${cap}>${spark(k.spark, { h: 30, fill: false, cls: 'tspark', dot: 'cap',
       tone: ch ? `var(--c-${ch})` : 'var(--ink)' }).outerHTML}</div>`;
   } else if (typeof k.spark === 'string' && k.spark) {
     sp = `<div class="t-s t-s-na">${esc(k.spark)}</div>`;

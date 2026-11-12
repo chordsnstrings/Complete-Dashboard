@@ -377,6 +377,13 @@ export const SCHEMA_FILES = [
      per-trip view over them, and trip.price_source, which says where a price
      came from so the live feed can fill only where nothing better exists. */
   'schema_v117.sql',
+  /* v119: two day roll-ups the hero sparklines read through /api/history
+     (api/history_routes.js) — each Uber account's first ONLINE instant per
+     Dubai day (the #online-time Late series, for any expected start) and cash
+     fares by account and day (the #deposits ceiling, cut at each week's end)
+     — and when each was last built (src/history_rollup.js). v115–v118 belong
+     to the other builders of the same batch. */
+  'schema_v119.sql',
   /* v121: passkeys and single sign-on (ULM-DESIGN §5.1, §14 decision 3) —
      access_passkey (credential id, public key, sign count, transports, the
      person), access_sso_identity (the provider's subject for a person) and

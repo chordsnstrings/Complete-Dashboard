@@ -41,6 +41,8 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
 import { CHANNEL_ORDER } from './tokens.js';
 import { TZ } from './tz.js';
 import { q, href, state } from './data.js';
+import { lineFor, historyFailed, shiftDay, mondayOf } from './history.js';
+import { dubaiDay } from './tz.js';
 /* In pagemeta.js, with why only a Monday is a week: the header checks it
    before this module has loaded. */
 import { isWeek } from './pagemeta.js';
@@ -740,13 +742,26 @@ const meanOf = (xs) => (xs.length ? xs.reduce((a, x) => a + x, 0) / xs.length : 
 async function performerGlance(AKB, tiles, p, id) {
   const wk = (p.week || [])[0];
   let d = null;
+  /* THE WEEKLY-MONEY LINE (plan §4 #performer: "needs one economics request
+     per past week and there is no history endpoint"): the twelve weeks ending
+     with this one, from the driver-day record, in ONE request beside the
+     economics row and under the same chips (api/history_routes.js). Always
+     an explicit span — q() would otherwise carry the shell's period onto a
+     page whose subject is one week. The series names its own basis, which
+     can part company with the economics ledger's choice above it, and the
+     tile's caption says so. */
+  const w0 = wk ? String(wk).slice(0, 10) : mondayOf(dubaiDay());
+  const histP = q('/api/history', { page: 'performer', id, from: shiftDay(w0, -77), to: weekEnd(w0) })
+    .catch(historyFailed);
   try { d = await q('/api/economics/drivers', wk ? { from: String(wk).slice(0, 10), to: weekEnd(wk) } : {}); } catch { d = null; }
+  const hist = await histP;
   const rows = (d?.rows || []);
   const me = rows.find((r) => r.driver_ext_id === id || (r.ids || []).includes(id)) || null;
   const earners = rows.filter((r) => Number(r.money) > 0);
   const mean = meanOf(earners.map((r) => Number(r.money)));
   const moneyTile = me && me.money != null
     ? { label: 'Money', value: money(me.money), hero: true,
+      ...lineFor(hist, 'money'),
       sub: me.money_basis ? `basis ${String(me.money_basis)}` : 'this week',
       ...(mean != null ? { delta: { value: Number(me.money) - mean, kind: 'gap', d: 2,
         of: `against ${money(mean)}, the mean of the ${fmt(earners.length)} who earned` } } : {}) }
