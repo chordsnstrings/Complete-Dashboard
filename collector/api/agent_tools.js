@@ -949,7 +949,12 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
          error reading it changes nothing — no claim is made from it. */
       const ro = await get(`/api/fleet/roster${fleet ? `?${qs({ fleet })}` : ''}`);
       const roster = ro.body && !ro.withheld && !ro.error ? ro.body : null;
-      const rosterNote = roster && (roster.known === false || roster.n) ? roster.reason || null : null;
+      /* Set aside: "left out of this list: <the sentence>". Not known: the
+         sentence alone, which says nothing was left out and why it cannot yet
+         say more — the prefix would contradict it. */
+      const rosterNote = !roster?.reason ? null
+        : roster.known === false ? roster.reason
+          : roster.n ? `left out of this list: ${roster.reason}` : null;
       const notes = [
         locHidden ? 'positions (area and coordinates) are withheld from this person\'s role — say so in one sentence; do not guess where any car is' : null,
         held, 'live = a tracker position in the last 30 minutes; a stale row is the last position the tracker reported, with its age — never say a stale car is there now',
@@ -992,7 +997,7 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
         /* The list's own exclusion, on the list's answer only — a one-car
            answer that found its car is not about the plates left out. */
         note: [...notes, 'moving/stopped/passenger counts are over the live cars only',
-          rosterNote ? `left out of this list: ${rosterNote}` : null].filter(Boolean).join(' — ') };
+          rosterNote].filter(Boolean).join(' — ') };
     },
 
     async driver_status(a, ctx) {
