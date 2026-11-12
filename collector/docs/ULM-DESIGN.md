@@ -1527,6 +1527,31 @@ ninth starts mixing.
 - **A cached answer is keyed by its scope.** A narrowed answer filed under the shared address would
   be handed to the Owner; the reader's key is `rls:<fleets>|<url>`, which no request line can
   produce, and the cache's stale refresh recomputes it under the same scope.
+- **So is any process-wide memo a `param` route reaches — and its validity token is read outside
+  the scope** (independent review, 2026-11-12). `api/performance_routes.js` read its data version
+  inside the reader's scope, where `collection_run` shows one fleet's runs, so the version differed
+  from the Owner's and each evicted the other's 19-28 s context; with equal versions they shared
+  one. Fixed there (FIX-STATUS RLS10). A new memo of that kind needs the same two lines.
+- **`GRANT` by a user holding SELECT without the grant option only warns** ("no privileges were
+  granted") — no error. `fm_rls_secure` checks the privilege after granting, so the boot log never
+  says "granted SELECT" for a table the role still cannot read (RLS11).
+- **`pg_dump` by a role that is neither owner nor BYPASSRLS fails on every RLS table**, even though
+  the permissive policy shows that role every row: pg_dump runs with `row_security = off` and stops
+  at "query would be affected by row-level security policy" (PG 16.15). Dump as the application's
+  user or `doadmin`, or pass `--enable-row-security`; restoring elsewhere needs the `fleet_request`
+  role first (the dump grants to it) or `--no-privileges`. DigitalOcean's daily backups are
+  physical and unaffected (RLS12).
+
+### What the backstop does not hold
+
+- **SQL somebody else chooses.** It holds a forgotten filter. Inside the reader's transaction a
+  statement may `RESET ROLE` or `set_config('app.fleets', …)` — both are open to the session's own
+  user — so it is no defence against injection; bound parameters remain that.
+- **Tables without a fleet column**: the person tables kept whole above, and the per-fleet tables
+  that have yet to gain one (`ledger_policy`, `partner`, `place_cell`, `app_setting`).
+- **A SECURITY DEFINER function or a materialized view** would read as its owner, and the boot
+  pass grants neither. None exists at v124 (checked on the built schema); adding one to a path a
+  `param` route reads reopens the gap.
 
 ### Not built yet
 
@@ -1546,5 +1571,7 @@ tables during a deploy (`first_failures` in "row-level security pass"); and the 
 cost on real volumes — two extra round trips a statement, a per-row policy filter, and the
 security-barrier ordering that evaluates a non-leakproof predicate (`ILIKE`, jsonb operators) after
 the policy and can cost it an index. Measure the heavy `param` pages as a one-fleet reader before
-handing out one-fleet roles. To check a deployment from outside: a one-fleet reader's answer to a
+handing out one-fleet roles — and compare their answers, not only their timings: the eight changed
+routes were measured on the fixture, and production holds more NULL-fleet and `'*'` rows
+(company-wide collectors, unmapped telematics), which a scoped reader does not see. To check a deployment from outside: a one-fleet reader's answer to a
 `param` route carries `x-fm-rls: <fleet>`; an all-fleet reader's and a visitor's carry none.

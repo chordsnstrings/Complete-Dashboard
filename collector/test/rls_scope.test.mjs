@@ -440,5 +440,92 @@ console.log('\n9. a company-wide figure inside a scope (api/target_weights.js)')
   check('one company row was written', rows === 1);
 }
 
+/* ══ 10. a process-wide memo reached from a scoped request ═══════════════
+   api/performance_routes.js holds its shaped context in a map every caller
+   shares, keyed on the question and validated by the data version. Both of
+   its routes are 'param', so a one-fleet reader reaches the map from inside
+   a scope (independent review of fix/rls, 2026-11-12). The fake q answers
+   the version query the way row-level security does — inside an Egari
+   scope collection_run shows Egari's runs only, so its max(finished_at) is
+   older whenever the other fleet ran last — and records whether the period
+   query ran under a scope.
+   REVERSION: in load() key on `${grain}|${show}|${fleet || ''}|${w.today}`
+   and call dataVersion(q) directly — the reader's request evicts the Owner's
+   context ("the Owner's context survives…" fails: periodsSql runs again),
+   the version is read inside the scope, and with equal versions the reader
+   is handed the Owner's unscoped context. */
+console.log('\n10. a shared memo inside a scope (api/performance_routes.js)');
+{
+  const express = (await import('express')).default;
+  const { performanceRoutes } = await import('../api/performance_routes.js');
+  let olderInScope = true;
+  const versions = [], periods = [];
+  const q = async (text) => {
+    const s = currentFleetScope();
+    if (/FROM collection_run/.test(String(text))) {
+      versions.push(s ? s.fleets.join(',') : null);
+      return [{ c: s && olderInScope ? '2026-11-12T05:00:00Z' : '2026-11-12T06:00:00Z', r: '2026-11-12T06:00:00Z' }];
+    }
+    periods.push(s ? s.fleets.join(',') : null);
+    return [];
+  };
+  const app = express();
+  app.use((req, res, next) => (req.get('x-scope') ? enterFleetScope(req.get('x-scope').split(','), res, next) : next()));
+  performanceRoutes(app, { q, wrap: (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: String(e.message || e) })) });
+  const server = app.listen(0);
+  const get = async (path, scope) => (await fetch(`http://127.0.0.1:${server.address().port}${path}`,
+    { headers: scope ? { 'x-scope': scope } : {} })).status;
+  const M = '/api/performance/fleet?fleet=egari&grain=month';
+  const statuses = [await get(M, null), await get(M, null)];
+  check('setup: the Owner\'s context is computed once and then held', periods.length === 1 && periods[0] === null, JSON.stringify(periods));
+  statuses.push(await get(M, 'egari'));
+  check('the Egari reader\'s context is computed under the reader\'s scope', periods.length === 2 && periods[1] === 'egari', JSON.stringify(periods));
+  statuses.push(await get(M, null));
+  check('the Owner\'s context survives the reader\'s request (no periodsSql again)', periods.length === 2, JSON.stringify(periods));
+  statuses.push(await get(M, 'egari'));
+  check('…and the reader\'s survives the Owner\'s', periods.length === 2, JSON.stringify(periods));
+  check('the version is never read inside a scope (it is the company\'s, as the response cache keys on)',
+    versions.length >= 4 && versions.every((v) => v === null), JSON.stringify(versions));
+  /* Equal versions: the other fleet did not run last. The reader must still
+     get a context computed under its own scope, never the Owner's. */
+  olderInScope = false;
+  const W = '/api/performance/fleet?fleet=egari&grain=week';
+  statuses.push(await get(W, null));
+  const before = periods.length;
+  statuses.push(await get(W, 'egari'));
+  check('with equal versions the reader is not handed the Owner\'s unscoped context',
+    periods.length === before + 1 && periods[periods.length - 1] === 'egari', JSON.stringify(periods.slice(before - 1)));
+  check('every request answered 200', statuses.every((s) => s === 200), JSON.stringify(statuses));
+  server.close();
+}
+
+/* ══ 11. a table the application reads but may not grant ════════════════
+   The brief's own warning: on production "table ownership may differ from
+   what you expect". A table owned by another role, which the application
+   reads through a plain grant (no grant option), cannot be granted on to
+   the restricted role — and GRANT says so with a WARNING, not an error. The
+   pass must report that, not "granted SELECT" (independent review of
+   fix/rls, 2026-11-12: it did, while the role still could not read it).
+   REVERSION: in fm_rls_secure drop the has_table_privilege check after the
+   GRANT — the result reads "granted SELECT, refused: must be owner of table
+   rls_lent" and the first check fails. */
+console.log('\n11. a table the application reads but may not grant on');
+{
+  await upg.exec(`CREATE ROLE review_owner NOLOGIN;
+    CREATE TABLE rls_lent (id int, fleet_id text);
+    ALTER TABLE rls_lent OWNER TO review_owner;
+    GRANT SELECT ON rls_lent TO app_user;`);
+  const sec = await asRole(upg, 'app_user', () => secureFleetScope(udb));
+  const o = sec.objects.find((x) => x.rel === 'rls_lent');
+  check('the pass says SELECT was NOT granted, naming the owner — never "granted SELECT"',
+    o && /^refused: SELECT could not be granted to fleet_request/.test(o.result) && /review_owner/.test(o.result)
+      && !/(^|, )granted SELECT/.test(o.result) && securedShort(o.result), JSON.stringify(o));
+  const st = await asRole(upg, 'app_user', () => probeFleetScope(udb, pgliteRunner(upg)));
+  check('…and the probe keeps the restricted path out of use, with the count', !st.ready && /cannot read 1 tables/.test(st.reason), st.reason);
+  await upg.exec('DROP TABLE rls_lent; DROP ROLE review_owner;');
+  const st2 = await asRole(upg, 'app_user', () => probeFleetScope(udb, pgliteRunner(upg)));
+  check('put right, it is in use again', st2.ready, st2.reason);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

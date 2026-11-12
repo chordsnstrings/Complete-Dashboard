@@ -236,9 +236,18 @@ BEGIN
     FROM pg_class c WHERE c.oid = target;
   IF NOT FOUND THEN RETURN 'skipped: no such table or view'; END IF;
 
-  -- 1. The read grant, on its own (see above).
+  -- 1. The read grant, on its own (see above). Checked after, not assumed: a
+  -- user that holds SELECT on an object it does not own, without the grant
+  -- option, gets a WARNING from GRANT ("no privileges were granted") and no
+  -- error — measured on PGlite in the review of 2026-11-12, where the result
+  -- read 'granted SELECT, refused: must be owner' for a table the role still
+  -- could not read. The reason in the boot log must be the true one.
   IF NOT has_table_privilege('fleet_request', target, 'SELECT') THEN
     EXECUTE format('GRANT SELECT ON %s TO fleet_request', target);
+    IF NOT has_table_privilege('fleet_request', target, 'SELECT') THEN
+      RETURN format('refused: SELECT could not be granted to fleet_request — %s does not own %s (its owner is %s) and holds no grant option on it',
+                    current_user, target, (SELECT pg_get_userbyid(c.relowner) FROM pg_class c WHERE c.oid = target));
+    END IF;
     done := done || 'granted SELECT'::text;
   END IF;
 
