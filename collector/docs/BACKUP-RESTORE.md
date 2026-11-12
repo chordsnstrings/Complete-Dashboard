@@ -164,8 +164,11 @@ DATABASE_URL=<restored cluster URL> SETTINGS_KEY=<production value> \
   node bin/restore-drill.mjs --expect-file counts-2026-11-12.json
 ```
 
-It never prints `DATABASE_URL`, `SETTINGS_KEY` or any stored secret. It names
-the database, the server version and when the server started (a restored
+It never prints `DATABASE_URL`, `SETTINGS_KEY` or any stored secret — and a
+failed connection's message has the URL's password, user, host and port cut
+out (node names an unreachable host bare; the first draft printed it). It
+names the database (its name, which is not a credential), the server version
+and when the server started (a restored
 cluster started minutes ago; production has been up for days — that is how
 you tell which one you are pointed at). The session is READ ONLY.
 
@@ -179,8 +182,8 @@ Exit codes: 0 pass (warnings allowed), 1 a check failed, 2 nothing failed but
 something was not measured, 3 could not connect. The checks live in
 `src/restore_drill.js` and are tested on PGlite in
 `test/restore_drill.test.mjs`, including that the drill's key derivation is
-the app's (a secret sealed by `setSetting()` decrypts) and that a refused
-connection prints no part of the URL.
+the app's (a secret sealed by `setSetting()` decrypts) and that a refused or
+unresolvable connection prints no part of the URL, host included.
 
 ## 6. Keeping history longer than seven days
 
@@ -213,7 +216,10 @@ node bin/restore-drill.mjs --counts | aws s3 cp - "s3://<bucket>/fleet/counts-$(
 - **Size**: the physical backup is 5.95 GB **[verified]**; a compressed
   custom-format dump is usually much smaller because indexes are not dumped,
   but measure the first one rather than trusting an estimate.
-- **Restoring an export**: create an empty cluster (or database), then
+- **Restoring an export**: create an empty cluster (or database), decrypt
+  the dump with the operator's private key, then restore it:
+  `age -d -i <operator key file> fleet.dump.age > fleet.dump` (on a machine
+  with its own disk, never the app's components) and
   `pg_restore --no-owner --no-privileges --dbname "$NEW_URL" fleet.dump`.
   The dump carries `schema_applied`, so the first boot skips what was
   applied (§4). Then run the drill against it.

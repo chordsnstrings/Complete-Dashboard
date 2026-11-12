@@ -49,15 +49,24 @@ export function retentionSentence(n) {
   return `${n.table} before ${when} was ${n.action} by retention; figures before that date are not complete.`;
 }
 
-/* What this render's answers said, gathered by api(); one entry per table. */
+/* What this render's answers said, gathered by api(); one entry per table.
+   TIED TO THE RENDER THAT ASKED (review of 2026-11-12). /api/coverage takes
+   16-33 s, and a reader who leaves #coverage before it answers would have
+   had its note land on whatever page they opened next: a claim about a range
+   that page never read. resetRetention() starts a new generation, api()
+   stamps each request with the generation it was made in, and a note from
+   an older one is dropped. */
 const seen = new Map();
-export function noteRetention(header) {
+let gen = 0;
+export const retentionGen = () => gen;
+export function noteRetention(header, g = gen) {
+  if (g !== gen) return;
   for (const n of parseRetentionHeader(header)) {
     const had = seen.get(n.table);
     if (!had || n.before > had.before) seen.set(n.table, n);
   }
 }
-export const resetRetention = () => seen.clear();
+export const resetRetention = () => { seen.clear(); gen += 1; };
 export const retentionNow = () => [...seen.values()];
 
 /* One line at the top of the page, or nothing. */
@@ -83,12 +92,14 @@ const MODE_WORDS = {
   off: 'off — the nightly pass is skipped',
 };
 const DUBAI_MS = 4 * 3600e3;
-/* The first Dubai day left whole, as api/data_retention_notes.js computes it. */
-export const wholeDayAfter = (t) => {
+/* The first Dubai day left whole, as api/data_retention_notes.js computes it
+   — or, with `own`, the Dubai day the instant falls in (where a claim
+   begins). */
+export const wholeDayAfter = (t, own = false) => {
   const ms = new Date(t).getTime();
   if (!Number.isFinite(ms)) return null;
   const day = new Date(ms + DUBAI_MS).toISOString().slice(0, 10);
-  return (ms + DUBAI_MS) % 864e5 === 0 ? day
+  return own || (ms + DUBAI_MS) % 864e5 === 0 ? day
     : new Date(Date.parse(`${day}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
 };
 const POLICY_WORDS = { thin: 'thinned', remove: 'removed', keep: 'kept', failed: 'failed' };
@@ -131,7 +142,16 @@ export function retentionPanel(h) {
       { label: 'Rule', key: 'policy', render: (r) => esc(POLICY_WORDS[r.policy] || r.policy) },
       { label: 'Older than', key: 'cutoff', render: (r) => (r.cutoff ? esc(h.dtStr(r.cutoff)) : '<span class="ent-off">no horizon</span>') },
       { label: 'Considered', key: 'considered', num: true, render: (r) => esc(num(r.considered) ?? '—') },
-      { label: 'Would remove', key: 'would_delete', num: true, render: (r) => esc(num(r.would_delete) ?? '—') },
+      /* A dry run never moves the cursor, so it re-examines the first 31
+         days past the horizon every night: past that, its count is of the
+         days it examined, not of everything an "on" pass would remove, and
+         it says so rather than showing a part as the whole (review of
+         2026-11-12). */
+      { label: 'Would remove', key: 'would_delete', num: true,
+        render: (r) => (r.would_delete == null ? '—' : `${esc(num(r.would_delete))}${Number(r.days_pending) > 0
+          ? ` <span class="ent-off">in the ${esc(num(r.days_examined))} day${Number(r.days_examined) === 1 ? '' : 's'} examined; `
+            + `${esc(num(r.days_pending))} more day${Number(r.days_pending) === 1 ? '' : 's'} past the horizon not examined this pass</span>`
+          : ''}`) },
       { label: 'Removed', key: 'deleted', num: true, render: (r) => esc(num(r.deleted) ?? '—') },
       { label: 'Rows (estimate)', key: 'total_estimate', num: true,
         render: (r) => (r.total_estimate == null
@@ -139,10 +159,15 @@ export function retentionPanel(h) {
           : esc(num(r.total_estimate))) },
       { label: 'Why', key: 'note', render: (r) => esc(r.note || '') },
     ]));
+    /* What pages are told: the range rows were really removed from. A
+       policy that has run and removed nothing claims nothing (its
+       done_before is only where the next pass resumes). */
     for (const s of d.state || []) {
       const e = document.createElement('p');
-      e.textContent = `${s.action === 'removed' ? 'Removed' : 'Thinned'} for real: ${s.tbl} before `
-        + `${dayWords(wholeDayAfter(s.done_before))}`;
+      e.textContent = s.removed_from && s.removed_before
+        ? `${s.action === 'removed' ? 'Removed' : 'Thinned'} for real: ${s.tbl} from `
+          + `${dayWords(wholeDayAfter(s.removed_from, true))} to before ${dayWords(wholeDayAfter(s.removed_before))}`
+        : `${s.tbl}: the policy has run up to ${dayWords(wholeDayAfter(s.done_before))} and removed nothing yet`;
       p.body.append(e);
     }
   };

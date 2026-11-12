@@ -133,6 +133,18 @@ console.log('\n5. the CLI never prints DATABASE_URL');
   check('a refused connection exits 3', out.status === 3, `${out.status} ${text.slice(0, 200)}`);
   check('and neither the password, the user nor the URL appears in what it printed',
     !text.includes('Sup3rS3cretPw') && !text.includes('drilluser') && !text.includes('postgres://'), text.slice(0, 300));
+  /* Review of 2026-11-12: node names the address bare ("connect
+     ECONNREFUSED 127.0.0.1:1", "getaddrinfo ENOTFOUND <host>"), and the
+     first draft printed it. A DigitalOcean host names the account and the
+     cluster. REVERSION: drop the urlParts loop in bin/restore-drill.mjs's
+     scrub and both checks below fail. */
+  check('nor the host and port it could not reach', !text.includes('127.0.0.1') && !/:1\b/.test(text), text.slice(0, 300));
+  const host = 'drill-cluster-do-user-424242-0.example.invalid';
+  const nx = spawnSync(process.execPath, ['bin/restore-drill.mjs'], { encoding: 'utf8', timeout: 60000,
+    env: { ...process.env, DATABASE_URL: `postgres://drilluser:Sup3rS3cretPw@${host}:25060/fleet`, SETTINGS_KEY: 'k' } });
+  const nxText = `${nx.stdout}\n${nx.stderr}`;
+  check('a host that does not resolve exits 3 without naming the host', nx.status === 3 && !nxText.includes(host)
+    && !nxText.includes('424242') && !nxText.includes('25060'), `${nx.status} ${nxText.slice(0, 300)}`);
   const noUrl = spawnSync(process.execPath, ['bin/restore-drill.mjs'], { encoding: 'utf8', timeout: 30000,
     env: { ...process.env, DATABASE_URL: '' } });
   check('no DATABASE_URL: says so and exits 3', noUrl.status === 3 && /DATABASE_URL is not set/.test(noUrl.stderr));

@@ -34,25 +34,30 @@ const nextDay = (d) => new Date(Date.parse(`${d}T00:00:00Z`) + 864e5).toISOStrin
 let cached = null;
 export const resetRetentionHorizon = () => { cached = null; };
 
-/* The boundary per table, as the first Dubai day the pass left whole.
-   done_before is an instant: a Dubai midnight when a thinning pass finished a
-   day, possibly mid-day when an alert removal was cut short. Rounded UP to
-   the next whole day in the second case, so "before <date>" is never a date
-   inside which rows are already gone. `read` is any (sql, params) => rows —
-   a route's q, or the pool wrapped. Cached five minutes: the boundary moves
-   once a night. A missing table (v115 not applied yet) means nothing has been
-   thinned, which is the truth. */
+/* The claim per table: the Dubai days rows were really removed from, as
+   [from, before). removed_before is an instant: a Dubai midnight when a
+   thinning pass finished (or cut short) a day, possibly mid-day when an alert
+   removal was cut short. Rounded UP to the next whole day in the second case,
+   so "before <date>" is never a date inside which rows are already gone; and
+   removed_from is read as its own Dubai day, for the same reason. A row with
+   no removed_from is a policy that has run and removed nothing: nothing to
+   say. (done_before is the pass's resume cursor, NOT the claim. The first
+   draft read it, and an "on" pass that removed no alert made every alert page
+   say alerts were removed; see sql/schema_v115.sql.) `read` is any
+   (sql, params) => rows: a route's q, or the pool wrapped. Cached five
+   minutes: the claim moves once a night. A missing table (v115 not applied
+   yet) means nothing has been thinned, which is the truth. */
 export async function retentionHorizon(read, { now = Date.now() } = {}) {
   if (cached && now - cached.at < TTL_MS) return cached.value;
   let value = {};
   try {
-    const rows = await read('SELECT tbl, action, done_before, bucket_min FROM retention_state');
+    const rows = await read('SELECT tbl, action, removed_from, removed_before, bucket_min FROM retention_state');
     for (const r of rows || []) {
-      if (!r?.done_before) continue;
-      const at = new Date(r.done_before);
+      if (!r?.removed_from || !r?.removed_before) continue;
+      const at = new Date(r.removed_before);
       const day = dubaiDayOf(at);
       const whole = (at.getTime() + DUBAI_MS) % 864e5 === 0;
-      value[r.tbl] = { action: r.action, before: whole ? day : nextDay(day),
+      value[r.tbl] = { action: r.action, from: dubaiDayOf(r.removed_from), before: whole ? day : nextDay(day),
         bucket_min: r.bucket_min == null ? null : Number(r.bucket_min), at: at.toISOString() };
     }
   } catch { value = {}; }
@@ -60,64 +65,69 @@ export async function retentionHorizon(read, { now = Date.now() } = {}) {
   return value;
 }
 
-/* How each reader's window is read off the request. */
-const WIN = (req) => winDays(req)[0];
+/* How each reader's window is read off the request, as the Dubai days
+   [first, last] its answer depends on. Both ends, because a window that ends
+   before the claim begins lost nothing: a page about a month before the
+   first fix was ever collected must not be told its fixes were thinned. */
+const WIN = (req) => winDays(req);
 const DAY = (req) => {
   const d = String(req.query.day || '').slice(0, 10);
-  return ISO_DAY.test(d) ? d : dubaiDayOf(Date.now());     // these routes default to today
+  const day = ISO_DAY.test(d) ? d : dubaiDayOf(Date.now());     // these routes default to today
+  return [day, day];
 };
 const AT = (req) => {
   const t = Date.parse(String(req.query.at || ''));
-  return Number.isFinite(t) ? dubaiDayOf(t) : null;
+  return Number.isFinite(t) ? [dubaiDayOf(t), dubaiDayOf(t)] : null;
 };
-const ALL = () => 'all';
+const ALL = () => ['0000-01-01', '9999-12-31'];
 /* /api/trip names a journey, not a time: its track is read around the
    journey's own start, which only the database knows. Asked only when a
-   horizon exists at all, so it costs nothing until the pass has run "on". */
+   claim exists at all, so it costs nothing until the pass has removed rows. */
 const TRIP = async (req, read) => {
   const rows = await read(
     'SELECT requested_at FROM trip WHERE platform = $1 AND external_id = $2 LIMIT 1',
     [String(req.query.platform || '').trim().toLowerCase(), String(req.query.id || '').trim()]);
-  return rows?.[0]?.requested_at ? dubaiDayOf(rows[0].requested_at) : null;
+  const d = rows?.[0]?.requested_at ? dubaiDayOf(rows[0].requested_at) : null;
+  return d ? [d, d] : null;
 };
 
 const T = 'telemetry_snapshot';
 const A = 'alert';
 /* The inventory. `tables` are the retention-managed tables the route reads;
-   `since` is the first Dubai day its answer depends on ('all' for a route
-   about the whole record). See src/data_retention.js for why each is here. */
+   `span` gives the Dubai days its answer depends on (ALL for a route about
+   the whole record). See src/data_retention.js for why each is here. */
 export const READERS = Object.freeze({
-  '/api/coverage': { tables: [T, A], since: ALL },
+  '/api/coverage': { tables: [T, A], span: ALL },
   '/api/schema/raw-fields': {
-    tables: (req) => ({ telemetry_snapshot: [T], alert: [A] }[req.query.table] || []), since: WIN },
+    tables: (req) => ({ telemetry_snapshot: [T], alert: [A] }[req.query.table] || []), span: WIN },
   // positions over a window the reader picks
-  '/api/where': { tables: [T], since: DAY },
-  '/api/where/fleet': { tables: [T], since: DAY },
-  '/api/track': { tables: [T], since: WIN },
-  '/api/map/days': { tables: [T], since: WIN },
-  '/api/map/journey': { tables: [T], since: DAY },
-  '/api/sensor-health': { tables: [T], since: WIN },
-  '/api/vehicle/kpis': { tables: [T, A], since: WIN },
-  '/api/vehicle/daily': { tables: [T, A], since: WIN },
-  '/api/vehicle/movement': { tables: [T], since: WIN },
-  '/api/vehicle/safety': { tables: [A], since: WIN },
-  '/api/economics/assets': { tables: [T, A], since: WIN },
-  '/api/economics/drivers': { tables: [A], since: WIN },
-  '/api/driver/day': { tables: [T], since: DAY },
-  '/api/driver/territory': { tables: [T], since: WIN },
-  '/api/driver/quality': { tables: [A], since: WIN },
-  '/api/online-time': { tables: [T], since: DAY },
-  '/api/segment': { tables: [T], since: AT },
-  '/api/trip': { tables: [T], since: TRIP },
+  '/api/where': { tables: [T], span: DAY },
+  '/api/where/fleet': { tables: [T], span: DAY },
+  '/api/track': { tables: [T], span: WIN },
+  '/api/map/days': { tables: [T], span: WIN },
+  '/api/map/journey': { tables: [T], span: DAY },
+  '/api/sensor-health': { tables: [T], span: WIN },
+  '/api/vehicle/kpis': { tables: [T, A], span: WIN },
+  '/api/vehicle/daily': { tables: [T, A], span: WIN },
+  '/api/vehicle/movement': { tables: [T], span: WIN },
+  '/api/vehicle/safety': { tables: [A], span: WIN },
+  '/api/economics/assets': { tables: [T, A], span: WIN },
+  '/api/economics/drivers': { tables: [A], span: WIN },
+  '/api/driver/day': { tables: [T], span: DAY },
+  '/api/driver/territory': { tables: [T], span: WIN },
+  '/api/driver/quality': { tables: [A], span: WIN },
+  '/api/online-time': { tables: [T], span: DAY },
+  '/api/segment': { tables: [T], span: AT },
+  '/api/trip': { tables: [T], span: TRIP },
   // alerts over a window the reader picks
-  '/api/kpis': { tables: [A], since: WIN },
-  '/api/alerts/summary': { tables: [A], since: WIN },
-  '/api/alerts/by-vehicle': { tables: [A], since: WIN },
-  '/api/alerts/by-driver': { tables: [A], since: WIN },
-  '/api/vehicles/directory': { tables: [A], since: WIN },
-  '/api/cohort/drivers': { tables: [A], since: WIN },
-  '/api/cohort/vehicles': { tables: [A], since: WIN },
-  '/api/day': { tables: [A], since: DAY },
+  '/api/kpis': { tables: [A], span: WIN },
+  '/api/alerts/summary': { tables: [A], span: WIN },
+  '/api/alerts/by-vehicle': { tables: [A], span: WIN },
+  '/api/alerts/by-driver': { tables: [A], span: WIN },
+  '/api/vehicles/directory': { tables: [A], span: WIN },
+  '/api/cohort/drivers': { tables: [A], span: WIN },
+  '/api/cohort/vehicles': { tables: [A], span: WIN },
+  '/api/day': { tables: [A], span: DAY },
 });
 
 /* The header value: table;action;first-whole-day;bucket-minutes, comma
@@ -125,15 +135,17 @@ export const READERS = Object.freeze({
 export const noteValue = (h, tables) => tables
   .map((t) => [t, h[t].action, h[t].before, h[t].bucket_min ?? ''].join(';')).join(',');
 
-/* Which managed tables this request reads past the boundary of. */
+/* Which managed tables this request reads rows retention removed from: its
+   days overlap the claim [from, before). */
 export async function notesFor(req, read, h) {
   const spec = READERS[req.path];
   if (!spec) return [];
   const want = (typeof spec.tables === 'function' ? spec.tables(req) : spec.tables).filter((t) => h[t]);
   if (!want.length) return [];
-  const since = await spec.since(req, read);
-  if (!since) return [];
-  return want.filter((t) => since === 'all' || since < h[t].before);
+  const span = await spec.span(req, read);
+  if (!span) return [];
+  const [first, last] = span;
+  return want.filter((t) => first < h[t].before && last >= h[t].from);
 }
 
 /* The middleware. Registered after the access gate and BEFORE the response

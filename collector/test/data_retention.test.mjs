@@ -25,7 +25,18 @@
        for 1 day is held back" and "nothing inside the weekly backfill
        window" fail;
      · let the boundary be written in dry_run — "a dry run moves no
-       boundary" fails. */
+       boundary" fails.
+   REVIEW OF 2026-11-12 (each proved the same way):
+     · write the alert state whenever no alert is left before the cutoff
+       (`out.deleted > 0 || !left`, the first draft) — "an on pass that
+       removed no alert claims nothing" fails;
+     · set removedFrom on the first day walked rather than the first day
+       anything was removed — "the claim begins on the first day fixes were
+       removed" fails;
+     · drop the claim on a day cut short — "a day cut short still claims
+       what it removed" fails;
+     · drop the stale-run sweep — "a pass left running by a dead process
+       is marked interrupted" fails. */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { dataRetentionPass, retentionSettings, telemetryCutoff, alertCutoff, KEEP_SQL }
@@ -144,10 +155,18 @@ console.log('\n3. "on": exactly the fixes the rules name survive, in short state
     Number((await one(`SELECT count(*)::int AS n FROM telemetry_snapshot WHERE source = 'uber'`)).n) === 10);
   check('nothing inside the 400-day horizon is touched (2025-10-20, 2026-01-15, 2026-11-01)',
     Number((await one(`SELECT count(*)::int AS n FROM telemetry_snapshot WHERE captured_at >= $1`, [at('2025-10-08', 0, 0)])).n) === 13 + 13 + 31);
-  const st = await one(`SELECT action, done_before, bucket_min FROM retention_state WHERE tbl = 'telemetry_snapshot'`);
-  check('the boundary moves to the end of the last day finished (2025-09-04, Dubai)',
+  const st = await one(`SELECT action, done_before, removed_from, removed_before, bucket_min
+    FROM retention_state WHERE tbl = 'telemetry_snapshot'`);
+  check('the cursor moves to the end of the last day finished (2025-09-04, Dubai)',
     st && st.action === 'thinned' && new Date(st.done_before).toISOString() === at('2025-09-04', 0, 0).toISOString() && st.bucket_min === 15,
     JSON.stringify(st));
+  /* The first day walked is 2024-04-16, the dormant unit's lone fix: the
+     rule keeps it, nothing is removed, and a page about April 2024 must not
+     be told its positions were thinned. */
+  check('the claim begins on the first day fixes were removed (2025-09-01), not the first day walked (2024-04-16)',
+    st && new Date(st.removed_from).toISOString() === at('2025-09-01', 0, 0).toISOString(), JSON.stringify(st));
+  check('and ends with the last day fixes were removed from (2025-09-03, so before 2025-09-04)',
+    st && new Date(st.removed_before).toISOString() === at('2025-09-04', 0, 0).toISOString(), JSON.stringify(st));
   const again = await dataRetentionPass({ db, now: NOW, read: settings({ RETENTION_MODE: 'on', RETENTION_BATCH: '100' }) });
   const t2 = again.tables.find((x) => x.tbl === 'telemetry_snapshot');
   check('a second pass resumes past its boundary and does nothing', t2.considered === 0 && t2.deleted === 0, JSON.stringify(t2));
@@ -176,9 +195,17 @@ console.log('\n5. alerts: kept unless opted in, and then never inside 365 days')
 {
   const a = (id, t) => db.query(`INSERT INTO alert (platform, external_id, fleet_id, plate, alert_type, occurred_at)
     VALUES ('fms', $1, 'ecosine', 'P1', 'Harsh Brake', $2)`, [id, t]);
-  await a('old1', '2025-06-01T10:00:00Z'); await a('old2', '2025-06-02T10:00:00Z'); await a('old3', '2025-11-01T10:00:00Z');
   await a('new1', '2026-10-01T10:00:00Z'); await a('new2', '2026-10-02T10:00:00Z');
   await db.query(`INSERT INTO alert (platform, external_id, plate, alert_type) VALUES ('fms', 'undated', 'P1', 'OverSpeed')`);
+  /* Production until 2027-05-22: the operator has opted in, the feed began
+     2026-05-22, and no alert is yet older than 365 days. The first draft
+     wrote the alert boundary on this pass anyway, and every alert page whose
+     window began before 2025-11-12 would have said alerts were removed. */
+  const none = await dataRetentionPass({ db, now: NOW, read: settings({ RETENTION_MODE: 'on', RETENTION_ALERT_DAYS: '365' }) });
+  check('an "on" pass that removed no alert claims nothing: no alert row in retention_state',
+    none.tables.find((x) => x.tbl === 'alert').deleted === 0
+    && !(await one(`SELECT 1 AS x FROM retention_state WHERE tbl = 'alert'`)));
+  await a('old1', '2025-06-01T10:00:00Z'); await a('old2', '2025-06-02T10:00:00Z'); await a('old3', '2025-11-01T10:00:00Z');
   const keep = await dataRetentionPass({ db, now: NOW, read: settings({ RETENTION_MODE: 'on' }) });
   check('with RETENTION_ALERT_DAYS unset an "on" pass removes no alert',
     keep.tables.find((x) => x.tbl === 'alert').deleted === 0 && Number((await one('SELECT count(*)::int AS n FROM alert')).n) === 6);
@@ -191,9 +218,18 @@ console.log('\n5. alerts: kept unless opted in, and then never inside 365 days')
   check('"on" removes those three and keeps the newer and the undated',
     on.tables.find((x) => x.tbl === 'alert').deleted === 3
     && (await rows('SELECT external_id FROM alert ORDER BY 1')).map((x) => x.external_id).join() === 'new1,new2,undated');
-  const st = await one(`SELECT action, done_before FROM retention_state WHERE tbl = 'alert'`);
+  const st = await one(`SELECT action, done_before, removed_from, removed_before FROM retention_state WHERE tbl = 'alert'`);
   check('and the alert boundary is the 365-day cutoff (2025-11-12 Dubai)',
-    st?.action === 'removed' && new Date(st.done_before).toISOString() === at('2025-11-12', 0, 0).toISOString(), JSON.stringify(st));
+    st?.action === 'removed' && new Date(st.done_before).toISOString() === at('2025-11-12', 0, 0).toISOString()
+    && new Date(st.removed_before).toISOString() === at('2025-11-12', 0, 0).toISOString(), JSON.stringify(st));
+  check('and the claim begins at the oldest alert removed (old1, 2025-06-01 10:00Z)',
+    st && new Date(st.removed_from).toISOString() === '2025-06-01T10:00:00.000Z', JSON.stringify(st));
+  const quiet = await dataRetentionPass({ db, now: NOW, read: settings({ RETENTION_MODE: 'on', RETENTION_ALERT_DAYS: '30' }) });
+  const st2 = await one(`SELECT removed_from, removed_before FROM retention_state WHERE tbl = 'alert'`);
+  check('a later pass that removes nothing keeps the claim an earlier pass made',
+    quiet.tables.find((x) => x.tbl === 'alert').deleted === 0
+    && new Date(st2.removed_from).toISOString() === '2025-06-01T10:00:00.000Z'
+    && new Date(st2.removed_before).toISOString() === at('2025-11-12', 0, 0).toISOString(), JSON.stringify(st2));
 }
 
 console.log('\n6. off, and a pass cut short');
@@ -208,6 +244,53 @@ console.log('\n6. off, and a pass cut short');
   check('out of time before the first day: partial, nothing removed, the days left are counted',
     cut.status === 'partial' && tc.complete === false && tc.deleted === 0 && tc.days_pending >= 1, JSON.stringify(tc));
   check('and the boundary did not move', !(await one(`SELECT 1 AS x FROM retention_state WHERE tbl = 'telemetry_snapshot'`)));
+}
+
+console.log('\n7. a day cut short still claims what it removed, and the next pass finishes it');
+{
+  /* P5, steady FMS at 30 s on 2025-08-10: 347 of 360 doomed. With batches of
+     100 and the clock jumped past the budget after the first DELETE, the
+     pass stops inside the day. Its readers already see fewer fixes, so the
+     claim must cover the day; the cursor must not, or the next pass would
+     never finish it. */
+  for (let k = 0; k < 360; k++) await ins({ plate: 'P5', at: new Date(at('2025-08-10', 12, 0).getTime() + k * 30e3) });
+  await db.query(`DELETE FROM retention_state WHERE tbl = 'telemetry_snapshot'`);
+  const realNow = Date.now;
+  let late = false;
+  const slow = { query: async (q, p) => { const r = await db.query(q, p); if (/DELETE FROM telemetry_snapshot/.test(q)) late = true; return r; } };
+  Date.now = () => (late ? realNow() + 864e5 : realNow());
+  let cut;
+  try {
+    cut = await dataRetentionPass({ db: slow, now: NOW, read: settings({ RETENTION_MODE: 'on', RETENTION_BATCH: '100' }) });
+  } finally { Date.now = realNow; }
+  const tc = cut.tables.find((x) => x.tbl === 'telemetry_snapshot');
+  const st = await one(`SELECT done_before, removed_from, removed_before FROM retention_state WHERE tbl = 'telemetry_snapshot'`);
+  check('stopped inside the day: 100 removed, the pass partial, the day still pending',
+    tc.deleted === 100 && tc.complete === false && tc.days_pending >= 1, JSON.stringify({ d: tc.deleted, c: tc.complete, p: tc.days_pending }));
+  check('a day cut short still claims what it removed: [2025-08-10, 2025-08-11)',
+    st && new Date(st.removed_from).toISOString() === at('2025-08-10', 0, 0).toISOString()
+    && new Date(st.removed_before).toISOString() === at('2025-08-11', 0, 0).toISOString(), JSON.stringify(st));
+  check('while the cursor stays at the day\'s start, so the next pass walks it again',
+    st && new Date(st.done_before).toISOString() === at('2025-08-10', 0, 0).toISOString(), JSON.stringify(st));
+  const fin = await dataRetentionPass({ db, now: NOW, read: settings({ RETENTION_MODE: 'on', RETENTION_BATCH: '100' }) });
+  const p5 = Number((await one(`SELECT count(*)::int AS n FROM telemetry_snapshot WHERE plate = 'P5'`)).n);
+  check('the next pass finishes it: 247 more removed, 13 of 360 left', fin.tables.find((x) => x.tbl === 'telemetry_snapshot').deleted === 247
+    && p5 === 13, String(p5));
+}
+
+console.log('\n8. a pass left "running" by a process that died is not shown as running for ever');
+{
+  const [old] = await rows(`INSERT INTO retention_run (mode, status, started_at)
+    VALUES ('on', 'running', now() - interval '3 hours') RETURNING id`);
+  const [recent] = await rows(`INSERT INTO retention_run (mode, status, started_at)
+    VALUES ('on', 'running', now() - interval '5 minutes') RETURNING id`);
+  await dataRetentionPass({ db, now: NOW, read: settings() });
+  const stale = await one('SELECT status, error FROM retention_run WHERE id = $1', [old.id]);
+  check('a pass left running by a dead process is marked interrupted, with the reason',
+    stale?.status === 'failed' && /^interrupted/.test(stale.error || ''), JSON.stringify(stale));
+  const fresh = await one('SELECT status, error FROM retention_run WHERE id = $1', [recent.id]);
+  check('and one that started minutes ago (another collector, mid-deploy) is left alone',
+    fresh?.status === 'running' && fresh.error == null, JSON.stringify(fresh));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

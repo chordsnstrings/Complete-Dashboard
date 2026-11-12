@@ -99,19 +99,22 @@ export const swr = {
     if (!cacheable(url)) return null;
     const hit = load()[url];
     if (!hit || Date.now() - hit.at > MAX_AGE_MS) return null;
-    try { return { body: JSON.parse(hit.body), at: hit.at }; } catch { return null; }
+    try { return { body: JSON.parse(hit.body), at: hit.at, ret: hit.ret || null }; } catch { return null; }
   },
 
   /* Keep it, and say whether it differs from what we had. The caller re-renders
-     only when it does. */
-  put(url, value) {
+     only when it does. `ret` is the answer's x-fm-retention header — "this
+     range was thinned by retention" — kept beside the body because a page
+     painted from the copy must carry the copy's note (data.js api()); a note
+     that moved is a change worth a redraw even when the body did not. */
+  put(url, value, ret = null) {
     if (!cacheable(url)) return { changed: true };
     let body;
     try { body = JSON.stringify(value); } catch { return { changed: true }; }
     if (body.length > MAX_ENTRY) return { changed: true };
     const store = load();
-    const changed = store[url]?.body !== body;
-    store[url] = { body, at: Date.now() };
+    const changed = store[url]?.body !== body || (store[url]?.ret || null) !== (ret || null);
+    store[url] = ret ? { body, at: Date.now(), ret } : { body, at: Date.now() };
     save(trim(store));
     return { changed };
   },

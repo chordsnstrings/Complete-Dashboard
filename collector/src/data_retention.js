@@ -86,16 +86,20 @@
 
    SAFE BY DEFAULT. RETENTION_MODE is dry_run unless the operator says "on":
    the pass counts what it WOULD remove and removes nothing, and only a pass in
-   "on" mode moves retention_state — the boundary pages read to say "thinned
-   by retention before <date>". So nothing is ever announced as thinned that
-   was not, and nothing is thinned that was not first visible as a count.
+   "on" mode moves retention_state. Pages read its CLAIM — [removed_from,
+   removed_before), the range rows were really removed from — to say "thinned
+   by retention before <date>", never its cursor (done_before), so a policy
+   that ran and removed nothing claims nothing (review of 2026-11-12: the
+   first draft let an alert pass that removed nothing announce a removal). So
+   nothing is ever announced as thinned that was not, and nothing is thinned
+   that was not first visible as a count.
 
    NO LONG LOCKS. One Dubai day of fixes per statement, at most RETENTION_BATCH
    rows deleted per statement (LIMIT), each statement its own short
    transaction, lock_timeout 3 s and statement_timeout 120 s on the session,
    at most 31 days and 15 minutes per pass. A backlog is worked off across
-   nights, oldest first; the cursor is retention_state, so a pass cut short
-   resumes where it stopped and never re-reads a finished day. */
+   nights, oldest first; the cursor is retention_state.done_before, so a pass
+   cut short resumes where it stopped and never re-reads a finished day. */
 import { pool } from './db.js';
 import { get } from './settings.js';
 import { log } from './log.js';
@@ -212,14 +216,25 @@ async function readState(c, tbl) {
   const r = await c.query('SELECT done_before FROM retention_state WHERE tbl = $1', [tbl]);
   return rowsOf(r)[0]?.done_before ? new Date(rowsOf(r)[0].done_before) : null;
 }
-async function writeState(c, { tbl, action, doneBefore, bucketMin = null, runId }) {
+/* done_before is the CURSOR: every row older than it has been through the
+   policy, whether or not anything was removed, and the next pass resumes
+   there. [removed_from, removed_before) is the CLAIM: the range rows were
+   really removed from (NULL until something is). Pages are told only about
+   the claim — see the v115 header for the false "removed by retention" the
+   cursor alone produced. least() and greatest() skip NULLs in Postgres, so a
+   pass that removed nothing keeps the claim an earlier pass made and never
+   invents one. */
+async function writeState(c, { tbl, action, doneBefore, removedFrom = null, removedBefore = null,
+  bucketMin = null, runId }) {
   await c.query(
-    `INSERT INTO retention_state (tbl, action, done_before, bucket_min, run_id, updated_at)
-     VALUES ($1, $2, $3, $4, $5, now())
+    `INSERT INTO retention_state (tbl, action, done_before, removed_from, removed_before, bucket_min, run_id, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now())
      ON CONFLICT (tbl) DO UPDATE SET action = EXCLUDED.action,
        done_before = greatest(retention_state.done_before, EXCLUDED.done_before),
+       removed_from = least(retention_state.removed_from, EXCLUDED.removed_from),
+       removed_before = greatest(retention_state.removed_before, EXCLUDED.removed_before),
        bucket_min = EXCLUDED.bucket_min, run_id = EXCLUDED.run_id, updated_at = now()`,
-    [tbl, action, doneBefore, bucketMin, runId]);
+    [tbl, action, doneBefore, removedFrom, removedBefore, bucketMin, runId]);
 }
 
 async function measure(c, tbl, col) {
@@ -262,6 +277,10 @@ async function thinTelemetry(c, s, { runId, now, deadline }) {
   }
   let cursor = done && done > new Date(0) ? done : new Date(0);
   const keep = KEEP_SQL(s.bucket_min);
+  /* The first day this pass really removed fixes from — where the claim
+     pages are told about begins. A day the rule left whole (nothing doomed)
+     moves the cursor but claims nothing. */
+  let removedFrom = null;
   while (cursor < cut.cutoff) {
     if (out.days_examined >= MAX_DAYS_PER_RUN || Date.now() > deadline) { out.complete = false; break; }
     const next = rowsOf(await c.query(
@@ -277,6 +296,7 @@ async function thinTelemetry(c, s, { runId, now, deadline }) {
       [from, to, TRACKER_SOURCES]));
     out.considered += Number(tally?.n || 0);
     out.would_delete += Number(tally?.doomed || 0);
+    let removedToday = 0;
     if (s.mode === 'on' && Number(tally?.doomed || 0) > 0) {
       for (;;) {
         const r = await c.query(
@@ -285,20 +305,35 @@ async function thinTelemetry(c, s, { runId, now, deadline }) {
           [from, to, TRACKER_SOURCES]);
         const n = affected(r);
         out.deleted += n;
+        removedToday += n;
         if (n < s.batch) break;
         if (Date.now() > deadline) break;
       }
     }
+    if (removedToday > 0 && !removedFrom) removedFrom = from;
     out.days_examined += 1;
     cursor = to;
-    /* The boundary moves only on a day finished for real. A dry run never
-       writes it, so a page is never told a range was thinned that was not. */
+    /* The cursor moves only on a day finished for real, and only an "on"
+       pass writes anything: a dry run never makes a page say a range was
+       thinned that was not. The claim moves only over a day fixes were
+       really removed from — including a day cut short, whose cursor stays at
+       its start so the next pass finishes it, but whose readers are already
+       looking at fewer fixes. */
     if (s.mode === 'on') {
       const left = Number(rowsOf(await c.query(`WITH f AS (${keep}) SELECT count(*) FILTER (WHERE NOT keep)::bigint AS n FROM f`,
         [from, to, TRACKER_SOURCES]))[0]?.n || 0);
-      if (left > 0) { out.complete = false; break; }
+      const claim = removedToday > 0 ? { removedFrom, removedBefore: to } : {};
+      if (left > 0) {
+        out.complete = false;
+        cursor = from;                       // counted below as a day still pending
+        if (removedToday > 0) {
+          await writeState(c, { tbl: 'telemetry_snapshot', action: 'thinned', doneBefore: from,
+            ...claim, bucketMin: s.bucket_min, runId });
+        }
+        break;
+      }
       await writeState(c, { tbl: 'telemetry_snapshot', action: 'thinned', doneBefore: to,
-        bucketMin: s.bucket_min, runId });
+        ...claim, bucketMin: s.bucket_min, runId });
     }
   }
   const pending = rowsOf(await c.query(
@@ -332,6 +367,10 @@ async function alertPolicy(c, s, { runId, now, deadline }) {
   out.considered = n;
   out.would_delete = n;
   if (s.mode !== 'on') return out;
+  /* The oldest alert this pass will remove — rows go oldest first — is where
+     the claim pages are told about begins. Read before the first DELETE. */
+  const oldest = rowsOf(await c.query(
+    'SELECT min(occurred_at) AS t FROM alert WHERE occurred_at < $1', [cut.cutoff]))[0]?.t;
   for (;;) {
     if (Date.now() > deadline) { out.complete = false; break; }
     const r = await c.query(
@@ -343,13 +382,20 @@ async function alertPolicy(c, s, { runId, now, deadline }) {
     if (k < s.batch) break;
   }
   /* Everything older than the boundary is gone: the cutoff when the pass
-     finished, or the oldest alert still standing when it was cut short. */
+     finished, or the oldest alert still standing when it was cut short.
+     NOTHING is written when nothing was removed. The first draft wrote the
+     cutoff whenever no alert was left before it — on every "on" pass until
+     the first alert is 365 days old (2027-05-22), with nothing removed — and
+     every alert page whose window began before the cutoff then said "Safety
+     alerts before <date> were removed by retention" of alerts that never
+     existed: a reason that is not the true one. */
   const left = rowsOf(await c.query(
     'SELECT min(occurred_at) AS t FROM alert WHERE occurred_at < $1', [cut.cutoff]))[0]?.t;
   if (left) out.complete = false;
   const boundary = left ? new Date(left) : cut.cutoff;
-  if (out.deleted > 0 || !left) {
-    await writeState(c, { tbl: 'alert', action: 'removed', doneBefore: boundary, runId });
+  if (out.deleted > 0) {
+    await writeState(c, { tbl: 'alert', action: 'removed', doneBefore: boundary,
+      removedFrom: oldest ? new Date(oldest) : null, removedBefore: boundary, runId });
   }
   return out;
 }
@@ -382,6 +428,15 @@ export async function dataRetentionPass({ db = pool, now = new Date(), read = ge
   let runId = null;
   let locked = false;
   try {
+    /* A pass the process never finished — a deploy or a restart mid-pass —
+       would otherwise read "running" on #settings for ever, a status that is
+       not the true one. Two hours is far past any pass's budget (15 minutes,
+       then at most a few 120 s statements), so a row still running then is
+       one nobody is running. */
+    await c.query(`UPDATE retention_run SET status = 'failed', finished_at = coalesce(finished_at, now()),
+        error = 'interrupted: the process stopped before this pass finished (a deploy or a restart); '
+          || 'every day it finished stays finished and the next pass resumes after them'
+      WHERE status = 'running' AND started_at < now() - interval '2 hours'`);
     const started = await c.query(
       `INSERT INTO retention_run (mode, settings) VALUES ($1, $2::text::jsonb) RETURNING id`, [s.mode, JSON.stringify(s)]);
     runId = rowsOf(started)[0]?.id;

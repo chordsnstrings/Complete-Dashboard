@@ -16,9 +16,18 @@
      6. /api/settings/retention shows the record, and says why when absent.
 
    REVERSION: in api/data_retention_notes.js make notesFor compare with `<=`
-   reversed (`since > h[t].before`) and section 2's "window reaching past"
+   reversed (`first > h[t].before`) and section 2's "window reaching past"
    checks fail; drop `removedBefore` from alertCoverage's call and section 4's
-   live-route check fails. */
+   live-route check fails.
+   REVIEW OF 2026-11-12, each proved by reverting it:
+     · notesFor ignoring the claim's START (`last >= h[t].from` removed) —
+       "a window that ends before the claim begins carries nothing" fails;
+     · retentionHorizon reading done_before (the cursor) instead of the
+       claim — "a policy that removed nothing tells no page anything" fails;
+     · data.js not noting the held copy's header — "a page painted from the
+       browser's copy still carries the note" fails;
+     · noteRetention ignoring the generation — "a note that lands after the
+       reader moved on is dropped" fails. */
 import { PGlite } from '@electric-sql/pglite';
 import express from 'express';
 import { applySchema } from './schema.mjs';
@@ -26,7 +35,7 @@ import { mountAll, declaredRoutes } from './mount.mjs';
 import { READERS, retentionHorizon, resetRetentionHorizon, retentionNotes, noteValue }
   from '../api/data_retention_notes.js';
 import { alertCoverageOf } from '../api/alert_coverage_sql.js';
-import { parseRetentionHeader, retentionSentence, noteRetention, retentionNow, resetRetention, dayWords }
+import { parseRetentionHeader, retentionSentence, noteRetention, retentionNow, resetRetention, dayWords, retentionGen }
   from '../api/public/retention_note.js';
 import { dataRetentionPass } from '../src/data_retention.js';
 
@@ -55,11 +64,21 @@ console.log('\n2. the boundary, as pages see it');
   resetRetentionHorizon();
   check('a database without the table (v115 not applied) reads as no horizon, not an error',
     Object.keys(await retentionHorizon(() => Promise.reject(new Error('relation "retention_state" does not exist')))).length === 0);
-  await db.query(`INSERT INTO retention_state (tbl, action, done_before, bucket_min)
-    VALUES ('telemetry_snapshot', 'thinned', '2025-09-04T00:00:00+04:00', 15),
-           ('alert', 'removed', '2025-06-10T13:30:00+04:00', NULL)`);
+  resetRetentionHorizon();
+  const idle = await retentionHorizon(async () => [{ tbl: 'alert', action: 'removed',
+    done_before: '2025-11-12T00:00:00+04:00', removed_from: null, removed_before: null, bucket_min: null }]);
+  check('a policy that removed nothing tells no page anything (done_before is the cursor, not a claim)',
+    Object.keys(idle).length === 0, JSON.stringify(idle));
+  /* Telemetry thinned from 2025-08-21 (when collection began) up to
+     2025-09-04; alerts removed from 2025-05-22 up to a removal cut short at
+     13:30 on 2025-06-10. */
+  await db.query(`INSERT INTO retention_state (tbl, action, done_before, removed_from, removed_before, bucket_min)
+    VALUES ('telemetry_snapshot', 'thinned', '2025-09-04T00:00:00+04:00', '2025-08-21T00:00:00+04:00', '2025-09-04T00:00:00+04:00', 15),
+           ('alert', 'removed', '2025-06-10T13:30:00+04:00', '2025-05-22T09:00:00+04:00', '2025-06-10T13:30:00+04:00', NULL)`);
   resetRetentionHorizon();
   const h = await retentionHorizon(read);
+  check('the claim begins on the Dubai day of removed_from', h.telemetry_snapshot?.from === '2025-08-21'
+    && h.alert?.from === '2025-05-22', JSON.stringify(h));
   check('a Dubai-midnight boundary is that day', h.telemetry_snapshot?.before === '2025-09-04', JSON.stringify(h.telemetry_snapshot));
   check('a mid-day boundary rounds UP, so "before <date>" never names a day already cut into',
     h.alert?.before === '2025-06-11', JSON.stringify(h.alert));
@@ -78,7 +97,8 @@ const head = async (p) => {
   return { status: r.status, note: r.headers.get('x-fm-retention') };
 };
 await db.query(`INSERT INTO trip (platform, external_id, fleet_id, plate, requested_at, status)
-  VALUES ('uber', 'old-trip', 'ecosine', 'L1', '2025-08-20T10:00:00Z', 'completed'),
+  VALUES ('uber', 'old-trip', 'ecosine', 'L1', '2025-08-25T10:00:00Z', 'completed'),
+         ('uber', 'older-trip', 'ecosine', 'L1', '2025-08-01T10:00:00Z', 'completed'),
          ('uber', 'new-trip', 'ecosine', 'L1', '2026-11-01T10:00:00Z', 'completed')`);
 
 console.log('\n3. set on exactly the answers whose window reaches past the boundary');
@@ -102,6 +122,19 @@ console.log('\n3. set on exactly the answers whose window reaches past the bound
   const k = await head('/api/kpis?from=2025-01-01&to=2026-11-12');
   check('an alert reader past the alert boundary names alerts as REMOVED', /alert;removed;2025-06-11/.test(k.note || ''), JSON.stringify(k));
   check('a route that is not a reader carries nothing', !(await head('/api/revenue?from=2024-01-01&to=2026-11-12')).note);
+  /* The windows the first draft got wrong: they end before anything was
+     removed, so nothing was taken from them. */
+  /* After the alert claim ends (2025-06-11) and before the position claim
+     begins (2025-08-21): this vehicle window reads both tables and lost
+     nothing from either. */
+  const early = await head('/api/vehicle/kpis?plate=L1&from=2025-06-15&to=2025-08-20');
+  check('a window that ends before the claim begins carries nothing (positions from 2025-08-21)', !early.note, JSON.stringify(early));
+  check('a day before the claim carries nothing either', !(await head('/api/where?plate=L1&day=2025-07-01')).note);
+  check('nor a journey from before it (/api/trip, 2025-08-01)', !(await head('/api/trip?platform=uber&id=older-trip')).note);
+  const pre = await head('/api/kpis?from=2025-01-01&to=2025-05-21');
+  check('an alert window wholly before the first alert removed carries nothing', !pre.note, JSON.stringify(pre));
+  const straddle = await head('/api/kpis?from=2025-01-01&to=2025-05-22');
+  check('one that reaches the first day removed does', /alert;removed;2025-06-11/.test(straddle.note || ''), JSON.stringify(straddle));
   const c = await head('/api/vehicle/kpis?plate=L1&from=2025-08-01&to=2025-09-30&cachehit=1');
   check('a cache hit that never reaches the route still carries it', /telemetry_snapshot/.test(c.note || ''), JSON.stringify(c));
 }
@@ -119,6 +152,13 @@ console.log('\n4. alertCoverage gives the true reason for removed days');
     gone.basis === 'not measured — alerts before 2025-06-11 were removed by retention (RETENTION_ALERT_DAYS)', gone.basis);
   const after = alertCoverageOf(['2026-10-01'], '2026-10-01', '2026-10-01', { removedBefore: '2025-06-11' });
   check('a window after the boundary says nothing about retention', after.removed_before === null && !/retention/.test(after.basis));
+  const before = alertCoverageOf([], '2025-01-01', '2025-03-31', { removedBefore: '2025-06-11', removedFrom: '2025-05-22' });
+  check('a window wholly before the first alert removed keeps the feed\'s own wording, no gap marked removed',
+    before.removed_before === null && !/retention/.test(before.basis) && !before.gaps.some((g) => g.removed), before.basis);
+  const half = alertCoverageOf([], '2025-05-01', '2025-05-31', { removedBefore: '2025-06-11', removedFrom: '2025-05-22' });
+  check('a window that straddles where removal began marks only the gap that reaches it',
+    half.removed_before === '2025-06-11' && half.gaps.length === 1 && half.gaps[0].removed === true
+    && !/^not measured — alerts before/.test(half.basis), JSON.stringify({ b: half.basis, g: half.gaps }));
   await db.query(`INSERT INTO alert (platform, external_id, fleet_id, plate, alert_type, occurred_at)
     VALUES ('fms', 'a1', 'ecosine', 'L1', 'Harsh Brake', '2025-06-15T10:00:00Z')`);
   const live = await m.get('/api/alerts/by-driver?from=2025-06-01&to=2025-06-30');
@@ -145,14 +185,75 @@ console.log('\n5. the front end reads it and words it truthfully');
   resetRetention();
   check('reset clears it for the next page', retentionNow().length === 0);
   const data = (await import('node:fs')).readFileSync('api/public/data.js', 'utf8');
-  check('data.js api() hands every answer\'s header over, beside x-fm-withheld',
-    /noteRetention\(r\.headers\.get\('x-fm-retention'\)\)/.test(data));
+  check('data.js api() hands every answer\'s header over, beside x-fm-withheld, and the held copy\'s too',
+    /const retention = r\.headers\.get\('x-fm-retention'\)/.test(data) && /noteRetention\(retention, rgen\)/.test(data)
+    && /noteRetention\(held\.ret, rgen\)/.test(data));
   const app = (await import('node:fs')).readFileSync('api/public/app.js', 'utf8');
   const phone = (await import('node:fs')).readFileSync('api/public/m/app.js', 'utf8');
   check('both shells reset it per page and print it', /resetRetention\(\)/.test(app) && /retentionBanner\(\)/.test(app)
     && /resetRetention\(\)/.test(phone) && /retentionBanner\(\)/.test(phone));
   const sw = (await import('node:fs')).readFileSync('api/public/sw.js', 'utf8');
   check('the service worker precaches the module data.js now imports', /'\/retention_note\.js'/.test(sw));
+  resetRetention();
+  const stale = retentionGen();
+  resetRetention();
+  noteRetention('telemetry_snapshot;thinned;2025-09-04;15', stale);
+  check('a note stamped with an earlier render is dropped', retentionNow().length === 0, JSON.stringify(retentionNow()));
+  noteRetention('telemetry_snapshot;thinned;2025-09-04;15', retentionGen());
+  check('and one stamped with this render is kept', retentionNow().length === 1);
+  resetRetention();
+}
+
+console.log('\n5b. through data.js api(): the browser copy keeps its note, and a late note stays on its own page');
+{
+  /* data.js is a browser module (test/gateway.test.mjs does the same):
+     localStorage and window as globals, relative URLs given a base. */
+  const store = new Map();
+  global.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, v),
+    removeItem: (k) => store.delete(k) };
+  global.window = { addEventListener() {}, dispatchEvent() {}, location: { hash: '' } };
+  const NOTE = 'telemetry_snapshot;thinned;2025-09-04;15';
+  const stub = express();
+  let visits = 0;
+  stub.get('/api/thinned', (_q, r) => {
+    visits += 1;
+    /* The second visit is slow, like /api/coverage: the page paints from
+       the browser's copy long before this answer and its header arrive. */
+    setTimeout(() => r.set('x-fm-retention', NOTE).json({ fixes: 13 }), visits > 1 ? 400 : 0);
+  });
+  stub.get('/api/thinned-slow', (_q, r) => setTimeout(() => r.set('x-fm-retention', NOTE).json({ fixes: 5 }), 300));
+  const srv = stub.listen(0);
+  await new Promise((r) => srv.once('listening', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const realFetch = global.fetch;
+  global.fetch = (u, o) => realFetch(String(u).startsWith('http') ? u : `${base}${u}`, o);
+  try {
+    const { api } = await import('../api/public/data.js');
+    const { swr } = await import('../api/public/swr.js');
+    resetRetention();
+    await api('/api/thinned');
+    check('first visit: the live answer\'s note is noted', retentionNow().length === 1);
+    check('and kept with the browser\'s copy of the answer', swr.get('/api/thinned')?.ret === NOTE, JSON.stringify(swr.get('/api/thinned')));
+    resetRetention();
+    const body = await api('/api/thinned');
+    check('a page painted from the browser\'s copy still carries the note, before the live answer lands',
+      body?.fixes === 13 && retentionNow().length === 1 && retentionNow()[0].before === '2025-09-04', JSON.stringify(retentionNow()));
+    await new Promise((r) => setTimeout(r, 600));
+    const pending = api('/api/thinned-slow');
+    resetRetention();                 // the reader opened another page
+    await pending;
+    check('a note that lands after the reader moved on is dropped, not printed on the next page',
+      retentionNow().length === 0, JSON.stringify(retentionNow()));
+    const a = swr.put('/api/x', { n: 1 }, null);
+    const b = swr.put('/api/x', { n: 1 }, NOTE);
+    const c = swr.put('/api/x', { n: 1 }, NOTE);
+    check('a note that moved is a change worth a redraw even when the body did not', a.changed && b.changed && !c.changed,
+      JSON.stringify({ a, b, c }));
+  } finally {
+    global.fetch = realFetch;
+    srv.close();
+    resetRetention();
+  }
 }
 
 console.log('\n6. /api/settings/retention: the record, and why when there is none');
@@ -168,6 +269,8 @@ console.log('\n6. /api/settings/retention: the record, and why when there is non
   check('after a pass: the run, its five tables, and the boundary pages read',
     one.body.last?.mode === 'dry_run' && tbls === 'alert,collection_run,driver_timeline_event,telemetry_snapshot,trip'
     && one.body.state.some((s) => s.tbl === 'telemetry_snapshot') && one.body.absent === null, JSON.stringify(one.body).slice(0, 400));
+  check('the state names the claim (removed_from, removed_before) beside the cursor',
+    one.body.state.every((s) => 'removed_from' in s && 'removed_before' in s && 'done_before' in s));
   check('considered / would remove / removed are on each table row',
     (one.body.last?.tables || []).every((t) => 'considered' in t && 'would_delete' in t && 'deleted' in t));
 }

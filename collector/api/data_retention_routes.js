@@ -46,7 +46,8 @@ export function dataRetentionRoutes(app, { q, wrap }) {
               complete, total_estimate, oldest, newest, note, took_ms
          FROM retention_run_table WHERE run_id = $1 ORDER BY tbl`, [last.id]) : [];
     const state = await q(
-      `SELECT tbl, action, done_before, bucket_min, updated_at FROM retention_state ORDER BY tbl`);
+      `SELECT tbl, action, done_before, removed_from, removed_before, bucket_min, updated_at
+         FROM retention_state ORDER BY tbl`);
     res.json({
       next,
       last: last ? { ...last, tables } : null,

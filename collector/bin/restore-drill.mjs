@@ -27,11 +27,31 @@ const flag = (n) => args.includes(n);
 const value = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : null; };
 
 /* What a connection error may print: its code and a generic sentence. pg's
-   messages can echo a user or host, and the brief is "never printed". */
-const scrub = (e) => `${e?.code || 'error'}: ${String(e?.message || e)
-  .replace(/postgres(ql)?:\/\/\S+/gi, '<DATABASE_URL>')
-  .replace(/(user|password|host)\s+"[^"]*"/gi, '$1 "<redacted>"')
-  .slice(0, 200)}`;
+   messages can echo a user or host, and the brief is "never printed".
+   THE FIRST DRAFT LEAKED THE HOST (review of 2026-11-12). It replaced a whole
+   URL and `user "…"`-style phrases, but node's socket errors name the
+   address bare — "getaddrinfo ENOTFOUND <host>", "connect ECONNREFUSED
+   <ip>:<port>" — and a DigitalOcean host names the account and the cluster,
+   on a cluster that has no trusted sources (docs/BACKUP-RESTORE.md §1). So
+   every identifying part of the URL itself — password, user, host, and the
+   host's port — is cut out of whatever the message says, wherever it says
+   it. (The database NAME is printed on purpose in the target line: it is
+   current_database(), not a credential.) */
+const urlParts = (url) => {
+  try {
+    const u = new URL(url);
+    const dec = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
+    return [u.password, u.username, u.hostname, u.hostname.replace(/^\[|\]$/g, '')]
+      .map(dec).filter((s) => s && s.length >= 2).sort((a, b) => b.length - a.length);
+  } catch { return []; }
+};
+const scrub = (e, url = process.env.DATABASE_URL) => {
+  let m = String(e?.message || e).replace(/postgres(ql)?:\/\/\S+/gi, '<DATABASE_URL>');
+  for (const part of urlParts(url)) m = m.split(part).join('<redacted>');
+  m = m.replace(/<redacted>:\d+/g, '<redacted>')
+    .replace(/(user|password|host)\s+"[^"]*"/gi, '$1 "<redacted>"');
+  return `${e?.code || 'error'}: ${m.slice(0, 200)}`;
+};
 
 async function main() {
   const url = process.env.DATABASE_URL;

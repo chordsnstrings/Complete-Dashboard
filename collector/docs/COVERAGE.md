@@ -10775,8 +10775,9 @@ The "447,543 alert rows" earlier in this file (Two feeds nobody reads) was the w
 **What retention does** (src/data_retention.js; docs/BACKUP-RESTORE.md for restores): telemetry
 tracker fixes are thinned — never emptied — past max(400 days, the weekly backfill's window + 7 days);
 alerts are kept unless `RETENTION_ALERT_DAYS` opts in (floor 365); timelines, trips and the run log
-are kept. `RETENTION_MODE` is dry_run until the operator says on. With the defaults nothing is
-thinned before about 2027-08.
+are kept. `RETENTION_MODE` is dry_run until the operator says on. With the defaults nothing collected
+is thinned before the pass of 2027-09-26 (2027-08-29 at the earliest if `RETENTION_TELEMETRY_DAYS` is
+lowered to the backfill floor); computed with `telemetryCutoff`, not estimated.
 
 ### Traps this added to the list
 
@@ -10817,3 +10818,19 @@ thinned before about 2027-08.
 - **The Arkiv focus pass folds any block over 15 words** (api/public/focus.js LEAD_WORDS), including
   a panel's most important sentence. The retention panel's "dry run — removes nothing" was folded
   into "2 notes" on its first render; facts that must be read go one short line each.
+- **A retention boundary that says only where the policy stopped lies about the range before it**
+  (review of 2026-11-12). The first draft wrote the alert boundary on any "on" pass with nothing
+  left before the cutoff — removed or not — and pages compared only the window's START with it, so a
+  window before the first row ever collected was told its rows were removed. Keep the cursor
+  (`done_before`, where the next pass resumes) apart from the claim (`[removed_from,
+  removed_before)`, written only for rows really removed) and test a window's BOTH ends against the
+  claim.
+- **A header-borne note does not survive the browser's stale-while-revalidate copy.** data.js
+  `api()` paints from `swr` before the live answer arrives, and redraws only when the BODY changed,
+  so a note sent as a response header (x-fm-retention; x-fm-withheld has the same shape) is missing
+  on every repeat visit unless it is stored with the copy. And a slow answer that lands after the
+  reader moved on notes onto the next page unless the note is tied to the render that asked
+  (`retentionGen`).
+- **Node's connection errors print the host bare.** `getaddrinfo ENOTFOUND <host>` and `connect
+  ECONNREFUSED <ip>:<port>` carry no `postgres://` and no `host "…"`, so a scrub keyed on those
+  patterns leaks the address. Redact the URL's own parts (bin/restore-drill.mjs `urlParts`).

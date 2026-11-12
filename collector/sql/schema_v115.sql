@@ -43,10 +43,29 @@
      retention_run_table  one row per pass per table: rows considered, rows the
                           policy would delete, rows deleted (0 in a dry run).
      retention_state      per table, the instant before which the policy has
-                          been applied for real. This is what a page reads to
+                          been applied for real, and the instant from which it
+                          has actually REMOVED rows (removed_from up to
+                          removed_before). That range is what a page reads to
                           say "thinned by retention before <date>" — a dry run
-                          never writes it, so nothing is ever announced as
-                          thinned that was not. */
+                          never writes it, and a pass that removed nothing
+                          leaves it NULL, so nothing is ever announced as
+                          thinned that was not. done_before is only the
+                          pass's own cursor: where the next pass resumes.
+
+   WHY removed_from (review of 2026-11-12). The first draft kept done_before
+   alone and let an "on" pass with RETENTION_ALERT_DAYS set write the alert
+   boundary even when it had removed nothing — which, with the alert feed
+   starting 2026-05-22 and the 365-day floor, is every pass until 2027-05-22.
+   Every alert page whose window began before the cutoff (the default
+   all-time window begins 2000-01-01) would then have said "Safety alerts
+   before <date> were removed by retention" of alerts that never existed, and
+   alertCoverage would have blamed retention for days the feed never ran. A
+   boundary that says only where the policy STOPS cannot tell a page whether
+   anything was taken from ITS range; one that also says where removal BEGAN
+   can: a window that ends before removed_from lost nothing. And the cursor
+   cannot be the claim's end either: a day cut short by the time budget has
+   lost fixes but must be walked again, so the cursor stays at its start while
+   removed_before already covers it. */
 
 CREATE TABLE IF NOT EXISTS retention_run (
   id           BIGSERIAL PRIMARY KEY,
@@ -83,13 +102,15 @@ CREATE TABLE IF NOT EXISTS retention_state (
   tbl          TEXT PRIMARY KEY,
   action       TEXT NOT NULL,             -- thinned | removed
   done_before  TIMESTAMPTZ NOT NULL,      -- every row older than this has been through the policy
+  removed_from TIMESTAMPTZ,               -- the earliest instant a pass really removed rows from; NULL = nothing removed yet
+  removed_before TIMESTAMPTZ,             -- and the end of the last day it removed rows from (a day cut short included)
   bucket_min   INT,                       -- thinned: one fix per car per this many minutes
   run_id       BIGINT,
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 COMMENT ON TABLE retention_state IS
-  'Per table, the instant before which the retention pass has thinned or removed rows FOR REAL (mode on). Read by api/data_retention_notes.js to put "thinned by retention before <date>" on every page whose window reaches back past it. A dry run never writes here.';
+  'Per table, the instant before which the retention pass has applied its policy FOR REAL (mode on), and the range it actually removed rows from ([removed_from, removed_before); NULL = nothing removed yet). Read by api/data_retention_notes.js to put "thinned by retention before <date>" on every page whose window overlaps that range. done_before is only where the next pass resumes. A dry run never writes here.';
 
 /* ── THE DUPLICATE INDEX ─────────────────────────────────────────────────────
    telemetry_snapshot carries (plate, captured_at DESC) twice:
