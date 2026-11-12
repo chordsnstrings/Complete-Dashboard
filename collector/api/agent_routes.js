@@ -34,6 +34,7 @@
 import { randomUUID, randomBytes } from 'node:crypto';
 import { log } from '../src/log.js';
 import { Workbook } from '../src/xlsx_write.js';
+import { exportStamp, stampWorkbook } from './access/watermark.js';
 import { parseCookies, setCookie } from './access/middleware.js';
 import { periodWindow, daysWindow, dubaiDay } from './window.js';
 import { rangeLabel } from './agent_period.js';
@@ -506,6 +507,7 @@ export function agentRoutes(app, { q, wrap }) {
       sh.header(r.columns.map((c) => (c.kind === 'hours' ? `${c.label} (hours)` : c.kind === 'min' ? `${c.label} (minutes)` : c.label)), kinds);
       for (const row of r.rows || []) sh.row(r.columns.map((c) => row[c.key] ?? null));
     }
+    stampWorkbook(wb, exportStamp(req), { what: `A workbook the assistant made: ${String(f.title || '').slice(0, 120)}` });
     const buf = wb.toBuffer();
     const fname = `${String(f.title || 'FleetMirror').replace(/[^A-Za-z0-9 _.-]+/g, ' ').trim().slice(0, 80) || 'FleetMirror'}.xlsx`;
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

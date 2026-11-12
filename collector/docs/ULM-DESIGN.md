@@ -1421,3 +1421,9 @@ section REV has one row per change.
   take, assign, close with an outcome and a note, reopen; the current state in `finding_owner`, the
   history in the audit log. The routes are under `/api/access/` (manifest `self`, never cached).
 - The v86 `access_review` table is left in place, unread.
+- **Export watermarks (§9.3)** (`api/access/watermark.js`): every route that hands back a file —
+  the trip CSV, the money workbook, Today, the month target, the low performers, a watch list, the
+  assistant's attached workbook — carries who exported it and when, for a signed-in person or a
+  wall screen: the CSV's first line, and a workbook's properties, every sheet's print footer and a
+  last "Exported by" sheet. A visitor while sign-in is optional gets the file as before. No emailed
+  report carries an attachment (they are HTML and text bodies), so there is none to stamp.

@@ -46,6 +46,9 @@ import { once } from 'node:events';
    the words are present, not that the arithmetic is right. It was wrong: see
    the comment on the walk-back below. */
 import { peopleCountStored, JOIN_TRIP } from './custody_sql.js';
+/* Who downloaded it and when, as the file's first line, for a signed-in
+   caller (ULM-DESIGN §9.3; api/access/watermark.js). */
+import { exportStamp, csvStampLine } from './access/watermark.js';
 
 const MAX_ROWS = 400000;
 
@@ -216,6 +219,11 @@ export function exportRoutes(app, { q, wrap, winDays, maxRows = MAX_ROWS, log = 
     /* The header row survives an empty result, so a window with no bookings
        downloads a file that says which columns it would have had rather than
        an empty one that reads as a broken export. */
+    /* The watermark first, for a signed-in caller: one quoted cell saying
+       who exported the file and when. A visitor while sign-in is optional
+       gets the file as it always was, header first. */
+    const stamp = exportStamp(req);
+    if (stamp) res.write(csvStampLine(stamp));
     res.write(`${cols.join(',')}\n`);
 
     if (dayRows) {
