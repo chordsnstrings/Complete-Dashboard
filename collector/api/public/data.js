@@ -6,7 +6,6 @@
 import { dubaiDay } from './tz.js';
 import { swr } from './swr.js';
 import { WithheldError, noteWithheld, toSignIn } from './access.js';
-import { noteRetention, retentionGen } from './retention_note.js';
 
 /* Storage access is guarded, not assumed. A browser with site data blocked
    THROWS on the getter rather than returning null, and this module is also
@@ -135,6 +134,42 @@ export const GRAINS = ['auto', 'day', 'week', 'month'];
    import it without importing the shell back. */
 let renderGen = 0;
 export const newRender = () => ++renderGen;
+/* ── retention: what each answer's x-fm-retention header said ─────────────
+   Moved here from retention_note.js (2026-11-12) with its words unchanged:
+   api() below notes every answer's header, so the capture has to be on the
+   first screen, and the module that draws it (retention_note.js) no longer
+   needs to be (test/lazy_pages.test.mjs). */
+/* table;action;first-whole-day;bucket-minutes, comma separated. Anything
+   malformed is dropped rather than printed half-understood. */
+export function parseRetentionHeader(h) {
+  return String(h || '').split(',').map((part) => {
+    const [table, action, before, bucket] = part.trim().split(';');
+    if (!table || !/^(thinned|removed)$/.test(action || '') || !/^\d{4}-\d{2}-\d{2}$/.test(before || '')) return null;
+    const b = Number(bucket);
+    return { table, action, before, bucket_min: Number.isFinite(b) && b > 0 ? b : null };
+  }).filter(Boolean);
+}
+
+/* What this render's answers said, gathered by api(); one entry per table.
+   TIED TO THE RENDER THAT ASKED (review of 2026-11-12). /api/coverage takes
+   16-33 s, and a reader who leaves #coverage before it answers would have
+   had its note land on whatever page they opened next: a claim about a range
+   that page never read. resetRetention() starts a new generation, api()
+   stamps each request with the generation it was made in, and a note from
+   an older one is dropped. */
+const seen = new Map();
+let gen = 0;
+export const retentionGen = () => gen;
+export function noteRetention(header, g = gen) {
+  if (g !== gen) return;
+  for (const n of parseRetentionHeader(header)) {
+    const had = seen.get(n.table);
+    if (!had || n.before > had.before) seen.set(n.table, n);
+  }
+}
+export const resetRetention = () => { seen.clear(); gen += 1; };
+export const retentionNow = () => [...seen.values()];
+
 export const currentGen = () => renderGen;
 export const alive = (g) => g === renderGen;
 

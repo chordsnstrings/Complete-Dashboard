@@ -152,6 +152,13 @@ async function open(skin, hash, { ui: build = 'desktop', width = 1280, scheme = 
   return { ctx, page, warnings, fonts };
 }
 const metas = (page) => page.evaluate(() => [...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.content));
+/* The bar the browser actually shows: the meta with no media, or the one whose
+   media matches. For the default reader (Arkiv, following the device) the
+   static per-scheme metas already carry the paper and themecolor.js is not
+   fetched at all (app.js themeBarWrong; integration, 2026-11-12), so the
+   two metas legitimately differ and only the shown one is the bar. */
+const shown = (page) => page.evaluate(() => [...document.querySelectorAll('meta[name="theme-color"]')]
+  .find((m) => !m.media || matchMedia(m.media).matches)?.content || null);
 const INSET3 = /3px 0px 0px( 0px)? inset|inset 3px 0px 0px/;
 
 await (async () => {
@@ -282,7 +289,7 @@ await (async () => {
   check('the preloads are Karla and Plex Mono 400 — what Arkiv draws first, measured', pre.join(' ') === 'karla-latin.woff2 ibm-plex-mono-400-latin.woff2', pre.join(' '));
   {
     const { ctx, page, warnings, fonts } = await open('arkiv', 'overview');
-    check('Arkiv, light OS: the bar is the white paper', (await metas(page)).every((c) => c.toUpperCase() === '#FFFFFF'), (await metas(page)).join(' '));
+    check('Arkiv, light OS: the bar is the white paper', (await shown(page))?.toUpperCase() === '#FFFFFF', `${await shown(page)} of ${(await metas(page)).join(' ')}`);
     check('…both preloaded faces are fetched first', fonts.slice(0, 2).sort().join(' ') === 'ibm-plex-mono-400-latin.woff2 karla-latin.woff2', fonts.join(' '));
     check('…and neither is reported preloaded-but-unused', !warnings.some((w) => /preload/i.test(w)), warnings.filter((w) => /preload/i.test(w)).join(' | '));
     await page.click('#themeBtn');                       // system → light
@@ -293,7 +300,7 @@ await (async () => {
   }
   {
     const { ctx, page } = await open('arkiv', 'overview', { scheme: 'dark' });
-    check('Arkiv, dark OS: the bar is the grey paper', (await metas(page)).every((c) => c.toUpperCase() === '#1E1F22'), (await metas(page)).join(' '));
+    check('Arkiv, dark OS: the bar is the grey paper', (await shown(page))?.toUpperCase() === '#1E1F22', `${await shown(page)} of ${(await metas(page)).join(' ')}`);
     await ctx.close();
   }
   {

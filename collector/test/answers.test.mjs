@@ -476,6 +476,13 @@ check('every rule is hooked by some page, and every hook names a rule',
 const appjs = src('app.js');
 const renderBody = appjs.slice(appjs.indexOf('async function render() {'), appjs.indexOf('/* ── every page says what it was built from'));
 check('render() empties the box on every navigation, beside clearPageFoot', /clearPageFoot\(\);[\s\S]{0,400}clearAnswer\(\);/.test(renderBody));
+/* app.js loads the answer line on demand and clears the box by id itself —
+   lowperf.js and targetpage.js load answers.js on their own, so app.js's
+   loader may never have run (integration, 2026-11-12). The id it removes must
+   be the one answerline.js mounts. */
+check('app.js clears the very box answerline.js mounts (ANSWER_HOST is HOST_ID)',
+  (/const ANSWER_HOST = '([^']+)'/.exec(appjs) || [])[1] === (/const HOST_ID = '([^']+)'/.exec(src('answerline.js')) || [])[1]
+    && /const clearAnswer = \(\) => document\.getElementById\(ANSWER_HOST\)\?\.remove\(\);/.test(appjs));
 for (const f of ['targetpage.js', 'lowperf.js']) {
   const s = src(f);
   check(`${f} (on the phone's static graph) loads answers.js only when used`,

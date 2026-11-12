@@ -17,23 +17,19 @@
 
 /* tz.js, a leaf module the page already loads: the one Dubai calendar. */
 import { dubaiDay } from './tz.js';
+/* The capture half lives in data.js since 2026-11-12: api() notes every
+   answer's x-fm-retention header there, so this module — the sentences, the
+   banner and the Settings panel — loads only when a page has something to
+   draw (app.js; test/lazy_pages.test.mjs holds the first screen under 20
+   modules and 1.3 MB). Re-exported so every importer reads one state. */
+import { parseRetentionHeader, retentionNow } from './data.js';
+export { parseRetentionHeader, noteRetention, resetRetention, retentionNow, retentionGen } from './data.js';
 const esc = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export const dayWords = (iso) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
   return m ? `${Number(m[3])} ${MONTH[Number(m[2]) - 1]} ${m[1]}` : String(iso || '');
 };
-
-/* table;action;first-whole-day;bucket-minutes, comma separated. Anything
-   malformed is dropped rather than printed half-understood. */
-export function parseRetentionHeader(h) {
-  return String(h || '').split(',').map((part) => {
-    const [table, action, before, bucket] = part.trim().split(';');
-    if (!table || !/^(thinned|removed)$/.test(action || '') || !/^\d{4}-\d{2}-\d{2}$/.test(before || '')) return null;
-    const b = Number(bucket);
-    return { table, action, before, bucket_min: Number.isFinite(b) && b > 0 ? b : null };
-  }).filter(Boolean);
-}
 
 /* The sentence, per table, in the words the page prints. */
 export function retentionSentence(n) {
@@ -50,26 +46,6 @@ export function retentionSentence(n) {
   }
   return `${n.table} before ${when} was ${n.action} by retention; figures before that date are not complete.`;
 }
-
-/* What this render's answers said, gathered by api(); one entry per table.
-   TIED TO THE RENDER THAT ASKED (review of 2026-11-12). /api/coverage takes
-   16-33 s, and a reader who leaves #coverage before it answers would have
-   had its note land on whatever page they opened next: a claim about a range
-   that page never read. resetRetention() starts a new generation, api()
-   stamps each request with the generation it was made in, and a note from
-   an older one is dropped. */
-const seen = new Map();
-let gen = 0;
-export const retentionGen = () => gen;
-export function noteRetention(header, g = gen) {
-  if (g !== gen) return;
-  for (const n of parseRetentionHeader(header)) {
-    const had = seen.get(n.table);
-    if (!had || n.before > had.before) seen.set(n.table, n);
-  }
-}
-export const resetRetention = () => { seen.clear(); gen += 1; };
-export const retentionNow = () => [...seen.values()];
 
 /* One line at the top of the page, or nothing. */
 export function retentionBanner() {

@@ -17,7 +17,29 @@ import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
-  applyWindow, MONTH_SHORT, dayLabel } from './data.js';
+  applyWindow, MONTH_SHORT, dayLabel, resetRetention, retentionNow } from './data.js';
+/* The answer line (answers.js, answerline.js) loads with the first page that
+   draws one, not with the first screen: test/lazy_pages.test.mjs holds the
+   first screen under 20 modules and 1.3 MB, and the batch of 2026-11-12 had
+   put both there, beside retention_note.js — 22 modules, 1,326 KB. A late
+   load never paints one page's answer on the next: the render that asked
+   must still be current (alive), and answers.js reads that page's state when
+   it runs. A failed load draws no box and is retried with the next page
+   (the page itself is unaffected).
+   Clearing removes the box itself, by answerline.js's HOST_ID: lowperf.js and
+   targetpage.js load answers.js on their own (they are on the phone's static
+   graph), so a box can stand on the page when this loader never ran — the
+   first version asked the loaded module to clear it, and #low-performers'
+   box stayed on #settings (test/answers.test.mjs pins the id to HOST_ID). */
+let answerMods = null;
+const ANSWER_HOST = 'pageAnswer';
+const loadAnswer = () => (answerMods ||= Promise.all([import('./answers.js'), import('./answerline.js')])
+  .catch((e) => { answerMods = null; throw e; }));
+const answer = (view, page, data) => {
+  const g = currentGen();
+  loadAnswer().then(([a]) => { if (alive(g)) a.answer(view, page, data); }).catch(() => {});
+};
+const clearAnswer = () => document.getElementById(ANSWER_HOST)?.remove();
 import { volatilePath } from './swr.js';
 import { rangePanel } from './daterange.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
@@ -29,13 +51,10 @@ import { startMotion, motionView, motionEntered } from './motion.js';
 /* ANS (answers.js, answerline.js): each page's answer line and Act-on strip,
    above #view under the Arkiv skin — the rules in answers.js, the box in
    answerline.js, emptied by render() on every navigation. */
-import { answer } from './answers.js';
-import { clearAnswer } from './answerline.js';
 /* Sign-in and access (collector/docs/ULM-DESIGN.md). The server decides; these
    only draw what it decided — which pages open, and the true reason where
    something is not shown. */
 import { mountAssistant } from './agentchat.js';
-import { resetRetention, retentionBanner, retentionPanel } from './retention_note.js';
 import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
   WithheldError, toSignIn, signOut, roleNames, post as accessPost, installFetchGuard, inChosenLook,
   unlessWithheld, closingClass, VIEW_CAP, VIEW_CAP_WHY, fleetLabel, fleetList, fleetNames, allFleetsLabel } from './access.js';
@@ -9291,7 +9310,15 @@ V.settings = async (root) => {
   root.append(jp.panel);
   /* The nightly data-retention pass: what it considered, would remove and
      removed, and why each table is kept (api/data_retention_routes.js). */
-  root.append(retentionPanel({ panel, tableFrom, loading, empty, pill, dtStr, api }));
+  /* The Data retention panel, from retention_note.js — loaded with this page,
+     not the first screen. Its place is held so the panels keep their order;
+     a failed load says so there rather than leaving a gap. */
+  const retHold = document.createElement('div');
+  root.append(retHold);
+  import('./retention_note.js')
+    .then(({ retentionPanel }) => retHold.replaceWith(retentionPanel({ panel, tableFrom, loading, empty, pill, dtStr, api })))
+    .catch(() => retHold.replaceWith(panel('Data retention',
+      'This panel’s code could not be loaded, so nothing is shown here; reload the page to try again.').panel));
   const jobs = async () => {
     loading(jp.body);
     try {
@@ -9714,9 +9741,15 @@ async function render() {
     /* What this page's answers left out for this role, said once at the top. */
     const wb = withheldBanner();
     if (wb) root.prepend(wb);
-    /* And what retention has thinned out of the range it read. */
-    const rb = retentionBanner();
-    if (rb) root.prepend(rb);
+    /* And what retention has thinned out of the range it read — drawn by
+       retention_note.js, loaded only when an answer said so (the capture is
+       data.js's; see the answer line's note above for the budget). */
+    if (retentionNow().length) {
+      const { retentionBanner } = await import('./retention_note.js');
+      if (!alive(gen)) return;
+      const rb = retentionBanner();
+      if (rb) root.prepend(rb);
+    }
     markShutLinks(root);
     await stampSource(root, gen);
     /* Before the animation, because it only adds a class. A table long enough
@@ -10581,7 +10614,7 @@ tzNote();
    dark → system, and the label names the state it is in now. */
 const THEME_LABEL = { light: '☀ light', dark: '☾ dark', system: '◐ system' };
 const THEME_NEXT = { system: 'light', light: 'dark', dark: 'system' };
-function applyTheme(mode) {
+function applyTheme(mode, { boot = false } = {}) {
   const r = document.documentElement;
   if (mode === 'system') { r.removeAttribute('data-theme'); store.set('theme', ''); }
   else { r.setAttribute('data-theme', mode); store.set('theme', mode); }
@@ -10594,10 +10627,26 @@ function applyTheme(mode) {
   /* The browser's bar follows the paper this choice resolves to
      (themecolor.js; loaded on demand — test/lazy_pages.test.mjs keeps the
      first screen under 20 modules, and a bar colour is not a first-screen
-     need: index.html's pre-paint script has already set a chosen theme's). */
-  import('./themecolor.js').then((m) => m.followThemeColor()).catch(() => { /* the static metas stand */ });
+     need: index.html's pre-paint script has already set a chosen theme's).
+     At boot it is not loaded at all unless the bar is wrong (themeBarWrong,
+     after the first render): for the default reader — Arkiv, following the
+     device — the static metas already carry the paper for each scheme, and
+     the browser switches them itself (integration, 2026-11-12: #overview
+     fetched 23 modules against the test's 22). */
+  if (!boot) import('./themecolor.js').then((m) => m.followThemeColor()).catch(() => { /* the static metas stand */ });
 }
-applyTheme(['light', 'dark'].includes(store.get('theme')) ? store.get('theme') : 'system');
+/* Does the bar the browser shows differ from the paper the page is drawn on?
+   Read once the stylesheets are in (the first render waits for them): the
+   Classic skin's linen, or a chosen theme the OS scheme does not match. */
+const themeBarWrong = () => {
+  try {
+    const paper = String(getComputedStyle(document.documentElement).getPropertyValue('--paper')).trim().toLowerCase();
+    const shown = [...document.querySelectorAll('meta[name="theme-color"]')]
+      .find((m) => !m.media || matchMedia(m.media).matches)?.getAttribute('content')?.trim().toLowerCase();
+    return Boolean(paper && shown && paper !== shown);
+  } catch { return true; }
+};
+applyTheme(['light', 'dark'].includes(store.get('theme')) ? store.get('theme') : 'system', { boot: true });
 $('#themeBtn').onclick = () => {
   const cur = document.documentElement.getAttribute('data-theme') || 'system';
   applyTheme(THEME_NEXT[cur] || 'system');
@@ -10748,14 +10797,25 @@ const whoReady = loadWho().then(() => {
 });
 whoReady.then((go) => {
   if (!go) return;
-  whenStyled(4000, render).then(render);
+  /* whenStyled resolves when the sheets are in; the first render is the
+     .then — `first` settles when that page is drawn. */
+  const first = whenStyled(4000, render).then(render);
   /* The chat assistant's button and window (agentchat.js), on <body> so it
      outlives every view. Mounted only once sign-in is settled. */
   mountAssistant();
-  /* The service worker on the desktop build, registered once the page has
-     loaded (swreg.js, HANDOFF §4.5). Loaded on demand, like themecolor.js:
-     it is not first-screen code. It is handed what the worker has said
-     since the page began (swHeld above). */
-  import('./swreg.js').then((m) => m.registerWorker({ held: swHeld })).catch(() => { /* no worker: the page works as before */ });
+  /* After the first page is drawn, and not before (integration, 2026-11-12):
+     the bar colour, only if it is wrong (themeBarWrong above); and the
+     service worker on the desktop build (swreg.js, HANDOFF §4.5), loaded on
+     demand like themecolor.js, two seconds after the first render. Neither
+     is first-screen work — an installed worker controls the page from the
+     navigation, whenever register() is called, and what it says before then
+     is held (swHeld above) — and fetching both while the page and its data
+     load put #overview at 23 modules against test/lazy_pages.test.mjs's 22. */
+  first.finally(() => {
+    if (themeBarWrong()) import('./themecolor.js').then((m) => m.followThemeColor()).catch(() => { /* the static metas stand */ });
+    setTimeout(() => {
+      import('./swreg.js').then((m) => m.registerWorker({ held: swHeld })).catch(() => { /* no worker: the page works as before */ });
+    }, 2000);
+  });
 });
 setInterval(() => { if (state.view === 'live') render(); }, 60000);

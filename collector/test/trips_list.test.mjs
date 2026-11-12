@@ -286,6 +286,10 @@ await ph.waitForTimeout(1200);
 const m = await ph.evaluate(() => ({
   text: document.body.innerText,
   cards: document.querySelectorAll('.m-row').length,
+  /* Each card's own words. textContent, not innerText: Arkiv sets the card's
+     date-and-channel line in mono capitals (arkiv-m.css .m-row .v span), and
+     innerText reports the transformed "HOTEL". */
+  cardText: [...document.querySelectorAll('.m-row')].map((r) => r.textContent),
   wide: document.documentElement.scrollWidth > window.innerWidth + 1,
 }));
 check('the phone screen rendered without throwing', phErrs.length === 0, phErrs.join(' | '));
@@ -311,8 +315,16 @@ check('a phone filter pick goes through the address, not straight into state',
   /setFilter\(\{/.test(readFileSync('api/public/m/app.js', 'utf8')),
   'render() reads the hash now, so a pick written only to state is overwritten by its own re-render');
 check('nothing pushes the phone sideways', !m.wide);
+/* Read off the cards themselves (integration, 2026-11-12). The check read the
+   whole page's innerText for "Uber" and "Hotel", so it passed on any mixed-case
+   mention — the controls sentence, which MOB moved off the top of the deck —
+   and failed once only the cards' capitalised line was left, while every card
+   still carried its channel. Now: every card names one, and both channels of
+   the mock's week appear. */
 check('the channel is on every card, not in a filter above',
-  /Uber/.test(m.text) && /Hotel/.test(m.text), '');
+  m.cardText.length > 0 && m.cardText.every((t) => /\b(Uber|Hotel|Bolt|Yango|Careem)\b/i.test(t))
+    && m.cardText.some((t) => /Uber/i.test(t)) && m.cardText.some((t) => /Hotel/i.test(t)),
+  m.cardText.filter((t) => !/\b(Uber|Hotel|Bolt|Yango|Careem)\b/i.test(t)).slice(0, 2).join(' | '));
 check('a cancelled trip says so on the card', /cancelled/i.test(m.text));
 await ph.fill('.m-search input', 'm3');
 await ph.waitForTimeout(900);
