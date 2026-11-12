@@ -10691,3 +10691,66 @@ the alert. FIX-STATUS NTFY has what is sent, at which priority, and why.
   that.
 * Reachable from this sandbox through the proxy (`GET https://ntfy.sh/v1/health`
   → `{"healthy":true}`, 2026-10-20).
+
+## What the system audit of 2026-11-12 measured: providers, platform, load
+
+Measured 01:20–02:20Z on 2026-11-12 against production `52cbf9d`. The
+report and its priorities are in HANDOFF 0.16. This section records only what
+is new here, or what contradicts a line above, so that nobody has to measure
+it again.
+
+**Providers**
+
+- **Bolt's `getCompanyEarnings` does not exist.**
+  - The gateway answers `404 "Route POST:/fleetIntegration/v1/getCompanyEarnings not found"`.
+  - The nightly probe asks for it (`src/probe.js:581`) and files the answer as "the money this channel has never delivered". The route is absent, not empty.
+- **Bolt's portal `getFleetBalanceDetails` rate-limits.** It returned HTTP 429, retried once after 1 s, 15 times in four hours of worker log.
+- **FMS `GetAlertData` answers HTTP 400 for some windows, with an IIS HTML error page.**
+  - This happened 22 times in four hours of worker log.
+  - Over the same hours the collector's alert count kept rising (Ecosine 18,296 → 21,842).
+  - This is separate from H96's "Authentication failed" for windows past retention.
+- **Every driver's Uber profile was refused on 11-09.**
+  - 119 of 119 for Ecosine and 46 of 46 for Egari (`/api/status`). The last rating stored is from 10-26.
+  - Meanwhile `/api/auth` reads the credential `ok`, and `/api/probe/uber/driver` answers.
+  - The probe leaves out the personal-data fields the collector asks for (`src/sources/uber_profile.js:84-87`), so a green probe does not prove the collector's query.
+  - The cause is unverified. The next run is 11-16 00:20Z.
+- **YoCharge has a rate limit.**
+  - It answered 429 on `/open/v1/users/` during the wallet refresh at 11-11 23:18Z, and 0 rows were stored.
+  - The client retries only on 502–504 (`src/sources/yocharge.js:115`).
+  - The YoCharge section above says no rate-limit headers were seen; the limit exists all the same.
+- **The analyst's model plan is exhausted.**
+  - It answered "The Token Plan usage limit has been reached" (HTTP 402) at 11-11 23:10Z.
+  - The desktop #analyst page says so. The phone says "has not run yet" (`api/public/m/screens.js:2360`).
+- **GDELT throttles most runs, with HTTP 429.**
+- **The Hijri cross-check times out on every run, with an AbortError.**
+
+**Platform** (DigitalOcean API, read-only)
+
+- **The live commit.** `active_deployment.services[].source_commit_hash` names it; see HANDOFF §9.
+- **The build.** Both components build from `collector/Dockerfile`, which:
+  - uses `node:20-slim`;
+  - copies `package.json` only, with no lockfile;
+  - has no `.dockerignore`.
+- **Alerts and logs.**
+  - There are no app alerts, no uptime checks and no `log_destinations`.
+  - Run logs cover only the current container. The worker restarted at 21:44Z on 11-02 and on 11-09 with no deploy, and nothing records why.
+- **The database, `fleet-dashboard-db`.**
+  - PG 16, `db-s-2vcpu-4gb`, one node, 60 GiB, 8 daily backups (the newest 5.95 GB).
+  - **No trusted sources**: it accepts connections from any address that has the password.
+  - DigitalOcean's default CPU, memory and disk alerts are on.
+- **Memory over 14 days.** The API peaked at 81.9% of 512 MB and did not restart. The worker peaked at 34.8%.
+- **October cost of this app's resources: $74.90 before VAT.**
+  - Database $48, plus $12.90 for its disk.
+  - Two basic-xxs containers, $10.
+  - The `fleet-egress` droplet, $4. Nothing in the code or the git history references it.
+
+**Load** (19 hours of API log, 11-11 07:00Z → 11-12 01:44Z)
+
+- 4,502 queries ran at or over `SLOW_QUERY_MS` (2,500 ms): median 4.6 s, p90 12.7 s, max 71 s.
+  - 720 of them took 10 s or more, and 36 took 30 s or more.
+- The most frequent slow queries:
+  - the per-person day roll-up (245);
+  - the per-source percentile (176);
+  - platform bookings (167);
+  - the five dataset-coverage counts (154 each). These are one per `/api/coverage` computation, roughly every 7.4 min.
+- `/api/coverage` measured 16.9 s, 19.3 s and 32.7 s cold.
