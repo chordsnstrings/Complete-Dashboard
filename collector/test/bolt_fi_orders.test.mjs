@@ -122,6 +122,27 @@ console.log('\nbolt FI orders: one order');
   check('…nor one with no creation time', orderFacts(fiOrder(2, { order_created_timestamp: 0 })) === null);
   check('the driver\'s phone is dropped before anything is kept',
     !('driver_phone' in keptOrder(fiOrder(2))) && keptOrder(fiOrder(2)).order_reference === 'ref-2');
+  /* The shape production sends for a ride that did not finish (review,
+     2026-11-12): the probe's fill rates put order_drop_off_timestamp at 71%
+     and order_pickup_timestamp at 75% against order_finished_timestamp and
+     order_price at 50%, so cancelled orders arrive WITH both stamps. The
+     test above nulled them first, and so could not see the end it gained. */
+  const stamped = orderFacts(fiOrder(2, { order_status: 'driver_cancelled_after_accept',
+    order_finished_timestamp: null, order_price: { ride_price: null, commission: null, net_earnings: null },
+    ride_distance: null }));
+  check('a cancelled order\'s drop-off stamp is not an end, and gives no duration (production\'s shape)',
+    stamped.endedAt === null && stamped.durationS === null, JSON.stringify({ e: stamped.endedAt, d: stamped.durationS }));
+  const noShow = orderFacts(fiOrder(2, { order_status: 'client_did_not_show' }));
+  check('…nor a no-show\'s, even with a finished stamp', noShow.endedAt === null && noShow.durationS === null);
+  const dropped = orderFacts(fiOrder(2, { order_status: 'arrived_to_destination', order_finished_timestamp: null }));
+  check('a rider carried to the destination, fare not yet final, does have an end and a duration',
+    dropped.endedAt === new Date((T0 + 1200 + 1500) * 1000).toISOString() && dropped.durationS === 1200);
+  const portalCancelled = portalRow(portalOrder(2, { status: 'driver_cancelled_after_accept', fare_finalised: 0,
+    arrived_to_destinations: [], price: 0, distance: 0 }), C);
+  const cPlan = fillPlan(portalCancelled, stamped, { unit: 'm' });
+  check('so a cancelled portal row is not given an end or a duration it never had',
+    portalCancelled.ended_at === null && !('ended_at' in cPlan.set) && !('duration_s' in cPlan.set),
+    JSON.stringify(cPlan.set));
 }
 
 /* ══ 4. the unit of ride_distance, measured ═══════════════════════════════ */
@@ -139,6 +160,28 @@ console.log('\nbolt FI orders: the distance unit is measured, not assumed');
   check('with no portal rides: from the magnitude of finished rides (median 12,003 = metres)',
     distanceUnit(facts, []).unit === 'm' && distanceUnit(facts, []).basis === 'magnitude');
   check('too few rides decides nothing', distanceUnit(facts.slice(0, 2), []).unit === null);
+}
+
+/* ══ 4b. the ride_price verdict, kept between batches ═════════════════════
+   Review, 2026-11-12: the verdict was per batch, and a batch holds no matched
+   ride exactly when the portal token is dead — so from the fourth day of a
+   lapse (the incremental window is three) every stand-in took ride_price
+   unchecked, even after a measurement had found that it disagrees. */
+console.log('\nbolt FI orders: the ride_price verdict outlives its batch');
+{
+  const pair = (n, fiPrice, portalPrice) => [orderFacts(fiOrder(n, { order_price: { ride_price: fiPrice } })),
+    { price: portalPrice }];
+  const measured = priceAgreement([1, 2, 3, 4, 5].map((n) => pair(n, 50 + n, 70 + n)));
+  check('five matched rides that disagree decide: no price from this feed',
+    measured.ok === false && measured.basis === 'measured' && measured.n === 5, JSON.stringify(measured));
+  const thin = priceAgreement([pair(1, 51, 71)], { ok: false, n: 5, agree: 0, at: '2026-11-12T00:00:00.000Z' });
+  check('a batch too thin to measure uses the kept verdict, dated — not "nothing to compare, so take it"',
+    thin.ok === false && thin.basis === 'kept' && thin.at === '2026-11-12T00:00:00.000Z', JSON.stringify(thin));
+  check('…a batch that can measure uses its own measurement over the kept one',
+    priceAgreement([1, 2, 3, 4, 5].map((n) => pair(n, 50 + n, 50 + n)), { ok: false, n: 9, agree: 0 }).ok === true);
+  check('…and with nothing kept, Bolt\'s price is used as stated, as before',
+    priceAgreement([]).ok === true && priceAgreement([]).basis === null);
+  check('a kept verdict built on fewer than five rides is no verdict', priceAgreement([], { ok: false, n: 2 }).ok === true);
 }
 
 /* ══ 5. the match ═════════════════════════════════════════════════════════ */
@@ -338,6 +381,31 @@ console.log('\nbolt FI orders: the walk');
   const nokey = await harvestFiOrders({ from: '2026-11-11', to: '2026-11-11', now: NOW, sleep: nap,
     ask: async () => ok([fiOrder(1), fiOrder(2, { order_reference: null })]) });
   check('an order with no order_reference is counted, never silently dropped', nokey.dropped === 1 && nokey.orders === 1);
+
+  /* total_orders read as the PAGE's count (review, 2026-11-12). The spec
+     names no meaning for it and nothing has measured one; the first version
+     stopped once offset reached it, which on this reading cut every window at
+     one full page and declared the cut complete (3 of 3). */
+  const pageCount = async (win, offset, limit) => {
+    const all = Array.from({ length: 7 }, (_, k) => fiOrder(0, { order_reference: `pc-${k}`,
+      order_created_timestamp: win.start_ts + k * 60 }));
+    const page = all.slice(offset, offset + limit);
+    return ok(page, page.length);
+  };
+  const pc = await harvestFiOrders({ from: '2026-11-11', to: '2026-11-11', ask: pageCount, now: NOW, sleep: nap,
+    pageSteps: [3] });
+  check('a total_orders that counts the PAGE does not end the window after one full page',
+    pc.orders === 7 && pc.chunks[0].error === null, JSON.stringify(pc.chunks));
+  let echoes = 0;
+  const echo = async (win, offset, limit) => {
+    echoes++;
+    return ok(Array.from({ length: limit }, (_, k) => fiOrder(0, { order_reference: `e-${k}`,
+      order_created_timestamp: win.start_ts + k })), 10);
+  };
+  const ec = await harvestFiOrders({ from: '2026-11-11', to: '2026-11-11', ask: echo, now: NOW, sleep: nap, pageSteps: [3] });
+  check('a gateway that ignores offset ends the window at the first repeated page, and the shortfall is said',
+    echoes === 2 && ec.orders === 3 && /collected 3 of 10 declared/.test(ec.chunks[0].error || ''),
+    JSON.stringify({ echoes, chunks: ec.chunks }));
 }
 
 /* ══ 11. the portal harvest tells this feed what it answered for ══════════ */

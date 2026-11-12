@@ -42,8 +42,8 @@ pool.connect = async () => ({
   release: () => {},
 });
 
-const { applyFiOrders, supersedeFiRows, protectFiFills, portalAnsweredThrough, pullFiOrders, ANSWERED_KEY } =
-  await import('../src/sources/bolt_orders.js');
+const { applyFiOrders, supersedeFiRows, protectFiFills, portalAnsweredThrough, pullFiOrders, ANSWERED_KEY,
+  loadPriceVerdict } = await import('../src/sources/bolt_orders.js');
 const { portalRow } = await import('../src/sources/bolt.js');
 
 const writePortal = async (orders) => upsertMany('trip',
@@ -350,6 +350,74 @@ await q(`DELETE FROM source_state WHERE source = 'bolt'`);
   const after = await bolt();
   check('the short answer still retires the stand-in: one row for one ride, the portal\'s',
     after.length === 1 && 'created' in (after[0].raw || {}), after.map((r) => r.external_id).join());
+}
+
+/* ══ I. the ride_price verdict outlives the batch that measured it ═════════
+   Review, 2026-11-12. Measured once, while the portal answered; then the
+   lapse, when no batch has a matched ride to compare — the moment the check
+   exists for, and the moment the first version dropped it. */
+console.log('\nI. a ride_price disagreement measured before a lapse still holds during it');
+await q(`DELETE FROM trip WHERE platform = 'bolt'`);
+await q('DELETE FROM bolt_fi_order');
+await q(`DELETE FROM source_state WHERE source = 'bolt'`);
+{
+  const at = (d, k) => Date.parse(`${d}T10:00:00+04:00`) / 1000 + k * 3600;
+  const rideOn = (d, k, over = {}) => fiOrder(k, { order_reference: `pv-${d}-${k}`, order_created_timestamp: at(d, k),
+    order_pickup_timestamp: at(d, k) + 300, order_drop_off_timestamp: at(d, k) + 1500,
+    order_finished_timestamp: at(d, k) + 1510, ...over });
+  const portalOn = (d, k, price) => portalOrder(k, { created: at(d, k), fare_finalised: at(d, k) + 1510,
+    arrived_to_destinations: [at(d, k) + 1500], price });
+  const H = Date.parse('2026-11-06T00:00:00+04:00');
+  check('nothing is kept before anything is measured', (await loadPriceVerdict('egari')) === null);
+  /* Five rides on both feeds, the portal's price 30 above Bolt's ride_price. */
+  await writePortal([1, 2, 3, 4, 5].map((k) => portalOn('2026-11-05', k, 80 + k)));
+  await applyFiOrders(C, [1, 2, 3, 4, 5].map((k) => rideOn('2026-11-05', k)),
+    { answeredThrough: H, priceKept: { v: await loadPriceVerdict('egari') } });
+  const kept = await loadPriceVerdict('egari');
+  check('five matched rides that disagree keep their verdict', kept?.ok === false && kept?.n === 5 && kept?.agree === 0,
+    JSON.stringify(kept));
+  /* The lapse: an order after the portal's last answer, nothing to compare. */
+  const lapse = await applyFiOrders(C, [rideOn('2026-11-08', 1, { order_reference: 'pv-lapse' })],
+    { answeredThrough: H, priceKept: { v: await loadPriceVerdict('egari') } });
+  const standIn = (await bolt()).find((r) => r.external_id === 'fi:pv-lapse');
+  check('a stand-in during the lapse takes no ride_price the kept verdict refused',
+    !!standIn && standIn.price == null && lapse.price?.basis === 'kept' && lapse.price?.ok === false,
+    JSON.stringify({ price: standIn?.price, verdict: lapse.price }));
+  /* An OLDER window measuring agreement — a backfill walks newest first —
+     must not overwrite the newer measurement. */
+  await writePortal([1, 2, 3, 4, 5].map((k) => portalOn('2026-10-20', k, 50 + k)));
+  await applyFiOrders(C, [1, 2, 3, 4, 5].map((k) => rideOn('2026-10-20', k)),
+    { answeredThrough: H, priceKept: { v: await loadPriceVerdict('egari') } });
+  check('…and an older window\'s agreement does not replace the newer verdict',
+    (await loadPriceVerdict('egari'))?.ok === false, JSON.stringify(await loadPriceVerdict('egari')));
+}
+
+/* ══ J. an ambiguous order gives up its stand-in ══════════════════════════
+   Review, 2026-11-12: kept "on the key it already has", the stand-in sat
+   beside the portal's rows for the same second — one ride, three rows. */
+console.log('\nJ. an order that becomes ambiguous does not keep a stand-in beside the portal\'s rows');
+await q(`DELETE FROM trip WHERE platform = 'bolt'`);
+await q('DELETE FROM bolt_fi_order');
+await q(`DELETE FROM source_state WHERE source = 'bolt'`);
+{
+  const at = Date.parse('2026-11-07T10:00:00+04:00') / 1000;
+  const order = fiOrder(1, { order_reference: 'amb-1', order_created_timestamp: at });
+  await applyFiOrders(C, [order], { answeredThrough: null });
+  check('the order stands in while the portal has nothing for it',
+    (await bolt()).map((r) => r.external_id).join() === 'fi:amb-1');
+  /* The portal then writes TWO rows for that second, both on the order's car
+     (same plate digits) — e.g. a window whose later page failed, so its
+     `answered` callback never ran. */
+  await writePortal([portalOrder(1, { created: at, driver: { id: 910001, name: 'A' } }),
+    portalOrder(1, { created: at, driver: { id: 910002, name: 'B' } })]);
+  const amb = await applyFiOrders(C, [order], { answeredThrough: null });
+  const after = await bolt();
+  check('…and once ambiguous, it gives the stand-in up: the portal\'s two rows, no third',
+    amb.ambiguous === 1 && after.length === 2 && !after.some((r) => r.external_id === 'fi:amb-1'),
+    after.map((r) => r.external_id).join());
+  const led = (await ledger()).find((l) => l.order_reference === 'amb-1');
+  check('…on the record as ambiguous, on no trip row', led?.disposition === 'ambiguous' && led?.trip_external_id == null,
+    JSON.stringify(led));
 }
 
 /* ══ H. no fleet-integration client configured ════════════════════════════ */

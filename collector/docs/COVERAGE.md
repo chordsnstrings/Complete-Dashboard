@@ -10853,6 +10853,28 @@ Timestamps are unix seconds (the narrow sample shows `order_cancelled_timestamp`
 * **A stand-in row is told apart by `raw ? 'created'`.** Every portal row's raw carries `created`
   (its key is built from it); a stand-in's raw carries only `fleet_integration`. Nothing may write
   a top-level `created` into a stand-in's raw.
+* **A cancelled order still carries a pick-up and a drop-off stamp** (independent review,
+  2026-11-12). The probe's fill rates on the 24 Egari orders: `order_drop_off_timestamp` 71%,
+  `order_pickup_timestamp` 75%, `order_accepted_timestamp` 71%, against `order_finished_timestamp`,
+  `payment_confirmed_timestamp`, `order_price.*` and `ride_distance` at 50% — the finished rides.
+  So the orders accepted and then not finished (driver_cancelled_after_accept is among the four
+  statuses seen) carry both stamps. Read as an end, that gave a cancelled portal row (the portal
+  writes no end for one) an `ended_at` and a `duration_s`, and reconcile's `bookingWindow()` reads
+  `ended_at` before it asks whether the booking was cancelled. An end or a duration is now taken
+  only from `finished` / `arrived_to_destination` (`RAN_STATUSES`). A test that cancels an order by
+  nulling its stamps first tests a shape production does not send — build fixtures from the
+  probe's fill rates, not from what a field's name suggests.
+* **`total_orders` has no stated meaning.** The spec types it as a number; whether it counts the
+  window or the page is not measured, and the probe's 24-order window cannot tell the two apart.
+  Stopping the page walk when offset reaches it cuts every window at one full page on the second
+  reading, with the shortfall check reading "1,000 of 1,000" — silent. A short page ends a window on
+  either reading; `total_orders` only feeds the shortfall report (FIX-STATUS BFO12).
+* **A verdict computed per batch is gone exactly when a lapse needs it.** The ride_price agreement
+  check needs matched rides, and a batch has none when the portal token is dead. The verdict of
+  the last batch that could measure (≥5 matched rides priced on both feeds) is kept in
+  `source_state` (`bolt`, fleet, `fi_price_agreement`), used by thinner batches with its date, and
+  replaced only by a measurement over newer rides (FIX-STATUS BFO13). Any check that compares the
+  two feeds has the same shape: decide what it falls back to when one feed is dark.
 
 **Open — to measure once deployed** (no credential reaches Bolt from this sandbox):
 
@@ -10864,6 +10886,8 @@ Timestamps are unix seconds (the narrow sample shows `order_cancelled_timestamp`
   `pickup_basis` real or requested).
 - The gateway's rate limit and how far back it keeps orders: 429 is waited out; the walk logs
   `too_old_from` the first time Bolt refuses a start date.
+- What `total_orders` counts (the window or the page), and what Bolt means by a pick-up and a
+  drop-off stamp on an order that did not finish. Neither changes what is written now.
 - After the tokens lapse (2026-11-14 15:06Z): `/api/status` bolt/egari should read `partial` with
   "fleet-integration getFleetOrders answered …" and its windows `kind: fleet-integration`, and
   Egari's Bolt trips keep arriving; Ecosine's stop, and its row says it is not entitled.

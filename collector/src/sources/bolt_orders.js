@@ -150,6 +150,10 @@ const PORTAL_WRITES = Object.freeze(['plate', 'driver_name', 'ended_at', 'pickup
   'distance_km', 'product', 'payment_type', 'price']);
 const FILLABLE = Object.freeze([...PORTAL_WRITES, 'pickup_lat', 'pickup_lng', 'dropoff_lat',
   'dropoff_lng', 'duration_s', 'is_scheduled']);
+/* The order statuses (Bolt's OrderTryState, open-api.json) under which the
+   rider was carried to the destination, so a drop-off stamp is the ride's end.
+   orderFacts explains why no other status may supply one. */
+export const RAN_STATUSES = Object.freeze(new Set(['finished', 'arrived_to_destination']));
 
 const DAY = 864e5;
 const dubaiMidnight = (d) => Date.parse(`${d}T00:00:00+04:00`);
@@ -323,15 +327,33 @@ export async function harvestFiOrders({ from, to, ask, sink = null, warn = () =>
           break pages;
       }
       declared = reading.total;
+      const had = seen.size;
       for (const o of reading.orders) {
         const ref = str(o?.order_reference);
         if (!ref) { dropped++; continue; }
         seen.set(ref, o);
       }
       offset += steps[0];
-      /* total_orders is the WINDOW's count, so the loop stops on it as well
-         as on a short page. */
-      if (reading.orders.length < steps[0] || (declared != null && offset >= declared)) break;
+      /* STOP ON A SHORT PAGE, NOT ON total_orders.
+         ───────────────────────────────────────────────────────────────────
+         The first version also stopped once offset reached total_orders,
+         reading it as the WINDOW's count. Bolt's spec types it as a bare
+         number and nothing has measured which count it is — no credential
+         reaches Bolt from here, and the probe asks for 50 rows of a 24-order
+         window, where the two readings agree. If it is the PAGE's count, a
+         window with more than one full page stopped after the first, and the
+         shortfall check below could not see it (1,000 collected of 1,000
+         "declared"): a silent cut at exactly one page per window. Egari's
+         ~240 orders a month never fill a page; Ecosine's ~1,600, the day
+         Bolt entitles company 142868, would. A short page ends the window on
+         either reading; the cost of not trusting the count is one empty
+         request when a window holds an exact multiple of the page size.
+         total_orders still drives the shortfall report, where either reading
+         is safe. A full page that adds no order not already seen is a
+         gateway ignoring `offset`, and ends the window rather than spinning
+         to the guard. */
+      if (reading.orders.length < steps[0]) break;
+      if (seen.size === had) { warn('a full page added no new order, stopping', { win: win.from, offset }); break; }
       if (++guard > 400) { warn('page guard hit', { win: win.from }); break; }
     }
     if (replaced) continue;
@@ -399,10 +421,42 @@ export function orderFacts(o, plates = null) {
   const dropS = sec(o.order_drop_off_timestamp);
   const plate = reconcilePlate(o.vehicle_license_plate, plates);
   const price = o.order_price || {};
+  const status = str(o.order_status);
+  /* A DROP-OFF STAMP IS AN END ONLY ON A RIDE THAT RAN.
+     ─────────────────────────────────────────────────────────────────────
+     The first version took the drop-off (else the finished stamp) from every
+     order, and its test cancelled an order by nulling the stamps first — the
+     one shape production does not send. The probe's own fill rates for
+     egari:getFleetOrders (2026-11-11 22:20Z, 24 orders, /api/probe/results)
+     are the evidence: order_drop_off_timestamp 71% and order_pickup_timestamp
+     75%, against order_finished_timestamp, order_price and ride_distance at
+     50% — the finished rides. So about five of the twelve orders that did NOT
+     finish (driver_cancelled_after_accept is among the four statuses seen)
+     still carry a pick-up and a drop-off stamp, whatever Bolt means by them
+     there.
+
+     Taken as an end, those stamps would do two things the product has
+     already paid to undo. ended_at and duration_s are columns this feed FILLS
+     on a portal row that lacks them, and the portal writes NULL for a
+     cancelled ride's end (portalRow: no arrival, fare_finalised 0) — so a
+     cancelled portal row would gain an end it never had. And reconcile's
+     bookingWindow() reads ended_at BEFORE it asks whether the booking was
+     cancelled, so that row would stretch from its request to Bolt's stamp:
+     the "nearest is a bolt trip 0 min away" evidence that src/reconcile.js
+     fixed on 2026-10-14, when 16 of 17 such bookings were cancelled ones,
+     back again through a second feed.
+
+     So an end and a duration are taken only from an order whose status says
+     the rider was carried to the destination: finished, or
+     arrived_to_destination (Bolt's OrderTryState for "dropped off, fare not
+     yet finalised"). Every other status — the cancellations, a no-show, a
+     ride still under way — has none from this feed; the portal's own end for
+     it, where it has one, is untouched. */
+  const ran = RAN_STATUSES.has(String(status || '').toLowerCase().replace(/^optional_ride_/, ''));
   return {
     ref, createdS,
     requestedAt: isoOf(createdS),
-    status: str(o.order_status),
+    status,
     driverUuid: str(o.driver_uuid),
     partnerUuid: str(o.partner_uuid),
     driverName: str(o.driver_name),
@@ -412,12 +466,13 @@ export function orderFacts(o, plates = null) {
     dropoff: { ...stopPoint(drops[drops.length - 1]),
       addr: str(o.destination_address) ?? str(drops[drops.length - 1]?.address) },
     /* The drop-off, else the moment the fare was finished — the same pair
-       portalRow reads (last arrival, else fare_finalised). A cancellation's
-       timestamp is NOT an end: a ride that never ran has no end. */
-    endedAt: isoOf(dropS || sec(o.order_finished_timestamp)),
+       portalRow reads (last arrival, else fare_finalised) — and only for a
+       ride that ran (`ran` above). A cancellation's timestamps are NOT an
+       end: a ride that never ran has no end. */
+    endedAt: ran ? isoOf(dropS || sec(o.order_finished_timestamp)) : null,
     /* With the rider: pick-up to drop-off. Bounded to a day, because a pair
        of stamps that disagree by more is a fault, not a ride. */
-    durationS: pickupS && dropS && dropS > pickupS && dropS - pickupS < 86400 ? dropS - pickupS : null,
+    durationS: ran && pickupS && dropS && dropS > pickupS && dropS - pickupS < 86400 ? dropS - pickupS : null,
     distanceRaw: positive(o.ride_distance),
     price: positive(price.ride_price),
     money: {
@@ -476,13 +531,33 @@ const kmOf = (raw, unit) => (raw == null || !unit ? null
 /* ride_price against the portal's price on the same rides. The concept is the
    same by name — what the rider paid for the ride — but not measured; where
    five or more matched rides disagree, the batch fills no price from this
-   feed rather than a figure that means something else. With no portal rides
-   to compare (the portal token dead, which is when this feed matters), Bolt's
-   own ride_price is used as Bolt states it. */
-export function priceAgreement(pairs = []) {
+   feed rather than a figure that means something else.
+
+   THE VERDICT OUTLIVES THE BATCH THAT MEASURED IT. The first version decided
+   per batch and fell back to "use Bolt's price as stated" whenever a batch
+   held fewer than five matched rides — and a batch holds none exactly when
+   the portal token is dead, which is the one situation this feed exists for.
+   The incremental window is three days, so from the fourth day of a lapse
+   every stand-in took ride_price unchecked, including after a measurement had
+   already found that it disagrees. So a batch that does measure (five or more
+   matched rides with a price on both feeds) has its verdict kept in
+   source_state (PRICE_KEY, written by applyFiOrders), and a batch too thin to
+   measure uses the last one kept, with its date. Only a fleet that has never
+   had five matched rides uses Bolt's price as stated, as before. `stored` is
+   that kept verdict, or null. */
+export const PRICE_KEY = 'fi_price_agreement';
+const PRICE_MIN_PAIRS = 5;
+export function priceAgreement(pairs = [], stored = null) {
   const both = pairs.filter(([f, p]) => f.price > 0 && Number(p.price) > 0);
   const agree = both.filter(([f, p]) => Math.abs(f.price - Number(p.price)) <= 0.01).length;
-  return { n: both.length, agree, ok: both.length < 5 || agree / both.length >= 0.8 };
+  if (both.length >= PRICE_MIN_PAIRS) {
+    return { n: both.length, agree, ok: agree / both.length >= 0.8, basis: 'measured' };
+  }
+  if (stored && Number(stored.n) >= PRICE_MIN_PAIRS && typeof stored.ok === 'boolean') {
+    return { n: Number(stored.n), agree: Number(stored.agree) || 0, ok: stored.ok, basis: 'kept',
+      at: stored.at || null };
+  }
+  return { n: both.length, agree, ok: true, basis: null };
 }
 
 /* ── the match ───────────────────────────────────────────────────────────── */
@@ -810,9 +885,42 @@ const blank = (fleet) => ({ fleet, orders: 0, enriched: 0, changed: 0, inserted:
   held: 0, ambiguous: 0, removed: 0, dropped: 0, comparable: 0, comparableMatched: 0,
   unit: null, price: null });
 
-/* One window's orders, decided and written. */
+/* The last ride_price verdict a batch measured for this fleet (priceAgreement
+   explains why it is kept), or null. A value that does not parse is no
+   verdict: the read must never cost the pass its orders. */
+export async function loadPriceVerdict(fleet) {
+  try {
+    const { rows } = await pool.query(
+      'SELECT value FROM source_state WHERE source = $1 AND fleet_id = $2 AND key = $3', [SRC, fleet, PRICE_KEY]);
+    const v = JSON.parse(rows?.[0]?.value ?? 'null');
+    return v && typeof v === 'object' ? v : null;
+  } catch { return null; }
+}
+/* `through` is the newest ride the measurement covered. A backfill walks its
+   windows newest first, so without it the verdict left standing at the end
+   would be the OLDEST window's — the opposite of the latest measurement.
+   A failed write is said and the verdict still serves this pass: keeping it
+   is a refinement, and must never cost the window its orders. */
+async function keepPriceVerdict(fleet, price, throughS) {
+  const v = { ok: price.ok, n: price.n, agree: price.agree, at: new Date().toISOString(),
+    through: new Date(throughS * 1000).toISOString() };
+  try {
+    await pool.query(
+      `INSERT INTO source_state (source, fleet_id, key, value, updated_at) VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (source, fleet_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+      [SRC, fleet, PRICE_KEY, JSON.stringify(v)]);
+  } catch (e) {
+    log.warn(SRC, `${NAME} ${fleet}: the ride_price verdict was not kept`, { err: String(e?.message || e).slice(0, 160) });
+  }
+  return v;
+}
+
+/* One window's orders, decided and written. `priceKept` carries the kept
+   ride_price verdict between the windows of one pass ({ v }, loaded by
+   pullFiOrders), so a window too thin to measure uses the last measurement
+   rather than none. */
 export async function applyFiOrders(c, orders, { answeredThrough = null, xref = new Map(), plates = null,
-  st = blank(c.fleet) } = {}) {
+  st = blank(c.fleet), priceKept = { v: null } } = {}) {
   const facts = [];
   for (const o of orders || []) {
     const f = orderFacts(o, plates);
@@ -828,7 +936,12 @@ export async function applyFiOrders(c, orders, { answeredThrough = null, xref = 
   const matches = matchOrders(facts.map(({ f }) => f), portal, xref);
   const pairs = facts.filter(({ f }) => matches.get(f.ref)?.row).map(({ f }) => [f, matches.get(f.ref).row]);
   const unit = distanceUnit(facts.map(({ f }) => f), pairs);
-  const price = priceAgreement(pairs);
+  /* A batch that measures uses its own measurement; it replaces the kept one
+     only if it covers newer rides than the kept one did. */
+  const price = priceAgreement(pairs, priceKept.v);
+  if (price.basis === 'measured' && !(Date.parse(priceKept.v?.through ?? '') > hiS * 1000)) {
+    priceKept.v = await keepPriceVerdict(c.fleet, price, hiS);
+  }
   st.unit = unit; st.price = price;
   const H = answeredThrough == null ? -Infinity : Number(answeredThrough);
   const ledger = [], stand = [], removals = [];
@@ -853,7 +966,19 @@ export async function applyFiOrders(c, orders, { answeredThrough = null, xref = 
       /* The stand-in this order had, if the portal's row is a different one. */
       if (live && live !== p.external_id) removals.push(live);
     } else if (m?.ambiguous) {
-      st.ambiguous++; disposition = 'ambiguous'; tripKey = live;
+      /* AN AMBIGUOUS ORDER GIVES UP ITS STAND-IN. Ambiguous means the portal
+         HAS rows for this second that fit the order (two of them, or one that
+         a second order also claims), so the portal has answered for this
+         ride in some form. The first version kept the stand-in "on the key it
+         already has", which left it beside the portal's row(s) for the same
+         ride — one ride, two or three rows — for as long as the ambiguity
+         lasted. Nothing is written on a guess, and a stand-in for a ride the
+         portal already shows is a guess in the direction of a double count.
+         Reachable when the portal wrote that second's rows without its
+         window reaching the `answered` callback (a later page failed), or
+         after it was asked. The order stays on the record as ambiguous. */
+      st.ambiguous++; disposition = 'ambiguous';
+      if (live) removals.push(live);
     } else if (live) {
       /* Still this feed's own row: refreshed under the key it already has —
          a key re-derived now could differ, and that is a second row. */
@@ -907,6 +1032,7 @@ export async function pullFiOrders(from, to, { fails, chunks, rowsByFleet, mint,
     try {
       const answeredThrough = await portalAnsweredThrough(c.fleet);
       const xref = await loadXref(c.fleet);
+      const priceKept = { v: await loadPriceVerdict(c.fleet) };
       const askOnce = async (win, offset, limit, t) => http(`${config.bolt.fiGateway}/getFleetOrders`, {
         method: 'POST', timeoutMs: 60000,
         headers: { authorization: `Bearer ${t}`, 'content-type': 'application/json' },
@@ -922,7 +1048,7 @@ export async function pullFiOrders(from, to, { fails, chunks, rowsByFleet, mint,
         return askOnce(win, offset, limit, await fresh(true));
       };
       const h = await harvestFiOrders({ from, to, ask, sleep, now,
-        sink: (orders) => applyFiOrders(c, orders, { answeredThrough, xref, plates, st }),
+        sink: (orders) => applyFiOrders(c, orders, { answeredThrough, xref, plates, st, priceKept }),
         warn: (m, x) => log.warn(SRC, `${NAME} ${c.fleet}: ${m}`, x) });
       for (const ch of h.chunks) chunks.push({ ...ch, fleet: c.fleet, kind: FI_KIND });
       st.dropped += h.dropped;
@@ -958,8 +1084,12 @@ export async function pullFiOrders(from, to, { fails, chunks, rowsByFleet, mint,
           + ' — re-measure the rule in src/sources/bolt_orders.js' });
       }
       if (st.price && !st.price.ok) {
+        /* Dated when the verdict is a kept one, so a lapse's run row does not
+           read as if this run had compared prices it had nothing to compare. */
         fails.push({ fleet: c.fleet, text: `${NAME} ${c.fleet}: ride_price agreed with the portal's price on`
-          + ` ${st.price.agree} of ${st.price.n} matched rides, so no price was taken from this feed` });
+          + ` ${st.price.agree} of ${st.price.n} matched rides`
+          + (st.price.basis === 'kept' && st.price.at ? ` (measured ${String(st.price.at).slice(0, 10)})` : '')
+          + ', so no price was taken from this feed' });
       }
       rowsByFleet.set(c.fleet, (rowsByFleet.get(c.fleet) || 0) + st.inserted + st.refreshed + st.changed);
       log[h.refusals.length || h.stop ? 'warn' : 'info'](SRC, `${NAME} ${c.fleet}`, {
