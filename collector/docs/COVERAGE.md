@@ -10816,9 +10816,17 @@ Timestamps are unix seconds (the narrow sample shows `order_cancelled_timestamp`
 * **"No match" is not "a new ride".** An order the portal answered for and did not return could be
   a duplicate the rule failed to see, so it is HELD (in `bolt_fi_order`, not in `trip`). Only an
   order created after the portal last answered for the fleet (`source_state`
-  `portal_answered_through`, moved by the portal harvest on every complete window) becomes a row
+  `portal_answered_through`, moved by the portal harvest on every window it answers) becomes a row
   of its own, and the portal's next answer for that day retires it. A source that inserts
   everything it cannot match doubles a fleet's trips the day its match rule stops holding.
+* **A short answer is still an answer, for retiring stand-ins.** The first draft retired them
+  only on windows the portal answered in full (no shortfall against `total_rows`), which reads
+  as caution. It is the opposite: the portal's rows for a short window are written anyway, so
+  a stand-in it does not retire sits beside the portal's own row for the same ride — two rows,
+  for as long as no later window answers in full, whenever the match rule is not there to tidy
+  up (`bolt_fi_orders_db` G proves it: `fi:ref-g` beside `900001|…`). Retiring on a short
+  answer costs only what the shortfall already costs. When deciding which of two feeds stands,
+  ask which failure is a double count.
 * **The portal is not asked for Dubai's today between 20:00Z and 24:00Z.** `harvestPortal` ends
   its windows at the UTC date of the scheduler's Date (`midnight()` reads `iso()`), clamped to
   Dubai's today; from 20:00Z the UTC date is Dubai's yesterday, so rides created 00:00–04:00 Dubai
@@ -10828,7 +10836,7 @@ Timestamps are unix seconds (the narrow sample shows `order_cancelled_timestamp`
   harvest itself is unchanged.
 * **The portal's date clock is not established — and cannot be from outside.** For the same
   reason, the portal is never handed a date that is in the future on one clock and not the other.
-  The retirement of stand-ins assumes Dubai days, and every complete window is checked: a row
+  The retirement of stand-ins assumes Dubai days, and every answered window is checked: a row
   created after the window's last Dubai day ended is evidence of UTC days, and the run says so
   (`portalDayEvidence`).
 * **`ride_distance` has no unit in the spec.** The portal's `distance` is kilometres (10.7 on a

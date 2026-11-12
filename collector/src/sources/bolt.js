@@ -722,16 +722,24 @@ export function portalRow(o, c, plates = null) {
    asking, and asking newest-first means the first refusal IS the boundary and
    every older window would be refused too, so we stop rather than spend twenty
    more requests being told the same thing. */
-/* `answered(win, {askedAt, first, last, rows})` is told about every window the
-   portal answered COMPLETELY — no refusal, no shortfall against its declared
-   total — after that window's rows are written. It is how the second Bolt
+/* `answered(win, {askedAt, first, last, rows, short})` is told about every
+   window the portal ANSWERED — not refused, not thrown, not the retention
+   boundary — after that window's rows are written. It is how the second Bolt
    trip source learns which instants the portal has now answered for
    (src/sources/bolt_orders.js supersedeFiRows): `askedAt` is the moment the
    window's first page was requested, because an order created after that
    cannot be in the answer; `first`/`last` are the window's earliest and
    latest requested_at, the evidence of which clock the portal's dates are on.
-   A short window is NOT passed on: an answer known to be missing rows is not
-   an answer to stand on. Optional, so every existing caller is unaffected. */
+
+   A SHORT window is passed on too, with its shortfall. Withholding it looks
+   like caution and is the opposite: the portal's rows for that window are
+   written either way, so a stand-in the answer does not retire sits beside
+   the portal's own row for the same ride — a double count, for as long as no
+   later window answers in full, whenever the match rule that would otherwise
+   tidy it up fails to hold. Retiring on a short answer costs only what the
+   shortfall already costs: the few orders lost to offset paging stay held, as
+   they were lost before this feed existed. Optional, so every existing caller
+   is unaffected. */
 export async function harvestPortal({ from, to, ask, row, sink = null, warn = () => {},
   page = PORTAL_PAGE, maxDays = PORTAL_MAX_DAYS, sleep = realSleep, answered = null }) {
   const rows = [];
@@ -862,7 +870,7 @@ export async function harvestPortal({ from, to, ask, row, sink = null, warn = ()
     chunkLog.push({ from: iso(win.start), to: iso(win.end), rows: collected,
       error: err || (declared != null && seen.size < declared
         ? `collected ${seen.size} of ${declared} declared` : null) });
-    const complete = !err && !(declared != null && seen.size < declared);
+    const shortBy = !err && declared != null && seen.size < declared ? declared - seen.size : 0;
     let first = null, last = null;
     for (let i = before; i < rows.length; i++) {
       const t = rows[i]?.requested_at;
@@ -873,7 +881,7 @@ export async function harvestPortal({ from, to, ask, row, sink = null, warn = ()
        throw not costing the rows already collected; handing them over as they
        are collected is what makes that true of a throw in the WRITE as well. */
     if (sink && collected) await sink(rows.splice(before, collected), win);
-    if (answered && complete && !stop) await answered(win, { askedAt, first, last, rows: collected });
+    if (answered && !err && !stop) await answered(win, { askedAt, first, last, rows: collected, short: shortBy });
     if (stop) break;
   }
   /* The first refusal is what the operator is shown, with a count beside it so

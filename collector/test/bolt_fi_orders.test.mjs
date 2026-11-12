@@ -357,15 +357,19 @@ console.log('\nbolt FI orders: the portal harvest reports only complete answers'
   const t0 = Date.now();
   await harvestPortal({ from: '2026-09-01', to: '2026-10-30', ask: portal('ok'), row: (o) => portalRow(o, C), sleep: nap,
     answered: async (win, meta) => { told.push({ win, ...meta }); } });
-  check('every window the portal answered completely is reported', told.length === 2, `${told.length}`);
+  check('every window the portal answered is reported', told.length === 2, `${told.length}`);
   check('…with the moment it was asked, the first and last order it returned',
     told.every((t) => t.askedAt >= t0 && t.askedAt <= Date.now() && t.first && t.last && t.first <= t.last),
     JSON.stringify(told.map((t) => [t.askedAt, t.first, t.last])));
   told.length = 0;
   await harvestPortal({ from: '2026-09-01', to: '2026-10-30', ask: portal('short'), row: (o) => portalRow(o, C), sleep: nap,
-    answered: async (win) => { told.push(win); } });
-  check('a window short of its declared count is NOT reported — an answer known to miss rows is not one to stand on',
-    told.length === 1 && new Date(told[0].start).toISOString().slice(0, 10) < '2026-10-01', `${told.length}`);
+    answered: async (win, meta) => { told.push({ win, ...meta }); } });
+  /* Withholding a short answer would leave a stand-in beside the portal's
+     own row for the same ride — its rows are written either way. */
+  check('a window short of its declared count IS reported, with its shortfall, so its stand-ins are still retired',
+    told.length === 2 && told.find((t) => new Date(t.win.start).toISOString().slice(0, 10) >= '2026-10-01')?.short === 3
+    && told.find((t) => new Date(t.win.start).toISOString().slice(0, 10) < '2026-10-01')?.short === 0,
+    JSON.stringify(told.map((t) => [new Date(t.win.start).toISOString().slice(0, 10), t.short])));
   told.length = 0;
   await harvestPortal({ from: '2026-09-01', to: '2026-10-30', ask: portal('refuse'), row: (o) => portalRow(o, C), sleep: nap,
     answered: async (win) => { told.push(win); } });

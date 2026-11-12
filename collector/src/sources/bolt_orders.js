@@ -739,9 +739,11 @@ export function portalDayEvidence(win, first, last) {
   return null;
 }
 
-/* Called by the portal harvest for every window that answered completely:
-   remove this feed's stand-in rows for the instants the portal has now
-   answered for, and move the "answered through" mark. A stand-in row is one
+/* Called by the portal harvest for every window it answered — a short one too
+   (harvestPortal's `answered` note says why withholding that one would leave
+   two rows for one ride): remove this feed's stand-in rows for the instants
+   the portal has now answered for, and move the "answered through" mark.
+   A stand-in row is one
    this feed wrote and the portal never has: `raw ? 'fleet_integration'` and
    NOT `raw ? 'created'` — every portal row carries `created`, the column its
    key is built from. Returns what was removed, by RETURNING (not rowCount —

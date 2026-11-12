@@ -326,5 +326,31 @@ await q('DELETE FROM collection_run');
   delete process.env.BOLT_REFRESH_TOKEN_EGARI;
 }
 
+/* ══ G. a SHORT portal answer still retires the stand-ins ═════════════════ */
+console.log('\nG. the portal answers short, and the match rule does not hold: still one row per ride');
+await q(`DELETE FROM trip WHERE platform = 'bolt'`);
+await q('DELETE FROM bolt_fi_order');
+await q(`DELETE FROM source_state WHERE source = 'bolt'`);
+{
+  const { harvestPortal } = await import('../src/sources/bolt.js');
+  const at = Date.parse('2026-11-11T10:00:00+04:00') / 1000;
+  /* The lapse: only this feed has the ride, so it stands in. */
+  await pass1([fiOrder(1, { order_reference: 'ref-g', order_created_timestamp: at })]);
+  check('the ride stands in while the portal is dark', (await bolt()).map((r) => r.external_id).join() === 'fi:ref-g');
+  /* The portal comes back with the same ride ONE SECOND off — the match rule's
+     premise failing — in a window that declares one more row than it serves
+     (offset paging lost a tie). Wired exactly as oneFleet wires it. */
+  const ride = portalOrder(1, { created: at + 1, fare_finalised: at + 1511, arrived_to_destinations: [at + 1501] });
+  await harvestPortal({ from: '2026-11-11', to: '2026-11-11', sleep: async () => {},
+    row: (o) => portalRow(o, C),
+    ask: async () => ({ code: 0, message: 'OK', data: { total_rows: 2,
+      columns: Object.keys(ride).map((k) => ({ key: k, cells: [ride[k]] })) } }),
+    sink: async (batch) => upsertMany('trip', await protectFiFills(batch), ['platform', 'external_id']),
+    answered: (win, meta) => supersedeFiRows(C, win, meta) });
+  const after = await bolt();
+  check('the short answer still retires the stand-in: one row for one ride, the portal\'s',
+    after.length === 1 && 'created' in (after[0].raw || {}), after.map((r) => r.external_id).join());
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
