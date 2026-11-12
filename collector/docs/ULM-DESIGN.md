@@ -1392,3 +1392,153 @@ Generated from the 2026-09-26 inventory of 189 routes. "gate today" is what guar
 | GET | /api/unauthorized/attributed/plan | none | yes | view:RAW (Owner diagnostics) | SYS |
 | GET | /api/unauthorized/attributed | none | yes | view:COND | ID,VEH,REV |
 | GET | /api/driver/unauthorized | none | yes | view:COND | ID,VEH,LOC |
+
+---
+
+## As built, 2026-11-12 — database roles and row-level security (§4)
+
+§16 listed "row-level security and the two database roles" as not built. This is what now exists
+(branch `fix/rls`, written, not deployed; FIX-STATUS.md "RLS" has the rows, the tests and the
+proofs by reversion). It is a **backstop under the API's fleet filter, not a second permission
+system**: the gate still decides; the database now holds the gate's decision for the requests the
+gate narrows, and changes nothing for anyone else.
+
+### What runs, for whom
+
+- **Narrowed:** a signed-in person or wall screen whose grants cover some fleets but not all,
+  reading (GET/HEAD) a `param` route — the class where the gate rewrites `?fleet=` to the reader's
+  fleet and trusts the handler to filter every statement by it. Each statement the handler sends
+  runs on a pooled connection as `BEGIN; SET TRANSACTION READ ONLY; SET LOCAL ROLE fleet_request;
+  SET LOCAL app.fleets = 'egari'`, the statement, `COMMIT` (`src/fleet_scope.js`; the pool is
+  patched once in `src/db.js`). A statement that forgot its fleet filter still reads one fleet.
+- **Not narrowed, exactly as before:** the Owner and every all-fleet role; the system (the warmer,
+  the cache's refresh); an anonymous visitor in open mode — which is production today; every write;
+  the collector. They never enter a scope, and `pool.query` forwards their arguments to the pool's
+  own `query()` untouched.
+- **`rows` routes are not narrowed in the database, deliberately.** Their answers are computed
+  over every fleet and trimmed by the shaper, and some per-row figures need the company:
+  `/api/lowperf` divides the company's plan by the drivers active that day, and inside one fleet's
+  scope that count fell 5 → 3 on the test fixture — every share would have grown by that factor.
+  Wrong numbers, not narrower ones. `global` routes are the company's by definition; `mixed` ones
+  are refused to a one-fleet reader before any of this.
+- **A write in a scope fails** (read-only transaction, SELECT-only role), and that is the safe
+  failure: `api/target_weights.js` `monthWeights()` learns a month's weekday weights from the trips
+  and freezes them into a table with no fleet column — learned inside one fleet's scope it would
+  have frozen one fleet's pattern into the company's targets for good. It now learns and freezes
+  outside any scope explicitly (`outsideFleetScope()`), the visible exemption for a company-wide
+  figure or a bookkeeping write inside a scoped request.
+
+### The two roles of §4, as built
+
+| role | as built |
+|---|---|
+| owner role | **the application's existing database user.** It ran every migration, so it owns every table, and an owner is exempt from its tables' policies — which is precisely what keeps every unrestricted caller on today's path. A separate NOLOGIN owner is not made: it would rewrite every table's owner on production for no change in what anyone can read. |
+| request role | **`fleet_request`** — NOLOGIN, NOINHERIT (it never picks up another role's rights, an owner's included, even if granted one), NOBYPASSRLS, owns nothing, SELECT on every table and view and nothing else. Used only by the narrowed requests above, not yet by all traffic. |
+
+Departures from §4, each on purpose:
+
+- **No `FORCE ROW LEVEL SECURITY`.** FORCE would subject the owner, i.e. every unrestricted
+  caller, to the policies: with the scope unset they would read nothing, and every query on the
+  main path would pay the policy's filter and its security-barrier ordering. §4 assumed all traffic
+  moved to the request role first; this phase moves only the narrowed readers.
+- **`app.fleets` is a list** (comma-separated), as §4 names it, so a reader of two of three fleets
+  works when a third fleet exists.
+- **One permissive policy for everybody** — `USING (current_user <> 'fleet_request' OR fleet_id =
+  ANY (string_to_array(nullif(current_setting('app.fleets', true), ''), ',')))`, `WITH CHECK
+  (current_user <> 'fleet_request')`, FOR ALL TO PUBLIC — so a role nobody here can see (a
+  reporting login an administrator made) that is neither the owner nor BYPASSRLS keeps reading what
+  it read. Unset or empty `app.fleets` matches no fleet (§4's "fails closed"); NULL-fleet rows and
+  the rollups' `'*'` rows are no fleet's and are not shown to the reader (§4: "the rollups' '*'
+  rows answer only a user whose scope is every fleet"). `/api/forecast` anchors on the `'*'` row and
+  falls back to computing from `trip_norm` when it is absent, so a reader's forecast takes that
+  slower path.
+- **`driver` is exempt** although it has a `fleet_id`: it is the person spine, §4 keeps rows about a
+  person whole, and its `fleet_id` is a column nothing has written since the spine replaced it —
+  under the policy every person row (fleet NULL) would vanish and every name with it.
+- **Every view runs as the reader** (`security_invoker = true`, Postgres 15+). A view runs with its
+  owner's rights by default and the owner is exempt, so `trip_norm` would have handed the reader
+  every fleet. This changes nothing for the owner, who owns the tables beneath as well.
+
+### How it is installed, and why not in the migration itself
+
+`sql/schema_v124.sql` creates the role (when the application's user has CREATEROLE), grants it to
+that user with SET, and defines three functions: `fm_rls_usable()`, `fm_rls_plan()` (what is not yet
+secured, and why) and `fm_rls_secure(object, lock_ms)` (secure ONE table or view). It writes no
+policy: a migration file runs as one transaction, and ENABLE ROW LEVEL SECURITY, CREATE POLICY and
+ALTER VIEW each hold an ACCESS EXCLUSIVE lock to its end — on fifty objects at once, behind a
+forty-second rollup. `src/db.js` runs the plan right after the migrations on every boot, one object
+per statement, each with a 3-second `lock_timeout`; a busy object is skipped and finished at the
+next boot. When everything is secured the plan is empty and the pass is one catalog query. The
+same pass re-secures what later migrations undo and secures fleet tables they add. Then a probe
+assumes the role for real and decides; the boot log says "row-level security in use", "in use,
+partly: …" or "not in use: <the reason>".
+
+**If the application's user lacks CREATEROLE** (a user made in DigitalOcean's panel rather than
+`doadmin`), v124 creates nothing, raises nothing, no table gains RLS and no view changes; the log
+says so and names the fix. An administrator runs, once:
+
+```sql
+CREATE ROLE fleet_request NOLOGIN NOINHERIT;
+GRANT fleet_request TO <the application's database user>;
+```
+
+and the next boot does the rest. As `doadmin` (CREATEROLE, BYPASSRLS) v124 does it itself.
+
+### What changes for a one-fleet reader (measured on the fixture, both fleets)
+
+64 of the 72 `param` GET routes answer a one-fleet reader exactly as before; none fails. Eight
+answer differently because each read the other fleet's rows while answering for one — the leak
+class this exists to close, now closed for those readers: `/api/compare` (the collectors list),
+`/api/compliance/drivers` (`rows_with_a_date`), `/api/drivers/directory` (a person's state, licence
+and rating from their accounts in the other fleet), `/api/economics/assets` and
+`/api/economics/drivers` (alert coverage measured over every fleet's alerts; a car's alerts and
+last position), `/api/revenue` (a platform's collection status), `/api/roster` (fleets worked,
+plates, lifetime trips), `/api/unauthorized/attributed` (attribution evidence from the other
+fleet's trips). Whether each handler should filter, or the figure is the company's and belongs
+elsewhere, is a per-route decision for the one-fleet work; `test/rls_routes.test.mjs` fails if a
+ninth starts mixing.
+
+### Traps learned (Postgres; measured on PGlite and on 16.15)
+
+- A **definer view bypasses row-level security** for whoever reads it: the owner's exemption
+  carries through. `security_invoker` is the fix; FORCE would also do it (the policy then applies to
+  the owner and `current_user` stays the reader inside the view) but taxes every query.
+- **`CREATE OR REPLACE VIEW` resets `security_invoker` and keeps the grants** — the reader can still
+  read the view, now as its owner. **`DROP` + `CREATE` loses both** — the reader cannot read it at
+  all. `sql/schema_v53.sql` does the second whenever the identity register changes. The boot pass
+  catches both before anything is served; the probe reports a view left running as its owner
+  ("partly") and takes the restricted path out of use while the role cannot read something, rather
+  than let a page fail on the grant.
+- **Postgres 16 gives a CREATEROLE user ADMIN on a role it creates, but not SET**, so it cannot
+  `SET ROLE` to it until it grants itself the role — v124's step 2.
+- **`GRANT` takes no lock a reader holds; `CREATE POLICY` and `ENABLE ROW LEVEL SECURITY` do** (1 ms
+  against a 400 ms `lock_timeout` on 16.15). So the grant is its own step: a busy table keeps its
+  grant and is merely unprotected until the next boot, instead of switching the backstop off.
+- **`SET LOCAL` outside a transaction does nothing** (a warning, not an error): a pooled
+  `pool.query('SET LOCAL ROLE …')` followed by another `pool.query` would run the statement as the
+  owner, possibly on another connection. Hence one checked-out connection and `BEGIN` in the same
+  round trip as the `SET LOCAL`s.
+- **A cached answer is keyed by its scope.** A narrowed answer filed under the shared address would
+  be handed to the Owner; the reader's key is `rls:<fleets>|<url>`, which no request line can
+  produce, and the cache's stale refresh recomputes it under the same scope.
+
+### Not built yet
+
+- All traffic on the request role, the owner role separated and FORCE on — §4's end state; it needs
+  every unrestricted caller to set `app.fleets` to the whole scope and the policy's cost measured on
+  the main path first.
+- Writes under row-level security (they run as before; a write in a narrowed read fails).
+- `rows` routes and the `'*'` rows for a narrowed reader (a per-route change of what is computed,
+  not a database switch).
+- The eight routes of the previous section: narrowed now for one-fleet readers, unchanged for
+  everyone else.
+
+### What only production can prove
+
+Which path the application's database user takes (the boot log line); lock waits on the busy
+tables during a deploy (`first_failures` in "row-level security pass"); and the restricted path's
+cost on real volumes — two extra round trips a statement, a per-row policy filter, and the
+security-barrier ordering that evaluates a non-leakproof predicate (`ILIKE`, jsonb operators) after
+the policy and can cost it an index. Measure the heavy `param` pages as a one-fleet reader before
+handing out one-fleet roles. To check a deployment from outside: a one-fleet reader's answer to a
+`param` route carries `x-fm-rls: <fleet>`; an all-fleet reader's and a visitor's carry none.

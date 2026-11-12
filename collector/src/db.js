@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { log } from './log.js';
 import { SCHEMA_FILES } from './schema_files.js';
+import { installFleetScope, secureFleetScope, probeFleetScope, poolRunner, setFleetScopeState, securedShort }
+  from './fleet_scope.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -112,6 +114,18 @@ pool.on('connect', (client) => {
   applySessionSettings(client).catch(
     (err) => log.warn('db', 'session setting refused', { err: err.message }));
 });
+
+/* ROW-LEVEL SECURITY FOR A NARROWED READER (src/fleet_scope.js).
+   ─────────────────────────────────────────────────────────────────────────
+   Every module here calls query() on this one pool, so this is the one
+   place a request's fleet scope can be honoured: inside a scope the access
+   gate opened for a one-fleet reader, each statement runs in its own
+   read-only transaction as `fleet_request` with app.fleets set, and the
+   policies of sql/schema_v124.sql hide the other fleet's rows from it.
+   Outside a scope — every caller the gate does not narrow, and the
+   collector, which never opens one — query() forwards its arguments to the
+   pool's own query() untouched. */
+installFleetScope(pool);
 
 
 /* Every deploy replayed all thirty-one files in full, and three of them are
@@ -278,6 +292,50 @@ async function runMigrations(client) {
     }
   }
   log.info('db', 'migrations complete', { ran, skipped, of: SCHEMA_FILES.length });
+  await rowSecurityPass(db);
+}
+
+/* THE ROW-LEVEL SECURITY PASS, after every migration has applied.
+   ─────────────────────────────────────────────────────────────────────────
+   sql/schema_v124.sql cannot write the policies itself: a migration file is
+   one transaction, and ENABLE ROW LEVEL SECURITY, CREATE POLICY and ALTER
+   VIEW each hold an ACCESS EXCLUSIVE lock to the end of it — on fifty
+   objects at once. So this asks fm_rls_plan() what is not yet secured and
+   secures it ONE OBJECT PER STATEMENT (each its own short transaction, a
+   3-second lock_timeout inside), on the migration's own locked session so
+   the API and the collector never both do it. A busy object waits for the
+   next boot; the API meanwhile narrows its rows in the API alone, as before.
+
+   On every boot, not once: a later migration that creates a fleet table,
+   or sql/schema_v53.sql rebuilding nine views (which resets
+   security_invoker), is secured here before anything is served. When
+   everything is already secured the plan is empty and this is one catalog
+   query. When the restricted role is missing or unusable the plan is empty
+   too, so this changes nothing at all.
+
+   Then the probe decides whether the API may use the restricted path, and
+   says why in the log either way — "not in use" with the true reason is a
+   state, never a silent absence. Nothing here can fail the boot. */
+async function rowSecurityPass(db) {
+  try {
+    const sec = await secureFleetScope(db, { lockMs: 3000 });
+    const changed = sec.objects.filter((o) => o.result !== 'nothing to do');
+    if (!sec.ran) log.warn('db', 'row-level security pass not run', { reason: sec.reason });
+    else if (changed.length) {
+      const failed = changed.filter((o) => securedShort(o.result));
+      log.info('db', 'row-level security pass', { objects: changed.length, failed: failed.length,
+        first_failures: failed.slice(0, 5).map((o) => `${o.rel}: ${String(o.result).slice(0, 120)}`) });
+    }
+  } catch (e) {
+    log.warn('db', 'row-level security pass skipped', { err: String(e).slice(0, 200) });
+  }
+  try {
+    const state = setFleetScopeState(await probeFleetScope(db, poolRunner(pool)));
+    log[state.ready ? 'info' : 'warn']('db', `row-level security ${state.ready ? 'in use' : 'not in use'}`,
+      { reason: state.reason });
+  } catch (e) {
+    log.warn('db', 'row-level security not checked', { err: String(e).slice(0, 200) });
+  }
 }
 
 /* COLUMNS THAT MERGE INSTEAD OF REPLACING, PER TABLE.

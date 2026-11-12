@@ -27,6 +27,7 @@ import { isInternal } from './internal.js';
 import { safeEqual, newToken } from './crypto.js';
 import { createHash } from 'node:crypto';
 import { rank, withheldSentence, CLASS, ROLE } from '../public/access_model.js';
+import { fleetScopeReady, rlsCacheKey, enterFleetScope, validFleets } from '../../src/fleet_scope.js';
 
 export const SID = 'fm_sid';
 export const CSRF = 'fm_csrf';
@@ -70,6 +71,29 @@ export const STEPUP_MINUTES = 10;
 export const READ_CAPS = new Set(['export']);
 /* Classes whose answers must never be stored by a browser or a proxy (§9.2). */
 export const NO_STORE = new Set(['CT', 'DOC', 'CASH', 'HR', 'MRG', 'PAX', 'AUDIT', 'RAW', 'CRED']);
+
+/* A request whose statements will run under row-level security for `fleets`
+   (src/fleet_scope.js). Its answer is filed in the response cache under the
+   reader's own namespace — never under the address an unscoped caller
+   shares, which would hand the Owner an answer computed from one fleet's rows
+   — and the response says it was narrowed in the database (x-fm-rls), which
+   is how a deployment can be checked from outside. */
+function markScoped(req, res, fleets) {
+  const list = validFleets(fleets);
+  req.fmRls = list;
+  req.fmCacheKey = rlsCacheKey(list, req.fmCacheKey || req.originalUrl);
+  res.set('x-fm-rls', list.join(',') || 'none');
+}
+
+/* Opens the scope for a marked request. Mounted AFTER the response cache
+   (api/server.js), so the cache's own statements — the data version, the
+   target salt — run unscoped and stay the same for every caller, and a hit
+   (already computed under the same scope, in the reader's namespace) never
+   reaches it. The scope closes when the response ends. */
+export function rlsScope(req, res, next) {
+  if (!req.fmRls) return next();
+  return enterFleetScope(req.fmRls, res, next);
+}
 
 
 export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lookup = lookupEntry }) {
@@ -268,7 +292,20 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
        emptied a signed-in person's offline figures and started again. */
     if ((fm.kind === 'user' || fm.kind === 'device') && fm.access) res.set('x-fm-scope', fingerprintOf(fm.access));
     if (entry?.self) return next();                 // /api/auth/*, /api/access/*: the handler decides
-    if (fm.kind === 'system') return next();
+    if (fm.kind === 'system') {
+      /* The response cache refreshing a narrowed reader's stale answer
+         (api/cache.js pump) names the reader's fleets in x-fm-rls, so the
+         refresh recomputes under the same row-level security the reader's
+         own request did and files it under the same key. Honoured only here,
+         for the process itself (internal token + loopback, identify()); the
+         system's own warming and refreshing carry no such header and take
+         today's path. */
+      const asked = req.get('x-fm-rls');
+      if (asked != null && fleetScopeReady()) {
+        try { markScoped(req, res, String(asked).split(',').filter(Boolean)); } catch { /* not fleet ids: unscoped */ }
+      }
+      return next();
+    }
 
     if (fm.kind === 'anonymous') {
       if (fm.mode === 'open' && !fm.broken) {
@@ -419,6 +456,31 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
         req.fmCacheKey = `${u.pathname}${u.search}`;
       }
     }
+    /* ROW-LEVEL SECURITY UNDER THE FLEET FILTER (src/fleet_scope.js,
+       sql/schema_v124.sql). A reader whose grants cover some fleets but not
+       all, reading a 'param' route — the class where the filter above was
+       just rewritten to the reader's fleet and the handler is trusted to put
+       it on every statement. From here the database holds it too: each
+       statement the handler sends runs as `fleet_request` with app.fleets
+       set to the judged fleet, so one that forgot the filter still cannot
+       read the other fleet.
+
+       'param' only, deliberately, and only reads. A 'rows' answer is
+       computed over every fleet and trimmed by the shaper, and some of its
+       per-row figures need the company: /api/lowperf splits the company's
+       target over the drivers active that day, and inside one fleet's scope
+       that count fell (5 to 3 on the fixture's first day,
+       test/rls_routes.test.mjs section 2) — every driver's share of the
+       plan would have grown by the same factor. 'global' answers are the
+       company's by definition; 'mixed' ones are refused above. A write is
+       never narrowed (src/fleet_scope.js says why).
+
+       Applied after the search narrowing, which parses fmCacheKey as a URL;
+       the scoped key is not one (rlsCacheKey). */
+    if (fleetScopeReady() && !access.allScope && entry.fleet === 'param'
+        && (req.method === 'GET' || req.method === 'HEAD')) {
+      markScoped(req, res, j.targets);
+    }
     req.fm.levels = L;
     req.fm.entry = entry;
     req.fm.targets = j.targets;
@@ -556,5 +618,5 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     return fm.levels?.[cls] ?? fm.access?.levels?.[cls] ?? '';
   };
 
-  return { identify, gate, levelOf, resolveSession, mfaRequired, cache, reveals };
+  return { identify, gate, levelOf, resolveSession, mfaRequired, cache, reveals, rlsScope };
 }

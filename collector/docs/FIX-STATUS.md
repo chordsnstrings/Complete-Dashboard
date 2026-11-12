@@ -5773,3 +5773,60 @@ Also run, all green: `arkiv_fils` 80, `arkiv_people` 241, `arkiv_shell` 77, `cha
 `segment_boundary` 6, `unauthorized_attribution` 221; `arkiv_classic_frozen` on the driver,
 `segments` and `unauthorized` routes 21/0 (the Classic skin's DOM did not move: the frozen day has
 no unbooked journey). Tool: `bin/focus-rows-audit.mjs`.
+
+## RLS - Database roles and row-level security (2026-11-12)
+
+ULM-DESIGN §4's backstop, which §16 listed as not built: a restricted database role, a fleet
+policy on every fleet-bearing table, and a one-fleet reader's statements run under both. Inert for
+every caller the API does not narrow (the Owner and every all-fleet role, the system's warmer and
+refresher, an anonymous visitor in open mode, every write, the collector): they never enter a scope,
+and the pool's own `query()` runs for them untouched. Production runs in open mode with no one-fleet
+reader, so on deploy nothing visible changes; the boot log says whether the backstop is in use and,
+if not, why. ULM-DESIGN.md "As built, 2026-11-12" has the design, the decisions and the traps.
+
+| id | what | where | test | state |
+|---|---|---|---|---|
+| RLS1 | **The restricted role** `fleet_request` — NOLOGIN, NOINHERIT, NOBYPASSRLS, owns nothing, SELECT only. Made by v124 when the application's user has CREATEROLE, which then grants it to itself (Postgres 16 gives a role's creator ADMIN without SET). Every statement guarded: without CREATEROLE nothing is created, nothing raises, and the API says why, with the two lines an administrator can run | `sql/schema_v124.sql:91-129`, registered `src/schema_files.js:369` | `rls_scope` §3, §8; `rls_pg` §1, §5 (PG 16.15: `set_option` true after v124) | written, not deployed |
+| RLS2 | **The policy** `fm_fleet_scope` on every table with a text `fleet_id`/`fleet` (49 at v124; `driver`, the person spine, exempt): FOR ALL TO PUBLIC, USING `current_user <> 'fleet_request' OR fleet_id = ANY(app.fleets)` — only a session that has assumed the role is narrowed; any other role reads as before. RLS on, never FORCEd (the owner, i.e. every unrestricted caller, stays exempt). The 11 views get `security_invoker` (a definer view hands the owner's exemption to the reader: measured, every fleet's rows through it). An unset scope matches no fleet; NULL-fleet and `'*'` rows are no fleet's | `sql/schema_v124.sql:131-294` (`fm_rls_usable`, `fm_rls_plan`, `fm_rls_secure`) | `rls_scope` §4, §5, §7 | written, not deployed |
+| RLS3 | **The boot pass**: after every migration, `fm_rls_plan()` then `fm_rls_secure()` ONE OBJECT PER STATEMENT (a migration file is one transaction and would hold ACCESS EXCLUSIVE on fifty objects at once), 3 s `lock_timeout` each; the read grant lands even when the lock waits (GRANT takes no lock a reader holds). Re-secures what later migrations undo (`CREATE OR REPLACE VIEW` resets `security_invoker`; v53's DROP + CREATE loses the grant too) and new fleet tables. Then the probe decides — refusing a role that could bypass RLS or holds an owner's rights — and logs "in use" / "in use, partly: …" / "not in use: <reason>" | `src/db.js:295,319`; `src/fleet_scope.js:269,294` | `rls_scope` §3, §4, §6, §7; `rls_pg` §1, §2, §4 (a held table: `busy` in 410 ms, grant kept, secured by the next pass) | written, not deployed |
+| RLS4 | **The restricted path**: `pool.query` patched in place. Inside a scope each statement runs on a pooled connection as `BEGIN; SET TRANSACTION READ ONLY; SET LOCAL ROLE fleet_request; SET LOCAL app.fleets = '…'` (one round trip), the statement, `COMMIT`; a failure rolls back, and a connection that cannot is destroyed, never pooled inside the reader's transaction. A write in scope fails (READ ONLY + SELECT-only role): a narrowed read must never feed a shared write. The scope closes at `res.end`, so the access audit and the slow-query plan run as before. `outsideFleetScope()` is the explicit exemption | `src/fleet_scope.js:123,148,188,209`; `src/db.js:128` | `rls_scope` §2 (fake pool: the exact protocol); `rls_pg` §3 (24 scoped statements at once on several connections, each its own fleet; no connection left as the role) | written, not deployed |
+| RLS5 | **The gate marks** a reader whose grants cover some fleets but not all, reading (GET/HEAD) a `param` route: `req.fmRls`, the answer filed under its own cache key (`rls:<fleets>\|<url>`, never the address an unscoped caller shares), `x-fm-rls` on the response. Not `rows` (computed over every fleet and trimmed by the shaper; some per-row figures need the company — RLS9), not `global`, not writes. `rlsScope` is mounted after the response cache, so the cache's version and salt queries stay unscoped and the same for everyone | `api/access/middleware.js:81,93,459-483`; `api/server.js:313` | `rls_gate` §1, §2, §3, §5 | written, not deployed |
+| RLS6 | **The stale refresh** of a scoped key fetches the address inside it with `x-fm-rls`, honoured only for the process itself (internal token + loopback), so it recomputes under the same scope and files under the same key; an outside caller's `x-fm-rls` does nothing | `api/cache.js:252`; `api/access/middleware.js:303` | `rls_gate` §4 | written, not deployed |
+| RLS7 | **`monthWeights()`** learns and freezes the company's weekday weights outside any scope — learned inside one it would freeze one fleet's pattern into `target_weights` (no fleet column) for good, and the INSERT would fail the page. Inert today (`/api/target*` are `mixed`, `/api/lowperf` is `rows`); here so that narrowing them later cannot break it | `api/target_weights.js:196,199` | `rls_scope` §9 | written, not deployed |
+| RLS8 | **Measured: 8 of the 72 `param` GET routes mix the other fleet into a one-fleet answer**, so a one-fleet reader's answer now changes on them: `/api/compare` (the collectors list), `/api/compliance/drivers` (`rows_with_a_date`), `/api/drivers/directory` (a person's state, licence and rating from their other-fleet accounts), `/api/economics/assets` and `/api/economics/drivers` (alert coverage measured over every fleet's alerts; a car's alerts and last position), `/api/revenue` (a platform's collection status), `/api/roster` (fleets worked, plates, lifetime trips), `/api/unauthorized/attributed` (attribution evidence from the other fleet's trips). The other 64 answer identically; none fails | `test/rls_routes.test.mjs` `KNOWN` | `rls_routes` §1 (both fleets, a deterministic split; a route that starts mixing fails) | measured; handlers unchanged |
+| RLS9 | Why `rows` routes are left to the shaper: inside one fleet's scope `/api/lowperf`'s drivers active on a day — the divisor of the company's plan — fell 5 → 3 on the fixture's first day, so every share would grow by that factor | `api/access/middleware.js:468` (the comment) | `rls_routes` §2 | measured |
+
+**Proof by reversion** (each file copied, mutated, the named test run, restored byte for byte):
+the gate's marking off → `rls_gate` 10 fail; marking all-fleet readers too → 5; no scoped cache key
+→ 5; the stale refresh fetching the key as a URL → 3; `scopedQuery` always raw → `rls_scope` §2
+fails; policy `USING (true)` → 12 (and `rls_routes` §1, §2); its `current_user` arm dropped → 1
+(another role then reads nothing); FORCE added → 2; the plan's view branch dropped → 2; no
+`security_invoker` → 9; v124's self-grant dropped → 3 (and `rls_pg` "v124 granted itself SET");
+the probe's bypass and owner checks dropped → 1 each; `validFleets` loosened → 1; `monthWeights`
+learning or freezing in scope → 1 / 3; the scope not closing at `res.end` → 1; a failed rollback
+pooled instead of destroyed → 1; the grant skipped for tables → `rls_routes` 4 (every route 500s);
+no `lock_timeout` → `rls_pg` 4 (it waited the full 5 s); `BEGIN` dropped from the preamble →
+`rls_pg` 6.
+
+**Verified locally on PostgreSQL 16.15** (production's major version; a throwaway cluster on port
+8313, removed afterwards): `test/rls_pg.test.mjs` 23/0, and the real `api/server.js` booted on it
+(log: "row-level security pass {objects: 123, failed: 0}", "in use: 49 fleet tables … all 11
+views"). An Egari-only reader's `/api/roster` came back `x-fm-rls: egari` with
+`platforms_with_trips ["uber"]` (miss, then hit), while the all-fleet reader and an anonymous visitor
+at the same address got `["bolt","uber"]` (the other fleet's platform — RLS8) from their own entry;
+`/api/trips/list` for the reader held Egari rows only; no ERROR line. Tests: `rls_scope` 78/0,
+`rls_gate` 25/0, `rls_routes` 5/0, `rls_pg` 23/0 (skips without a server). Also run, all green:
+`access_core` 211, `cache` 59, `migrate` 34, `pg_session` 9, `upsert` 21, `collector_invariants`
+129, `target_weights` 47, `route_smoke` 60, `access_manifest` 17, `lowperf` 107, `revenue_target`
+85, `target_month` 60, `warm` 28, `agent_access` 12, `agent_reach` 74, `server_redaction` 64,
+`fleet_discovery` 117, `indexes` 12; `access_pages` skipped (no Postgres on 55432).
+
+**Only production can prove**: which path the application's database user takes (CREATEROLE or
+not — the boot log line says, and when it is "not in use" the reason carries the two administrator
+lines); lock waits on the busy tables during a deploy (a busy object is logged in `first_failures`
+and finished at the next boot); the restricted path's cost on real volumes — two extra round trips
+a statement, a per-row policy filter, and Postgres's security-barrier ordering, which evaluates a
+non-leakproof predicate (`ILIKE`, jsonb operators) after the policy and can cost it an index —
+measure the heavy `param` pages as a one-fleet reader before handing out one-fleet roles. A person
+querying a view by hand as a role that holds the view but not its tables loses it
+(`security_invoker`); the product's own user owns both and is unaffected.
