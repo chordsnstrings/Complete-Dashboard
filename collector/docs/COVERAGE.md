@@ -10788,3 +10788,20 @@ What the OPS workstream learned that is not written down above. FIX-STATUS "OPS"
   lower-case it and drop the slash first: `/api/Probe/uber/rest/` reaches the
   probe handler. The access gate refuses a capitalised `/API` prefix and a
   trailing slash, but not capitals after the prefix.
+* **The live spec now has a record and a check.**
+  `collector/deploy/app-spec.redacted.yaml` is the spec as measured on
+  2026-11-12, with every value replaced by `<set in DigitalOcean>`; it cannot
+  be applied as it stands (it would blank every variable). `node
+  bin/app-spec.mjs --check` (DO_APP_ID + DIGITALOCEAN_TOKEN, or `--token-file`
+  outside the repo) says whether production still matches it. Until
+  `COMMIT_SHA` is added in DigitalOcean the check reports that drift on each
+  component — plus anything the audit brief got wrong (`source_dir` and
+  `dockerfile_path` were stated by it, not read from a raw spec dump).
+* **`/api/health`'s `commit` needs `COMMIT_SHA = ${_self.COMMIT_HASH}`.**
+  `_self` is the component the variable sits on; `COMMIT_HASH` is the commit
+  DigitalOcean built it from. A reference that is not resolved can reach the
+  process as its literal text (not observed here; assumed, defensively), so
+  the API refuses any value containing `${` and says so (`commit_reason`)
+  rather than print it as a commit. Adding the
+  variable is a spec change, so it redeploys the last BUILT commit (trap 25):
+  add it, then `node bin/deploy.mjs`.
