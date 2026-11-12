@@ -231,8 +231,13 @@ export const api = async (path, opts) => {
         try { j = await r.clone().json(); } catch { /* not json */ }
         if (j?.error === 'signin') { toSignIn('expired'); }
         if (j?.error === 'restricted') { toSignIn('setup'); }
+        /* 'no_access' (api/access/middleware.js gate, PKY9): an account that
+           holds no role at all. Before it had its own code it was sent
+           'withheld' or 'fleet_scope'; off this list it became "Could not
+           load this view" and broke every unlessWithheld() panel (review,
+           2026-11-12). */
         if (r.status === 403 && j && ['withheld', 'fleet_scope', 'bad_fleet', 'undeclared', 'not_allowed',
-          'preview', 'no_action'].includes(j.error)) throw new WithheldError(j, r.status);
+          'preview', 'no_action', 'no_access'].includes(j.error)) throw new WithheldError(j, r.status);
       }
       throw new Error(await failure(r));
     }

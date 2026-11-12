@@ -33,6 +33,14 @@ export const DEFAULTS = Object.freeze({
      2026-09-30: "This number of trips will change so we should be able to set
      it up in admin panel". */
   low_trips_min: 10,
+  /* Passkeys and single sign-on (api/access/signin_methods.js): OFF until
+     the Owner turns them on — ULM-DESIGN §14 decision 3 is the Owner's. The
+     provider's address and secret are never here: they are environment
+     variables (OIDC_*), which a page cannot rewrite. */
+  passkeys: 'off',         // 'off' | 'on'
+  sso: 'off',              // 'off' | 'on'
+  sso_provision: 'off',    // 'on' = a verified address on an allowed domain with no account gets one (with no access)
+  sso_domains: [],         // the email domains single sign-on accepts, e.g. ['example.com']
 });
 
 let accessVersion = 1;

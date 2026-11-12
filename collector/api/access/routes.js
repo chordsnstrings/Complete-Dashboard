@@ -23,6 +23,11 @@ import {
   ROLES, ROLE, CLASSES, CLASS_CODES, CAPS, CAP_CODES, roleIsSensitive, rank,
 } from '../public/access_model.js';
 import { sendSms, uaeMobile, maskPhone } from '../../src/smsala.js';
+/* Passkeys and single sign-on (api/access/signin_methods.js): their switches
+   are company settings below, and taking them off a person is an account
+   action below, so both keep this file's Owner, step-up, ceiling and audit
+   rules instead of a second copy of them. */
+import { signinMethodChanges, removePasskeys, unlinkSso, otherWayIn, usablePasskeys } from './signin_methods.js';
 
 const MIN_REASON = 3;
 
@@ -416,6 +421,9 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     const fm = me(req, res, { allowRestricted: true, write: true });
     if (!fm) return undefined;
     const u = await svc.getUserSecrets(db, fm.user.id);
+    /* An account opened by single sign-on has no password here, and "your
+       current password is not right" would not be the reason. */
+    if (!u.password_hash) return fail(res, 409, 'no_password', 'This account has no password here: it signs in with single sign-on or a passkey.');
     if (!verifyPassword(String(req.body?.current || ''), u.password_hash)) {
       await audit(req, 'auth.password_change_failed', 'user', fm.user.id, {});
       return fail(res, 401, 'bad_credentials', 'Your current password is not right.');
@@ -443,6 +451,18 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       const code = String(req.body?.code || '').trim();
       const step = code ? verifyTotp(unseal(u.totp_secret), code, { lastStep: u.totp_last_step }) : null;
       if (step != null) { ok = true; await db.query('UPDATE access_user SET totp_last_step = $2 WHERE id = $1', [u.id, step]); }
+    } else if (!u.password_hash) {
+      /* No code and no password (an account single sign-on opened): neither
+         can confirm it, and "that password is not right" would not be why.
+         What CAN confirm it is said exactly (review, 2026-11-12): the person's
+         passkey if they have one that works; otherwise two-step, first —
+         adding a passkey needs this very confirmation, so "use your passkey"
+         to somebody with none pointed at a door that does not open. */
+      const keys = await usablePasskeys(db, fm.user.id, { cfg: await svc.getConfig(db) });
+      return fail(res, 409, 'no_method', keys
+        ? 'Your account has no password or two-step code to confirm with: confirm with your passkey (“Use a passkey”).'
+        : 'Your account has no password or two-step code to confirm with, and no passkey that can be used. '
+          + 'Turn on two-step sign-in on your account page first.');
     } else if (req.body?.password) {
       ok = verifyPassword(String(req.body.password), u.password_hash);
     }
@@ -747,7 +767,13 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       await svc.updateUser(db, id, { status: 'suspended', suspended_reason: reason });
       await svc.revokeUserSessions(db, id, 'suspended');
     } else if (action === 'reinstate') {
-      await svc.updateUser(db, id, { status: target.password_changed_at ? 'active' : 'invited', suspended_reason: null });
+      /* Back to active if they had finished setting up: a password, or — for
+         an account single sign-on opened, which has none — a link or a
+         passkey still in place (review, 2026-11-12: it went back to
+         'invited', and then nothing could open it). Offboarding removes
+         both, so a rehire still starts from an invitation. */
+      const done = Boolean(target.password_changed_at) || await otherWayIn(db, id);
+      await svc.updateUser(db, id, { status: done ? 'active' : 'invited', suspended_reason: null });
     } else if (action === 'offboard') {
       if (reason.length < MIN_REASON) return fail(res, 400, 'reason', 'Say why.');
       await svc.updateUser(db, id, { status: 'offboarded', offboarded_at: new Date().toISOString(), suspended_reason: reason });
@@ -755,6 +781,9 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       for (const g of await svc.listGrants(db, { userId: id })) await svc.endGrant(db, g.id, fm.user.id);
       for (const t of await svc.teamsOf(db, id)) await svc.setMember(db, t.id, id, false);
       await db.query(`UPDATE access_link SET used_at = now() WHERE user_id = $1 AND used_at IS NULL`, [id]);
+      /* Every way in goes, not only the sessions: a rehire starts afresh. */
+      await removePasskeys(db, id);
+      await unlinkSso(db, id);
     } else if (action === 'reset') {
       if (target.status === 'offboarded') return fail(res, 409, 'offboarded', 'This person has been offboarded.');
       const token = await svc.createLink(db, id, target.status === 'invited' ? 'invite' : 'reset', fm.user.id,
@@ -768,6 +797,20 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
     } else if (action === 'reset_mfa') {
       await db.query(`UPDATE access_user SET totp_enabled = false, totp_secret = NULL, recovery_codes = '{}' WHERE id = $1`, [id]);
       await svc.revokeUserSessions(db, id, 'two-step reset by admin');
+    } else if (action === 'remove_passkeys') {
+      /* A lost or stolen phone: its passkeys and the sessions they opened. */
+      await removePasskeys(db, id);
+      await svc.revokeUserSessions(db, id, 'passkeys removed by admin');
+    } else if (action === 'unlink_sso') {
+      /* The provider's ACCOUNT is no longer this person's (handed to somebody
+         else, or replaced by a new one for them): the link goes, and so does
+         every session, since a sign-on may have opened one. NOT for a mailbox
+         given to somebody else: the link is what refuses the address's new
+         holder, and once it is gone the next verified sign-on for the address
+         links afresh to this account — offboard instead (review, 2026-11-12;
+         signin_methods_admin.js says so on the page). */
+      await unlinkSso(db, id);
+      await svc.revokeUserSessions(db, id, 'single sign-on unlinked by admin');
     } else {
       return fail(res, 400, 'bad_action', 'Unknown action.');
     }
@@ -1039,6 +1082,11 @@ export function accessRoutes(app, { db, layer, wrap, log = { info() {}, warn() {
       if (!['on', 'dry', 'off'].includes(req.body.sms_target)) return fail(res, 400, 'bad_switch', 'Choose on, dry run or off.');
       changes.sms_target = req.body.sms_target;
     }
+    /* Passkeys and single sign-on, and the domains it accepts: refused with
+       the true reason while the platform is not ready for them. */
+    const sm = signinMethodChanges(req.body, { cfg: await svc.getConfig(db, { fresh: true }) });
+    if (sm.error) return fail(res, sm.error === 'not_ready' ? 409 : 400, sm.error, sm.detail);
+    Object.assign(changes, sm.changes);
     for (const [k, v] of Object.entries(changes)) await svc.setConfig(db, k, v, fm.user.id);
     await svc.getConfig(db, { fresh: true });
     layer.cache.clear();

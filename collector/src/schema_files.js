@@ -367,4 +367,10 @@ export const SCHEMA_FILES = [
      (plate, captured_at DESC) index on telemetry_snapshot dropped, keeping
      the twin the planner already uses (src/data_retention.js). */
   'schema_v115.sql',
+  /* v121: passkeys and single sign-on (ULM-DESIGN §5.1, §14 decision 3) —
+     access_passkey (credential id, public key, sign count, transports, the
+     person), access_sso_identity (the provider's subject for a person) and
+     access_session.auth_method. Both methods are off until the Owner turns
+     them on; api/access/signin_methods.js. */
+  'schema_v121.sql',
 ];

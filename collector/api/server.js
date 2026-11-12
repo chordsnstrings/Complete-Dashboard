@@ -162,6 +162,9 @@ import { RAW_ALIASES } from '../src/probe.js';
    run for a cached answer. collector/docs/ULM-DESIGN.md is the design. */
 import { accessLayer } from './access/middleware.js';
 import { accessRoutes, housekeeping as accessHousekeeping } from './access/routes.js';
+/* Passkeys and single sign-on, off until the Owner turns them on (ULM-DESIGN
+   §5.1, §14 decision 3): api/access/signin_methods.js. */
+import { signinMethodRoutes } from './access/signin_methods.js';
 import { bootstrapOwner } from './access/service.js';
 import { INTERNAL_TOKEN } from './access/internal.js';
 /* Liveness and the per-client request budget, both mounted before the caller
@@ -6911,6 +6914,7 @@ tripRoutes(app, { q, wrap });
 authRoutes(app, { q, wrap });
 /* Sign-in, the account page and Set up → Access (api/access/routes.js). */
 accessRoutes(app, { db: pool, layer: access, wrap, log });
+signinMethodRoutes(app, { db: pool, layer: access, wrap, log });
 /* Fleets named from the platforms (ULM-DESIGN §3): the names each platform
    gives, the accounts behind them, and the changes waiting for an Owner. */
 fleetNameRoutes(app, { q, wrap, db: pool, tx: pgTx(pool), log });
