@@ -10811,7 +10811,7 @@ transaction cost nothing. It cannot backfill: nothing older than 24 hours is rea
 
 **How it fills.** `trip.price` (the rider fare, the same node the payments report states) where the
 price is NULL or the feed's own; `trip.price_source` says `uber_live`. The fare walk now stamps
-`uber_payments` when it states a fare and replaces the provisional figure. `GET /api/uber/live-money`
+`uber_payments` when it states a fare and replaces the provisional figure. `GET /api/status/uber-live-money`
 measures, on trips both have priced, whether the two agree — the check that the feed is reading the
 node this product thinks it is.
 

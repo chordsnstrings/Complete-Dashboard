@@ -20,7 +20,7 @@
      7. the schedule collides with no other job's minute, and a pass that
         moves the response cache starts eight minutes after each run;
      8. the nightly probe and both API probes ask with POST, never GET;
-     9. GET /api/uber/live-money: provisional prices, agreement with the
+     9. GET /api/status/uber-live-money: provisional prices, agreement with the
         payments report, and absent-with-a-reason where nothing is measured.
    Synthetic ids and a synthetic driver ("Test Driver") only. No network. */
 import { PGlite } from '@electric-sql/pglite';
@@ -481,36 +481,45 @@ console.log('\nthe probes ask the way the feed answers');
     && !/transactions: `https:\/\/api\.uber\.com\/v1\/vehicle-suppliers\/transactions\?\$\{qs/.test(apiSrc));
 }
 
-/* ══ 9. GET /api/uber/live-money ═══════════════════════════════════════════ */
-console.log('\nGET /api/uber/live-money');
+/* ══ 9. GET /api/status/uber-live-money ═══════════════════════════════════════════ */
+console.log('\nGET /api/status/uber-live-money');
 {
   const { mountAll } = await import('./mount.mjs');
   const m = await mountAll(db, { serverRoutes: false });
   check('the route module is discovered', m.mounted.some((x) => /uber_live_money_routes\.js:uberLiveMoneyRoutes/.test(x)));
-  const r = await m.get('/api/uber/live-money');
+  /* The runs it reports move no cache version (mode realtime), so a cached
+     answer would go stale for as long as nothing else ran. It must sit under
+     a prefix the response cache never holds — read off api/cache.js itself. */
+  const never = [...(readFileSync('api/cache.js', 'utf8').match(/const NEVER = \[([\s\S]*?)\];/)?.[1] || '')
+    .replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/'([^']+)'/g)].map((x) => x[1]);
+  const declared = readFileSync('api/uber_live_money_routes.js', 'utf8').match(/app\.get\('([^']+)'/)?.[1] || '';
+  check('the route is on a prefix the response cache never serves',
+    never.length > 5 && declared === '/api/status/uber-live-money' && never.some((p) => declared.startsWith(p)),
+    `${declared} against ${j(never)}`);
+  const r = await m.get('/api/status/uber-live-money');
   const ec = r.body?.fleets?.find((x) => x.fleet === 'ecosine');
   const eg = r.body?.fleets?.find((x) => x.fleet === 'egari');
   check('200, both fleets', r.status === 200 && ec && eg, j(r.body).slice(0, 200));
   /* t-live still carries the feed's price; t-null was confirmed by the
      payments report at 47.50 against the feed's 46.94. */
   check('the feed\'s provisional prices, counted and summed',
-    ec.provisional.trips === 2 && Math.abs(ec.provisional.aed - 93.88) < 0.001, j(ec.provisional));
+    ec?.provisional?.trips === 2 && Math.abs(ec.provisional.aed - 93.88) < 0.001, j(ec?.provisional));
   check('agreement with the payments report, measured on the trips both priced',
-    ec.agreement.confirmed === 2 && ec.agreement.agreed === 0 && ec.agreement.worst_gap_aed === 3.16,
-    j(ec.agreement));
+    ec?.agreement?.confirmed === 2 && ec.agreement.agreed === 0 && ec.agreement.worst_gap_aed === 3.16,
+    j(ec?.agreement));
   check('a fleet the feed never ran for is absent with the reason, not zero',
-    eg.last_run !== null || /has not run/.test(eg.absent || ''), j(eg));
-  const only = await m.get('/api/uber/live-money?fleet=egari');
-  check('the fleet filter narrows to one fleet', only.body.fleets.length === 1 && only.body.fleets[0].fleet === 'egari');
+    Boolean(eg) && (eg.last_run !== null || /has not run/.test(eg.absent || '')), j(eg));
+  const only = await m.get('/api/status/uber-live-money?fleet=egari');
+  check('the fleet filter narrows to one fleet', only.body?.fleets?.length === 1 && only.body.fleets[0].fleet === 'egari');
   await q(`DELETE FROM collection_run WHERE fleet_id = 'egari'`);
-  const absent = await m.get('/api/uber/live-money?fleet=egari');
-  check('no run at all reads as absent, with what it needs', absent.body.fleets[0].last_run === null
-    && /UBER_ORG_ENCRYPTED_EGARI/.test(absent.body.fleets[0].absent), j(absent.body.fleets[0]));
+  const absent = await m.get('/api/status/uber-live-money?fleet=egari');
+  check('no run at all reads as absent, with what it needs', absent.body?.fleets?.[0]?.last_run === null
+    && /UBER_ORG_ENCRYPTED_EGARI/.test(absent.body.fleets[0].absent), j(absent.body?.fleets?.[0]));
   await q(`UPDATE trip SET price_source = 'uber_live' WHERE price_source = 'uber_payments'`);
   await q(`UPDATE trip SET price_source = NULL WHERE external_id = 't-stmt'`);
-  const unmeasured = (await m.get('/api/uber/live-money?fleet=ecosine')).body.fleets[0];
+  const unmeasured = (await m.get('/api/status/uber-live-money?fleet=ecosine')).body?.fleets?.[0] || {};
   check('no trip priced by both yet: agreement absent, with the true reason',
-    unmeasured.agreement.pct === null && /hours after the live feed/.test(unmeasured.agreement.why), j(unmeasured.agreement));
+    unmeasured.agreement?.pct === null && /hours after the live feed/.test(unmeasured.agreement?.why || ''), j(unmeasured.agreement));
   m.server.close();
 }
 

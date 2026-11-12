@@ -1,4 +1,4 @@
-/* GET /api/uber/live-money — what Uber's live per-trip feed holds, per fleet,
+/* GET /api/status/uber-live-money — what Uber's live per-trip feed holds, per fleet,
    and whether its fares agree with the statement-grade ones.
    ═════════════════════════════════════════════════════════════════════════
    Each run already reports itself in /api/status (source uber_transactions,
@@ -19,13 +19,22 @@
 
    ABSENT WITH A REASON, never zero: a fleet with no run says it has none and
    why that can be; an agreement nobody can measure yet says what is missing
-   (the payments walk prices a trip hours after the live feed does). */
+   (the payments walk prices a trip hours after the live feed does).
+
+   UNDER /api/status/, WHICH THE RESPONSE CACHE NEVER HOLDS. api/cache.js keys
+   every cached answer on a version that a collection run or a rollup moves —
+   and this feed's runs are logged in mode 'realtime' precisely so that they do
+   NOT move it. Anywhere else this answer would be served from the cache until
+   some other pass happened to run, describing a feed that had moved on: the
+   defect api/cache.js records for /api/coverage/verified, whose nightly writer
+   bumped no version either. /api/status is on its NEVER list by prefix, and an
+   answer about whether a feed is fresh belongs there anyway. */
 
 const FLEETS = ['ecosine', 'egari'];
 const n = (v) => (v == null ? null : Number(v));
 
 export function uberLiveMoneyRoutes(app, { q, wrap }) {
-  app.get('/api/uber/live-money', wrap(async (req, res) => {
+  app.get('/api/status/uber-live-money', wrap(async (req, res) => {
     const fleet = FLEETS.includes(String(req.query.fleet)) ? String(req.query.fleet) : null;
     const P = [fleet];
     const [runs, lastOk, held, trips] = await Promise.all([
