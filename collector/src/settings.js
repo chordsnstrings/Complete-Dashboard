@@ -470,6 +470,36 @@ export const SETTING_DEFS = [
 ];
 const DEF_BY_KEY = Object.fromEntries(SETTING_DEFS.map((d) => [d.key, d]));
 
+/* WHERE A REQUEST GOES IS NOT A PAGE SETTING (system audit 2026-11-12, CRIT 1).
+   ─────────────────────────────────────────────────────────────────────────
+   UBER_TOKEN_URL, AGENT_BASE_URL and eight more were ordinary settings: PUT
+   /api/settings stored any value, get() preferred the stored value to the
+   environment, and the code then sent the credential to whatever it said —
+   auth/uber.js POSTs the fleet's client id and secret to UBER_TOKEN_URL,
+   agent_model.js sends the model key as a bearer to AGENT_BASE_URL, the SMS,
+   hotel, charging, Tesla and ntfy clients likewise. With sign-in optional and
+   ADMIN_TOKEN unset (admin_gate.js passes everyone), anyone who could reach
+   the site could point the Uber token request at their own host and wait for
+   the next refresh. Measured on production the same day: none of the ten was
+   stored in the database (all default, or HOTEL_BASE from the environment),
+   so nobody had ever needed to change one from the page.
+
+   So a destination lives only in the environment, which a web page cannot
+   rewrite: get() never reads a stored value for one, setSetting() refuses one,
+   both save routes refuse one with this sentence before writing anything, and
+   the Settings page shows it read-only with the same reason. The set is a RULE
+   (a key named _URL/_HOST/_BASE/_ENDPOINT, or one whose default is an http(s)
+   address), not a list, so a destination added later is covered the day it
+   arrives; test/settings_env_only.test.mjs pins the ten it covers today. */
+const DESTINATION_KEY = /(_URL|_HOST|_BASE|_ENDPOINT)$/;
+export const ENV_ONLY_KEYS = new Set(SETTING_DEFS
+  .filter((d) => DESTINATION_KEY.test(d.key) || /^https?:\/\//i.test(String(SETTING_DEFAULTS[d.key] ?? '')))
+  .map((d) => d.key));
+export const envOnlyReason = (key) => (ENV_ONLY_KEYS.has(key)
+  ? `${key} says where this dashboard sends a request, and a credential or a driver's details go with it, `
+    + 'so it is set in DigitalOcean as an environment variable on the app, not from this page.'
+  : null);
+
 let cache = {}; let loadedAt = 0;
 /* WHICH saved value each key holds in this process, beside the value itself.
    ─────────────────────────────────────────────────────────────────────────
@@ -544,7 +574,7 @@ export async function withPinnedSettings(fn, { force = false, db = pool } = {}) 
 const current = () => pinned.getStore() || { cache, versions };
 
 // Synchronous read of the last loaded snapshot, falling back to env.
-export const get = (key, dflt) => (current().cache[key] ?? process.env[key] ?? dflt);
+export const get = (key, dflt) => ((ENV_ONLY_KEYS.has(key) ? undefined : current().cache[key]) ?? process.env[key] ?? dflt);
 
 /** The version of the value get(key) returns here: the stored row's
     updated_at in whole microseconds, or null when the value is not from the
@@ -567,6 +597,7 @@ const repin = (key) => {
 };
 
 export async function setSetting(key, value, db = pool) {
+  if (ENV_ONLY_KEYS.has(key)) { const e = new Error(envOnlyReason(key)); e.code = 'env_only'; throw e; }
   const def = DEF_BY_KEY[key];
   if (!def) throw new Error(`unknown setting: ${key}`);
   const stored = def.secret ? enc(value) : String(value);
@@ -641,14 +672,17 @@ export async function describeSettings() {
     for (const v of vis) (elsewhere[v.key] ||= []).push(v);
   } catch { elsewhere = {}; }
   return SETTING_DEFS.map((d) => {
-    const fromDb = cache[d.key] != null && updated[d.key] != null;
+    const envOnly = ENV_ONLY_KEYS.has(d.key);
+    /* A stored value for a destination is ignored by get(), so it is not the
+       source and not the value — saying so would describe a request nobody makes. */
+    const fromDb = !envOnly && cache[d.key] != null && updated[d.key] != null;
     /* A code default is a THIRD source, and it was being reported as no source
        at all. get() resolves settings > environment > default, so a key with a
        default is configured whether or not anyone has typed it in; saying
        "unset" about a username FMS is authenticating with right now sends an
        operator to fix something that works. */
     const dflt = SETTING_DEFAULTS[d.key];
-    const val = cache[d.key] ?? process.env[d.key] ?? dflt ?? '';
+    const val = (envOnly ? undefined : cache[d.key]) ?? process.env[d.key] ?? dflt ?? '';
     /* Held by SOME component, not necessarily this one.
        ─────────────────────────────────────────────────────────────────────
        seen_by below was added because a key scoped to the collector is not a
@@ -666,6 +700,7 @@ export async function describeSettings() {
     const held = (elsewhere[d.key] || []).some((v) => v.configured);
     return {
       key: d.key, group: d.group, label: d.label, hint: d.hint || null, secret: !!d.secret,
+      env_only: envOnly, env_only_reason: envOnlyReason(d.key),
       source: fromDb ? 'settings' : process.env[d.key] ? 'environment'
         : dflt != null ? 'default' : held ? 'elsewhere' : 'unset',
       /* What the code would fall back to, so a reader can tell an operator's

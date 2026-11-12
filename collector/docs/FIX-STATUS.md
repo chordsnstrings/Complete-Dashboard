@@ -6220,3 +6220,12 @@ no migration, no new route, no new `server.js` import; the 96 reasons are true a
   under; `/api/hr-roster` still lists every upload (file name, who uploaded it) even where none of
   its rows are the reader's fleet; `/api/coverage/verified` reads `?fleet=` through a two-fleet
   list, so a third fleet would read as "every fleet" there (the windows are still row-filtered).
+
+## SEC - the system audit's criticals (2026-11-12)
+
+The audit of 2026-11-12 (HANDOFF 0.16) found two critical holes. The first is closed here; the
+second needs the operator's decision on required sign-in and stays open (HANDOFF 0.16).
+
+| # | Fix | Where | Proof | State |
+|---|---|---|---|---|
+| SEC1 | **A Settings save could send the fleet's credentials anywhere.** PUT `/api/settings` stored any key; `get()` preferred a stored value to the environment; `auth/uber.js` then POSTed the client id and secret to `UBER_TOKEN_URL`, and the assistant, report, SMS, hotel, charging, Tesla and ntfy clients sent their keys or drivers' details to their own `_URL`/`_HOST`/`_BASE` settings. With sign-in optional and `ADMIN_TOKEN` unset, `requireAdmin` passes everyone, so any visitor could redirect the next token refresh. Destinations are now environment-only: `get()` never reads a stored copy, `setSetting()` refuses one, both save routes refuse one before writing anything (the PUT refuses the whole save, so a half-applied save cannot read as done), and the Settings page shows them read-only with the server's sentence. The set is a rule (key named `_URL`/`_HOST`/`_BASE`/`_ENDPOINT`, or a default that is an http(s) address), so a destination added later is covered; ten today. Measured on production before the change: none of the ten was stored in the database (nine on their defaults, `HOTEL_BASE` from the environment), so nothing live changes | `src/settings.js` ENV_ONLY_KEYS, get, setSetting, describeSettings; `api/server.js` PUT `/api/settings` and the paste route; `api/public/app.js` the Settings row; `test/mount.mjs` | `settings_env_only` 13 checks. Reverted one at a time: get() reading the stored copy (2 fail), the setSetting guard (2), the PUT refusal (3), the paste refusal (1), the page rendering the row with `data-k` (1). Also green: `credential_save_check`, `route_smoke`, and the 25 suites that name a destination or `/api/settings` | written, not deployed |

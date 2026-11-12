@@ -9103,9 +9103,17 @@ V.settings = async (root) => {
        against a provider's own documentation and wants to copy; the hint is a
        sentence telling them where to get it. They are not the same kind of
        thing and they no longer share a line or a typeface. */
+    /* A destination (UBER_TOKEN_URL, AGENT_BASE_URL…) is read-only here, with
+       the server's own sentence: the save routes refuse it and get() ignores
+       a stored copy (src/settings.js ENV_ONLY_KEYS, system audit 2026-11-12).
+       No data-k, so the save below never collects it. */
+    const box = d.env_only
+      ? `<input readonly aria-readonly="true" value="${esc(d.value)}" title="${esc(d.env_only_reason || '')}">`
+      : `<input data-k="${esc(d.key)}" data-orig="${d.secret ? '' : esc(d.value)}" type="${d.secret ? 'password' : 'text'}" placeholder="${d.configured ? esc(d.value) : 'not set'}" ${d.secret ? '' : `value="${esc(d.value)}"`}>`;
     row.innerHTML = `<div class="lab">${esc(d.label)}<small>${esc(d.key)}</small>${
-      d.hint ? `<span class="labhint">${esc(d.hint)}</span>` : ''}</div>
-      <div><input data-k="${esc(d.key)}" data-orig="${d.secret ? '' : esc(d.value)}" type="${d.secret ? 'password' : 'text'}" placeholder="${d.configured ? esc(d.value) : 'not set'}" ${d.secret ? '' : `value="${esc(d.value)}"`}></div>
+      d.hint ? `<span class="labhint">${esc(d.hint)}</span>` : ''}${
+      d.env_only ? `<span class="labhint">${esc(d.env_only_reason || '')}</span>` : ''}</div>
+      <div>${box}</div>
       <div>${sourceTag(d)}${expiryTag(d)}</div>`;
     (groupEl || wrap).append(row);
   });

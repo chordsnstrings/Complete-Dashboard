@@ -42,7 +42,7 @@ import { proposeKeys } from '../src/credmodel.js';
    suite dies with a ReferenceError before its first assertion. */
 import { normaliseFiles, crossFile, silentFiles, fileReport,
   boltFollowUp } from '../src/credfiles.js';
-import { SETTING_DEFS } from '../src/settings.js';
+import { SETTING_DEFS, envOnlyReason } from '../src/settings.js';
 /* The one definition of a cancellation and of who caused it — see
    api/cancellation_sql.js, which carries the measurements. */
 import { CANCEL_CASE, DROPPED_SQL, DECLINED_SQL } from './cancellation_sql.js';
@@ -4131,6 +4131,15 @@ app.get('/api/settings', wrap(async (req, res) => {
 
 app.put('/api/settings', requireAdmin, wrap(async (req, res) => {
   const updates = req.body && typeof req.body === 'object' ? req.body : {};
+  /* A destination (UBER_TOKEN_URL, AGENT_BASE_URL…) is refused before
+     anything is written, the whole save with it, and says why — see
+     src/settings.js ENV_ONLY_KEYS (system audit 2026-11-12, CRIT 1). A save
+     that stored the other keys and dropped this one would leave the operator
+     believing it had gone through. */
+  const refused = Object.keys(updates).map(envOnlyReason).filter(Boolean);
+  if (refused.length) {
+    return res.status(400).json({ ok: false, error: 'env_only', detail: refused.join(' '), updated: [] });
+  }
   const done = [];
   for (const [k, v] of Object.entries(updates)) {
     if (v === null || v === '') { await deleteSetting(k); done.push(`${k}:cleared`); }
@@ -4286,6 +4295,10 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
            authenticates as nothing and looks exactly like the credential
            having been wrong. Checked before the first write rather than
            recovered from after it. */
+        /* A destination is refused here exactly like an unknown key: nothing of
+           the pair is written (src/settings.js ENV_ONLY_KEYS). */
+        const fixed = Object.keys(t.keys).map(envOnlyReason).filter(Boolean);
+        if (fixed.length) { t.verdict = 'fail'; t.detail = `${t.detail || ''} — ${fixed.join(' ')} Nothing was written.`; continue; }
         const bad = Object.keys(t.keys).filter((k) => !SETTING_DEFS.some((d) => d.key === k));
         if (bad.length) {
           t.verdict = 'fail';
@@ -4301,6 +4314,7 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
         continue;
       }
       if (!t.key) continue;
+      if (envOnlyReason(t.key)) { t.verdict = 'fail'; t.detail = `${t.detail || ''} — ${envOnlyReason(t.key)} Nothing was written.`; continue; }
       await setSetting(t.key, t.value);
       applied.push(t.key);
       admitted.push(t);
