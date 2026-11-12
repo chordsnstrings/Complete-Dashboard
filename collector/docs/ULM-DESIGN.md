@@ -1392,3 +1392,32 @@ Generated from the 2026-09-26 inventory of 189 routes. "gate today" is what guar
 | GET | /api/unauthorized/attributed/plan | none | yes | view:RAW (Owner diagnostics) | SYS |
 | GET | /api/unauthorized/attributed | none | yes | view:COND | ID,VEH,REV |
 | GET | /api/driver/unauthorized | none | yes | view:COND | ID,VEH,LOC |
+
+---
+
+## As built, 2026-11-12 — Phase 4 (reviews, dormancy, watermarks, finding owners)
+
+Branch `fix/access-reviews`, written and tested, not deployed. One migration, `sql/schema_v122.sql`.
+This replaces §16's "Phase 4 (§13): quarterly reviews exist as a table and three routes, not as a
+cycle; no dormant suspension, no export watermarks, no finding ownership". docs/FIX-STATUS.md
+section REV has one row per change.
+
+- **Reviews (§11.3) are a cycle** (`api/access/reviews.js`). Opened by the schedule — the 1st of
+  each Dubai month: quarterly in January, April, July and October, monthly (sensitive classes only:
+  DOC at F, CASH, CRED, ACCUSE, AUDIT, RAW) in the other months — or by an Access admin; due in 14
+  days. One line per direct grant and per person in a team that holds a role, each with an owner
+  (the team's lead, or any Access admin/Owner) and a state. Each keep or revoke is audited.
+  Undecided lines become unattested at the close and end 14 days later unless someone attests them
+  first. **Deviation, on purpose:** the schedule opens reviews only once sign-in is REQUIRED — in
+  open mode nobody is obliged to sign in to attest, and unattested access would end. An admin can
+  open one by hand in either mode.
+- **The last Owner is never ended by a review**, at the close or at the expiry (§11.2).
+- **Direct grants are attested by an Access admin or the Owner**, team places by the team's lead.
+  §11.3 names only leads; a direct grant belongs to no team, so no lead can attest it.
+- **Dormant suspension (§11.2)** was already in the hourly housekeeping; now reinstatement restarts
+  the 60-day clock, sign-in says why and how to get back, each suspension is audited, and only the
+  last active Owner is exempt (every Owner was).
+- **Finding ownership** is §8's `act:finding.own` on #insights' findings (`api/access/findings.js`):
+  take, assign, close with an outcome and a note, reopen; the current state in `finding_owner`, the
+  history in the audit log. The routes are under `/api/access/` (manifest `self`, never cached).
+- The v86 `access_review` table is left in place, unread.

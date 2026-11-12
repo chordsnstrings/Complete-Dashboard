@@ -361,4 +361,12 @@ export const SCHEMA_FILES = [
   /* v114: charging_link's 'held' tier (a fold's contradictory decisions,
      never recomputed) and one confirmation per customer (a unique index). */
   'schema_v114.sql',
+  /* v122: ULM Phase 4 — access reviews as a cycle (access_review_cycle and
+     access_review_item: every grant and team place, each with its reviewer
+     and a state; unattested access ends 14 days after the close), the
+     dormancy columns on access_user (reinstated_at restarts the 60-day clock,
+     dormant_since lets sign-in say why), and finding_owner (who took, was
+     assigned or closed a finding on #insights). api/access/reviews.js and
+     api/access/findings.js. */
+  'schema_v122.sql',
 ];
