@@ -5942,3 +5942,77 @@ Also run, all green: `tokens` 150, `arkiv_skin` 119, `arkiv_shell` 77, `page_con
 #coverage, #feeds, #performance, #top-performers, #cancellations, #identity, #same-person and the
 detail pages) have no rule yet — the component takes one by adding a rule to `RULES` and one hook
 line. Not deployed.
+
+### ANS — the independent review (2026-11-12, branch `fix/answer-line`)
+
+An adversarial review of `90d76da...54d64de`: every rule traced to the route that feeds it, every
+slot to the field the server sends, and every rule asked what it says for a reader who does not see
+everything (`api/access/manifest.json` × the fourteen roles) and for a call that failed. The
+component, the placement, the hooks, the styles and the guards held; so did the rendering (below).
+What did not hold was one class of defect, across nine rules: **saying what was never seen.** The house
+rule is "absent with the true reason, never a zero for an unknown"; these were zeros, false
+reasons, or a "Nothing to act on" naming a check that was never made.
+
+| # | finding | fix | file:line | test | state |
+|---|---|---|---|---|---|
+| ANS13 | **#drivers printed zeros for withheld bookings.** The directory's counts are `.filter()` over `active_in_window` / `ever_driven` (BK) and `licence_days_left` (DOC); the server sends a withheld field as null (`access/shape.js`), so for a Cash desk, HR officer or Fleet technician reader (no BK, or BK as totals only) the line read "330 drivers on the books: 0 drove this month, 0 did not and 330 never have". For every role without DOC in full — Finance, Operations, Dispatcher, Technician, Analyst (withheld); Management, Safety, Auditor (masked, "•••") — the strip claimed "no licence has expired, every driver has a licence date" | `answer()` now hands every rule the render's withheld classes (`access.js withheldNow()`, gathered from x-fm-withheld) as `ctx.withheld`; #drivers says "who drove {window} is not shown to your role", judges no licence when DOC is withheld or masked, and says so in its basis. The directory is no-store (it carries DOC), so its header is always read before the rule runs — a stale-while-revalidate copy would skip it | `answers.js:313` (drivers), `:90` (`withheld()`), `:906` (the hook) | `answers` §1b (4 checks), §4 "#drivers in Chromium, bookings and licence dates withheld" (the real hook, with the server's null rows and header replayed) | written, not deployed |
+| ANS14 | **#drivers claimed "no pair of records awaits review" when the backlog was never counted.** `/api/same-person?counts=1` is refused below MRG (most roles), can fail, and arrives after the first draw; the rule read null as 0 | driver.js hands the rule `pairsCount` — null until a NUMBER arrives, redrawn on any count; the strip names the pairs only on a counted 0 | `driver.js:4307`, `:4319`; `answers.js:313` | `answers` §1b, §3 (the hook) | written, not deployed |
+| ANS15 | **#unauthorized gave a false reason for withheld revenue.** HR officer and Safety open the page (COND) without REV; `value.forgone_aed` and `value.basis` both arrive null, and the rule printed its own fallback "revenue forgone is not valued: there is no rate to value the distance at" | "…; revenue forgone is not shown to your role." from the response's `_withheld` stamp. Also: a summary with no `segments` (or no `unauthorized`) count is now absent with that reason, not "No telematics journey was examined" — mockapi's summary has no `segments` key and the line said exactly that beside a page of 23 unauthorized journeys | `answers.js:394` | `answers` §1b (3 checks) | written, not deployed |
+| ANS16 | **#compliance read two failed calls as "nothing has lapsed".** `V.compliance` catches each call into `{ rows: [], totals: {} }`, so both failing gave 0 and 0, and the line read "No licence or vehicle document has lapsed, and none expires within a week." | The page keeps each failure (`_err`) and hands it over (`vErr`, `dErr`): both failed → **Not answered** "Neither the vehicle documents nor the driver licences could be read: {error}."; one failed → the half that answered is said, the other named unread ("…; the driver licences could not be read (timeout), so no driver is counted here."), and no "Nothing to act on". The page's own tiles still show 0 on a failed call — a page defect outside this workstream (AUDIT ANS review, R1) | `app.js:7037`, `:7175`; `answers.js:838` | `answers` §1b (3 checks), §3 (the hook), §4 "#compliance in Chromium, both calls failing" | written, not deployed |
+| ANS17 | **"Nothing to act on" named checks that were never made.** #payouts printed "the comparison with our own figures did not load, so no wire is checked" and under it "Nothing to act on: every transfer is checked"; #target said "today is not behind the usual day" with `/api/target/hours` failed, and "yesterday met its target" of an unsettled day; #month-target "no active driver is behind" before any driver was measured (`drivers.why`) and for a reader without the money flags (EARN); #overview "fewer than 15% failed" with no share sent; #compare "every source collected" with no collector list | `noneOf()` builds the sentence from the checks MADE AND PASSED only, and draws none when nothing could be checked | `answers.js:95` (`noneOf`), and each rule's return | `answers` §1b (8 checks) | written, not deployed |
+| ANS18 | **#revenue for the wall screen** (REV in full, BK as totals only): bookings null → "0 of 0 bookings are on a channel whose money we hold" | "{AED} is accounted for {window}; how many bookings that covers is not shown to your role." — no channel judged by bookings it cannot see, and no "Nothing to act on" | `answers.js:792` | `answers` §1b | written, not deployed |
+| ANS19 | **#unauthorized's seat action counted readings as sensors.** It read "Seat sensors: 23 stuck, 0 dead"; the 23 is the summary's `sensor_suspect` — occupancy READINGS excluded as implausible — while "dead" counts SENSORS. The page's tile ("Seat-pad faults") captions the two units; the action had dropped the caption | "{n} seat readings excluded as stuck on, {m} seat sensors that never read a passenger — every count on this page leans on them" | `answers.js` (unauthorized, the seat action) | `answers` §1b | written, not deployed |
+| ANS20 | **Grammar at one**: "1 record carry", "1 car report", "1 pair … await", "1 of 46 drivers are", "1 more document expire", "1 still wait", "find them" (one car), "review them" (one journey), "Yango, Bolt … its money" | each verb and pronoun agrees | `answers.js` (the rules) | `answers` §1b; §1 #live tightened (it accepted "1 car report") | written, not deployed |
+
+**The rules' wording, as changed** (for the operator's review; every other template above stands):
+
+- **#drivers** — bookings withheld: "{total} drivers on the books; who drove {window} is not shown to
+  your role." Licence dates withheld or masked: no licence clause or action, and the basis ends
+  "…; licence dates are not shown to your role, so no licence is judged here." Nothing to act on:
+  "no licence has expired" / "every driver has a licence date" only where the dates were seen, and
+  "no pair of records awaits review" only on a counted 0.
+- **#unauthorized** — revenue withheld: "{n} of {segments} journeys examined {window} had no booking
+  behind them: {km} km; revenue forgone is not shown to your role." New Not answered: "The summary
+  does not say how many journeys were examined, so no share of them can be stated." / "The summary
+  does not say how many journeys had no booking behind them." The seat action: "{sensor_suspect}
+  seat readings excluded as stuck on, {dead} seat sensors that never read a passenger — every count
+  on this page leans on them" → Seat-sensor health.
+- **#compliance** — both calls failed: Not answered "Neither the vehicle documents nor the driver
+  licences could be read: {error}."; one failed: "{the half that answered}; the {driver licences /
+  vehicle documents} could not be read ({error}), so no {driver / car} is counted here."
+- **#revenue** — bookings withheld: "{AED accounted} is accounted for {window}; how many bookings
+  that covers is not shown to your role."
+- **Every page's "Nothing to act on"** lists only the checks made and passed, joined "a, b and c";
+  with none, it is not drawn.
+
+**Revert proofs** (app.js, answers.js and driver.js copied first; four of the review's fixes and two
+of the builder's reverted together, each check below targeting one of them; then restored byte for
+byte, md5 checked): **242/15**. The builder's: the BAD guard disabled → §2 "a sentence carrying NaN"
+and "an action carrying undefined"; `clearAnswer()` out of render() → §3 "render() empties the box"
+and §4 "navigating away clears it". The review's: #drivers' withheld handling off → §1b four checks
+and §4 both Chromium checks (the page read "10 drivers on the books: 0 drove this month, 0 did not
+and 10 never have"); #unauthorized's → §1b "revenue withheld"; #payouts' old constant → §1b two
+checks; V.compliance's old catches → §3 the hook and §4 "#compliance in Chromium" (the line read "No
+licence or vehicle document has lapsed, and none expires within a week"). The seat-unit check, added after that run, alone: the old wording put back → §1b "the seat action names its two units" fails ("Seat sensors: 23 stuck, 1 dead"); restored, md5 checked.
+
+**Checked on production's data** (7 GETs, one at a time, cache-busted, bodies deleted after the run,
+only the sentences printed): #target, #month-target, #unauthorized, #payouts and #revenue word on
+real shapes — e.g. #unauthorized "475 of 9,743 journeys examined this month had no booking behind
+them: 8,064 km, AED 37,094.40 revenue forgone."; #payouts "AED 12,258,851.86 has reached the bank in
+361 transfers on record; the latest checked wire, Nov 9, 2026, was AED 275.01 above our figure
+(0.37%)." with no "Nothing to act on" (three actions fired).
+
+**Rendered** (Chromium, mockapi on :8359, all 18 pages × 1280/390 × light/dark = 72 loads, Arkiv):
+no page error; no NaN/undefined/null in any box; the box never widens a page (the scroll width is
+the same with and without it on every page — #target and #month-target at 390 are 985 px wide
+either way, AUDIT ANS finding 3); nothing in the box clipped or outside the viewport; every action at
+390 is 44 px or taller.
+
+Tests, final code: `answers` **258/0** (was 223; §1b and the new §3/§4 checks are the review's), `arkiv_shell` 77/0, `page_contract` 95/0, `tokens` 150/0, `arkiv_people` 241/0, `arkiv_classic_frozen` with `ONLY=compliance,drivers` 9/0 (the two pages whose code the review touched; the Classic DOM did not move). The revert run above was taken at 257 checks, before the seat-unit check was added.
+
+**Still not done** (beyond the builder's list): a page whose fetch THROWS before its hook (#supply,
+#retention, #roster, #revenue, #compare, #analyst, #providers, #vehicles, #overview, #unauthorized,
+#sources) shows its own error and no answer box — absent, but without the box's "Not answered"
+line. The bases say "both fleets" from the chips, which is not true for a one-fleet reader on a
+`fleet: param` route (the gate rewrites `?fleet=` without saying so) — the access model's one-fleet
+phase.

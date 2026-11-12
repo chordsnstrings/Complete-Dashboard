@@ -28,7 +28,25 @@
        further down this page (`to`: the panel's key, ui.js panel()'s
        data-panel, or its heading; answerline.js findTarget);
      · when nothing fired, `none` says what was checked, so "nothing to act on"
-       is a finding with a basis, not a blank.
+       is a finding with a basis, not a blank — and it names ONLY the checks
+       that were actually made. A check whose data did not arrive (a call that
+       failed, a count still in flight, a field withheld from the reader's
+       role) is left out of it, and where nothing could be checked there is no
+       `none` at all. The independent review of 2026-11-12 found the first
+       version claiming checks it never ran: #payouts printed "the comparison
+       … did not load, so no wire is checked" and, under it, "Nothing to act
+       on: every transfer is checked"; #drivers told every role without the
+       pair backlog (most of them: the count is refused below MRG) that "no
+       pair of records awaits review".
+     · A FIELD WITHHELD FROM THE READER'S ROLE IS NOT A ZERO. The server sends
+       a withheld value as null (api/access/shape.js) and names the classes in
+       x-fm-withheld, which api() gathers per render (access.js
+       withheldNow()); answer() hands that map to every rule as
+       `ctx.withheld` (class → the reader's level: '' hidden, 'A' totals only,
+       'M' masked). A page that counts rows by a withheld flag counts zero —
+       #drivers counted "0 drove, N never have" for a Cash desk, HR or
+       Technician reader — so a rule that reads such a field asks first, and
+       says "not shown to your role" instead of the count.
 
    AND ONE THE CODE ENFORCES. answerFor() refuses any sentence carrying NaN,
    undefined, null, Infinity or [object …] and draws the answer absent instead
@@ -48,6 +66,10 @@ import { href, windowLabel, dayLabel, periodLabel, state } from './data.js';
 import { fleetVerdict, revenueVerdict } from './verdicts.js';
 import { membersOf } from './cohorts.js';
 import { mountAnswer, ACTS_MAX } from './answerline.js';
+/* What this render's answers withheld from the reader (x-fm-withheld,
+   gathered by data.js api()). answerline.js already loads access.js, so this
+   adds no module to the page. */
+import { withheldNow } from './access.js';
 
 /* ── small, shared ───────────────────────────────────────────────────────── */
 /* A finite number, or null. Postgres sends numerics as strings; '' and null
@@ -61,6 +83,20 @@ const cap1 = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 /* The page's own failure sentence, for a call that threw. */
 const failed = (what, e) => `${what} could not be read: ${e?.message || 'no answer'}.`;
 const ended = (s) => (/[.!?]$/.test(s) ? s : `${s}.`);
+/* Was class `cls` withheld from (or masked for) this reader? Asked of the
+   response's own `_withheld` stamp where the body is an object (shape.js puts
+   it there), and of the render's x-fm-withheld map either way — an ARRAY
+   body (the driver directory) cannot carry the stamp, only the header. */
+const withheld = (ctx, cls, body = null) => !!(body && body._withheld
+  && Object.prototype.hasOwnProperty.call(body._withheld, cls)) || !!ctx.withheld?.has(cls);
+/* "Nothing to act on: a, b and c." from the checks that were MADE, or null
+   when none could be — then the strip says nothing rather than something
+   unchecked. */
+const noneOf = (checked) => {
+  const c = checked.filter(Boolean);
+  if (!c.length) return null;
+  return `Nothing to act on: ${c.length === 1 ? c[0] : `${c.slice(0, -1).join(', ')} and ${c[c.length - 1]}`}.`;
+};
 
 /* The window, as a phrase inside a sentence: "this month", "in the last 30
    days", "in August 2026", "in 3 Aug 2026 – 19 Aug 2026" (data.js windowLabel
@@ -101,7 +137,8 @@ const P = strict(pct);
 
 /* ═══ THE RULES ═════════════════════════════════════════════════════════════
    Keyed by the page's address (#target → 'target'). Each takes (data, ctx):
-   ctx = { win: the window label, platform, fleet: the chips, href, now }. The wording is the operator's to
+   ctx = { win: the window label, platform, fleet: the chips, href, now, withheld: class → level
+   withheld from this reader }. The wording is the operator's to
    review (FIX-STATUS ANS lists every template and the field behind each slot),
    and follows the demo the operator saw on 2026-10-22 wherever the live data
    supports the same sentence. */
@@ -156,8 +193,14 @@ export const RULES = {
       acts.push(act(`${F(y.drove - y.reached)} of the ${F(y.drove)} who drove yesterday did under `
         + `${C(y.trips_min ?? t.trips_min, 'trip')} — see who is behind this month`, ctx.href('month-target')));
     }
+    /* Only the checks made: "today is not behind the usual day" needs the
+       hours to have answered (a failed /api/target/hours left R null and the
+       first version said it anyway), and "yesterday met its target" needs a
+       yesterday judged OVER — not one still unsettled, nor none at all. */
     return { text, basis, acts,
-      none: 'Nothing to act on: today is not behind the usual day, and yesterday met its target.' };
+      none: noneOf([s.met ? 'the month’s target is met' : null,
+        R && !R.absent && num(R.ahead) != null && R.ahead >= 0 ? 'today is not behind the usual day' : null,
+        y && y.verdict === 'over' ? 'yesterday met its target' : null]) };
   },
 
   /* #overview — "How much work did the fleet do, and where did it come from?"
@@ -198,7 +241,11 @@ export const RULES = {
     return { text,
       basis: `Basis: bookings from the booking table — ${scopeWords(ctx)} — in the window; `
         + 'the change is per driver-day, against the same number of days just before.',
-      acts, none: 'Nothing to act on: every day was collected with no source silent, and fewer than 15% of bookings failed to complete.' };
+      /* The cancellation clause only where the share was sent: a window with
+         no booking answers cancel_pct null, and "fewer than 15% failed" is
+         then a claim about nothing (review, 2026-11-12). */
+      acts, none: noneOf([!v.uncollected && !v.partial ? 'every day was collected with no source silent' : null,
+        cancel != null && cancel < 15 ? 'fewer than 15% of bookings failed to complete' : null]) };
   },
 
   /* #month-target — "Where does the month land at this pace, and who is behind?"
@@ -231,23 +278,33 @@ export const RULES = {
     const acts = [];
     const dr = v.drivers && !v.drivers.why ? v.drivers : null;
     const rows = dr?.rows || [];
-    const mOff = rows.filter((r) => r.money_on === false).length;
-    const tOff = rows.filter((r) => r.trips_on === false).length;
+    /* money_on is EARN and trips_on is BK (manifest): withheld, each is null
+       on every row, which counts nobody behind — so neither count, nor the
+       "nobody is behind" below, is said for a reader who lacks them. */
+    const noEARN = withheld(ctx, 'EARN', v), noBK = withheld(ctx, 'BK', v);
+    const mOff = noEARN ? 0 : rows.filter((r) => r.money_on === false).length;
+    const tOff = noBK ? 0 : rows.filter((r) => r.trips_on === false).length;
+    const verb = (n) => (n === 1 ? 'is' : 'are');
     if (mOff) {
-      acts.push(act(`${F(mOff)} of ${C(rows.length, 'active driver')} are behind their money target — the furthest first`,
+      acts.push(act(`${F(mOff)} of ${C(rows.length, 'active driver')} ${verb(mOff)} behind their money target — the furthest first`,
         ctx.href('month-target'), 'mt-drivers'));
     }
     if (tOff) {
-      acts.push(act(`${F(tOff)} of ${C(rows.length, 'active driver')} are behind their trip target over the counted days`,
+      acts.push(act(`${F(tOff)} of ${C(rows.length, 'active driver')} ${verb(tOff)} behind their trip target over the counted days`,
         ctx.href('month-target'), 'mt-drivers'));
     }
     const r = tj.recent;
-    if (s.days_left > 0 && num(s.per_day_left) != null && r && num(r.per_day) != null && r.per_day < s.per_day_left) {
+    const pacing = s.days_left > 0 && num(s.per_day_left) != null && r && num(r.per_day) != null;
+    if (pacing && r.per_day < s.per_day_left) {
       acts.push(act(`Every day left must bring ${M(s.per_day_left)}; the last ${C(r.days, 'settled day')} averaged `
         + `${M(r.per_day)}`, ctx.href('month-target'), 'mt-path'));
     }
+    /* Only the checks made: no driver list yet (no settled day: drivers.why)
+       or a withheld flag is not "no active driver is behind"; a month with
+       no recent average is not "carried to its target". */
     return { text, basis, acts,
-      none: 'Nothing to act on: no active driver is behind, and the recent days carry the month to its target.' };
+      none: noneOf([dr && rows.length && !noEARN && !noBK && !mOff && !tOff ? 'no active driver is behind' : null,
+        pacing && r.per_day >= s.per_day_left ? 'the recent days carry the month to its target' : null]) };
   },
 
   /* #drivers — "Who is on the books, who is working, and who may not?"
@@ -257,22 +314,49 @@ export const RULES = {
     const total = num(d.total);
     if (total == null) return absent('The driver directory did not load.');
     if (!total) return absent('The driver directory holds nobody for this reader.');
+    /* WHAT THE PAGE'S COUNTS ARE, FOR A READER WHO DOES NOT SEE EVERYTHING.
+       The directory's counts are .filter() over the rows (driver.js): drove =
+       `active_in_window`, never = `!ever_driven`, expired = a negative
+       `licence_days_left`. Those fields are BK and DOC (api/access/
+       manifest.json), and the server sends a withheld one as null — so for a
+       Cash desk, HR officer or Fleet technician reader (no bookings, or totals
+       only) every row "never drove", and the first version of this line read
+       "330 drivers on the books: 0 drove this month, 0 did not and 330 never
+       have". Masked (DOC:M — Management, Safety, Auditor) a days-left figure
+       arrives as "•••", which no comparison reads as expired. So: who drove
+       is said only where bookings reached the page, and nothing is said about
+       licences unless the dates did (review of 2026-11-12). The directory is
+       an ARRAY, so the only word on what was withheld is the x-fm-withheld
+       header (ctx.withheld) — and it is always read before this runs: the
+       route carries DOC, which makes every answer no-store (access/
+       middleware.js NO_STORE), so it is never handed back from data.js's
+       stale-while-revalidate copy, which would skip the header. */
+    const noBK = withheld(ctx, 'BK'), noDOC = withheld(ctx, 'DOC');
     const active = num(d.active) || 0, idle = num(d.idle) || 0, never = num(d.never) || 0;
-    const expired = num(d.expired) || 0, notFilled = num(d.notFilled) || 0, pending = num(d.pendingPairs) || 0;
-    const text = `${C(total, 'driver')} on the books: ${F(active)} drove ${winPhrase(ctx.win)}, `
-      + `${F(idle)} did not and ${F(never)} never have`
-      + (expired ? `; ${C(expired, 'holds an expired licence', 'hold an expired licence')}.` : '.');
+    const expired = noDOC ? 0 : num(d.expired) || 0, notFilled = noDOC ? 0 : num(d.notFilled) || 0;
+    /* null until /api/same-person answers — and it never does for a role
+       without MRG (refused) or when it fails: then the backlog is unknown,
+       which is not "no pair awaits review". */
+    const pending = num(d.pendingPairs);
+    const text = noBK
+      ? `${C(total, 'driver')} on the books; who drove ${winPhrase(ctx.win)} is not shown to your role.`
+      : `${C(total, 'driver')} on the books: ${F(active)} drove ${winPhrase(ctx.win)}, `
+        + `${F(idle)} did not and ${F(never)} never have`
+        + (expired ? `; ${C(expired, 'holds an expired licence', 'hold an expired licence')}.` : '.');
     const acts = [];
     if (expired) acts.push(act(`${C(expired, 'driver')} cannot legally drive: the licence has expired — check them`, ctx.href('compliance')));
     if (notFilled) {
       acts.push(act(`${C(notFilled, 'driver')} ${notFilled === 1 ? 'has' : 'have'} no real licence date on file — `
         + 'whether they may drive cannot be judged', ctx.href('hr-roster')));
     }
-    if (pending) acts.push(act(`${C(pending, 'pair')} of records await review — one person may be counted twice`, ctx.href('same-person')));
+    if (pending) acts.push(act(`${C(pending, 'pair')} of records ${pending === 1 ? 'awaits' : 'await'} review — one person may be counted twice`, ctx.href('same-person')));
     return { text,
       basis: 'Basis: one row per person in the driver directory (reviewed merges only); licence dates from the '
-        + 'roster, a placeholder date shared by half the roster excluded.',
-      acts, none: 'Nothing to act on: no licence has expired, every driver has a licence date, and no pair of records awaits review.' };
+        + 'roster, a placeholder date shared by half the roster excluded'
+        + (noDOC ? '; licence dates are not shown to your role, so no licence is judged here.' : '.'),
+      acts,
+      none: noneOf([noDOC || expired ? null : 'no licence has expired', noDOC || notFilled ? null : 'every driver has a licence date',
+        pending === 0 ? 'no pair of records awaits review' : null]) };
   },
 
   /* #vehicles — "Which cars are not working?"
@@ -296,7 +380,7 @@ export const RULES = {
       : `All ${C(cars.length, 'car')} took a booking ${winPhrase(ctx.win)}.`;
     const acts = [];
     if (moved) acts.push(act(`${C(moved, 'car')} moved with nothing paying for it — review ${moved === 1 ? 'its' : 'their'} journeys`, ctx.href('cohort', 'vehicles-moved-no-booking')));
-    if (still) acts.push(act(`${C(still, 'car')} did not move at all — find them`, ctx.href('cohort', 'vehicles-still')));
+    if (still) acts.push(act(`${C(still, 'car')} did not move at all — find ${still === 1 ? 'it' : 'them'}`, ctx.href('cohort', 'vehicles-still')));
     if (stale) acts.push(act(`${C(stale, 'tracker')} ${stale === 1 ? 'has' : 'have'} gone quiet — check ${stale === 1 ? 'it' : 'them'}`, ctx.href('cohort', 'vehicles-stale')));
     if (docs) acts.push(act(`${C(docs, 'car')} ${docs === 1 ? 'has' : 'have'} a document expiring within 30 days`, ctx.href('cohort', 'vehicles-docs-due')));
     return { text,
@@ -310,22 +394,37 @@ export const RULES = {
   unauthorized({ sum, vehicles = null, stuck = null, dead = null } = {}, ctx) {
     if (!sum) return absent('The unauthorized-trip summary did not load.');
     const t = sum.totals || {};
-    const segs = num(t.segments) || 0;
+    /* A count the summary did not send is unknown, not zero: "no journey was
+       examined" is a claim about the fleet, and it was made on mockapi's
+       summary (no `segments` key) beside a page showing 23 unauthorized
+       journeys (review, 2026-11-12). The server always sends the key; a
+       missing one says so. */
+    const segs = num(t.segments);
     const w = winPhrase(ctx.win);
+    if (segs == null) return absent('The summary does not say how many journeys were examined, so no share of them can be stated.');
     if (!segs) return absent(`No telematics journey was examined ${w}, so nothing can be said about movement without a booking.`);
-    const un = num(t.unauthorized) || 0;
+    const un = num(t.unauthorized);
+    if (un == null) return absent('The summary does not say how many journeys had no booking behind them.');
     const km = num(t.unauth_km);
     const forgone = num(sum.value?.forgone_aed);
+    /* Revenue forgone is REV (manifest: value.forgone_aed, value.basis). For
+       an HR officer or Safety reader — who open this page on COND and hold no
+       REV — both arrive null, and the first version then printed the
+       server's no-rate reason as its own fallback: "revenue forgone is not
+       valued: there is no rate to value the distance at", a reason that was
+       not the true one. The true one is the role. */
+    const valueHidden = withheld(ctx, 'REV', sum);
     const human = num(t.needs_a_human) ?? ((num(t.unverifiable) || 0) + (num(t.partial) || 0));
     let text;
     if (un) {
       text = `${F(un)} of ${C(segs, 'journey')} examined ${w} had no booking behind ${un === 1 ? 'it' : 'them'}`
         + (km != null ? `: ${F(km)} km` : '')
         + (forgone != null ? `, ${M(forgone)} revenue forgone.`
-          : `; revenue forgone is not valued: ${String(sum.value?.basis || 'there is no rate to value the distance at').replace(/\.$/, '')}.`);
+          : valueHidden ? '; revenue forgone is not shown to your role.'
+            : `; revenue forgone is not valued: ${String(sum.value?.basis || 'there is no rate to value the distance at').replace(/\.$/, '')}.`);
     } else {
       text = `None of the ${C(segs, 'journey')} examined ${w} was found without a booking`
-        + (human ? `; ${F(human)} still wait on a person.` : '.');
+        + (human ? `; ${F(human)} still ${human === 1 ? 'waits' : 'wait'} on a person.` : '.');
     }
     const acts = [];
     /* The destination lists exactly what the act counts: verdict
@@ -333,12 +432,21 @@ export const RULES = {
        a different set with no list of its own, so it stays in the sentence.) */
     const unver = num(t.unverifiable) || 0;
     if (unver) {
-      acts.push(act(`${C(unver, 'journey')} could not be verified: a revenue channel was unreadable at the time — review them`,
+      acts.push(act(`${C(unver, 'journey')} could not be verified: a revenue channel was unreadable at the time — review ${unver === 1 ? 'it' : 'them'}`,
         ctx.href('segments', 'verdict', 'unverifiable')));
     }
     if (num(vehicles)) acts.push(act(`${C(vehicles, 'car')} carried an unexplained journey — the worst are ranked`, ctx.href('unauthorized'), 'Vehicles with unexplained trips'));
+    /* Two units, named as two units. `stuck` is the summary's sensor_suspect —
+       occupancy READINGS excluded as implausible (a pad stuck on); `dead` is
+       the page's count of SENSORS that never read a passenger. The page's
+       tile captions the difference (app.js "Seat-pad faults"); the first
+       version of this action dropped the caption and read "Seat sensors: 23
+       stuck, 0 dead", which counts 23 readings as 23 sensors (review,
+       2026-11-12; production's 23 is intervals). */
     if (num(dead) || num(stuck)) {
-      acts.push(act(`Seat sensors: ${F(num(stuck) || 0)} stuck, ${F(num(dead) || 0)} dead — every count on this page leans on them`,
+      const st = num(stuck) || 0, dd = num(dead) || 0;
+      acts.push(act(`${F(st)} seat ${plural(st, 'reading')} excluded as stuck on, ${F(dd)} seat ${plural(dd, 'sensor')} `
+        + `that never ${dd === 1 ? 'reads' : 'read'} a passenger — every count on this page leans on them`,
         ctx.href('unauthorized'), 'Seat-sensor health'));
     }
     return { text,
@@ -384,15 +492,16 @@ export const RULES = {
             : '; no transfer can be checked against our own figure yet.');
     }
     const acts = [];
+    let worst = null, unchecked = null;
     if (ok) {
-      const worst = [...comparable].filter((r) => num(r.delta_pct) != null && abs(r.delta_pct) >= 5)
-        .sort((a, b) => abs(b.delta_pct) - abs(a.delta_pct))[0];
+      worst = [...comparable].filter((r) => num(r.delta_pct) != null && abs(r.delta_pct) >= 5)
+        .sort((a, b) => abs(b.delta_pct) - abs(a.delta_pct))[0] || null;
       if (worst) {
         acts.push(act(`${dateStr(worst.paid_on)}: the wire is ${P(abs(worst.delta_pct), 1)} ${worst.delta >= 0 ? 'above' : 'below'} `
           + 'our figure — check that transfer', ctx.href('payouts'), 'payout-diff'));
       }
       const t = rec.totals || {};
-      const unchecked = (num(t.rows) || 0) - (num(t.comparable_rows) || 0);
+      unchecked = num(t.rows) == null || num(t.comparable_rows) == null ? null : num(t.rows) - num(t.comparable_rows);
       if (unchecked > 0) {
         acts.push(act(`${C(unchecked, 'transfer')} cannot be checked: no stated period, or no driver-day figure of ours for it`,
           ctx.href('payouts'), 'Every transfer, by the date it arrived'));
@@ -401,12 +510,17 @@ export const RULES = {
     const silent = (d.coverage || []).filter((c) => !c.publishes_payouts);
     if (silent.length) {
       acts.push(act(`${silent.map((c) => sourceLabel(c.platform)).join(', ')} publish${silent.length === 1 ? 'es' : ''} no transfer — `
-        + 'its money is checked nowhere on this page', ctx.href('payouts'), 'What each platform publishes'));
+        + `${silent.length === 1 ? 'its' : 'their'} money is checked nowhere on this page`, ctx.href('payouts'), 'What each platform publishes'));
     }
     return { text,
       basis: `Basis: the transfers each platform’s own books record ${record ? 'over the whole record' : span ? 'over that span' : 'in the window'} `
         + `(${scopeWords(ctx)}), each set against our driver-day figure for the week the wire names.`,
-      acts, none: 'Nothing to act on: every transfer is checked, none is 5% or more off our figure, and every platform publishes its transfers.' };
+      /* Only what was checked (the header's rule): with the comparison
+         failed, the line above already says "no wire is checked", and the
+         first version then printed "every transfer is checked" under it. */
+      acts, none: noneOf([ok && payouts.length && unchecked === 0 ? 'every transfer is checked' : null,
+        ok && comparable.length && !worst ? 'none is 5% or more off our figure' : null,
+        (d.coverage || []).length && !silent.length ? 'every platform publishes its transfers' : null]) };
   },
 
   /* #low-performers — "Who is below target, by how much, and why?"
@@ -469,7 +583,8 @@ export const RULES = {
     return { text,
       basis: partial ? `Basis: both days cut at the same Dubai minute, ${p.cut_label}; bookings on the channels and fleets chosen above.`
         : 'Basis: both days in full; bookings on the channels and fleets chosen above.',
-      acts, none: 'Nothing to act on: nobody who drove the day before is missing, and every source collected in the last day.' };
+      acts, none: noneOf([!stopped ? 'nobody who drove the day before is missing' : null,
+        (p.collectors || []).length && !stale ? 'every source collected in the last day' : null]) };
   },
 
   /* #supply — "When are drivers online with nobody in the car?"
@@ -533,7 +648,7 @@ export const RULES = {
     const acts = [];
     if (silent) acts.push(act(`${C(silent, 'car')} silent over a day — the tracker, not the car, is the first suspect`, ctx.href('live'), 'live-fresh'));
     if (stale) acts.push(act(`${C(stale, 'car')} with a stale fix — sort the table by fix age to bring them together`, ctx.href('live'), 'Live vehicles'));
-    if (noFix) acts.push(act(`${C(noFix, 'car')} report no usable fix — counted, never placed on a map`, ctx.href('live'), 'Live vehicles'));
+    if (noFix) acts.push(act(`${C(noFix, 'car')} ${noFix === 1 ? 'reports' : 'report'} no usable fix — counted, never placed on a map`, ctx.href('live'), 'Live vehicles'));
     return { text,
       basis: 'Basis: the latest position from every feed that reports one; stale means no fix in 30 minutes, '
         + 'moving means above 3 km/h at a fix that is not stale.',
@@ -681,9 +796,18 @@ export const RULES = {
     if (num(t.accounted) == null) {
       return absent(`No fare and no payout statement covers ${winPhrase(ctx.win)}, so no money is accounted for${v.bookings ? ` against its ${C(v.bookings, 'booking')}` : ''}.`);
     }
-    const text = `${M(t.accounted)} is accounted for ${winPhrase(ctx.win)}: ${F(num(t.accounted_bookings) || 0)} of `
-      + `${C(v.bookings, 'booking')} are on a channel whose money we hold`
-      + (num(t.priced_bookings) != null ? `, ${F(t.priced_bookings)} with a fare on the trip itself.` : '.');
+    /* Booking counts here are BK (manifest: totals.bookings, platforms[].
+       bookings). A reader who holds revenue but bookings only as totals —
+       the wall screen — gets them null, revenueVerdict then sums nothing,
+       and the first version read "0 of 0 bookings are on a channel whose
+       money we hold". The money is said; the counts are said to be withheld,
+       and no channel is judged by bookings it cannot see. */
+    const noBK = withheld(ctx, 'BK', d);
+    const text = noBK
+      ? `${M(t.accounted)} is accounted for ${winPhrase(ctx.win)}; how many bookings that covers is not shown to your role.`
+      : `${M(t.accounted)} is accounted for ${winPhrase(ctx.win)}: ${F(num(t.accounted_bookings) || 0)} of `
+        + `${C(v.bookings, 'booking')} ${num(t.accounted_bookings) === 1 ? 'is' : 'are'} on a channel whose money we hold`
+        + (num(t.priced_bookings) != null ? `, ${F(t.priced_bookings)} with a fare on the trip itself.` : '.');
     const names = (rows) => rows.map((r) => sourceLabel(r.platform)).join(', ');
     const acts = [];
     if (v.dark.length) {
@@ -694,36 +818,53 @@ export const RULES = {
     }
     return { text,
       basis: `Basis: every fare and payout statement on record for the window (${scopeWords(ctx)}); a booking on a channel that files neither is counted, with no money.`,
-      acts, none: 'Nothing to act on: every channel with work reports money, and each carries a fare on the trip.' };
+      acts, none: noBK ? null : 'Nothing to act on: every channel with work reports money, and each carries a fare on the trip.' };
   },
 
   /* #compliance — "Who and what cannot legally work, and what lapses next?"
      data (the page's own counts, app.js V.compliance): { vExpired, vWeek,
-     dExpired, dWeek, byPerson, dNoDate, pConflict } — people when the spine
-     placed them (byPerson), licence RECORDS when it did not, and the words
-     say which. */
+     dExpired, dWeek, byPerson, dNoDate, pConflict, vErr, dErr } — people
+     when the spine placed them (byPerson), licence RECORDS when it did not,
+     and the words say which.
+
+     A HALF THAT FAILED IS NOT A HALF WITH NOTHING IN IT. The page catches
+     each of its two calls into an empty answer ({ rows: [], totals: {} }),
+     so a failed call counted 0 expired — and the first version of this rule
+     then said "No licence or vehicle document has lapsed, and none expires
+     within a week" over two calls that never answered (review,
+     2026-11-12). The page now hands over each failure (vErr, dErr): both →
+     absent with the reason; one → the half that answered is said, the other
+     is named as unread, and nothing is claimed about it. */
   compliance(c = {}, ctx) {
-    const vExpired = num(c.vExpired), dExpired = num(c.dExpired);
+    if (c.vErr && c.dErr) {
+      return absent(`Neither the vehicle documents nor the driver licences could be read: ${c.dErr.message || c.vErr.message || 'no answer'}.`);
+    }
+    const vExpired = c.vErr ? null : num(c.vExpired), dExpired = c.dErr ? null : num(c.dExpired);
     if (vExpired == null && dExpired == null) return absent('The compliance record did not load.');
-    const soon = (num(c.vWeek) || 0) + (num(c.dWeek) || 0);
+    const soon = (c.vErr ? 0 : num(c.vWeek) || 0) + (c.dErr ? 0 : num(c.dWeek) || 0);
+    const unread = c.dErr ? `the driver licences could not be read (${String(c.dErr.message || 'no answer').replace(/\.$/, '')}), so no driver is counted here`
+      : c.vErr ? `the vehicle documents could not be read (${String(c.vErr.message || 'no answer').replace(/\.$/, '')}), so no car is counted here` : null;
     const drv = c.byPerson ? (n) => `${C(n, 'driver')} ${n === 1 ? 'holds' : 'hold'} an expired licence`
       : (n) => `${C(n, 'licence record')} ${n === 1 ? 'has' : 'have'} expired`;
     const parts = [dExpired ? drv(dExpired) : null,
       vExpired ? `${C(vExpired, 'vehicle document')} ${vExpired === 1 ? 'has' : 'have'} expired` : null].filter(Boolean);
-    const text = parts.length
-      ? `${cap1(parts.join(' and '))}${soon ? `; ${F(soon)} more ${plural(soon, 'document')} expire within a week.` : '.'}`
-      : soon ? `Nothing has lapsed; ${C(soon, 'document')} ${soon === 1 ? 'expires' : 'expire'} within a week.`
-        : 'No licence or vehicle document has lapsed, and none expires within a week.';
+    const said = parts.length
+      ? `${cap1(parts.join(' and '))}${soon ? `; ${F(soon)} more ${plural(soon, 'document')} ${soon === 1 ? 'expires' : 'expire'} within a week` : ''}`
+      : unread
+        ? `${c.dErr ? 'No vehicle document has lapsed' : 'No driver licence has lapsed'}${soon ? `; ${C(soon, 'document')} ${soon === 1 ? 'expires' : 'expire'} within a week` : ''}`
+        : soon ? `Nothing has lapsed; ${C(soon, 'document')} ${soon === 1 ? 'expires' : 'expire'} within a week`
+          : 'No licence or vehicle document has lapsed, and none expires within a week';
+    const text = `${said}${unread ? `; ${unread}` : ''}.`;
     const acts = [];
     if (dExpired) acts.push(act(`${C(dExpired, c.byPerson ? 'driver' : 'licence record')} cannot legally work — soonest first`, ctx.href('compliance'), 'Driver licences'));
     if (vExpired) acts.push(act(`${C(vExpired, 'vehicle document')} expired — those cars cannot legally work`, ctx.href('compliance'), 'Vehicle documents'));
     if (num(c.pConflict)) acts.push(act(`${C(c.pConflict, 'driver')} ${c.pConflict === 1 ? 'has' : 'have'} records that disagree about a document — a filing error or a wrong merge`, ctx.href('compliance'), 'Driver licences'));
-    if (num(c.dNoDate)) acts.push(act(`${C(c.dNoDate, 'record')} carry no licence date — whether they may drive cannot be answered`, ctx.href('hr-roster')));
+    if (num(c.dNoDate)) acts.push(act(`${C(c.dNoDate, 'record')} ${c.dNoDate === 1 ? 'carries' : 'carry'} no licence date — whether they may drive cannot be answered`, ctx.href('hr-roster')));
     return { text,
       basis: c.byPerson
         ? 'Basis: one row per person, each with every account’s documents; a default date a source writes for an empty field is not an expiry.'
         : 'Basis: licence records, not people — the person spine could not place these accounts; vehicle papers by plate.',
-      acts, none: 'Nothing to act on: nothing has lapsed, and every record carries a licence date.' };
+      acts, none: unread ? null : 'Nothing to act on: nothing has lapsed, and every record carries a licence date.' };
   },
 };
 
@@ -734,7 +875,10 @@ export function answerFor(page, data, ctx = {}) {
   const rule = RULES[page];
   if (!rule) return null;
   const c = { win: ctx.win ?? windowLabel(), platform: ctx.platform ?? null, fleet: ctx.fleet ?? null,
-    href: ctx.href || href, now: ctx.now || new Date() };
+    href: ctx.href || href, now: ctx.now || new Date(),
+    /* class → level for what this render's answers withheld (see the header);
+       a test hands a Map or [[class, level]] pairs, the page access.js's. */
+    withheld: ctx.withheld instanceof Map ? ctx.withheld : new Map(ctx.withheld || []) };
   let r;
   try {
     r = rule(data, c);
@@ -759,7 +903,7 @@ export function answerFor(page, data, ctx = {}) {
 export function answer(view, page, data) {
   if (!contract()) return null;
   return mountAnswer(view, answerFor(page, data, { win: windowLabel(), platform: state.platform || null,
-    fleet: state.fleet || null, href, now: new Date() }));
+    fleet: state.fleet || null, href, now: new Date(), withheld: withheldNow() }));
 }
 
 /* For a reader of the code: the page keys that have a rule. */

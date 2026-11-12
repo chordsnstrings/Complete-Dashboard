@@ -10782,3 +10782,19 @@ it again.
   whole record".
 * **`pkill -f test/preview.mjs` matches every worktree's preview server**, not only one's own — on
   a machine shared by several builders, stop a server by the PID it started with.
+* **A field withheld from the reader's role arrives as null, and a page that counts rows by it
+  counts zero.** `api/access/shape.js` nulls a withheld value (and masks an `M` one: a number
+  becomes "•••", a boolean null); `#drivers` then counted "0 drove … 330 never have" for a reader
+  without bookings. Ask before counting: an OBJECT body carries `_withheld` ({ class: level }); an
+  ARRAY body cannot, and only the `x-fm-withheld` header says it — gathered per render by data.js
+  `api()` into `access.js withheldNow()`. **But `api()` hands back a stale-while-revalidate copy
+  without reading that header** (it notes the header only when the live answer lands), so on a
+  revisit `withheldNow()` can be empty for a storable route. A route carrying a NO_STORE class
+  (CT, DOC, CASH, HR, MRG, PAX, AUDIT, RAW, CRED — `access/middleware.js`) is never stored, so its
+  header is always read first; for any other route, rely on the body's own `_withheld`.
+* **A "nothing to act on" sentence is a claim.** Built as a constant, it names checks whether or
+  not their data arrived: #payouts said "every transfer is checked" under its own "the comparison
+  … did not load". Build it from the checks made and passed (answers.js `noneOf()`).
+* **A page that catches a failed call into an empty answer** (`.catch(() => ({ rows: [] }))`) turns
+  the failure into a zero for everything downstream of it. Keep the failure beside the empty answer
+  (`_err`) so a sentence can tell "no rows" from "no answer" (`V.compliance`, ANS16).

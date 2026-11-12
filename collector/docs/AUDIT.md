@@ -2921,3 +2921,38 @@ To repeat: `PORT=8309 node test/preview.mjs &`, then for each page read
 `document.getElementById('pageAnswer')` (line, basis, `.ans-act-i` hrefs and `data-to`) at 1280 and
 390 under `?ui=desktop&skin=arkiv`, in both colour schemes; `node test/answers.test.mjs` does the
 same on mockapi and asserts it. Stop the preview by its PID.
+
+### ANS — the review's rendering pass (2026-11-12)
+
+Repeated independently of the builder's: Chromium (`test/browser.mjs` launchChromium, service
+workers blocked, Asia/Dubai), `mockapi.mjs` on :8359, `?ui=desktop&skin=arkiv`, every page with a
+rule × 1280 and 390 × light and dark — 72 loads. Per load the script read `#pageAnswer` (line,
+basis, every action's height and address, the `none` sentence), the page's scroll width with the box
+shown and with it hidden, any element in the box clipped or past the viewport's edge, and any
+NaN/undefined/null in its text.
+
+| measure | result |
+|---|---|
+| page errors | none on any of the 72 |
+| the box widening a page | never: the scroll width is the same with and without the box everywhere; #target and #month-target at 390 are 985 px wide either way (finding 3 above) |
+| clipped or off-screen inside the box | nothing, including on the two over-wide pages at 390 |
+| touch targets at 390 | every action 44 px or taller, in all 34 boxes that carry actions (the other two are #unauthorized's absent line, R2) |
+| NaN / undefined / null | none |
+
+Findings — the defects behind R0 are fixed on the branch (FIX-STATUS ANS13–ANS20); R1 and R2 are not:
+
+- **R0. The pass draws only what a full-access reader sees.** The defects the review found — zeros
+  for withheld bookings on #drivers, a false no-rate reason on #unauthorized, a failed #compliance
+  read as "nothing has lapsed", "Nothing to act on" naming checks never made — do not show on
+  mockapi, which answers everything for everyone. They are proved in `answers` §1b and in two §4
+  Chromium checks that replay the server's withheld rows and header (#drivers) and fail both
+  compliance calls (#compliance).
+- **R1. #compliance's own tiles read a failed call as zero.** `V.compliance` catches each call into
+  an empty answer, and the tiles count it: "Vehicle docs expired 0", "Drivers who cannot legally
+  work 0" over two calls that never answered. The answer line now says so (ANS16); the tiles are
+  the page's and are unchanged. The same pattern holds on #drivers for a reader without bookings:
+  the toolbar reads "0 drove in this window · 330 never have" (the answer line no longer repeats it,
+  ANS13).
+- **R2. mockapi's `/api/unauthorized/summary` has no `totals.segments`** (the server always sends
+  it), so the §4 pass on #unauthorized only ever exercises an absent line. The present line is
+  proved by §1 and by production's data (FIX-STATUS ANS review).

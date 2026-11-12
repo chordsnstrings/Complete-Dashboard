@@ -7030,9 +7030,12 @@ V.compliance = async (root) => {
   const dueAk = (n) => (n < 0
     ? `<span style="color:var(--sem-neg);white-space:nowrap" title="expired ${fmt(Math.abs(n))} days ago">expired · −${fmt(Math.abs(n))} d</span>`
     : n <= 45 ? `<b style="white-space:nowrap">${fmt(n)} d</b>` : `<span class="dim">${fmt(n)} d</span>`);
+  /* Each failure is kept (`_err`) beside the empty answer the page draws
+     from: the answer line must not read a call that never answered as a
+     record with nothing in it (answers.js compliance; review, 2026-11-12). */
   const [vehPage, drvPage] = await Promise.all([
-    api('/api/compliance/vehicles').catch(() => ({ rows: [], totals: {} })),
-    api('/api/compliance/drivers').catch(() => ({ drivers: [], totals: {} })),
+    api('/api/compliance/vehicles').catch((e) => ({ rows: [], totals: {}, _err: e })),
+    api('/api/compliance/drivers').catch((e) => ({ drivers: [], totals: {}, _err: e })),
   ]);
   const veh = vehPage.rows || [];
   const drv = drvPage.drivers || [];
@@ -7169,7 +7172,8 @@ V.compliance = async (root) => {
     });
   }
 
-  answer(root, 'compliance', { vExpired, vWeek, dExpired, dWeek: dt.within_7 || 0, byPerson, dNoDate, pConflict });
+  answer(root, 'compliance', { vExpired, vWeek, dExpired, dWeek: dt.within_7 || 0, byPerson, dNoDate, pConflict,
+    vErr: vehPage._err || null, dErr: drvPage._err || null });
   const COMP_TILES = [
     ['Vehicle docs expired', fmt(vExpired), 'cannot legally work', vExpired ? 'err' : 'ok'],
     ['Expiring in 7 days', fmt(vWeek), 'renew now', vWeek ? 'err' : 'ok'],

@@ -29,6 +29,17 @@
       scrolls to its panel; a navigation clears the box; the Classic skin never
       builds it.
 
+   1b. THE INDEPENDENT REVIEW (2026-11-12, FIX-STATUS ANS13–ANS20): nothing
+      withheld from the reader's role, nothing from a call that failed, and
+      nothing the server did not send is said as a zero, given a false
+      reason, or listed under "Nothing to act on" as a check that passed —
+      #drivers (bookings/licence dates withheld, the pair backlog uncounted),
+      #unauthorized (revenue withheld, counts missing, the seat units),
+      #compliance (either call failed — also end to end in §4), #payouts,
+      #target, #month-target, #overview, #compare, #revenue; and verb
+      agreement at one. §4 replays the server's withheld #drivers answer
+      (null BK/DOC fields + x-fm-withheld) through the real hook.
+
    Revert proofs (FIX-STATUS ANS): clearAnswer() out of render() → §4
    "navigating away clears it" fails; the payouts hook out → §4 payouts fails
    and §3 fails; the BAD guard out of answerFor → §2 fails; the 44px floor out
@@ -235,7 +246,7 @@ console.log('1 · the rules, page by page — the answer, and every absent case 
     r.text === '2 of 4 cars reported within 30 minutes, 1 of them moving; 2 are stale, 1 of them silent over a day.', r.text);
   const quiet = run('live', { rows: [{ stale: true, fix_age_min: 9000, speed: 40 }], fixed: 1 });
   check('…a silent car’s last speed is not "moving" now', quiet.text === '0 of 1 car reported within 30 minutes; 1 is stale and silent over a day.', quiet.text);
-  check('…acts: the silent, the stale, the cars with no usable fix', r.acts.length === 3 && /1 car report no usable fix|1 car reports no usable fix|1 car report/.test(r.acts[2].text), J(r.acts));
+  check('…acts: the silent, the stale, the cars with no usable fix', r.acts.length === 3 && /^1 car reports no usable fix/.test(r.acts[2].text), J(r.acts));
   check('#live: failed → absent with the page’s sentence', run('live', { err: new Error('HTTP 503') }).absent === 'The live feed could not be read: HTTP 503.');
   check('#live: no car reports → absent', /No feed reports a position/.test(run('live', { rows: [] }).absent || ''));
 }
@@ -318,6 +329,112 @@ console.log('1 · the rules, page by page — the answer, and every absent case 
   check('#compliance: not loaded → absent', run('compliance', {}).absent === 'The compliance record did not load.');
 }
 
+console.log('\n1b · the independent review (2026-11-12): nothing withheld, failed or unsent is said as a zero or as checked');
+{
+  /* #drivers for a reader without bookings (Cash desk, HR officer; a Fleet
+     technician holds them as totals only): the server nulls active_in_window
+     and ever_driven, the page's filters count 0 drove / everyone "never",
+     and the first version printed exactly that. */
+  const noBK = run('drivers', { total: 330, active: 0, idle: 0, never: 330, expired: 0, notFilled: 0, pendingPairs: null },
+    { ...ctx, withheld: [['BK', ''], ['DOC', '']] });
+  check('#drivers, bookings withheld: who drove is said to be withheld — never "0 drove … 330 never have"',
+    noBK.text === '330 drivers on the books; who drove this month is not shown to your role.' && !/\b0 drove|never have/.test(noBK.text), noBK.text);
+  check('…licence dates withheld: no licence is judged, and the basis says why', !noBK.acts.length
+    && /licence dates are not shown to your role, so no licence is judged here\.$/.test(noBK.basis), J(noBK));
+  check('…and with nothing checkable there is no "Nothing to act on" at all', noBK.none == null, J(noBK.none));
+  const masked = run('drivers', { total: 5, active: 5, idle: 0, never: 0, expired: 0, notFilled: 0, pendingPairs: 0 },
+    { ...ctx, withheld: new Map([['DOC', 'M']]) });
+  check('#drivers, licence dates MASKED (DOC:M, days left arrive as "•••"): "no licence has expired" is not claimed',
+    masked.none === 'Nothing to act on: no pair of records awaits review.' && !/licence/.test(masked.text), J(masked));
+  const unknownPairs = run('drivers', { total: 3, active: 3, idle: 0, never: 0, expired: 0, notFilled: 0, pendingPairs: null });
+  check('#drivers: the pair backlog not (yet) counted — refused below MRG, failed, or in flight — is not "no pair awaits review"',
+    unknownPairs.none === 'Nothing to act on: no licence has expired and every driver has a licence date.', unknownPairs.none);
+  const zeroPairs = run('drivers', { total: 3, active: 3, idle: 0, never: 0, expired: 0, notFilled: 0, pendingPairs: 0 });
+  check('…a COUNTED zero is', /and no pair of records awaits review\.$/.test(zeroPairs.none || ''), zeroPairs.none);
+  check('…one pair "awaits", not "await"', /^1 pair of records awaits review/.test(run('drivers', { total: 3, active: 3, pendingPairs: 1 }).acts[0]?.text || ''));
+
+  /* #unauthorized for an HR officer or Safety reader: COND opens the page,
+     REV is not held, so value.forgone_aed AND value.basis arrive null. */
+  const hidden = run('unauthorized', { sum: { totals: { segments: 10, unauthorized: 3, unauth_km: 20 },
+    value: { forgone_aed: null, aed_per_km: null, basis: null }, _withheld: { REV: '' } } });
+  check('#unauthorized, revenue withheld: "not shown to your role" — not the server’s no-rate reason borrowed as a fallback',
+    /; revenue forgone is not shown to your role\.$/.test(hidden.text) && !/no rate/.test(hidden.text), hidden.text);
+  check('#unauthorized: a summary with no `segments` count is not "no journey was examined"',
+    /does not say how many journeys were examined/.test(run('unauthorized', { sum: { totals: { unauthorized: 23 } } }).absent || ''));
+  check('…nor one with no `unauthorized` count "none found without a booking"',
+    /does not say how many journeys had no booking/.test(run('unauthorized', { sum: { totals: { segments: 50 } } }).absent || ''));
+  check('…one waiting journey "waits"', /; 1 still waits on a person\.$/.test(run('unauthorized', { sum: { totals: { segments: 9, unauthorized: 0, needs_a_human: 1 } } }).text || ''));
+  /* sensor_suspect counts occupancy READINGS, the dead count SENSORS: the
+     page's tile captions the two units; the action must name them. */
+  const seat = run('unauthorized', { sum: { totals: { segments: 9, unauthorized: 1 } }, stuck: 23, dead: 1 }).acts.find((a) => a.to === 'Seat-sensor health');
+  check('#unauthorized: the seat action names its two units — readings stuck on, sensors that never read — never "23 stuck" as sensors',
+    seat?.text === '23 seat readings excluded as stuck on, 1 seat sensor that never reads a passenger — every count on this page leans on them', seat?.text);
+
+  /* #payouts: the comparison failed, so no wire is checked — and the first
+     version printed "Nothing to act on: every transfer is checked" under it. */
+  const pf = run('payouts', { d: { scope: 'record', payouts: [{ amount: 10 }], coverage: [{ platform: 'uber', publishes_payouts: true }] },
+    rec: { __error: 'HTTP 500' } });
+  check('#payouts, comparison failed: the strip never says "every transfer is checked"',
+    /no wire is checked/.test(pf.text) && !/every transfer is checked|none is 5%/.test(pf.none || ''), J(pf));
+  const pc = run('payouts', { d: { scope: 'record', payouts: [{ amount: 10 }], coverage: [{ platform: 'uber', publishes_payouts: true }] },
+    rec: { totals: { rows: 1, comparable_rows: 1 }, rows: [{ paid_on: '2026-10-19', delta: 1, delta_pct: 0.1 }] } });
+  check('…and says it when every check was made', pc.none === 'Nothing to act on: every transfer is checked, none is 5% or more off our figure and every platform publishes its transfers.', pc.none);
+  check('…two silent platforms: "their money", not "its"', /Yango, Bolt publish no transfer — their money/.test(run('payouts', { d: { scope: 'record', payouts: [],
+    coverage: [{ platform: 'yango', publishes_payouts: false }, { platform: 'bolt', publishes_payouts: false }] } }).acts[0]?.text || ''));
+
+  /* #target: the hours failed, yesterday unsettled — neither is "fine". */
+  const tf = run('target', { t: { month_name: 'November', summary: { ahead: 500, under: 0, unsettled: 1, today_needs: 100 },
+    days: [{ state: 'past' }, { state: 'today' }], yesterday: { verdict: 'unsettled', day: '2026-11-11' } }, h: { _err: new Error('HTTP 502') } });
+  check('#target, hours failed and yesterday unsettled: no "today is not behind", no "yesterday met its target"',
+    !tf.acts.length && tf.none == null, J(tf));
+  const tok = run('target', { t: { month_name: 'November', summary: { ahead: 500, under: 0, today_needs: 100 },
+    days: [{ state: 'past' }, { state: 'today' }], yesterday: { verdict: 'over', day: '2026-11-11' } }, h: { clock: '09:00', revenue: { ahead: 10 } } });
+  check('…both checked and fine: said', tok.none === 'Nothing to act on: today is not behind the usual day and yesterday met its target.', tok.none);
+
+  /* #month-target: no driver list yet; a reader without EARN (the wall
+     screen) — money_on null on every row counts nobody behind. */
+  const base = { month_name: 'May', summary: { month_target: 100, days_left: 5, per_day_left: 10 }, days: [{ state: 'past' }, { state: 'today' }],
+    trajectory: { avg: { month_end: 120, pct: 120 }, recent: { days: 3, per_day: 50 } } };
+  check('#month-target, drivers not measured yet (drivers.why): no "no active driver is behind"',
+    run('month-target', { ...base, drivers: { why: 'No day of the month has settled yet.' } }).none === 'Nothing to act on: the recent days carry the month to its target.');
+  const wall = run('month-target', { ...base, drivers: { rows: [{ money_on: null, trips_on: false }] }, _withheld: { EARN: '' } });
+  check('…money flags withheld: no money count, and no "nobody is behind"',
+    !wall.acts.some((a) => /money target/.test(a.text)) && !/no active driver/.test(wall.none || ''), J(wall));
+  check('…one driver behind "is", not "are"', /^1 of 2 active drivers is behind their money target/.test(run('month-target',
+    { ...base, drivers: { rows: [{ money_on: false, trips_on: true }, { money_on: true, trips_on: true }] } }).acts[0]?.text || ''));
+
+  /* #compliance: the page catches each call into an empty answer; a failed
+     call is not a record with nothing in it. */
+  const both = run('compliance', { vExpired: 0, vWeek: 0, dExpired: 0, dWeek: 0, byPerson: false, dNoDate: 0, pConflict: 0,
+    vErr: new Error('HTTP 500'), dErr: new Error('HTTP 502') });
+  check('#compliance, both calls failed → absent with the reason — never "No licence or vehicle document has lapsed"',
+    both.absent === 'Neither the vehicle documents nor the driver licences could be read: HTTP 502.', J(both));
+  const half = run('compliance', { vExpired: 2, vWeek: 0, dExpired: 0, dWeek: 0, byPerson: true, dNoDate: 0, pConflict: 0, dErr: new Error('timeout') });
+  check('…the driver half failed: the vehicle half is said, the driver half named unread, nothing claimed about it',
+    half.text === '2 vehicle documents have expired; the driver licences could not be read (timeout), so no driver is counted here.' && half.none == null, J(half));
+  check('…the vehicle half failed and no licence lapsed: says so of licences only',
+    /^No driver licence has lapsed; the vehicle documents could not be read \(HTTP 500\), so no car is counted here\.$/.test(
+      run('compliance', { vExpired: 0, dExpired: 0, byPerson: true, vErr: new Error('HTTP 500') }).text || ''));
+  check('…one record "carries", one document "expires"', /^1 record carries no licence date/.test(run('compliance', { vExpired: 0, dExpired: 0, dNoDate: 1 }).acts[0]?.text || '')
+    && /; 1 more document expires within a week\.$/.test(run('compliance', { vExpired: 1, vWeek: 1, dExpired: 0 }).text || ''));
+
+  /* #revenue for the wall screen: bookings as totals only → null here. */
+  const rw = run('revenue', { totals: { accounted: 5000, bookings: null, accounted_bookings: null, priced_bookings: null },
+    platforms: [{ platform: 'uber', bookings: null }], _withheld: { BK: 'A' } });
+  check('#revenue, bookings withheld: the money is said, the counts are said withheld — never "0 of 0 bookings"',
+    rw.text === 'AED 5,000.00 is accounted for this month; how many bookings that covers is not shown to your role.' && rw.none == null, J(rw));
+
+  /* #overview / #compare: a share or a list the server did not send is not
+     a check that passed. */
+  check('#overview: no cancellation share sent → no "fewer than 15% failed"',
+    run('overview', { k: { trips: 10, cancel_pct: null }, daily: [{ trips: 10 }], byPlat: [] }).none === 'Nothing to act on: every day was collected with no source silent.');
+  check('#compare: no collector list → no "every source collected in the last day"',
+    run('compare', { p: { cut_minutes: 1440, totals: { a: { bookings: 5 }, b: { bookings: 5 } } }, a: '2026-11-12', b: '2026-11-11' }).none
+      === 'Nothing to act on: nobody who drove the day before is missing.');
+  check('#live: one car "reports" no usable fix', /^1 car reports no usable fix/.test(run('live', { rows: [{ stale: false, speed: 0 }, { stale: false, speed: 0 }], fixed: 1 }).acts[0]?.text || ''));
+  check('#vehicles: one still car — "find it"', /did not move at all — find it$/.test(run('vehicles', { rows: [{ vin: 'A', trips: 0 }] }).acts[0]?.text || ''));
+}
+
 console.log('\n2 · the guard: no NaN on screen, a throwing rule is said, three actions at most');
 {
   const saved = RULES.target;
@@ -370,6 +487,19 @@ for (const f of ['answers.js', 'answerline.js']) {
     !/\b(fetch|api|qAll|qChan)\(|\bq\(|\bimport\(/.test(s), (s.match(/\b(fetch|api|qAll|qChan)\(|\bq\(|\bimport\(/) || [])[0]);
   check(`${f} reads the skin as a token, never the attribute`, !/dataset\.skin|data-skin/.test(s));
 }
+/* The review's wiring (2026-11-12): what a rule needs in order NOT to claim
+   what it never saw. */
+const answersJs = src('answers.js').replace(/\/\*[\s\S]*?\*\//g, '');
+check('answer() hands every rule what this render withheld (access.js withheldNow → ctx.withheld)',
+  /import \{ withheldNow \} from '\.\/access\.js'/.test(answersJs) && /withheld: withheldNow\(\)/.test(answersJs));
+const driverJs = src('driver.js');
+check('driver.js hands the rule the pair backlog only as a COUNTED number (null until /api/same-person answers one), and redraws on any count',
+  /pendingPairs: pairsCount \}/.test(driverJs) && /pairsCount = c\.pending != null && Number\.isFinite\(Number\(c\.pending\)\) \? Number\(c\.pending\) : null;[\s\S]{0,300}answerDrivers\(\);/.test(driverJs)
+    && !/if \(pendingPairs\) answerDrivers\(\)/.test(driverJs));
+check('V.compliance keeps each call’s failure and hands it to the rule (vErr, dErr)',
+  /api\('\/api\/compliance\/vehicles'\)\.catch\(\(e\) => \(\{ rows: \[\], totals: \{\}, _err: e \}\)\)/.test(appjs)
+    && /api\('\/api\/compliance\/drivers'\)\.catch\(\(e\) => \(\{ drivers: \[\], totals: \{\}, _err: e \}\)\)/.test(appjs)
+    && /vErr: vehPage\._err \|\| null, dErr: drvPage\._err \|\| null/.test(appjs));
 const ark = src('arkiv.css');
 check('arkiv.css styles the box under the skin only', /:root\[data-skin="arkiv"\] #pageAnswer\{/.test(ark) && !/^#pageAnswer|^\.ans-/m.test(ark));
 
@@ -492,6 +622,50 @@ for (const r of ['drivers', 'payouts', 'low-performers']) {
   });
   check('an action to a page the role does not open is drawn as plain text, as inside #view', !shut.open && shut.closed, J(shut));
   await o.c.close();
+}
+{
+  /* The review's two page-side fixes, end to end through the real hooks.
+     #compliance with both of its calls failing: the page draws its empty
+     fallback, and the answer must not read it as "nothing has lapsed". */
+  const c = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: 'block', timezoneId: 'Asia/Dubai' });
+  const page = await c.newPage();
+  await page.route(/\/api\/compliance\/(vehicles|drivers)/, (r) => r.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' }));
+  await page.goto(`${base}/?ui=desktop&skin=arkiv#compliance`, { waitUntil: 'load' });
+  await page.waitForFunction(() => document.getElementById('pageAnswer'), null, { timeout: 15000 }).catch(() => {});
+  const x = await page.evaluate(() => ({ line: document.querySelector('#pageAnswer .ans-line')?.textContent || '',
+    absent: !!document.querySelector('#pageAnswer [data-absent]'), none: document.querySelector('#pageAnswer .ans-act-n')?.textContent || null }));
+  check('#compliance in Chromium, both calls failing: "Not answered" with the reason — never "No licence or vehicle document has lapsed"',
+    x.absent && /Neither the vehicle documents nor the driver licences could be read/.test(x.line) && !/has lapsed/.test(x.line) && !x.none, J(x));
+  await c.close();
+}
+{
+  /* #drivers for a reader without bookings or licence dates, as the server
+     sends it (api/access/shape.js): the BK and DOC fields null on every row,
+     x-fm-withheld naming the classes, and the pair backlog refused. */
+  const c = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: 'block', timezoneId: 'Asia/Dubai' });
+  const page = await c.newPage();
+  const BK = ['trips', 'completed', 'bookable', 'days', 'km', 'priced_trips', 'first_trip', 'last_trip', 'last_ever', 'lifetime_trips',
+    'platform_lifetime_trips', 'active_in_window', 'ever_driven', 'identity_from_history'];
+  const DOC = ['licence_expires', 'licence_days_left', 'licence_placeholder', 'licence_no'];
+  await page.route(/\/api\/drivers\/directory/, async (r) => {
+    const res = await r.fetch();
+    const rows = (await res.json()).map((x) => ({ ...x, ...Object.fromEntries([...BK, ...DOC].map((k) => [k, null])) }));
+    await r.fulfill({ status: 200, contentType: 'application/json', headers: { 'x-fm-withheld': 'BK,DOC' }, body: JSON.stringify(rows) });
+  });
+  await page.route(/\/api\/same-person/, (r) => r.fulfill({ status: 403, contentType: 'application/json',
+    headers: { 'x-fm-withheld': 'MRG' }, body: '{"error":"withheld","class":"MRG","detail":"Not shown to your role."}' }));
+  await page.goto(`${base}/?ui=desktop&skin=arkiv#drivers`, { waitUntil: 'load' });
+  await page.waitForFunction(() => document.getElementById('pageAnswer'), null, { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(800);
+  const x = await page.evaluate(() => ({ line: document.querySelector('#pageAnswer .ans-line')?.textContent || '',
+    basis: document.querySelector('#pageAnswer .ans-basis')?.textContent || '',
+    none: document.querySelector('#pageAnswer .ans-act-n')?.textContent || null,
+    acts: [...document.querySelectorAll('#pageAnswer .ans-act-i')].map((a) => a.textContent) }));
+  check('#drivers in Chromium, bookings and licence dates withheld: "who drove … is not shown to your role" — never "0 drove"',
+    /on the books; who drove .* is not shown to your role\./.test(x.line) && !/\b0 drove|never have/.test(x.line), J(x));
+  check('…no licence judged, no pair claimed: no action and no "Nothing to act on"', !x.acts.length && !x.none
+    && /licence dates are not shown to your role/.test(x.basis), J(x));
+  await c.close();
 }
 {
   const o = await open('payouts', { skin: 'classic' });
