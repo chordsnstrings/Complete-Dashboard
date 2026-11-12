@@ -2916,4 +2916,4 @@ already drew a hero line from their own payloads; they keep it, and make no extr
 To repeat the checks without a server: `node test/history_sparklines.test.mjs` (the mock, 57 checks:
 one request per draw, the runs, the end mark, the caption, 390, dark, Classic, every absence) and
 `node test/history_routes.test.mjs` (the route against `/api/online-time`, `/api/cancellations`,
-`/api/trips/daily` and #deposits' own sum, 60 checks).
+`/api/trips/daily` and #deposits' own sum, 62 checks).

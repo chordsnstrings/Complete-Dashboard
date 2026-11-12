@@ -264,6 +264,13 @@ console.log('\n#cancellations: the line is the tile\'s count, day by day');
   const bk = pointsOf(o.body, 'bookings');
   check('#overview\'s bookings line answers what /api/trips/daily serves, day for day',
     daily.length === 5 && daily.every((r) => bk[r.d]?.v === r.trips), JSON.stringify(daily.map((r) => [r.d, r.trips, bk[r.d]?.v])));
+  /* A pass that failed stamps finished_at too, so its time is no guide to
+     what the table holds: the line is withheld, saying so. */
+  await q(`UPDATE rollup_state SET status = 'error', error = 'deadlock detected' WHERE name = 'rollup_day'`);
+  const failed = await H(`page=cancellations&from=${D[0]}&to=${D[4]}`);
+  await q(`UPDATE rollup_state SET status = 'ok', error = NULL WHERE name = 'rollup_day'`);
+  check('the day roll-up\'s last pass failed: absent, saying the line returns once a pass succeeds',
+    /last pass failed/.test(failed.body.series.cancelled.absent || ''), failed.body.series.cancelled.absent);
   const fms = await H(`page=cancellations&from=${D[0]}&to=${D[4]}&platform=fms`);
   check('platform=fms: absent — the trackers record journeys, never bookings — rather than a row of zeros',
     /not a booking channel/.test(fms.body.series.cancelled.absent || '') && fms.body.series.cancelled.grain === 'day',
@@ -377,6 +384,11 @@ console.log('\n#performer: the person\'s weekly money from the day record');
   const cp = pointsOf(cur.body, 'money')[mondayOf(TODAY)];
   check('the week still running is a gap that says how many of its days have happened',
     cp?.v === null && /this week is still running — \d of its 7 days so far/.test(cp?.why || ''), JSON.stringify(cp));
+  await q2(`UPDATE rollup_state SET status = 'error' WHERE name = 'driver_day'`);
+  const bad = await H2('id=u-hana&from=2026-09-07&to=2026-10-04');
+  await q2(`UPDATE rollup_state SET status = 'ok' WHERE name = 'driver_day'`);
+  check('the driver-day roll-up\'s last pass failed: absent, saying so', /last pass failed/.test(bad.body.series.money.absent || ''),
+    bad.body.series.money.absent);
   const nobody = await H2('id=nobody-at-all');
   check('an account no day record holds: absent, saying so', /never seen it/.test(nobody.body.series.money.absent || ''),
     nobody.body.series.money.absent);

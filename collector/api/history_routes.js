@@ -169,13 +169,18 @@ const finish = (metric, points, extra = {}) => ({
   measured: points.filter((p) => p.v != null).length, of: points.length,
 });
 
-/* When a rollup_state pass last finished well. The row says 'running' while a
-   pass is in flight and keeps the PREVIOUS finish meanwhile, which is the
-   conservative answer for "built through which day". */
+/* When a rollup_state pass last finished, and whether it finished well. The
+   row says 'running' while a pass is in flight and keeps the PREVIOUS finish
+   meanwhile, which is the conservative answer for "built through which day".
+   A pass that FAILED stamps finished_at too (src/rollup.js runOne), so its
+   time says nothing about what the table holds: the table is whatever the
+   last good pass wrote, from a time this row no longer records. */
 async function passFinished(q, name) {
-  const [r] = await q(`SELECT status, finished_at FROM rollup_state WHERE name = $1`, [name]);
-  return r?.finished_at ? r.finished_at : null;
+  const [r] = await q(`SELECT status, finished_at, error FROM rollup_state WHERE name = $1`, [name]);
+  return r?.finished_at ? { at: r.finished_at, failed: r.status === 'error' } : null;
 }
+const FAILED_WHY = (what) => `the ${what}'s last pass failed, so what it holds may be a pass behind and the day it `
+  + 'was last built is not known — the line is drawn again once a pass succeeds';
 async function buildOf(q, name) {
   const [r] = await q(`SELECT read_at, built_from::text AS built_from FROM history_rollup_build WHERE name = $1`, [name]);
   return r ? { read_at: r.read_at, built_from: String(r.built_from).slice(0, 10) } : null;
@@ -197,11 +202,13 @@ async function rollupDaySeries(q, metrics, { from, to, today, platform, fleet })
     const why = 'FMS is the trackers\u2019 feed, not a booking channel — it records journeys, never bookings, so this line has nothing to count';
     return Object.fromEntries(metrics.map((m) => [m, absentSeries(m, why)]));
   }
-  const finished = await passFinished(q, 'rollup_day');
-  if (!finished) {
-    const why = 'the day roll-up has not been built yet — the collector builds it after each collection run';
+  const pass = await passFinished(q, 'rollup_day');
+  if (!pass || pass.failed) {
+    const why = pass ? FAILED_WHY('day roll-up')
+      : 'the day roll-up has not been built yet — the collector builds it after each collection run';
     return Object.fromEntries(metrics.map((m) => [m, absentSeries(m, why)]));
   }
+  const finished = pass.at;
   const builtTo = dayOf(finished);
   const rows = await q(
     `WITH cal AS (SELECT generate_series($1::date, $2::date, interval '1 day')::date AS d)
@@ -339,8 +346,10 @@ async function lateSeries(q, { from, to, today, fleet, platform, startRaw }) {
 
 /* ── #performer: one person's money, week by week ───────────────────────── */
 async function moneySeries(q, { from, to, today, fleet, platform, id }) {
-  const finished = await passFinished(q, 'driver_day');
-  if (!finished) return absentSeries('money', 'the driver-day roll-up has not been built yet — the collector builds it after each collection run');
+  const pass = await passFinished(q, 'driver_day');
+  if (!pass) return absentSeries('money', 'the driver-day roll-up has not been built yet — the collector builds it after each collection run');
+  if (pass.failed) return absentSeries('money', FAILED_WHY('driver-day roll-up'));
+  const finished = pass.at;
   /* The person, by the stored fold, so a second account's weeks are this
      person's weeks — the economics row the hero reads folds the same way. */
   const [who] = await q(
