@@ -52,6 +52,13 @@ import { createHash } from 'node:crypto';
    the rule the other two feeds were already on. Every answer still carries
    x-data-version and, when stale, x-cache-age. A collection or rollup that
    writes trips or money moves the version exactly as before.
+   ONE EXCEPTION, deliberate (2026-11-12, FIX-STATUS UTX): Uber's live money
+   feed (src/sources/uber_transactions.js) also logs 'realtime', and it DOES
+   write money — trip.price, provisionally. Four runs an hour moving the
+   version would put the warmer back where CABMAN had it; as 'realtime' a
+   price it fills reaches cached answers with the next rollup or incremental,
+   which starts eight minutes after each of its runs. Do not read 'realtime'
+   here as "writes no money"; that file says why at its MODE.
    Shared with api/warm.js, so the warmer and the cache agree on when the data
    moved. test/cache.test.mjs "a realtime tick does not move the version". */
 export const VERSION_SQL =

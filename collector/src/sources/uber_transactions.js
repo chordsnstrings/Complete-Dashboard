@@ -194,8 +194,47 @@ const listOf = (data) => {
   }
   return [];
 };
-const nextToken = (data) => String(data?.paginationResult?.nextPageToken
-  || data?.pagination_result?.next_page_token || data?.nextPageToken || '');
+const PAGINATION_KEYS = ['paginationResult', 'pagination_result'];
+const CURSOR_KEYS = ['nextPageToken', 'next_page_token'];
+/* A token is a non-blank string, or a non-zero number (followed as its
+   string, as the first version of this read it). */
+const tokenOf = (v) => (typeof v === 'string' ? v.trim() && v
+  : (typeof v === 'number' && Number.isFinite(v) && v ? String(v) : ''));
+export const nextToken = (data) => {
+  for (const p of PAGINATION_KEYS) {
+    for (const c of CURSOR_KEYS) { const t = tokenOf(data?.[p]?.[c]); if (t) return t; }
+  }
+  for (const c of CURSOR_KEYS) { const t = tokenOf(data?.[c]); if (t) return t; }
+  return '';
+};
+/* A CURSOR UNDER A NAME THIS FILE DOES NOT READ — the one silent path the
+   walk had (independent review, 2026-11-12).
+   ─────────────────────────────────────────────────────────────────────────
+   The cursor's key inside paginationResult is INFERRED (drivers/actions
+   answers `nextPageToken`); no window has yet been seen holding more than one
+   page. The repeated-page check below catches a cursor we SEND that Uber
+   ignores. It cannot catch a cursor Uber sends that we never READ: nextToken
+   comes back empty, the loop ends after page one, and a busy quarter hour is
+   stored as its first 50 transactions under a window marked answered — the
+   money of every trip after the fiftieth missing, with nothing saying so.
+
+   So a FULL page with no cursor read is examined: a pagination object that
+   carries a non-empty value under a cursor-like key we do not know is that
+   case, and the window fails in its own words, naming the key. An empty or
+   absent pagination object on a full page is Uber saying there is no next
+   page (proto3 JSON omits an empty string), and passes. Only cursor-like
+   names count, because proto3 renders an int64 total as a string too. */
+export function unreadCursor(data) {
+  for (const p of PAGINATION_KEYS) {
+    const pg = data?.[p];
+    if (!pg || typeof pg !== 'object') continue;
+    for (const [k, v] of Object.entries(pg)) {
+      if (CURSOR_KEYS.includes(k) || !/token|cursor|next/i.test(k)) continue;
+      if (typeof v === 'string' ? v.trim() : Boolean(v)) return `${p}.${k}`;
+    }
+  }
+  return null;
+}
 
 /* Retry-After is seconds or an HTTP date; either way capped, because a header
    asking for an hour would hold the tick past the next three. */
@@ -391,6 +430,14 @@ export async function fetchWindow({ url, token, w, httpImpl = http, sleep = real
     raw.push(...page);
     pages += 1;
     pageToken = nextToken(data);
+    if (!pageToken && page.length >= PAGE_SIZE) {
+      const unread = unreadCursor(data);
+      if (unread) {
+        return { raw, pages, res, backoffs, truncated: true,
+          error: `a full page of ${PAGE_SIZE} came back with its cursor under ${unread}, which this `
+            + 'collector does not read — the rest of this window was not read' };
+      }
+    }
     if (!pageToken || !page.length) return { raw, pages, res, backoffs };
     if (pages >= MAX_PAGES) {
       return { raw, pages, res, backoffs, truncated: true,

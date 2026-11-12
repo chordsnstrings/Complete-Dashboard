@@ -43,9 +43,16 @@ export function uberLiveMoneyRoutes(app, { q, wrap }) {
            FROM collection_run
           WHERE source = 'uber_transactions' AND ($1::text IS NULL OR fleet_id = $1)
           ORDER BY fleet_id, finished_at DESC NULLS LAST`, P),
-      q(`SELECT fleet_id, max(finished_at) AS at FROM collection_run
-          WHERE source = 'uber_transactions' AND status = 'ok'
-            AND ($1::text IS NULL OR fleet_id = $1)
+      /* `answered_24h`: runs in the last day that got ANY answer from Uber.
+         An 'ok' or 'partial' run of this source answered at least one window
+         (src/sources/uber_transactions.js: every asked window refused is
+         'error'), so this is what lets an empty last_24h below say "Uber
+         answered and there was nothing" — or admit it was never answered. */
+      q(`SELECT fleet_id, max(finished_at) FILTER (WHERE status = 'ok') AS at,
+                count(*) FILTER (WHERE status IN ('ok', 'partial')
+                                   AND finished_at > now() - interval '24 hours')::int AS answered_24h
+           FROM collection_run
+          WHERE source = 'uber_transactions' AND ($1::text IS NULL OR fleet_id = $1)
           GROUP BY 1`, P),
       q(`SELECT fleet_id, count(*)::int AS transactions,
                 count(DISTINCT trip_uuid)::int AS trips,
@@ -59,6 +66,7 @@ export function uberLiveMoneyRoutes(app, { q, wrap }) {
          payments report has since stated — the second set is where agreement
          can be measured. */
       q(`SELECT m.fleet_id,
+                count(*) FILTER (WHERE m.fare IS NOT NULL)::int AS live_priced,
                 count(*) FILTER (WHERE t.price_source = 'uber_live')::int AS provisional,
                 sum(t.price) FILTER (WHERE t.price_source = 'uber_live') AS provisional_aed,
                 count(*) FILTER (WHERE t.price_source = 'uber_payments'
@@ -85,21 +93,41 @@ export function uberLiveMoneyRoutes(app, { q, wrap }) {
       }
       const detail = typeof r.detail === 'string' ? JSON.parse(r.detail) : (r.detail || []);
       const confirmed = t?.confirmed ?? 0;
+      /* AN EMPTY DAY IS A ZERO ONLY IF UBER WAS ASKED AND ANSWERED
+         (independent review, 2026-11-12). This read "0 transactions — Uber
+         reported no transaction for this fleet in the last 24 hours" whenever
+         the table held none, which is also exactly what it holds when every
+         run of the day was refused: a 403 on the org, an expired client, a
+         throttle on every pass. Then Uber reported nothing because nobody got
+         an answer from it, and the zero and its reason were both false. */
+      const answered = OK.get(f)?.answered_24h ?? 0;
+      const last24h = h ? { transactions: h.transactions, trips: h.trips, newest: h.newest }
+        : answered
+          ? { transactions: 0, trips: 0, newest: null,
+            why: 'Uber answered this feed for this fleet in the last 24 hours, and no window it '
+              + 'answered held a transaction' }
+          : { transactions: null, trips: null, newest: null,
+            why: 'not measured: no run in the last 24 hours got an answer from Uber'
+              + (r.error ? ` (the last run: ${String(r.error).slice(0, 160)})` : '') };
+      /* The agreement's reason, for the same reason: "the fare walk prices a
+         trip hours after the live feed does" is true only once the live feed
+         has priced something. With nothing priced by the feed there is
+         nothing to compare, and that is what is said. */
+      const unmeasured = (t?.live_priced ?? 0)
+        ? 'no trip the live feed priced has been priced by the payments report yet: the fare '
+          + 'walk prices a trip hours after the live feed does'
+        : 'nothing to compare yet: the live feed has priced no trip this fleet holds';
       return {
         fleet: f,
         last_run: { status: r.status, finished_at: r.finished_at, written: r.rows_written,
           error: r.error, windows: detail },
         last_ok_at: OK.get(f)?.at ?? null,
-        last_24h: h ? { transactions: h.transactions, trips: h.trips, newest: h.newest }
-          : { transactions: 0, trips: 0, newest: null,
-            why: 'Uber reported no transaction for this fleet in the last 24 hours' },
+        last_24h: last24h,
         provisional: { trips: t?.provisional ?? 0, aed: n(t?.provisional_aed) ?? 0 },
         agreement: confirmed
           ? { confirmed, agreed: t.agreed, pct: Math.round((t.agreed / confirmed) * 1000) / 10,
             worst_gap_aed: n(t.worst_gap) }
-          : { confirmed: 0, agreed: null, pct: null, worst_gap_aed: null,
-            why: 'no trip yet carries both this feed\'s fare and the payments report\'s: the '
-              + 'fare walk prices a trip hours after the live feed does' },
+          : { confirmed: 0, agreed: null, pct: null, worst_gap_aed: null, why: unmeasured },
       };
     });
     res.json({ fleets, source: 'uber_transactions',

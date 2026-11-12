@@ -124,6 +124,13 @@ const EXEMPT = {
     + 'saying no channel reports one; GetDriver returns recognitionRating and nothing here had asked',
   '/api/probe/uber/window': 'operator tool: asks the provider what it still holds for one window, '
     + 'to settle whether a gap in our history is recoverable or gone',
+  /* Added by the independent review of the UTX branch (2026-11-12): the route
+     shipped with no page and no entry here, so this file failed on it. */
+  '/api/status/uber-live-money': 'operator read for the rollout of Uber’s live per-trip money '
+    + 'feed (src/sources/uber_transactions.js, FIX-STATUS UTX): how many trips carry the feed’s '
+    + 'provisional price, and whether its fares agree with the payments report’s on trips both '
+    + 'have priced — the measurement that proves the fill rule safe, read by hand after the deploy. '
+    + 'Each run is already on #sources through /api/status; no page shows the agreement yet',
   '/api/probe/uber/tier': 'operator tool: asks the Uber GraphQL surface whether it names a driver reward '
     + 'tier — Blue, Gold, Platinum, Diamond — by trying introspection, then a fixed list of candidate fields '
     + 'on GetDriver, then a fixed list of candidate operations. Every candidate is written in the file; nothing '

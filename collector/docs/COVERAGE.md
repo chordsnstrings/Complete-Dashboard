@@ -981,6 +981,13 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **A new `/api` route is three declarations, not one** (2026-11-12, FIX-STATUS UTX13–14). The
+  handler; an entry in `api/access/manifest.json` (the gate denies by default: undeclared, it is
+  served to anonymous visitors in open mode and refused to EVERY signed-in reader with 403
+  "undeclared"); and a page that calls it or a reasoned entry in `test/endpoint_coverage.test.mjs`
+  EXEMPT. The UTX branch shipped the first alone, with its own 82 checks green, while
+  `access_manifest` and `endpoint_coverage` were red. Run both whenever a route is added.
+
 * **Under Arkiv, focus.js decides what a row IS from its loose text** (2026-11-11, FIX-STATUS
   UBJ1). Text with no prose block around it (`p`, `.cap`, `.note`, `.why`…) is judged by the
   nearest div, so a list row whose only loose text was its "open ↗" link was judged as one
@@ -10849,3 +10856,17 @@ node this product thinks it is.
   hour's two or three drivers' first and last names would have been kept every night. Fixing a
   probe's verb is also deciding what its answer may leave behind — `withholdNames` keeps the keys
   and drops the values.
+
+### Traps the independent review added (2026-11-12, FIX-STATUS UTX15–16)
+
+- **"Nothing stored" is a zero only if somebody got an answer.** The live feed's table holds no
+  transaction for a fleet after a quiet day AND after a day of refused runs (a 403 on the org, an
+  expired client, a throttle on every pass). `/api/status/uber-live-money` printed `0` and "Uber
+  reported no transaction" for both. Ask `collection_run` whether any run in the window got an
+  answer (`ok`/`partial`: for this source every asked window refused is `error`) before calling an
+  empty table a measurement.
+- **Detecting an ignored cursor is not detecting an unread one.** A page repeated for the next
+  cursor catches a token we SEND that Uber ignores. A token Uber SENDS under a key we do not read
+  ends the loop after page one with the window marked answered — silent truncation. With the cursor
+  key still inferred, a FULL page and no cursor read is examined: a cursor-like key carrying a value
+  fails the window and names the key; an empty `paginationResult` is the last page.

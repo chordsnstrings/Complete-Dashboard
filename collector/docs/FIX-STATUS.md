@@ -5810,3 +5810,33 @@ reason ("Uber's payments report carries no row for this booking") — the feed's
 `uber_live_transaction` for a later change to show. Unverified until production: `paginationResult`'s
 inner key (inferred from the drivers surface; an ignored cursor is caught), the 15 min − 1 ms span,
 and the `cash_collected` node's path (no cash trip was in the sampled row). Nothing here is deployed.
+
+### UTX — the independent review (2026-11-12)
+
+Reviewed adversarially against `90d76da`. The builder's two load-bearing claims were re-proved by
+revert on a byte-exact copy and restored with `cmp`: removing the fill guard (UTX6) overwrote the
+statement-grade 50.10 and the legacy 44.00 — 6 checks fail; removing the fare walk's stamp (UTX7)
+put 46.94 back over the statement's 47.50 — 4 fail. Two suites the builder did not run were red on
+the branch, and the read route and the walk each had a path that could say something untrue.
+
+| id | what | where | test | state |
+|---|---|---|---|---|
+| UTX13 | **The new route was undeclared to the access gate.** `GET /api/status/uber-live-money` had no entry in `api/access/manifest.json`, so `test/access_manifest` failed on it and the gate (deny by default) refused every signed-in reader with 403 "undeclared" — in any mode — while anonymous visitors in open mode were served. Declared: subject SYS, `fleet: param` (the handler honours `?fleet=`, so a one-fleet reader is rewritten to its own fleet), the AED totals under REV and the counts under BK, so a role without them sees those fields withheld | `api/access/manifest.json` | `access_manifest` 17/0 (16/1 on the branch as built: "every route in code has an entry … GET /api/status/uber-live-money") | written, not deployed |
+| UTX14 | **The route had no page and no exemption**, so `test/endpoint_coverage` failed ("orphaned: /api/status/uber-live-money"). Exempted with its reason: an operator read for the rollout (the agreement check that proves the fill rule), each run already on #sources through `/api/status` | `test/endpoint_coverage.test.mjs` EXEMPT | `endpoint_coverage` 4/0 (3/1 as built) | written, not deployed |
+| UTX15 | **An empty day was a zero whatever happened.** `last_24h` read `0 transactions — "Uber reported no transaction for this fleet in the last 24 hours"` whenever the table held none — also exactly what it holds after a day of refused runs (a 403 on the org, an expired client, a throttle every pass). Now a zero only when a run in the last 24 h got an answer (`ok`/`partial` — every asked window refused is `error`); otherwise `null`, "not measured", and the last run's own words. The agreement's reason likewise: "the fare walk prices a trip hours after the live feed does" only once the feed has priced something; before that, "nothing to compare yet" | `api/uber_live_money_routes.js` | `uber_transactions` §9: 3 checks. Revert (HEAD route): all 3 fail — the refused day read `0` with "Uber reported no transaction" | written, not deployed |
+| UTX16 | **A cursor Uber sends under a key the walk does not read was a silent truncation.** The repeated-page check caught a cursor we send that Uber ignores, not one Uber sends that we never read: `nextToken` empty, loop ends after page one, a busy quarter hour stored as its first 50 transactions under a window marked answered. A FULL page with no cursor read now fails its window, naming the key, when the pagination object carries a cursor-like key with a value; an empty pagination object (the end) and a string total pass. `nextToken` reads both spellings of the envelope | `src/sources/uber_transactions.js` `nextToken`, `unreadCursor`, `fetchWindow` | `uber_transactions` §3: 3 checks. Revert (guard removed): "a full page whose cursor sits under a key nobody reads" fails, 50 rows kept and no error | written, not deployed |
+| UTX17 | **Two notes that the branch made untrue.** `api/cache.js` said a `realtime` run "writes no trip and no money" — the live feed is a `realtime` run that writes `trip.price`, deliberately; the exception and its bound are now stated there. HANDOFF §4.4 listed the feed as "not collected … the nightly probe still sends a GET": now says written on this branch, not deployed | `api/cache.js` VERSION_SQL comment; `docs/HANDOFF.md` §4.4 | — | written, not deployed |
+
+Also run on the reviewed branch, all green: `uber_transactions` 88, `access_manifest` 17,
+`endpoint_coverage` 4, `access_core` 211, `auth_banner` 79, `collection_debt` 34,
+`source_resilience` 29, `dangling_online` 55, `cache` 59, `uber_fleet_window_tz` 17; and the
+builder's list re-run: `uber_payments_order` 34, `collector_invariants` 129, `quiet_sources` 32,
+`rollup_schedule` 5, `tokens` 150, `chart_marks` 151, `uber_fleet_orgs` 13,
+`uber_per_fleet_oauth` 15, `migrate` 34, `uber_tier_probe` 38, `credential_save_check` 109,
+`consistency` 67, `route_smoke` 60, `server_wiring` 5.
+
+Left for whoever ships it: `UBER_FARE` / `UBER_FARE_WHY` (api/public/ui.js) still say Uber's fares
+"come from its separate payments report, which is collected a week at a time", and #compare adds "so a
+recent Uber booking carries no fare until that walk reaches it". Once the feed is verified on
+production for both fleets, a recent Uber row is priced minutes after the ride and those sentences
+describe only the rows the feed has not reached; six tests pin their wording.

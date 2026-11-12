@@ -224,6 +224,25 @@ const at = (iso) => iso;   // readability
   const s = (await run({ httpImpl: stuck.fn })).fleets[0];
   check('an ignored cursor on a full page is reported, not looped on', s.failed === 1
     && stuck.calls.length === 5, j(s));
+  /* The other half (independent review): a cursor Uber SENDS under a key this
+     file does not read. nextToken comes back empty and, unguarded, the loop
+     ended after page one with the window marked answered — 50 of its
+     transactions stored, the rest silently gone. */
+  const w0 = T.txnWindows(new Date('2026-11-12T10:07:30Z'), 0.25)[0];
+  const full = data.slice(0, 50).map((d) => d.txn);
+  const once = (pagination) => T.fetchWindow({ url: T.txnUrl('o'), token: 't', w: w0,
+    httpImpl: async () => ({ status: 200, headers: {}, data: { transactions: full, paginationResult: pagination } }) });
+  const unread = await once({ next_cursor: 'abc' });
+  check('a full page whose cursor sits under a key nobody reads fails its window, naming the key',
+    /paginationResult\.next_cursor/.test(unread.error || '') && unread.truncated && unread.raw.length === 50,
+    j({ e: unread.error, n: unread.raw.length }));
+  const end = await once({});
+  const total = await once({ totalSize: '50' });
+  check('…while a full LAST page (an empty paginationResult) is simply the end, and a total is not a cursor',
+    !end.error && end.pages === 1 && !total.error && total.pages === 1, j({ end: end.error, total: total.error }));
+  check('the cursor is read under either spelling of the envelope', T.nextToken({ pagination_result: { nextPageToken: 'x' } }) === 'x'
+    && T.nextToken({ paginationResult: { next_page_token: 'y' } }) === 'y' && T.nextToken({ paginationResult: {} }) === ''
+    && T.nextToken({ paginationResult: { nextPageToken: 50 } }) === '50' && T.nextToken({ paginationResult: { nextPageToken: '  ' } }) === '');
 }
 
 /* ══ 4. 429, 403, 400 ══════════════════════════════════════════════════════ */
@@ -515,6 +534,24 @@ console.log('\nGET /api/status/uber-live-money');
   const absent = await m.get('/api/status/uber-live-money?fleet=egari');
   check('no run at all reads as absent, with what it needs', absent.body?.fleets?.[0]?.last_run === null
     && /UBER_ORG_ENCRYPTED_EGARI/.test(absent.body.fleets[0].absent), j(absent.body?.fleets?.[0]));
+  /* An empty day is a zero only if Uber answered (independent review): a day
+     of refused runs holds no transaction either, and "Uber reported none"
+     would be a reason that is not the true one. Egari holds no transaction
+     at all here, whatever the clock says. */
+  const egariRun = (status, error = null) => q(
+    `INSERT INTO collection_run (source, fleet_id, mode, status, rows_written, finished_at, error)
+     VALUES ('uber_transactions', 'egari', 'realtime', $1, 0, now(), $2)`, [status, error]);
+  await egariRun('error', '4 of 4 windows refused: 403 from Uber — bad key');
+  const refused = (await m.get('/api/status/uber-live-money?fleet=egari')).body?.fleets?.[0] || {};
+  check('a day of refused runs is NOT a zero: not measured, and the last run\'s own words',
+    refused.last_24h?.transactions === null && /not measured/.test(refused.last_24h?.why || '')
+    && /bad key/.test(refused.last_24h.why), j(refused.last_24h));
+  check('…and nothing the feed priced means nothing to compare, said as that',
+    refused.agreement?.pct === null && /nothing to compare/.test(refused.agreement?.why || ''), j(refused.agreement));
+  await egariRun('ok');
+  const quiet = (await m.get('/api/status/uber-live-money?fleet=egari')).body?.fleets?.[0] || {};
+  check('a day Uber answered with nothing is a measured zero, and says it was answered',
+    quiet.last_24h?.transactions === 0 && /answered/.test(quiet.last_24h?.why || ''), j(quiet.last_24h));
   await q(`UPDATE trip SET price_source = 'uber_live' WHERE price_source = 'uber_payments'`);
   await q(`UPDATE trip SET price_source = NULL WHERE external_id = 't-stmt'`);
   const unmeasured = (await m.get('/api/status/uber-live-money?fleet=ecosine')).body?.fleets?.[0] || {};
