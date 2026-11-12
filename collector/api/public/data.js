@@ -6,6 +6,7 @@
 import { dubaiDay } from './tz.js';
 import { swr } from './swr.js';
 import { WithheldError, noteWithheld, toSignIn } from './access.js';
+import { noteRetention } from './retention_note.js';
 
 /* Storage access is guarded, not assumed. A browser with site data blocked
    THROWS on the getter rather than returning null, and this module is also
@@ -214,6 +215,9 @@ export const api = async (path, opts) => {
     /* `quiet`: chrome that is not the page (the desktop's today strip) keeps
        its refusals out of the page's "not shown to your role" line. */
     if (!opts?.quiet) noteWithheld(r.headers.get('x-fm-withheld'));
+    /* And what the data-retention pass has thinned out of the range this
+       answer read — said once at the top too (retention_note.js). */
+    if (!opts?.quiet) noteRetention(r.headers.get('x-fm-retention'));
     if (!r.ok) {
       /* Signed out, or not shown to this role: both are answers with a true
          reason, not failures, and each is told as what it is. */

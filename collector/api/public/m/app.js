@@ -27,6 +27,7 @@ import { SCREENS, TABS, titleFor } from './screens.js';
 /* Sign-in and access, the same library the desktop uses (../access.js): the
    server decides, the phone draws what it decided. */
 import { mountAssistant } from '../agentchat.js';
+import { resetRetention, retentionBanner } from '../retention_note.js';
 import { who, loadWho, gated, canOpenView, subjectOf, closedBlock, withheldBanner, resetWithheld,
   WithheldError, toSignIn, installFetchGuard, fleetList, fleetNames, allFleetsLabel } from '../access.js';
 import { phoneContract } from './ui.js';
@@ -294,6 +295,7 @@ async function render() {
   deck.scrollTop = 0;
   deck.innerHTML = '';
   resetWithheld();
+  resetRetention();
   /* A screen this role does not open says so, with the reason and a way to
      ask — the same rule as the desktop (ULM-DESIGN §7). */
   if (gated() && !['account', 'access', 'fleet-names', 'more'].includes(id)
@@ -334,6 +336,8 @@ async function render() {
     if (g === gen) {
       const wb = withheldBanner();
       if (wb) deck.prepend(wb);
+      const rb = retentionBanner();
+      if (rb) deck.prepend(rb);
     }
   } catch (e) {
     if (g !== gen) return;

@@ -63,6 +63,8 @@
 
 /* The assumption, in the words the pages print. Exported so a page quotes the
    rule rather than paraphrasing it. */
+import { retentionHorizon } from './data_retention_notes.js';
+
 export const ALERT_COVERED_DAY_RULE =
   'a day counts as covered when the alert feed produced at least one row on it; '
   + 'on a feed running thousands of rows a day, a day with none is an outage rather than a calm day';
@@ -81,8 +83,16 @@ const spanDays = (from, to) => Math.max(0,
  *
  * @param days  ['YYYY-MM-DD', ...] — days inside [from, to] with >= 1 alert row
  */
-export function alertCoverageOf(days, from, to, { fleet = null } = {}) {
+/* `removedBefore` (a Dubai day, or null): the first day the data-retention
+   pass left whole, when RETENTION_ALERT_DAYS has removed alerts
+   (src/data_retention.js; api/data_retention_notes.js reads it). Days before
+   it are still not covered — nothing is there to count — but the reason is
+   not the feed: saying "the alert feed produced nothing" of rows this product
+   collected and then deleted would be a false reason. So the basis says what
+   happened, and each gap before the boundary is marked `removed`. */
+export function alertCoverageOf(days, from, to, { fleet = null, removedBefore = null } = {}) {
   const windowDays = spanDays(from, to);
+  const removed = removedBefore && String(removedBefore).slice(0, 10) > from ? String(removedBefore).slice(0, 10) : null;
   const covered = [...new Set((days || []).map((d) => String(d).slice(0, 10)))]
     .filter((d) => d >= from && d <= to).sort();
   const measured = covered.length > 0;
@@ -103,6 +113,9 @@ export function alertCoverageOf(days, from, to, { fleet = null } = {}) {
     else run = { from: d, to: d, days: 1 };
   }
   if (run) gaps.push(run);
+  if (removed) for (const g of gaps) if (g.from < removed) g.removed = true;
+  const removedNote = removed ? `; alerts before ${removed} were removed by retention (RETENTION_ALERT_DAYS), `
+    + 'so those days count as not covered for that reason, not because the feed was dark' : '';
 
   return {
     from, to, fleet,
@@ -121,11 +134,14 @@ export function alertCoverageOf(days, from, to, { fleet = null } = {}) {
        not have a rate of zero, and it does not have a silent null. */
     measured,
     rule: ALERT_COVERED_DAY_RULE,
+    removed_before: removed,
     basis: !measured
-      ? `not measured — the alert feed produced nothing in these ${windowDays} days`
+      ? (removed && to < removed
+        ? `not measured — alerts before ${removed} were removed by retention (RETENTION_ALERT_DAYS)`
+        : `not measured — the alert feed produced nothing in these ${windowDays} days${removedNote}`)
       : covered.length === windowDays
         ? `measured over all ${windowDays} day${windowDays === 1 ? '' : 's'} in this window`
-        : `measured over ${covered.length} of the ${windowDays} days in this window`,
+        : `measured over ${covered.length} of the ${windowDays} days in this window${removedNote}`,
   };
 }
 
@@ -149,7 +165,11 @@ export async function alertCoverage(q, from, to, { fleet = null } = {}) {
         AND ($3::text IS NULL OR fleet_id = $3)
       GROUP BY 1 ORDER BY 1`,
     [from, to, fleet]);
-  return alertCoverageOf(rows.map((r) => r.day), from, to, { fleet });
+  /* Read through the same cached horizon the page notes use, so the basis and
+     the banner can never disagree about where retention stopped. */
+  const horizon = await retentionHorizon(q);
+  return alertCoverageOf(rows.map((r) => r.day), from, to,
+    { fleet, removedBefore: horizon.alert?.action === 'removed' ? horizon.alert.before : null });
 }
 
 /* The predicate every denominator narrows itself with. An empty day set binds

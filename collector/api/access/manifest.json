@@ -5969,6 +5969,22 @@
  },
  {
   "method": "GET",
+  "path": "/api/settings/retention",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/data_retention_routes.js. Body: {next: the RETENTION_* settings the next pass reads, with the schedule and the cutoffs; last: the latest retention_run with tables[] (tbl, policy, cutoff, considered, would_delete, deleted, days_examined, days_pending, complete, total_estimate, oldest, newest, note); history[]: 14 passes with summed counts; state[]: retention_state (tbl, action, done_before, bucket_min); absent: the reason when there is no record}. Whole-table row counts and timestamps only: no fleet data, no personal data. Never cached (/api/settings is on api/cache.js NEVER). Read by #settings (api/public/retention_note.js retentionPanel)."
+ },
+ {
+  "method": "GET",
   "path": "/api/settlement/cash-exposure",
   "subject": "CASH",
   "carries": [
