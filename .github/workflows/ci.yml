@@ -1,0 +1,108 @@
+# CI for the fleet dashboard: what it runs, what it leaves out, and why.
+# ─────────────────────────────────────────────────────────────────────────────
+# Until 2026-11-12 nothing ran the tests but a person: 394 files, about 23
+# minutes on a shared 4-CPU sandbox, run by hand before a deploy. This runs the
+# part of that suite a plain GitHub runner CAN run, on every pull request into
+# the production branch and on demand:
+#
+#   1. install exactly the lockfile (`npm ci` refuses a package-lock.json that
+#      is out of step with package.json, so a dependency changed in one and
+#      not the other fails here, not on the next deploy);
+#   2. parse every source file under src/, api/ and bin/ (`node --check` — the
+#      check bin/checkjs.sh runs by hand, extended to bin/ and .mjs);
+#   3. every test file that needs no browser and no external Postgres, in four
+#      shards so the run stays under ten minutes on two-CPU runners.
+#
+# WHAT IS LEFT OUT, said out loud by the runner on its first screen:
+#   --skip-browser   the 88 files that drive Chromium (directly, through a test
+#                    helper, or through a bin/ script they spawn) or the :8099
+#                    mock server. A runner has no Chromium, and the runner never
+#                    starts or probes the mock server in this mode
+#                    (test/run_all_lib.mjs decides which files, from source).
+#   --allow-fail     known failures that are not defects in the code under
+#                    test — reported on every run, never counted:
+#                      access_pages          needs a Postgres this runner lacks
+#                      arkiv_classic_frozen  fails 7 routes on any machine
+#                      truncation            fails in 30-day months
+#                    (the first two are browser files and are skipped anyway;
+#                    they stay listed so a run without --skip-browser is still
+#                    read correctly). A listed file that starts passing is
+#                    called out in the log, so the list cannot go stale quietly.
+#
+# Also known (COVERAGE, system audit 2026-11-12) and NOT allow-listed, because
+# hiding them would hide real regressions too: payout_scope can fail between
+# 20:00 and 24:00 UTC, forecast_yoy at a month boundary.
+#
+# This workflow deploys nothing. Production builds from the branch only when
+# bin/deploy.mjs forces a build (collector/deploy/app-spec.redacted.yaml).
+
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - claude/ecosine-egari-tracking-apis-rf9ong
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install-and-parse:
+    name: lockfile, install, parse
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+        working-directory: collector
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: collector/package-lock.json
+      - name: The lockfile is committed
+        run: test -f package-lock.json
+      - name: Install exactly the lockfile
+        run: npm ci --no-audit --no-fund
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      - name: Every file under src, api and bin parses
+        run: find src api bin -type f \( -name '*.js' -o -name '*.mjs' \) -not -path '*/node_modules/*' -print0 | xargs -0 -n1 -P4 node --check
+
+  test:
+    name: tests ${{ matrix.shard }}/4 (no browser, no external Postgres)
+    needs: install-and-parse
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - 1
+          - 2
+          - 3
+          - 4
+    defaults:
+      run:
+        shell: bash
+        working-directory: collector
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: collector/package-lock.json
+      - name: Install exactly the lockfile
+        run: npm ci --no-audit --no-fund
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      - name: Tests
+        run: node test/run-all.mjs --skip-browser --allow-fail=access_pages,arkiv_classic_frozen,truncation --shard=${{ matrix.shard }}/4 --jobs=2

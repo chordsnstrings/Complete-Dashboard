@@ -319,10 +319,14 @@ const wait = (s) => (s < 120 ? `${s} second${s === 1 ? '' : 's'}`
   : `${Math.ceil(s / 60)} minutes`);
 
 /* The 429 body. Plain words, and true ones: the limit is per network address,
-   so several people behind one office connection share it. */
+   so several people behind one office connection share it. `error` carries
+   the wait as well as the word, because not every page prints `detail`:
+   api/public/data.js shows "429 <error>: <detail>", but the payout
+   verification panel (payouts.js) shows `error` alone, and "too many
+   requests" with no time in it would leave the reader guessing when to retry. */
 export function refusalBody(name, b, retryAfter) {
   return {
-    error: 'too many requests',
+    error: `too many requests from this address — try again in ${wait(retryAfter)}`,
     budget: name,
     limit: b.limit,
     window_s: b.window_s,

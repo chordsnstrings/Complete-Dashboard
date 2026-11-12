@@ -10805,3 +10805,32 @@ What the OPS workstream learned that is not written down above. FIX-STATUS "OPS"
   rather than print it as a commit. Adding the
   variable is a spec change, so it redeploys the last BUILT commit (trap 25):
   add it, then `node bin/deploy.mjs`.
+* **`process.exit()` straight after a burst of `console.log` truncates output
+  read through a pipe.** stdout to a pipe is asynchronous in Node here: the
+  runner's `--list` printed 300 lines and exited, and a reader on the other end
+  of a pipe got 8,806 bytes — half the list, differently cut on every run.
+  CI reads every log through a pipe. Write long output in one piece and wait
+  for it to drain (`process.stdout.write('', cb)`) before exiting; the runner
+  now does so for `--list` and for its final summary.
+* **A test can need a browser without importing one.**
+  `numbers_audit_identity` imports nothing of playwright; it spawns
+  `bin/numbers-audit.mjs`, which launches Chromium through `test/browser.mjs`.
+  Any rule for "which tests need a browser" must follow spawned bin/ scripts
+  as well as imports (test/run_all_lib.mjs does). 88 of 397 files need one.
+* **CI on GitHub: what it can and cannot run.** `.github/workflows/ci.yml`
+  runs on pull requests into the production branch and by hand. A manual run
+  (`workflow_dispatch`) is only offered once the workflow file is on the
+  repository's DEFAULT branch — GitHub's rule, not this file's. The runner's
+  default parallelism is CPUs − 1, which is ONE on a two-CPU runner (GitHub's
+  standard runner for a private repository), so CI passes `--jobs=2` and splits the
+  suite in four shards. Not allow-listed, and liable to fail CI at certain
+  hours for reasons of the clock rather than the code: `payout_scope` (20:00–
+  24:00 UTC) and `forecast_yoy` (a month boundary) — system audit 2026-11-12.
+* **`trust proxy` is still 1 with Cloudflare in front.** api/server.js's own
+  comment says the hop count must be counted, never guessed, if a CDN is put in
+  front. Cloudflare now is (above). Whether App Platform's router already
+  folds Cloudflare's hop into the one it reports is not measured, so the count
+  was left alone: `req.ip` feeds the sign-in throttle and the ledger's audit
+  column, and a wrong count there is a forgeable address recorded as fact.
+  The request budget does not depend on it unless neither connecting-ip
+  header arrives.

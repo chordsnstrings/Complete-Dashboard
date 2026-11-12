@@ -251,7 +251,7 @@ const drive = (lim, req) => { const res = fakeRes(); let passed = false; lim(req
   check('429 carries Retry-After in whole seconds to the end of the window', refusal.headers['retry-after'] === '60', refusal.headers['retry-after']);
   check('…and is never cached', refusal.headers['cache-control'] === 'no-store');
   check('…and says why in plain words',
-    refusal.body?.error === 'too many requests' && refusal.body.budget === 'reads' && refusal.body.limit === 3
+    refusal.body?.error === 'too many requests from this address — try again in 60 seconds' && refusal.body.budget === 'reads' && refusal.body.limit === 3
     && /at most 3 requests for figures per minute/.test(refusal.body.detail) && /in 60 seconds/.test(refusal.body.detail),
     JSON.stringify(refusal.body));
   check('another client is untouched', drive(lim, fakeReq('GET', '/api/kpis', B)).passed);
@@ -294,6 +294,9 @@ const drive = (lim, req) => { const res = fakeRes(); let passed = false; lim(req
 }
 check('the refusal body is shaped the way data.js prints it ({error, detail})',
   (() => { const x = refusalBody('writes', { limit: 60, window_s: 60, what: 'changes' }, 1); return x.error && /in 1 second\./.test(x.detail); })());
+/* payouts.js prints `error` alone on a refusal: the wait must be in it. */
+check('`error` alone still says when to retry', /try again in 41 minutes$/.test(refusalBody('provider', BUDGETS.provider, 2460).error),
+  refusalBody('provider', BUDGETS.provider, 2460).error);
 
 /* Over real HTTP, through Express, the order server.js uses. */
 {
