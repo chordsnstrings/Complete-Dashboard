@@ -50,7 +50,12 @@ const OPS = meAs({ id: 4, name: 'Test Ops', caps: ['finding.own', 'export', 'age
 
 const browser = await launchChromium();
 async function open(hash, { me = null, routes = {} } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  /* serviceWorkers blocked (integration, 2026-11-12): the desktop now registers
+     /sw.js (ARK), and Playwright's route() does not see a request the worker
+     answers — the findings stub went unread once the worker took the page, the
+     panel read the mock server's answer instead and said "its rule no longer
+     finds it", and the Close button the test waits for never came. */
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce', serviceWorkers: 'block' });
   const page = await ctx.newPage();
   const errs = []; page.on('pageerror', (e) => errs.push(String(e).slice(0, 200)));
   const asked = [];
