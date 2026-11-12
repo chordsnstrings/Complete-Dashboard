@@ -10,6 +10,7 @@
    it: the window, and the sentence that says what the numbers do not cover. */
 import { winDays } from './window.js';
 import { cancellationsSql, OFFER_CHANNELS } from './cancellation_sql.js';
+import { onlyFleet } from './access/one_fleet.js';
 
 export function cancellationRoutes(app, { q, wrap }) {
   app.get('/api/cancellations', wrap(async (req, res) => {
@@ -47,9 +48,20 @@ export function cancellationRoutes(app, { q, wrap }) {
        23:59:59.999 for exactly the timestamptz comparison being removed
        here, and against a date column that string would have to be cast
        back down again. */
+    /* ONE FLEET'S CANCELLATIONS, for a reader whose access covers one fleet
+       (api/access/one_fleet.js): `_fmfleet` narrows the bookings themselves,
+       so each person's row counts only their bookings in that fleet, the ids,
+       plates and channels listed are only the ones those bookings carry, and
+       every total below — summed from the rows — follows. A person who drives
+       in both fleets appears with their one-fleet record, never with the other
+       fleet's cancellations folded in. Null for everyone else: the statement
+       is the one it always was. */
+    const only = onlyFleet(req);
     const rows = await q(cancellationsSql({
-      where: 'n.local_day BETWEEN $1::date AND $2::date AND n.is_booking',
-    }), [from, to]);
+      where: only
+        ? 'n.local_day BETWEEN $1::date AND $2::date AND n.is_booking AND n.fleet_id = $3'
+        : 'n.local_day BETWEEN $1::date AND $2::date AND n.is_booking',
+    }), only ? [from, to, only] : [from, to]);
 
     /* WHAT THIS PAGE CANNOT TELL YOU, computed rather than asserted.
        If no Yango cancellation fell in the window the caveat is not printed —

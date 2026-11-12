@@ -668,9 +668,32 @@ async function unheldReasons(q) {
 /* The whole roster as the page sees it: one entry per (fleet, employee_id)
    ever uploaded, the latest upload's people first and the ones a newer
    upload dropped marked "off the HR list since". */
-export async function rosterView(q, { today = null } = {}) {
+/* `fleet`: ONE FLEET'S ROSTER, for a reader whose access covers one fleet
+   (api/access/one_fleet.js; /api/hr-roster passes it, nothing else does).
+   This answer was refused to such a reader because its people carried a
+   fleet but its totals and upload history counted every fleet beside them —
+   "on the list: 144" over a one-fleet table of 70. Narrowed:
+     - the people are that fleet's HR rows, and every total is counted from
+       them, so each count is a count OF the list beside it; `by_fleet` names
+       that fleet alone rather than printing the other's as a zero;
+     - an account HR's row matched that the database files under the OTHER
+       fleet is left off the person (an id of the other fleet is the other
+       fleet's record), and person_id follows the accounts that remain;
+     - each upload's rows_read is that fleet's rows in it, and byte_len is
+       null with the reason — one workbook holds both fleets, and its size is
+       a measurement of both.
+   Without `fleet` the answer is exactly what it was. */
+export async function rosterView(q, { today = null, fleet = null } = {}) {
   const day = today || dubaiDay(new Date());
-  const ups = await uploads(q);
+  let ups = await uploads(q);
+  if (fleet && ups.length) {
+    const mine = new Map((await q(
+      `SELECT upload_id, count(*)::int n FROM hr_roster_row WHERE fleet_id = $1 GROUP BY upload_id`, [fleet]))
+      .map((r) => [Number(r.upload_id), r.n]));
+    ups = ups.map((u) => ({ ...u, rows_read: mine.get(Number(u.id)) ?? 0, byte_len: null,
+      byte_len_absent: 'One HR workbook holds both fleets\' employees, so its size measures both; '
+        + `rows_read counts this fleet's rows in it.` }));
+  }
   if (!ups.length) {
     return { latest: null, uploads: [], people: [], totals: null, today: day,
       absent_reason: 'No HR roster has been uploaded yet. Nothing on this page can be counted until '
@@ -681,7 +704,8 @@ export async function rosterView(q, { today = null } = {}) {
   const latest = ups[0];
   const rows = await q(
     `SELECT ${PUBLIC_COLS} FROM hr_roster_row r JOIN hr_roster_upload u ON u.id = r.upload_id
-      ORDER BY u.export_date, u.id`);
+      ${fleet ? 'WHERE r.fleet_id = $1' : ''}
+      ORDER BY u.export_date, u.id`, fleet ? [fleet] : []);
   const spine = await personMap(q);
   const reason = await unheldReasons(q);
   const byEmp = new Map();
@@ -723,10 +747,19 @@ export async function rosterView(q, { today = null } = {}) {
         prev = v;
       }
     }
-    const accounts = accountsOf(last.matched_accounts).map((a) => ({ ...a,
-      person_id: spine.ok ? (spine.byAccount.get(a.ext_id) ?? null) : null }));
+    const matched = accountsOf(last.matched_accounts);
+    const accounts = matched
+      .filter((a) => !fleet || a.fleet_id === fleet)
+      .map((a) => ({ ...a, person_id: spine.ok ? (spine.byAccount.get(a.ext_id) ?? null) : null }));
     const pids = [...new Set(accounts.map((a) => a.person_id).filter((x) => x != null))];
-    const heldIds = new Set(accounts.map((a) => `${a.platform}\u0000${String(a.ext_id).toLowerCase()}`));
+    /* Held means matched to an account in ANY fleet — from every match, not
+       only the ones shown. Built from the narrowed list, an HR id that
+       matched an account filed under the other fleet came back as
+       "unmatched", with the reason "no … account with this id is held in
+       anything collected": false — it is held, outside the reader's access
+       — and it printed the other fleet's account id (review, 2026-11-12).
+       Unnarrowed, `accounts` IS every match, so nothing changes there. */
+    const heldIds = new Set(matched.map((a) => `${a.platform}\u0000${String(a.ext_id).toLowerCase()}`));
     const unmatched = Object.entries(PLATFORM_COLUMNS).filter(([col, plat]) => last[col]
       && !heldIds.has(`${plat}\u0000${String(last[col]).toLowerCase()}`))
       .map(([col, plat]) => ({ platform: plat, ext_id: last[col], column: col,
@@ -764,7 +797,8 @@ export async function rosterView(q, { today = null } = {}) {
     totals: {
       on_list: on.length,
       off_list: people.length - on.length,
-      by_fleet: Object.fromEntries(['ecosine', 'egari'].map((f) => [f, on.filter((p) => p.fleet_id === f).length])),
+      by_fleet: Object.fromEntries((fleet ? [fleet] : ['ecosine', 'egari'])
+        .map((f) => [f, on.filter((p) => p.fleet_id === f).length])),
       matched: { platform_id: on.filter((p) => p.match_basis === 'platform_id').length,
         phone: on.filter((p) => p.match_basis === 'phone').length,
         none: on.filter((p) => p.match_basis === 'none').length },

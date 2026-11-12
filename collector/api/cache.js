@@ -152,7 +152,19 @@ const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/t
      import would look as though it had written nothing, and the next move is
      to upload the same file again (which the duplicate check then refuses,
      confirming the wrong story). A few hundred rows; nothing worth caching. */
-  '/api/hr-roster'];
+  '/api/hr-roster',
+  /* THE MESSAGES, which answer only a signed-in person (api/sms_routes.js
+     signedIn(): "they carry drivers' mobile numbers and what was texted to
+     them"). That check lives in the HANDLER, and a hit here is served
+     before the handler runs — so once anyone signed in had opened the
+     Messages page, an anonymous visitor in open mode asking the same address
+     was handed the cached log, mobile numbers and texts, without the check
+     ever running. One-fleet narrowing (2026-11-12) made the address of a
+     one-fleet reader's log predictable too (`?fleet=…&_fmfleet=…`). Found in
+     review, 2026-11-12, and proven in test/access_one_fleet.test.mjs §15.
+     LIMIT 200 over one indexed table; the preview is a dry run of the next
+     batch, which a cached copy would freeze. Neither is worth a cache. */
+  '/api/sms/'];
 
 /* ONE DAY OF ONE DRIVER, WHEN THE DAY IS TODAY (2026-10-13).
    /api/driver/day for a past day only changes when a collection lands, which

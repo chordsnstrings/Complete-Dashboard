@@ -6094,3 +6094,129 @@ fixture data — production has more NULL-fleet and `'*'` rows (company-wide col
 telematics), which a scoped reader does not see, so more `param` answers may change for one-fleet
 readers there: compare them, not only time them, before granting one-fleet roles. `access_pages`
 was not run (it starts its own server on 8412 and a browser).
+## ONE - One-fleet readers on the 77 mixed routes (2026-11-12)
+
+ULM-DESIGN §16 deferred it: a reader whose access covers one fleet was refused every route the
+manifest classes `mixed`, with one sentence for all of them. Measured on 2026-11-12 there were
+**110** such entries, not 77 — the HR roster, the feeds, the watch lists and the target pages
+joined the class after the design counted. Each was read and given one of two outcomes:
+**narrowed** (re-classed `narrow`; the handler answers for the one fleet in every row, total and
+count) or **still refused, with that route's own true reason** (still `mixed`;
+`api/access/one_fleet.js` MIXED_WHY). Nothing changes for an anonymous visitor in open mode or an
+unrestricted reader: the gate hands the narrowing parameter (`_fmfleet`) to one-fleet readers
+only, and the handlers read it in addition to — never instead of — what they read before.
+Test: `test/access_one_fleet.test.mjs` — the real gate, the response cache and every route
+(test/mount.mjs), on PGlite holding two fleets' records. Every row below: **written, not deployed**.
+
+| id | what | where | test | state |
+|---|---|---|---|---|
+| ONE1 | **The `narrow` class.** For a one-fleet reader the gate writes the fleet into `_fmfleet` and `fleet`, keys the cache on both, refuses another fleet named in `?fleet=` ("That fleet is outside your access"), narrows a reader holding some but not all of three or more fleets to the one they name and refuses them only when they name none (ONE-R4), and refuses a fleet id the handlers could not read back (ONE-R5). An unrestricted reader is judged exactly as `mixed` was (levels over every fleet, no rewrite) | `api/access/middleware.js:226`, `:433` | `access_one_fleet` §2–13, §11 the cache; reverted (branch disabled): the narrowed routes refuse again and the run stops in §2 | written, not deployed |
+| ONE2 | **The true reason, per route still refused** — 96 routes under 22 reasons. The one generic sentence stays only as a fallback, and the test fails if any mixed route has no reason of its own, or a reason is kept for a route no longer mixed | `api/access/one_fleet.js:171`; `middleware.js:258` | §1, §14; reverted (reasons ignored): 4 fail | written, not deployed |
+| ONE3 | The shaper drops another fleet's row from a `narrow` answer whose rows carry their fleet (`fleetRows` on segments, coverage/verified, recommendations, settings/jobs, hr-roster, feeds) — a second line behind the handler, as on `rows` routes | `api/access/shape.js:129` | §1 shaper check; reverted: 1 fails | written, not deployed |
+| ONE4 | **`/api/segments` narrowed** — the list that ignored the fleet chip (system audit, 2026-11-12). Rows, total, every facet, each provider's count and its absent-reason follow `_fmfleet`; who held the car is read from that fleet's custody records only (`custodyNames`/`custodyRefs` take an optional fleet bind; without it their SQL is unchanged) | `api/segment_routes.js:118`; `api/custody_sql.js:88` | §2, §11, §13; reverted to 90d76da: 10 fail; the custody bind alone: 4 fail | written, not deployed |
+| ONE5 | **`/api/cancellations` narrowed** at the bookings themselves, so each person's row and every total are that fleet's | `api/cancellation_routes.js:59` | §3; reverted: 3 fail | written, not deployed |
+| ONE6 | **`/api/kpis` narrowed.** Every figure already followed `?fleet=` except the tracker count (live, silent, tracked vehicles), which counted both fleets' trackers | `api/server.js:733` | §4, §13; reverted: 1 fails | written, not deployed |
+| ONE7 | **`/api/trips/daily` narrowed.** The day figures follow the per-fleet rollup; the silent-source columns read `source_day_coverage`, both fleets — narrowed, each channel's daily rows are counted from that fleet's trips by the view's own definition (sql/schema_v9.sql) | `api/server.js:1297` | §5; reverted: 1 fails | written, not deployed |
+| ONE8 | **`/api/recommendations`** and **`/api/settings/jobs` narrowed**: the newest per type and the history count are the fleet's; the jobs, their total and the queued and running counts are the fleet's — never a job queued for every fleet | `api/server.js:6254`, `:4571` | §6; reverted: 2 fail | written, not deployed |
+| ONE9 | **`/api/coverage/verified` narrowed**: the windows followed `?fleet=` already; the money and rating horizons counted both fleets | `api/analytics_routes.js:1611` | §7; reverted: 1 fails | written, not deployed |
+| ONE10 | **`/api/funnel/drivers`**, **`/api/tiers/by-vehicle`** (each car's custodians from that fleet's records) and **`/api/analyst/brief`** (per-source coverage from that fleet's trips; the collector's own analyst run is untouched) **narrowed** | `api/analytics_routes.js:2023`, `:1101`, `:2230`; `src/analyst.js:422` | §8; reverted: 5 fail | written, not deployed |
+| ONE11 | **`/api/hr-roster` narrowed**: the fleet's HR rows; every total counted from them (`by_fleet` names that fleet alone, never the other's as a zero); an account HR matched that the database files under the other fleet is left off; each upload's `rows_read` is that fleet's rows and `byte_len` is null with the reason — one workbook holds both fleets | `api/hr_roster.js:686`; `api/hr_roster_routes.js:55` | §9; reverted: 4 fail | written, not deployed |
+| ONE12 | **`/api/vehicles/feeds` narrowed**: the fleet's cars before anything is counted, so totals, no-data counts and dark-feed verdicts are theirs; the accounts list names that fleet; a current-driver record filed under the other fleet is not named beside the car | `api/feed_routes.js:754` | §10; reverted: 4 fail | written, not deployed |
+| ONE13 | **`/api/breaks` kept refused, although its handler filters on `?fleet=`.** `src/sources/events.js` writes every break with `fleet_id` null and `metric_break`'s key has no fleet, so a one-fleet list would be empty — "nothing changed" where nothing was measured. Open-mode finding, not changed here: the #causes fleet chip already shows that empty list to anyone who picks a fleet | `api/access/one_fleet.js` (reason `breaks`) | §14 | written, not deployed |
+| ONE15 | **`/api/sms/log` narrowed** (the Messages page): the messages and the seven-day counts are the fleet's; a message filed under no fleet (a staff sign-in code) is left out; the switches are company settings, not records | `api/sms_routes.js:42` | §10b; reverted: the counts leak, 1 fails (the shaper still dropped the rows) | written, not deployed |
+| ONE16 | **`GET /api/lowperf/watch` narrowed**: the lists saved for that fleet, never one that follows both fleets, and each list's member count counts that fleet's members | `api/lowperf_routes.js:117` | §10b; reverted: 1 fails | written, not deployed |
+| ONE14 | Tests that pinned the old refusal now pin the narrowing: `agent_access` (an Egari manager's fleet totals are Egari's — 2 completed, not 5 — and the company target is still refused, with its own reason); `access_manifest` (`narrow` is a known class; the HR roster and the feeds are never `rows`) | `test/agent_access.test.mjs`; `test/access_manifest.test.mjs` | 14/0; 17/0 | written, not deployed |
+
+**Per route.** Narrowed (14): `GET /api/segments`, `/api/cancellations`, `/api/kpis`,
+`/api/trips/daily`, `/api/recommendations`, `/api/settings/jobs`, `/api/coverage/verified`,
+`/api/funnel/drivers`, `/api/tiers/by-vehicle`, `/api/analyst/brief`, `/api/hr-roster`,
+`/api/vehicles/feeds`, `/api/sms/log`, `/api/lowperf/watch`. Still refused (96), under the reason in brackets — the authoritative list is
+`BY_ROUTE` in `api/access/one_fleet.js`:
+- *(person)* the 17 `/api/driver/*` person routes, `/api/performer`, `/api/status/driver` — one
+  person's accounts can sit in both fleets; counting only one fleet's accounts is not built.
+- *(cash)* `/api/driver/register`, `/api/ledger/{cash-position,entries,exposure,people,receipt/:sha}`,
+  `POST /api/ledger/{entry,import/commit,import/preview}` — cash is kept per person.
+- *(identity)* `/api/drivers/identity-links`, `/api/same-person`, `GET`/`POST /api/person/merge`,
+  `POST /api/same-person/decide` — a pair can be one account in each fleet.
+- *(vehicle)* `/api/map/journey`, `/api/track`, `/api/where` and the 10 `/api/vehicle/*` routes —
+  read by plate whichever fleet's accounts; *(segment)* `/api/segment`; *(trip)* `/api/trip`.
+- *(target)* `/api/target`, `/api/target/hours`, `/api/target/car`, `/api/export/today.xlsx`,
+  `/api/export/target-month.xlsx` — one figure set for the company.
+- *(settings)* `GET`/`PUT /api/settings`, `POST /api/settings/paste`; *(run)* `POST /api/analyst/run`,
+  `/api/uber/fares/run`, `/api/settings/trigger`; *(probe)* the 8 provider probes and
+  `/api/probe/results`; *(raw)* `/api/probe/uber/timeline`, `/api/probe/zero-distance`,
+  `/api/schema/raw-{fields,values}`; *(tesla)* `/api/tesla/{status,vehicles}`.
+- *(system)* `/api/coverage`, `/api/coverage/calendar`; *(breaks)* `/api/breaks` (ONE13).
+- *(hr)* `POST /api/hr-roster/{commit,preview}`; *(messages)* `/api/sms/preview` (a run is worked
+  out over both fleets' drivers at once);
+  *(charging)* the 5 `/api/charging/*` reads and `POST /api/charging/link`.
+- *(lowperf)* `/api/export/lowperf.xlsx`; *(watch)* `POST /api/lowperf/watch`,
+  `POST /api/lowperf/watch/:id`, `/api/export/lowperf-watch.xlsx`.
+- *(day)* `/api/day`, `/api/slot`, `/api/online-time`; *(compare)* `/api/cohort/{drivers,vehicles}`;
+  *(cabman)* `/api/vehicles/feeds/cabman`.
+
+Narrowing is **impossible as the data stands** for the trend breaks (no per-fleet series), the
+company target, the company-wide settings and credentials, the runs and probes that act on every
+fleet, the HR workbook files and the identity decisions. The rest are **possible and not done in
+this run**: each needs its handler filtered part by part, as ONE4–12 were — the driver and vehicle
+pages (about 30 routes), the cash pages, the day, slot, online-time, cohort, segment and trip
+pages, source coverage, charging, the message preview, the CABMAN table and the watch-list
+export and edits. Their reasons
+say "not built yet", which is the true one. No migration was needed: every narrowed answer reads
+a `fleet_id` (or `fleet`) column that already exists, and production carries it on every sampled
+row (2026-11-12: 500/500 segments, 128/128 feed rows, 268/268 live vehicles).
+
+**Found on the way, not changed (open mode is left exactly as it was):** the fleet chip is
+half-applied on `/api/kpis` (tracker count), `/api/trips/daily` (silent sources),
+`/api/coverage/verified` (horizons), `/api/tiers/by-vehicle` (custody) and `/api/analyst/brief`
+(coverage), and not applied at all on `/api/segments`, `/api/cancellations`,
+`/api/funnel/drivers` and `/api/recommendations` — an open-mode reader who picks a fleet still
+sees both there. `/api/lowperf` (class `rows`) returns `hidden_other_fleet`, a count of the other
+fleet's drivers, to a one-fleet reader.
+
+Also run, all green: `access_core` 211, `access_manifest` 17, `agent_access` 14, `segment_routes`
+68, `segment_boundary` 6, `occupancy_sources` 95, `cancellation_split` 23, `hr_roster_numbers` 19,
+`hr_roster_import` 88, `hr_compliance` 19, `feeds_seat_index` 10, `feeds_cabman` 46,
+`vehicle_feeds` 56, `analyst` 73, `analytics_routes` 164, `uber_past_audit` 52, `job_heartbeat`
+25, `server_audit` 112, `quiet_sources` 32, `live_fix` 13, `consistency` 67, `aggregates` 89,
+`unauthorized_attribution` 221, `reachability` 19.
+
+### Review of ONE (2026-11-12) — what the independent review found and fixed
+
+Branch `fix/one-fleet`, reviewed against 90d76da as a security review. The builder's claims were
+checked by reverting: `/api/segments` to 90d76da (10 checks fail, as claimed), the `/api/kpis`
+tracker narrowing (1 fails) and the shaper's `narrow` row filter (1 fails); each file was copied
+first and restored byte for byte. Five defects were found and fixed, each proven by reverting its
+fix (`test/access_one_fleet.test.mjs`, 115/0 with all five in). Every row: **written, not
+deployed**.
+
+| id | what | where | test | state |
+|---|---|---|---|---|
+| ONE-R1 | **The Messages log was served from the response cache past its own sign-in check.** `api/sms_routes.js` refuses anyone not signed in *in the handler*; `api/cache.js` answers a hit before any handler runs, and in open mode the gate passes an anonymous visitor through. Once anyone signed in had opened Messages, an anonymous GET of the same address got the log — drivers' mobile numbers and the texts. Narrowing made a one-fleet reader's address predictable (`?fleet=…&_fmfleet=…`). Measured on production 2026-11-12 (one GET, open mode): an anonymous `/api/sms/log` is refused by the handler's own sentence, and the answer carries `x-cache: miss` — the cache was in front of it. Fix: `/api/sms/` on the cache's NEVER list. Trap added to COVERAGE.md | `api/cache.js` (NEVER) | §15; reverted: both checks fail (anonymous 200, the log served) | written, not deployed |
+| ONE-R2 | **`/api/vehicles/feeds` folded a plate's Uber records across fleets before narrowing.** FEEDS_SQL's `active` CTE files a plate under the LEAST of its records' fleets and lists every driver EITHER record assigns (Uber files 222 records over 138 plates). A car ACTIVE in both fleets' Uber accounts was missing from an Egari reader's list (filed `ecosine`), and an Ecosine reader was handed the drivers Egari's account assigns — names and phones. Fix: an optional fleet bind (`$2`) inside the CTE, null for everyone else, so an unrestricted reader's statement selects the same rows. Not measured on production whether any plate is ACTIVE in both accounts today | `api/feed_routes.js` FEEDS_SQL, handler | §16; reverted (bind dropped, one param): the Egari car is missing | written, not deployed |
+| ONE-R3 | **Two narrowed reasons were not the true one.** The feeds row whose current driver was left off (filed under the other fleet) said "no trip on record names one" — one does. The HR roster built `heldIds` from the narrowed accounts, so an HR id matched under the other fleet was listed as unmatched, "not held in anything collected" — false, and it printed the other fleet's account id. Fix: the feeds row states the true reason; `heldIds` comes from every match | `api/feed_routes.js` (driver_absent), `api/hr_roster.js` (heldIds) | §10, §9; reverted: 1 and 2 fail | written, not deployed |
+| ONE-R4 | **"Choose one of your fleets" refused the choice too.** A reader holding some but not all of three or more fleets was refused even with `?fleet=` naming one of theirs. Unreachable today (two fleets); the sentence was still untrue. Fix: the fleet named is narrowed to | `api/access/middleware.js` judge() | §17 (a principal over three fleets, through the gate); reverted: 1 fails | written, not deployed |
+| ONE-R5 | **Fail closed when the gate and the handlers could disagree.** The handlers read `_fmfleet` through `onlyFleet()`, which accepts a plain id only; a fleet id it rejects came back as null — "every fleet" — while the gate believed it had narrowed. Fix: the gate refuses, with that reason, a fleet id `onlyFleet()` would not read back | `api/access/middleware.js` judge() | §17; reverted: the reader is passed with `_fmfleet` set, 1 fails | written, not deployed |
+
+**Checked and sound:** the gate's `narrow` branch for unrestricted readers (judged as `mixed`) and
+open-mode visitors (never handed `_fmfleet`); the cache keys on both parameters and the stale
+refresh recomputes the narrowed answer; a caller's own `_fmfleet` only narrows their own answer;
+every narrowed query binds its fleet (no interpolation); repeated or nested `?fleet=` is refused;
+no migration, no new route, no new `server.js` import; the 96 reasons are true as written.
+
+**Found, not changed (for the operator or a later workstream):**
+- *Scope.* The brief asked to keep refusing a route only where narrowing is impossible. About 70
+  of the 96 still refused are narrowable and simply not built (the person, vehicle, cash, day,
+  cohort, trip and segment pages, coverage, charging, the CABMAN table, the watch-list export and
+  edits). Their refusals say "not built yet", which is true.
+- *`rows` routes carry both fleets' totals to a one-fleet reader.* `/api/lowperf` (class `rows`):
+  the gate filters its rows but does not write the fleet, so without `?fleet=` its totals
+  (population, below, on target, plan) are both fleets'; with it, `hidden_other_fleet` counts the
+  other fleet's drivers. Pre-existing, outside this diff; other `rows` routes with top-level
+  totals deserve the same look.
+- *Small residues on narrowed answers, judged low:* `/api/segments` still prints a matched or
+  nearest booking's id when that booking was made through the other fleet's account on the
+  reader's car, and its count-once rule compares a plate's segments whatever fleet they are filed
+  under; `/api/hr-roster` still lists every upload (file name, who uploaded it) even where none of
+  its rows are the reader's fleet; `/api/coverage/verified` reads `?fleet=` through a two-fleet
+  list, so a third fleet would read as "every fleet" there (the windows are still row-filtered).

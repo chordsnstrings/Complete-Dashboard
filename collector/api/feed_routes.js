@@ -70,6 +70,7 @@
    read — counted through /api/driver/profile, whose fold is not the spine's
    but draws on the same register and link table. */
 import { config } from '../src/config.js';
+import { onlyFleet } from './access/one_fleet.js';
 
 /* THE WINDOW, and why it is a day and not a poll.
    ─────────────────────────────────────────────────────────────────────────
@@ -105,7 +106,8 @@ export const FEED_WINDOW_H = 24;
 const FLEET_NAME = (f) => (f ? `${String(f)[0].toUpperCase()}${String(f).slice(1)}` : 'this fleet');
 
 /* The SQL, exported so a test can read what the route runs. The window is the
-   one parameter, so nothing about it is spelled twice. */
+   first parameter, so nothing about it is spelled twice; the second is the one
+   fleet a narrowed reader's list is built from, or null for every fleet. */
 export const FEEDS_SQL = `
   WITH active AS (
     /* One row per plate Uber lists as ACTIVE. A plate is matched to its Uber
@@ -125,6 +127,19 @@ export const FEEDS_SQL = `
      WHERE vp.platform = 'uber'
        AND upper(btrim(vp.compliance_status)) = 'ACTIVE'
        AND nullif(btrim(vp.plate), '') IS NOT NULL
+       /* $2, ONE FLEET'S UBER RECORDS, for a reader narrowed to one fleet
+          (api/access/one_fleet.js); null for everyone else, and then this
+          line selects every row it always did. Uber files 222 vehicle
+          records across 138 plates (docs/COVERAGE.md), and this CTE folds a
+          plate's records into one row: fleet_id is the LEAST of their fleets
+          and assigned is every driver EITHER record assigns. A plate with an
+          ACTIVE record in each fleet's Uber account was therefore filed
+          under 'ecosine' — missing from an Egari reader's list though it is
+          in their own account — and an Ecosine reader was handed the drivers
+          Egari's account assigns to it, names and phones (review,
+          2026-11-12). Narrowed here, before the fold, a reader's row is
+          built from their fleet's records alone. */
+       AND ($2::text IS NULL OR btrim(vp.fleet_id) = $2)
      GROUP BY vp.plate
   ),
   heard AS (
@@ -180,6 +195,11 @@ export const FEEDS_SQL = `
          (h.fms_seat_at > now() - make_interval(hours => $1::int)) IS TRUE AS fms_seat_receiving,
          nullif(btrim(cd.driver_ext_id), '') AS custody_id,
          nullif(btrim(cd.driver_name), '') AS custody_name,
+         /* The fleet the current-driver record is filed under, so a reader
+            narrowed to one fleet is not handed the other fleet's driver for
+            one of their cars (api/access/one_fleet.js). Read by the handler,
+            never sent. */
+         cd.fleet_id AS custody_fleet,
          /* Text, not a DATE: node-postgres hands a DATE back as a Date at the
             server's local midnight, and the page slices the first ten
             characters of whatever it receives. */
@@ -735,9 +755,25 @@ export function cabmanSeat({ rosterRows = [], last = [], fixes = [], bookings = 
 }
 
 export function feedRoutes(app, { q, wrap }) {
-  app.get('/api/vehicles/feeds', wrap(async (_req, res) => {
-    const rows = await q(FEEDS_SQL, [FEED_WINDOW_H]);
-    const accounts = feedAccounts();
+  app.get('/api/vehicles/feeds', wrap(async (req, res) => {
+    /* ONE FLEET'S CARS, for a reader whose access covers one fleet
+       (api/access/one_fleet.js). Refused to such a reader until now because
+       its rows carried a fleet while its totals, its per-fleet counts and the
+       "is any car of this fleet receiving" test that decides a dark feed were
+       counted over every fleet. Narrowed, the cars are that fleet's before
+       anything is counted, so every total, every no-data count and every
+       verdict is computed from them alone; the accounts list names that fleet
+       only; and a current-driver record filed under the other fleet is not
+       named beside the car. Null for everyone else: nothing changes. */
+    const only = onlyFleet(req);
+    let rows = await q(FEEDS_SQL, [FEED_WINDOW_H, only]);
+    if (only) {
+      rows = rows.filter((r) => r.fleet_id === only).map((r) => (r.custody_fleet && r.custody_fleet !== only
+        ? { ...r, custody_id: null, custody_name: null, custody_as_of: null, custody_other_fleet: true } : r));
+    }
+    const all = feedAccounts();
+    const accounts = only
+      ? Object.fromEntries(Object.entries(all).map(([k, v]) => [k, v.filter((f) => f === only)])) : all;
 
     /* Uber's assignment where it names somebody, custody where it does not. */
     const ids = [...new Set(rows.flatMap((r) => (r.assigned && r.assigned.length
@@ -794,8 +830,15 @@ export function feedRoutes(app, { q, wrap }) {
         driver_refs: refs,
         driver_basis: assigned ? 'uber_assignment' : refs.length ? 'custody' : null,
         driver_as_of: assigned ? null : r.custody_as_of || null,
+        /* The TRUE reason when the custodian was left off for a narrowed
+           reader (custody_other_fleet, above): "no trip on record names
+           one" was false there — one does, filed under the other fleet
+           (review, 2026-11-12). */
         driver_absent: refs.length ? null
-          : 'no driver known — Uber assigns nobody to this car and no trip on record names one',
+          : r.custody_other_fleet
+            ? 'no driver of your fleet known — Uber assigns nobody to this car, and the latest driver on '
+              + 'record for it is filed under another fleet, which your access does not cover'
+            : 'no driver known — Uber assigns nobody to this car and no trip on record names one',
       };
     });
 

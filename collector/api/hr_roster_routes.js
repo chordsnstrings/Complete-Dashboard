@@ -31,6 +31,7 @@ import { signedInActor } from './access/actor.js';
 import express from 'express';
 import { adminGate } from './admin_gate.js';
 import { previewOf, commitRoster, rosterView } from './hr_roster.js';
+import { onlyFleet } from './access/one_fleet.js';
 
 const XLSX_TYPES = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -49,7 +50,9 @@ export function hrRosterRoutes(app, { q, wrap, tx, requireAdmin = null }) {
 
   app.get('/api/hr-roster', wrap(async (req, res) => {
     res.set('Cache-Control', 'no-store');
-    res.json(await rosterView(q));
+    /* onlyFleet: the one fleet the gate narrowed this reader to, or null for
+       every fleet as before (api/access/one_fleet.js). */
+    res.json(await rosterView(q, { fleet: onlyFleet(req) }));
   }));
 
   app.post('/api/hr-roster/preview', gate, xlsxBody, wrap(async (req, res) => {
