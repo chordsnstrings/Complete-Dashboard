@@ -487,7 +487,15 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     if (fleetScopeReady() && !access.allScope && entry.fleet === 'param'
         && (req.method === 'GET' || req.method === 'HEAD')
         && (!entry.cap || READ_CAPS.has(entry.cap))) {
-      markScoped(req, res, j.targets);
+      /* A fleet id SET LOCAL cannot carry (src/fleet_scope.js validFleets)
+         is refused there, never escaped. This gate is an async Express 4
+         middleware, where a throw is a request that hangs; so such a reader
+         keeps the API's own filter — today's path — and the log says why. */
+      try {
+        markScoped(req, res, j.targets);
+      } catch (e) {
+        log.warn('access', 'row-level security not applied to this request', { path, err: String(e.message || e).slice(0, 160) });
+      }
     }
     req.fm.levels = L;
     req.fm.entry = entry;

@@ -241,6 +241,28 @@ console.log('\n5. when row-level security is not in use');
   setFleetScopeState(saved);
 }
 
+/* ══ 6. a fleet id the scope cannot carry ════════════════════════════════
+   validFleets refuses anything that is not a plain fleet id rather than
+   escape it into SET LOCAL. The gate is an async Express 4 middleware, where
+   a throw is a request that never answers.
+   REVERSION: call markScoped without its try/catch in the gate — the throw
+   escapes as an unhandled rejection: this harness dies on it, and the real
+   server (api/server.js logs unhandledRejection) would leave the request
+   hanging until the fetch gives up. */
+console.log('\n6. a fleet id that cannot be written into the scope');
+{
+  await pg.exec(`INSERT INTO fleet (id, name) VALUES ('Odd.Fleet', 'Odd') ON CONFLICT DO NOTHING`);
+  svc.resetFleetCache();
+  const odd = await person('odd-fleet@example.test', ['Odd.Fleet']);
+  let r = null, err = null;
+  try {
+    const f = await fetch(`${B}/api/t/forgot?k=odd`, { headers: { cookie: odd }, signal: AbortSignal.timeout(3000) });
+    r = { status: f.status, rls: f.headers.get('x-fm-rls') };
+  } catch (e) { err = e; }
+  check('the request still answers, on the API\'s own filter, unscoped (no hang)',
+    r && r.status === 200 && r.rls === null && lastCall().scope === null, String(err?.message || JSON.stringify(r)));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
