@@ -473,12 +473,20 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
        test/rls_routes.test.mjs section 2) — every driver's share of the
        plan would have grown by the same factor. 'global' answers are the
        company's by definition; 'mixed' ones are refused above. A write is
-       never narrowed (src/fleet_scope.js says why).
+       never narrowed (src/fleet_scope.js says why) — and neither is an
+       ACTION that happens to be a GET: the provider probes (cap
+       collector.probe) spend quota and record what the provider said
+       (src/auth_state.js noteCredential), and src/sources/bolt.js would
+       save a successor refresh token (setSetting) if the portal ever handed
+       one back. In a read-only scope those writes would be lost — the last
+       one for everybody, as a dead credential. A download ('export', READ_CAPS)
+       only reads, and is narrowed.
 
        Applied after the search narrowing, which parses fmCacheKey as a URL;
        the scoped key is not one (rlsCacheKey). */
     if (fleetScopeReady() && !access.allScope && entry.fleet === 'param'
-        && (req.method === 'GET' || req.method === 'HEAD')) {
+        && (req.method === 'GET' || req.method === 'HEAD')
+        && (!entry.cap || READ_CAPS.has(entry.cap))) {
       markScoped(req, res, j.targets);
     }
     req.fm.levels = L;

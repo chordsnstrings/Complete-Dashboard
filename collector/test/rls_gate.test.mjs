@@ -58,6 +58,10 @@ const MANIFEST = {
   'GET /api/t/export': { ...base, method: 'GET', path: '/api/t/export', subject: 'BK', fleet: 'param', cap: 'export', auditRead: true },
   'GET /api/t/rows': { ...base, method: 'GET', path: '/api/t/rows', subject: 'BK', fleet: 'rows', fleetRows: ['rows'], fleetKey: 'fleet_id' },
   'GET /api/t/global': { ...base, method: 'GET', path: '/api/t/global', subject: 'BK', grain: 'aggregate', fleet: 'global' },
+  /* Like the provider probes: a GET that acts (cap collector.probe) and
+     records what it learned as it goes (src/auth_state.js noteCredential). */
+  'GET /api/t/probe': { ...base, method: 'GET', path: '/api/t/probe', subject: 'CRED', carries: ['CRED'], grain: 'aggregate',
+    fleet: 'param', cap: 'collector.probe' },
 };
 const lookup = (m, p) => { const real = lookupEntry(m, p); return real?.self ? real : MANIFEST[`${m} ${p}`] || null; };
 
@@ -80,6 +84,12 @@ for (const p of ['/api/t/forgot', '/api/t/export', '/api/t/global']) {
     res.json({ asked: req.query.fleet ?? null, rows: await everyTrip() });
   }));
 }
+app.get('/api/t/probe', wrap(async (req, res) => {
+  calls.push({ path: '/api/t/probe', scope: currentFleetScope()?.fleets?.join(',') ?? null });
+  await db.query(`INSERT INTO source_state (source, fleet_id, key, value, updated_at) VALUES ('rls-test', $1, 'probe', 'seen', now())
+                  ON CONFLICT (source, fleet_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [req.query.fleet]);
+  res.json({ fleet: req.query.fleet, rows: await everyTrip() });
+}));
 app.get('/api/t/rows', wrap(async (req, res) => {
   calls.push({ path: '/api/t/rows', scope: currentFleetScope()?.fleets?.join(',') ?? null });
   res.json({ rows: await everyTrip() });
@@ -91,14 +101,16 @@ cache.setPort(server.address().port);
 
 /* ── the callers ─────────────────────────────────────────────────────── */
 const cfg = await svc.getConfig(db);
-const person = async (email, fleets) => {
+const person = async (email, fleets, roleCode = 'OPS') => {
   const u = await svc.createUser(db, { email, name: email, status: 'active' });
-  await svc.createGrant(db, { userId: u.id, roleCode: 'OPS', fleets });
+  await svc.createGrant(db, { userId: u.id, roleCode, fleets });
   const { token } = await svc.createSession(db, { userId: u.id, mfaOk: true, cfg });
   return `fm_sid=${encodeURIComponent(token)}`;
 };
 const everyFleet = await person('all-fleets@example.test', null);
 const egariOnly = await person('egari-only@example.test', ['egari']);
+/* Connections admin over Egari alone: holds collector.probe for one fleet. */
+const egariConnections = `${await person('egari-connections@example.test', ['egari'], 'CON')}; fm_csrf=rls-test-csrf`;
 const get = async (path, { cookie = null, headers = {} } = {}) => {
   const r = await fetch(B + path, { headers: { ...headers, ...(cookie ? { cookie } : {}) } });
   let json = null; try { json = await r.json(); } catch { /* not json */ }
@@ -146,6 +158,15 @@ console.log('\n2. everybody else reads exactly what they read before');
     `${fleetsIn(rows)} ${JSON.stringify(rows.json._withheld)}`);
   const glob = await get('/api/t/global', { cookie: egariOnly });
   check('a \'global\' route is not narrowed (the company\'s by definition)', glob.status === 200 && lastCall().scope === null);
+  /* REVERSION: drop the READ_CAPS condition from the gate's marking — the
+     probe runs in the reader's read-only scope, its bookkeeping INSERT fails
+     and the call 500s. */
+  const probe = await get('/api/t/probe', { cookie: egariConnections, headers: { 'x-fm-csrf': 'rls-test-csrf' } });
+  check('a GET that ACTS (a provider probe, cap collector.probe) is not narrowed: its writes must land',
+    probe.status === 200 && lastCall().scope === null && probe.h.get('x-fm-rls') === null,
+    `${probe.status} ${JSON.stringify(probe.json).slice(0, 160)}`);
+  const noted = (await pg.query(`SELECT count(*)::int n FROM source_state WHERE source = 'rls-test' AND fleet_id = 'egari'`)).rows[0].n;
+  check('…and what it recorded was written', noted === 1);
 }
 
 /* ══ 3. the response cache keeps the two apart ════════════════════════════

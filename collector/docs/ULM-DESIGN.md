@@ -1413,8 +1413,10 @@ gate narrows, and changes nothing for anyone else.
   patched once in `src/db.js`). A statement that forgot its fleet filter still reads one fleet.
 - **Not narrowed, exactly as before:** the Owner and every all-fleet role; the system (the warmer,
   the cache's refresh); an anonymous visitor in open mode — which is production today; every write;
-  the collector. They never enter a scope, and `pool.query` forwards their arguments to the pool's
-  own `query()` untouched.
+  every action that is a GET — the provider probes (cap `collector.probe`) record what the provider
+  said (`noteCredential`) and would save a successor Bolt refresh token, writes that must land, so
+  they are not narrowed (a download, `export`, only reads and is); the collector. They never enter
+  a scope, and `pool.query` forwards their arguments to the pool's own `query()` untouched.
 - **`rows` routes are not narrowed in the database, deliberately.** Their answers are computed
   over every fleet and trimmed by the shaper, and some per-row figures need the company:
   `/api/lowperf` divides the company's plan by the drivers active that day, and inside one fleet's
@@ -1486,8 +1488,10 @@ and the next boot does the rest. As `doadmin` (CREATEROLE, BYPASSRLS) v124 does 
 
 ### What changes for a one-fleet reader (measured on the fixture, both fleets)
 
-64 of the 72 `param` GET routes answer a one-fleet reader exactly as before; none fails. Eight
-answer differently because each read the other fleet's rows while answering for one — the leak
+The gate narrows 71 of the 78 `param` GET routes (the seven others are actions). None fails
+inside the scope; 61 answer a one-fleet reader exactly as before and 2 with the same status (their
+bodies carry the clock, so they are not compared). Eight answer differently because each read the
+other fleet's rows while answering for one — the leak
 class this exists to close, now closed for those readers: `/api/compare` (the collectors list),
 `/api/compliance/drivers` (`rows_with_a_date`), `/api/drivers/directory` (a person's state, licence
 and rating from their accounts in the other fleet), `/api/economics/assets` and

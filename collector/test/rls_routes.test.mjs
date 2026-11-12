@@ -3,9 +3,12 @@
    The gate narrows a one-fleet reader's 'param' routes in the database
    (src/fleet_scope.js). This mounts the whole API (test/mount.mjs) over a
    two-fleet database owned by an ordinary role, as on production, and calls
-   every 'param' GET route the manifest declares twice for each fleet: once
-   as before (?fleet=X, no scope) and once inside X's scope, as the gate now
-   runs it for a reader whose grants cover X alone.
+   every 'param' GET route the gate narrows — all 78 the manifest declares
+   but the seven that are actions (cap collector.probe: the six provider
+   probes and the plan diagnostic, which the gate leaves unscoped because
+   their writes must land) — twice for each fleet: once as before (?fleet=X,
+   no scope) and once inside X's scope, as the gate now runs it for a reader
+   whose grants cover X alone.
 
    Two things are asserted.
 
@@ -42,6 +45,7 @@ import { mountAll } from './mount.mjs';
 import { seedFleet } from './fixture.mjs';
 import { refreshRollups } from '../src/rollup.js';
 import { secureFleetScope, probeFleetScope, pgliteRunner, scopedPglite, enterFleetScope, RLS_ROLE } from '../src/fleet_scope.js';
+import { READ_CAPS } from '../api/access/middleware.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -60,12 +64,11 @@ const KNOWN = {
 /* Bodies not comparable, with the reason. Their STATUS is still compared:
    a route that fails inside the scope fails here whatever its body. */
 const SKIP = {
-  '/api/unauthorized/attributed/plan': 'answers with EXPLAIN output, whose costs change by construction once a policy adds a filter',
   '/api/online/hours': 'carries the current clock (live_to), which moves between the two calls',
   '/api/export/money.xlsx': 'a workbook stamps the second it was made inside the file, so two calls a second apart differ',
 };
 /* Fields that differ between any two calls (timings), never data. */
-const VOLATILE = new Set(['wall_ms', 'plan', 'live_to', 'took_ms', 'ms']);
+const VOLATILE = new Set(['wall_ms', 'live_to', 'took_ms', 'ms']);
 
 const pg = new PGlite();
 await pg.exec(`CREATE ROLE app_user LOGIN NOSUPERUSER NOCREATEROLE NOBYPASSRLS;
@@ -100,8 +103,10 @@ const h = await mountAll(scopedPglite(pg), {
     ? enterFleetScope(req.get('x-test-scope').split(','), res, next) : next())),
 });
 const manifest = JSON.parse(readFileSync('api/access/manifest.json', 'utf8'));
+/* Exactly the routes the gate marks: GET 'param', no action cap but a read
+   one (api/access/middleware.js). None has a path parameter today. */
 const routes = Object.values(manifest.routes || manifest)
-  .filter((r) => r.method === 'GET' && r.fleet === 'param' && !r.path.includes(':') && !r.path.startsWith('/api/probe/'))
+  .filter((r) => r.method === 'GET' && r.fleet === 'param' && !r.path.includes(':') && (!r.cap || READ_CAPS.has(r.cap)))
   .map((r) => r.path).sort();
 const call = async (p, scope) => {
   const r = await fetch(`http://127.0.0.1:${h.port}${p}`, { headers: scope ? { 'x-test-scope': scope } : {} });
