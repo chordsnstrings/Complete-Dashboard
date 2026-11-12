@@ -41,6 +41,7 @@ import { targetHoursLive, todayHtml, hoursNearHtml, REFRESH_MS } from '../target
    colour. Imported rather than retyped — see the comment on GREY there. */
 import { GREY } from '../onlinetime.js';
 import { parseParam, pageHref, listUrl, watchUrl, parseSpans, HOTEL_WORD, shortDay as lpDay } from '../lowperf.js';
+import { focusSwitch } from './focus-m.js';
 
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
@@ -1525,6 +1526,11 @@ async function more(deck) {
   b.style.marginTop = '10px';
   b.onclick = () => { location.href = `/?ui=desktop${location.hash}`; };
   c.body.append(b);
+  /* FOCUS's switch (m/focus-m.js), under the redesign: the desktop keeps it
+     in the control bar beside the theme; the phone's bar is the window's, so
+     it lives with the other things about this app. After the desktop button,
+     which stays the card's first. */
+  if (phoneContract()) c.body.append(focusSwitch());
   c.body.append(accountBlock());
   deck.append(c.card);
   /* Under the redesign "This app" carries the masthead the header has no

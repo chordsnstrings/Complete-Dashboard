@@ -138,8 +138,11 @@
      it. The URL's own word wins where storage is refused, as for the skin.
      A system asking for reduced motion is honoured inside the stylesheet, not
      here, so the boot sheet's words still show for that reader.
-     Stamped here, before the stylesheet the second script writes in for it. */
-  if (r.dataset.skin === 'arkiv' && !phone) {
+     Stamped here, before the stylesheet the second script writes in for it.
+     The PHONE takes the same stamp, by the same rules, since 2026-11-12
+     (FIX-STATUS MOB): its own layer is m/motion-m.css and m/motion-m.js,
+     appended below with m.css, and it never loads the desktop's motion.css. */
+  if (r.dataset.skin === 'arkiv') {
     var mo = new URLSearchParams(location.search).get('motion');
     try {
       if (mo === 'on' || mo === 'off') localStorage.setItem('fleet.motion', mo);
@@ -155,9 +158,10 @@
          the shell was built. The boot sheet would otherwise go on saying
          "still opening" over a page that never will (motion.css §1). A script
          element's error does not bubble, hence the capture; a broken image is
-         not a broken opening, hence the tag. */
+         not a broken opening, hence the tag. The phone's opening is over at
+         its first screen, when m/app.js turns data-boot to "up". */
       var stop = function (e) {
-        if (document.querySelector('#app.ak-shell')) return;
+        if (document.querySelector('#app.ak-shell') || r.dataset.boot === 'up') return;
         if (e.type === 'error' && e.target && e.target !== window && e.target.tagName !== 'SCRIPT') return;
         r.dataset.boot = 'failed';
       };
@@ -169,6 +173,14 @@
     var css = document.createElement('link');
     css.rel = 'stylesheet'; css.href = '/m/m.css';
     document.head.appendChild(css);
+    /* The phone's motion layer, APPENDED like m.css, so it never holds the
+       first paint: it only animates, and nothing in it moves the layout
+       (m/motion-m.css, header). */
+    if (r.dataset.motion === 'on') {
+      var mcss = document.createElement('link');
+      mcss.rel = 'stylesheet'; mcss.href = '/m/motion-m.css';
+      document.head.appendChild(mcss);
+    }
   }
   /* The application, written in by the PARSER, not appended. A module the
      parser inserts runs once the document has been parsed (a module script is
@@ -231,10 +243,10 @@
      skin (the boot sheet is the first paint) and never after it: arkiv.css
      wins every tie by being the last stylesheet in the document
      (test/arkiv_skin.test.mjs), and motion.css needs no tie — each of its
-     selectors carries [data-motion="on"] as well. Desktop only; the
-     pre-paint script stamps it only there. -->
+     selectors carries [data-motion="on"] as well. Desktop only: the phone's
+     layer is its own sheet, appended by the pre-paint script. -->
 <script>
-if (document.documentElement.dataset.motion === 'on')
+if (document.documentElement.dataset.motion === 'on' && document.documentElement.dataset.ui !== 'phone')
   document.write('<link rel="stylesheet" href="/motion.css">');
 if (document.documentElement.dataset.skin === 'arkiv')
   document.write('<link rel="stylesheet" href="/arkiv.css">');

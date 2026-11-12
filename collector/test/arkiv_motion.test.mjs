@@ -13,8 +13,10 @@
    2 · THE SWITCH. Off under automation unless asked for, so every screenshot
        and every other browser test in this suite sees the still page it was
        written against; on when asked (?motion=on, remembered); never on the
-       Classic skin (held byte-frozen) or the phone build. motion.css goes in
-       BEFORE arkiv.css — the skin must stay the last stylesheet.
+       Classic skin (held byte-frozen). motion.css goes in BEFORE arkiv.css —
+       the skin must stay the last stylesheet — and never on the phone build,
+       which since 2026-11-12 takes the same switch for its own layer
+       (m/motion-m.css; test/phone_focus_motion.test.mjs).
    3 · THE BOOT SHEET stands where the masthead will: same top and gutter as
        the real wordmark, the label under it after a beat, the sentence after
        four seconds, "stopped" when a module fails — and gone on the frame
@@ -88,10 +90,13 @@ check('arkiv.css still carries no @keyframes', !/@keyframes/.test(strip(read('ar
 console.log('\n2 · index.html');
 const mw = html.indexOf("href=\"/motion.css\"");
 const aw = html.indexOf('<link rel="stylesheet" href="/arkiv.css">');
-check('motion.css is written in before arkiv.css, only when data-motion is on', mw > 0 && aw > mw
-  && /dataset\.motion === 'on'\)\s*\n\s*document\.write\('<link rel="stylesheet" href="\/motion\.css">'\)/.test(html));
-check('the stamp is Arkiv and desktop only, and off under automation unless asked',
-  /r\.dataset\.skin === 'arkiv' && !phone/.test(html) && /mo === 'on' \|\| \(mo !== 'off' && !navigator\.webdriver\)/.test(html));
+/* Since 2026-11-12 (FIX-STATUS MOB) the PHONE takes the same stamp by the same
+   rules, for its own layer (m/motion-m.css, test/phone_focus_motion.test.mjs);
+   this sheet stays the desktop's, so its line now names the desktop build. */
+check('motion.css is written in before arkiv.css, only when data-motion is on, and only on the desktop build', mw > 0 && aw > mw
+  && /dataset\.motion === 'on' && document\.documentElement\.dataset\.ui !== 'phone'\)\s*\n\s*document\.write\('<link rel="stylesheet" href="\/motion\.css">'\)/.test(html));
+check('the stamp is the Arkiv skin’s (both builds), and off under automation unless asked',
+  /if \(r\.dataset\.skin === 'arkiv'\) \{\s*\n\s*var mo = /.test(html) && /mo === 'on' \|\| \(mo !== 'off' && !navigator\.webdriver\)/.test(html));
 check('app.js starts the layer and hands it each fresh #view',
   /import \{ startMotion, motionView, motionEntered \} from '\.\/motion\.js'/.test(read('app.js'))
   && /startMotion\(\);\s*\n\s*const root = freshView\(\);[\s\S]{0,260}const arriving = motionView\(root\);/.test(read('app.js')));
@@ -154,8 +159,10 @@ console.log('\n3 · the switch, in a browser');
   check('never on the Classic skin', cl.m === null && cl.n === 0, JSON.stringify(cl));
   await page.goto(`${base}/?ui=phone&skin=arkiv#overview`, { waitUntil: 'domcontentloaded' });
   const ph = await page.evaluate(() => ({ m: document.documentElement.dataset.motion || null,
-    n: document.querySelectorAll('link[href="/motion.css"]').length }));
-  check('never on the phone build', ph.m === null && ph.n === 0, JSON.stringify(ph));
+    n: document.querySelectorAll('link[href="/motion.css"]').length,
+    own: document.querySelectorAll('link[href="/m/motion-m.css"]').length }));
+  check('the phone build follows the same remembered switch, with its own sheet — never this one',
+    ph.m === 'on' && ph.n === 0 && ph.own === 1, JSON.stringify(ph));
   await page.goto(`${base}/?ui=desktop&skin=auto&motion=off#overview`, { waitUntil: 'domcontentloaded' });
   check('?motion=off turns it off and remembers that', await page.evaluate(() =>
     !document.documentElement.dataset.motion && localStorage.getItem('fleet.motion') === 'off'));

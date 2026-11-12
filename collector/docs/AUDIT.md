@@ -3070,3 +3070,90 @@ Findings — the defects behind R0 are fixed on the branch (FIX-STATUS ANS13–A
 - **R2. mockapi's `/api/unauthorized/summary` has no `totals.segments`** (the server always sends
   it), so the §4 pass on #unauthorized only ever exercises an absent line. The present line is
   proved by §1 and by production's data (FIX-STATUS ANS review).
+## Focus and motion on the phone — a rendering pass (2026-11-12, FIX-STATUS MOB)
+
+The phone build had neither Arkiv layer (HANDOFF 0.9, 0.11). After bringing both to it, four passes
+in Chromium at 390×844 with a coarse pointer, Arkiv, light and dark; nothing here touched
+production (its read budget for this batch was 30 GETs, one at a time, which a page sweep through
+`bin/live-ui.mjs` would spend on two screens).
+
+**1 · Hermetic, every phone screen** (`test/phone_focus_motion.test.mjs` on
+`test/phone_harness.mjs`: the recorded fixture, the clock fixed). 25 phone screens and the
+fallback's two desktop tabs, each with the notes folded and with every word shown:
+
+| measure | result |
+|---|---|
+| folds | 71 on 24 of 27 screens; 42 toggles, every one 44 px tall |
+| deck height, all screens | 56,657 → 51,716 px (−8.7%); no screen taller folded than whole |
+| rows | every `.m-row` exactly as tall folded as whole, on every screen; no mark on a row, a list, a tile's figure or label, a button or a link; no marked element holds a block |
+| words | the deck's text identical folded and whole; every line the whole screen shows is shown once its toggles are open |
+| absence | no `[data-absent]` value, empty state, error, stale warning, `.tg-absent` or absence-band reason folded or hidden |
+| layout shift | 198 prose blocks on Today, To the bank and Online time watched frame by frame (answers held 500 ms): none on screen for a frame before its mark; Today and To the bank 0.0003 folded and whole |
+| at rest | 0 mutations in 3 s on Today and To the bank with both layers on |
+
+**2 · The sweep tool against the real handlers** (`bin/focus-rows-audit.mjs` with `PHONE=1`, served by
+`test/preview.mjs` on :8308 from its seeded fleet): the default window (November — mostly empty
+screens, so their absence reasons) and `WINDOW=from=2026-08-01&to=2026-08-31` (the seeded month):
+
+| window | screens | faults | deck, whole → folded |
+|---|---|---|---|
+| default | 26 | 0 | 29,284 → 27,471 px |
+| August 2026 | 26 | 0 | 44,303 → 42,012 px |
+
+A fault is a mark on a row or a layout, a row cut, or a toggle under 44 px. In the August pass the
+largest saving is To the bank (1,794 → 1,408 px: its long rule captions — one per platform, 55–85
+words each in the hermetic pass — fold under their section's toggle); More and Credentials are
+unchanged (nothing on them pays for a toggle);
+Sources is 77 px shorter with no mark at all (the control sentence, which its bar's sheet carries).
+
+**3 · Motion, frame by frame.** The boot sheet with `/m/app.js` held: the mark at 16, 17.77 px,
+21.70 × 20.47 — the header wordmark's own box — in each theme's artwork; the rule at 56 px under it;
+"Opening the dashboard" after its beat; "Still opening — the dashboard's code is still arriving."
+at four seconds; "… waiting for the server to answer." with `/api/auth/me` held; "The dashboard
+stopped opening" when the module throws. An arrival 160 ms in: the 00 band's rule half drawn by the
+pen, the tiles 4 px low and fading up; at rest, every block where it stands with the layer off, to
+the pixel (Today, Money, To the bank, a driver, More). A redraw (the refresh button) replays nothing;
+content after a watched 1.8 s skeleton fades up; Today's minute refresh washes the one figure that
+moved ("Done so far").
+
+**4 · First paint, before and after.** The base tree (90d76da) and this one served side by side by
+the harness, Today opened 11 times each, interleaved: 36 → 39 static files (40 with motion on —
+the sheet, appended, never render-blocking), the shell at 90 / 94 / 110 ms and the first card at
+189 / 185 / 204 ms (medians; before / after under automation / after with motion on). No API call is
+added; Today's 10 s on production is its live calls, untouched.
+
+**5 · The independent review's pass (same day).** Against `test/preview.mjs` on :8358 with the August
+window: every phone screen and both fallback tabs at 390×844 (coarse pointer, motion on) and eleven
+desktop pages at 1280×900 (overview, target, unauthorized, payouts, drivers, a driver, vehicles,
+online time, demand, sources, month target), light and dark. No page error, no sideways scroll, no
+NaN, undefined or null, no mark on a row, every toggle's label well formed, and 0 mutations in 2.5 s
+at rest on every page of both builds. The only targets under 44 px are in the fallback tabs' desktop
+markup ("Back to all drivers", a phone number, table headings: 15–37 px) and are the base commit's
+exactly. Two defects, both fixed (FIX-STATUS MOB17, MOB18):
+
+- **A toggle over nothing.** "Revenue, hour by hour" redrawn by the minute refresh with its
+  revenue absent kept "ⓘ 1 note" under the absence line, with 0 marks in the card — neither pass
+  ever revisited a host that had lost its last mark.
+- **The pen drew the reach card's hairline in ink.** On a driver's screen the reach card's grey rule
+  was black for the 1.6 s of the entrance, then snapped to grey: the only ruled block on any screen,
+  in either theme, whose rule is not `--ink`.
+
+**Found on the way, not changed:**
+
+- **The control sentence shifts every screen it is on, with every word shown.** m/app.js
+  `akApplies()` prepends "The date range, grouping, platform and fleet do not apply here — …" once a
+  screen has drawn (the screens empty the deck after their fetch), so when the screen paints before
+  it lands, everything below moves down by its two or three lines: layout shift 0.37 on Online time
+  in one run, 0.07 in another. With the notes folded (the default) the sentence is not drawn and the
+  shift does not happen; under the old skin and with every word shown it still does.
+- **The phone's refresh shows the stored copy.** Pull-to-refresh and ⟳ re-render, and `api()`
+  answers from this phone's stored copy while the live request runs behind it; the phone has no
+  `data:refreshed` listener, so new figures appear on the NEXT render (COVERAGE, end).
+- **The desktop's focus pass never rested** — fixed here (FIX-STATUS MOB4): 144 toggle rewrites in
+  3 s on #target, before.
+
+To repeat: `node test/phone_focus_motion.test.mjs` (hermetic; `ONLY=3` for the focus sweep alone),
+and `PORT=8308 node test/preview.mjs &` then `PHONE=1 node bin/focus-rows-audit.mjs
+http://127.0.0.1:8308 /tmp/fx-phone.json`, with `WINDOW=from=2026-08-01&to=2026-08-31` for the
+seeded month. Against production data: `node bin/prod-mirror.mjs &` and the same with
+`http://127.0.0.1:8200`, within that run's read budget.
