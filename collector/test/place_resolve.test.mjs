@@ -80,9 +80,11 @@ console.log('\nthe vocabulary: names an area, not the city, not a code, Latin on
     all.filter((n) => n === 'Dubai').join());
   const one = buildVocabulary([{ name: 'Loop Restaurant', n: 1 }, { name: 'Al Barsha', n: 2 }]);
   check('a name one trip produced is left out (minN 2)', one.size === 1);
-  const spell = buildVocabulary([{ name: 'Sheikh Zayed Road', n: 3 }, { name: 'Sheikh Zayed Rd', n: 40 }]);
+  /* Was "Sheikh Zayed Road" / "Sheikh Zayed Rd" — a road, which the review
+     of 2026-11-16 took out of the vocabulary (below). The fold is the same. */
+  const spell = buildVocabulary([{ name: 'Dubai International City', n: 3 }, { name: "Dubai Int'l City", n: 40 }]);
   check('two spellings that fold together keep the more used one',
-    spell.size === 1 && matchName('Duja Tower Sheikh Zayed Road AE', spell) === 'Sheikh Zayed Rd');
+    spell.size === 1 && matchName('Dragon Mart Dubai International City AE', spell) === "Dubai Int'l City");
 }
 
 console.log('\nthe one-line and comma forms: the noisy cases first');
@@ -93,12 +95,19 @@ console.log('\nthe one-line and comma forms: the noisy cases first');
   check('no fixture string is named "Dubai" or any other generic name', generic.length === 0,
     generic.slice(0, 3).map(([a, r]) => `${r} <- ${a}`).join(' | '));
   check('"Dubai - United Arab Emirates" names nothing', m('Dubai - United Arab Emirates') === null);
-  /* The digit trap: the Arabic is a barrier, so its "6" cannot join anything,
-     and the Latin road after it is what is named. */
-  check('"Duja Tower شارع 6 Sheikh Zayed Road AE" is not matched on the 6',
-    m('Duja Tower شارع 6 Sheikh Zayed Road AE') !== null
-      && !/^\d/.test(m('Duja Tower شارع 6 Sheikh Zayed Road AE') || ''),
-    m('Duja Tower شارع 6 Sheikh Zayed Road AE'));
+  /* The digit trap: the Arabic is a barrier, so its "6" cannot join
+     anything. The Latin after it is a ROAD, which names no area (review
+     2026-11-16), so the string names nothing and the tracker places it. */
+  check('"Duja Tower شارع 6 Sheikh Zayed Road AE" is matched neither on the 6 nor on the road',
+    m('Duja Tower شارع 6 Sheikh Zayed Road AE') === null, m('Duja Tower شارع 6 Sheikh Zayed Road AE'));
+  /* The trap itself, directly: an Arabic-script name whose only Latin
+     residue is its digit ("ام سقيم 1" tokenises to "1") must never answer a
+     "1" in an address, however often it was seen. */
+  const arabic = buildVocabulary([{ name: 'ام سقيم 1', n: 500 }, { name: 'Al Barsha', n: 2 }]);
+  check('an Arabic-script name seen 500 times does not match the "1" in "Wasl 51 Street 1 AE"',
+    matchName('Wasl 51 Street 1 AE', arabic) === null && arabic.size === 1);
+  check('…while the Latin name after the Arabic in "Taneem House شارع الفصول Dubai Media City 2 AE" is found',
+    m('Taneem House شارع الفصول Dubai Media City 2 AE') === 'Dubai Media City', m('Taneem House شارع الفصول Dubai Media City 2 AE'));
   check('a name never spans the Arabic: "Sheikh شارع Zayed" is not "Sheikh Zayed …"',
     tokens('Sheikh شارع Zayed').join(' ') === 'sheikh | zayed');
   check('"Avenue Hotel 26c شارع AE" — nothing Latin names an area: null', m('Avenue Hotel 26c شارع AE') === null);
@@ -137,9 +146,16 @@ console.log('\nthe one-line and comma forms: the noisy cases first');
   check('Bolt "Jumeirah Golf Estates, Dubai" → Jumeirah Golf Estates', m('Jumeirah Golf Estates, Dubai') === 'Jumeirah Golf Estates');
   check('Bolt "52B Street 46, Dubai" names nothing — a street number is not an area', m('52B Street 46, Dubai') === null);
   check('Bolt "86 Street 12, Sharjah" names nothing — the emirate is not an area', m('86 Street 12, Sharjah') === null);
-  /* Accents do not hide a name ("Dubaï - Émirats arabes unis"). */
-  check('accents are folded: "Anantara Downtown Dubai Hotel, Dubaï - Émirats arabes unis" → Downtown Dubai',
-    m('Anantara Downtown Dubai Hotel, Dubaï - Émirats arabes unis') === 'Downtown Dubai');
+  /* Accents do not hide a name ("Dubaï - Émirats arabes unis", "Árabes").
+     The Anantara string this used to check is now a hotel-name case (the
+     review's rules, below: a name followed by "Hotel" is the hotel's), so
+     the folding is checked on the tokens and on Bolt's Portuguese-locale
+     string. */
+  check('accents are folded: "Dubaï - Émirats arabes unis" tokenises to plain Latin',
+    tokens('Anantara Downtown Dubai Hotel, Dubaï - Émirats arabes unis').join(' ')
+      === 'anantara downtown dubai hotel | dubai | emirats arabes unis');
+  check('Bolt "Galadari Motor Driving Centre Al Quoz Main Office, Mosque, Dubai - Emirados Árabes Unidos" → Al Quoz',
+    m('Galadari Motor Driving Centre Al Quoz Main Office, Mosque, Dubai - Emirados Árabes Unidos') === 'Al Quoz');
   /* Coverage over the fixture's one-line and comma strings, so a change that
      quietly breaks the matcher shows as a number, not a feeling. */
   const textForms = F.addresses.filter((a) => !placeArea(a.addr) && !findPlusCode(a.addr));
@@ -148,12 +164,88 @@ console.log('\nthe one-line and comma forms: the noisy cases first');
   /* A floor at the figure measured when this was written (48 of 78; the
      rest are street numbers, Chinese-script city names, "Dubai - United
      Arab Emirates" and malls the vocabulary does not hold — the tracker's
-     job). A change that quietly breaks the matcher drops below it. */
-  check('at least 48 of the fixture strings the dash rule cannot read get a name',
-    named.length >= 48, `${named.length}/${textForms.length}`);
+     job). A change that quietly breaks the matcher drops below it. The
+     review of 2026-11-16 lowered it to 46: two of the 48 were roads
+     ("Duja Tower شارع 6 Sheikh Zayed Road AE" → "Sheikh Zayed Rd", "Palm
+     Jumeirah Rd 7, Dubai" → "Palm Jumeirah"), which are not areas. */
+  check('at least 46 of the fixture strings the dash rule cannot read get a name',
+    named.length >= 46, `${named.length}/${textForms.length}`);
   check('Yango "Dubai International Airport, Terminal 3 (Emirates)" → the vocabulary\'s "Dubai Int\'l Airport"',
     m('Dubai International Airport, Terminal 3 (Emirates)') === "Dubai Int'l Airport",
     m('Dubai International Airport, Terminal 3 (Emirates)'));
+}
+
+console.log('\nthe review\'s rules (2026-11-16): a wrong area is worse than an absent one');
+{
+  /* Every string here is a real production pickup (GET /api/trips/list,
+     9–15 Nov 2026) that the matcher as first written named wrongly. Run
+     over the sample's 5,550 Uber, 199 Bolt and 23 Yango pickups with the
+     fixture vocabulary plus the sample's own place_area() names, the rules
+     took 70 names away — 49 roads, 10 "District", 4 brand or fragment
+     "Jumeirah", 2 hotels, 4 malls, 1 "Business Centre" — and gave 4
+     ("Gate 4, Dubai Hills Mall" → Dubai Hills, "DIFC District building 5"
+     → DIFC, "One JLT First Al Khail Street …" → JLT, "Jumeirah Beach Road
+     Jumeirah AE" → Jumeirah). Absent goes on to the tracker; wrong stops. */
+  const m = (a) => matchName(a, vocab);
+  // Roads are not areas.
+  check('a road is not an area: "Sheikh Zayed Rd", "Al Seef St", "Festival Blvd", "Al Garhoud Bridge", "Manama Road 6 1"',
+    !vocabularyName('Sheikh Zayed Rd') && !vocabularyName('Al Seef St') && !vocabularyName('Festival Blvd')
+      && !vocabularyName('Al Garhoud Bridge') && !vocabularyName('Manama Road 6 1'));
+  check('"Le Meridien Hotel Airport Road Garhoud AE" is not "Airport Rd"', m('Le Meridien Hotel Airport Road Garhoud AE') === null,
+    m('Le Meridien Hotel Airport Road Garhoud AE'));
+  check('"King\'s Dubai School Umm Suqeim Street Hadaeq Sheikh Mohammad Bin Rashid AE" is not "Umm Suqeim St"',
+    m("King's Dubai School Umm Suqeim Street Hadaeq Sheikh Mohammad Bin Rashid AE") === null,
+    m("King's Dubai School Umm Suqeim Street Hadaeq Sheikh Mohammad Bin Rashid AE"));
+  // An area's name used as a road's name names the road.
+  check('Bolt "Al Safa Street Taxi Terminal, City Walk Mall" is not "Al Safa"',
+    m('Al Safa Street Taxi Terminal, City Walk Mall') === null, m('Al Safa Street Taxi Terminal, City Walk Mall'));
+  check('Bolt "Umm Suqeim Street 145, Dubai" and "Golden Mile 9, Palm Jumeirah Rd 9, Dubai" name nothing',
+    m('Umm Suqeim Street 145, Dubai') === null && m('Golden Mile 9, Palm Jumeirah Rd 9, Dubai') === null);
+  check('…but the area AFTER the road is still found: "wasl square Al Wasl Road Al Safa 1 AE" → an Al Safa',
+    /^Al Safa/.test(m('wasl square Al Wasl Road Al Safa 1 AE') || ''), m('wasl square Al Wasl Road Al Safa 1 AE'));
+  // Kinds of place are not places.
+  check('"District", "District 2", "Zone 1", "Industrial Area", "Business Centre" are not areas',
+    !vocabularyName('District') && !vocabularyName('District 2') && !vocabularyName('Zone 1')
+      && !vocabularyName('Industrial Area') && !vocabularyName('Business Centre'));
+  check('…while "Dubai Design District" and "Al Quoz Industrial Area 3" are',
+    vocabularyName('Dubai Design District') && vocabularyName('Al Quoz Industrial Area 3'));
+  const district = buildVocabulary([...F.vocabulary, { name: 'District', n: 8 }]);
+  check('"District 1 Al Worood 1 Street Al Thanyah AE" is not "District", even with "District" seen 8 times',
+    matchName('District 1 Al Worood 1 Street Al Thanyah AE', district) === null,
+    matchName('District 1 Al Worood 1 Street Al Thanyah AE', district));
+  check('"DIFC District building 5 شارع الصكوك AE" → DIFC', matchName('DIFC District building 5 شارع الصكوك AE', district) === 'DIFC');
+  // Buildings and businesses are not areas; a name glued to another by a comma is neither.
+  check('"Latifa Hospital", "Lake Central Tower", "Onpassive Metro Station", "near to Novotel hotel" are not areas',
+    !vocabularyName('Latifa Hospital') && !vocabularyName('Lake Central Tower')
+      && !vocabularyName('Onpassive Metro Station') && !vocabularyName('near to Novotel hotel'));
+  check('…"Jumeirah Lake Towers" (plural: the community) is', vocabularyName('Jumeirah Lake Towers'));
+  check('"Al Mawakeb Al Garhoud, Al Garhoud" (two segments glued) is not an area', !vocabularyName('Al Mawakeb Al Garhoud, Al Garhoud'));
+  check('…and does not stop "Al Mawakeb School Al Garhoud Al Garhoud AE" naming Al Garhoud',
+    matchName('Al Mawakeb School Al Garhoud Al Garhoud AE',
+      buildVocabulary([{ name: 'Al Garhoud', n: 9 }, { name: 'Al Mawakeb Al Garhoud, Al Garhoud', n: 3 }])) === 'Al Garhoud');
+  // A fragment of a longer known name is part of that name.
+  check('"Layan Community K Road Wadi Al Safa 7, Dubai Land AE" is not "Al Safa" (Wadi Al Safa 5 is known)',
+    m('Layan Community K Road Wadi Al Safa 7, Dubai Land AE') !== 'Al Safa', m('Layan Community K Road Wadi Al Safa 7, Dubai Land AE'));
+  check('"Spinneyes Market 1st, Wadi Al Safa 7 Dubai Sustainable City AE" is not "Al Safa"',
+    m('Spinneyes Market 1st, Wadi Al Safa 7 Dubai Sustainable City AE') !== 'Al Safa');
+  // The weak name only as the district itself.
+  check('Bolt "Jumeirah Emirates Towers Hotel Entrance, Museum Of The Future …" is not "Jumeirah" (the brand)',
+    m('Jumeirah Emirates Towers Hotel Entrance, Museum Of The Future and Emirates Towers') === null,
+    m('Jumeirah Emirates Towers Hotel Entrance, Museum Of The Future and Emirates Towers'));
+  check('"Gmm Tower lolow street Jumeirah Village AE" is not "Jumeirah" (JVC/JVT, not Jumeirah)',
+    m('Gmm Tower lolow street Jumeirah Village AE') === null, m('Gmm Tower lolow street Jumeirah Village AE'));
+  check('"Bulgari Resort Dubai Al Mouje street Jumeirah Bay Island AE" is not "Jumeirah"',
+    m('Bulgari Resort Dubai Al Mouje street Jumeirah Bay Island AE') !== 'Jumeirah');
+  check('"Jumeirah Beach Road Jumeirah AE" → Jumeirah (the last one stands alone)', m('Jumeirah Beach Road Jumeirah AE') === 'Jumeirah',
+    m('Jumeirah Beach Road Jumeirah AE'));
+  check('Yango "King Salman Bin Abdulaziz Al Saud Street, Jumeirah, Dubai" → Jumeirah',
+    m('King Salman Bin Abdulaziz Al Saud Street, Jumeirah, Dubai') === 'Jumeirah');
+  check('with no "Jumeirah 1" in the vocabulary, "Street 21B Jumeirah 1 AE" → the weak Jumeirah',
+    matchName('Street 21B Jumeirah 1 AE', buildVocabulary([{ name: 'Jumeirah', n: 9 }])) === 'Jumeirah');
+  // A hotel's name is not where it is.
+  check('"Jumeirah Beach Hotel Jumeirah Road Umm Suqiem 3 AE" names nothing (the hotel, then a road)',
+    matchName('Jumeirah Beach Hotel Jumeirah Road Umm Suqiem 3 AE',
+      buildVocabulary([...F.vocabulary, { name: 'Jumeirah Beach', n: 5 }])) === null);
 }
 
 console.log('\nAbu Dhabi\'s zone code in the area position');
@@ -255,6 +347,16 @@ console.log('\nthe ladder: order and basis');
   const r9 = resolveEndpoint({ addr: '', plate: 'L1', at: null, cancelled: true }, ctx);
   check('a cancelled booking\'s drop-off with no time → "…+cancelled", the true reason',
     r9.reason === 'no_address+cancelled' && /cancelled before any drop-off/.test(reasonText(r9.reason)));
+  /* A booking made in advance (review 2026-11-16): its request time is when
+     it was made, so the tracker then is not at the pickup. The text rungs
+     still answer; only the tracker is not asked. */
+  const rs = resolveEndpoint({ addr: '', plate: 'L1', at: '2026-11-12T10:00:00Z', fix, scheduled: true }, ctx);
+  check('a scheduled booking with no address: absent "no_address+scheduled", even with a fix in hand',
+    rs.area === null && rs.reason === 'no_address+scheduled' && !rs.needsFix, JSON.stringify(rs));
+  check('…in words that say why', reasonText(rs.reason) === 'no address, and a booking made in advance, so its request time is not when the car was at the pickup',
+    reasonText(rs.reason));
+  check('…while its address still places it',
+    resolveEndpoint({ addr: 'Al bafta grand building Al Moraqabat Deira AE', plate: 'L1', at: 'x', fix, scheduled: true }, ctx).area === 'Deira');
   const r10 = resolveEndpoint({ addr: '', plate: 'L1', at: null }, ctx);
   check('…and a drop-off with no time otherwise → "no_time"', r10.reason === 'no_address+no_time');
   check('the tracker basis says it is the car, not the platform',

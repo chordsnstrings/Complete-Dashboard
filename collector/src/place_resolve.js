@@ -95,13 +95,69 @@ export function placeArea(addr) {
      Dubai" — where Google's dash form of the same place says "Dubai Marina".
      Alone it is still the best the text offers, so it is kept as a fallback.
    * Commas, semicolons and ' - ' are barriers too: a name never spans two
-     parts of an address. */
+     parts of an address.
+
+   THE INDEPENDENT REVIEW (2026-11-16) found the matcher above still naming
+   things that are not areas — a wrong area is worse than an absent one,
+   because an absent pickup goes on to the tracker and a wrong one stops
+   there. Run over the production sample's 5,550 Uber, 199 Bolt and 23 Yango
+   pickups with the fixture vocabulary (place_area() names plus the
+   place_cell names) and the sample's own place_area() answers, 508 pickups
+   were named; 70 of those names are gone under the rules below (59 roads
+   or "District"), and 4 pickups gained a name:
+     · ROADS, from place_cell's vocabulary — FMS's reverse geocoder names a
+       fix by its road ("Sheikh Zayed Rd", "Airport Rd", "Umm Suqeim St"),
+       and the matcher found those words in "Duja Tower شارع 6 Sheikh Zayed
+       Road AE" (15), "Le Meridien Hotel Airport Road Garhoud AE" (13),
+       "King's Dubai School Umm Suqeim Street Hadaeq Sheikh Mohammad Bin
+       Rashid AE". Sheikh Zayed Road is fifty kilometres long; it is not
+       where a pickup was. A name whose last word is a road word is not an
+       area, and neither is an area name used AS a road name — "Al Safa
+       Street Taxi Terminal, City Walk Mall" is on Al Safa Street, in Al
+       Wasl; "Umm Suqeim Street 145" can be in Al Barsha.
+     · "District" (13), "District 2", "Zone 1", "Industrial Area": place
+       kinds, not places. Uber writes "District 1 Al Worood 1 Street Al
+       Thanyah AE"; the matcher found "District". AREA_KIND below joins
+       STOP so a name made only of them carries no real word.
+     · BUILDINGS and businesses in place_cell's vocabulary ("Latifa
+       Hospital", "Lake Central Tower", "Onpassive Metro Station", "near to
+       Novotel hotel"). A name carrying a POI word is not an area.
+     · FRAGMENTS of a longer place: "Layan Community K Road Wadi Al Safa 7,
+       Dubai Land AE" came back "Al Safa" — a community twenty kilometres
+       from Wadi Al Safa — because "Wadi Al Safa 7" is not in the
+       vocabulary and "Al Safa" is a sub-sequence of it. A match whose
+       neighbouring word continues a LONGER known name ("Wadi Al Safa 5"
+       precedes "Al Safa" with "Wadi") is part of that name, and is not
+       taken.
+     · the WEAK "Jumeirah" as a hotel brand or a fragment: "Jumeirah
+       Emirates Towers Hotel Entrance, Museum Of The Future …" (Trade
+       Centre), "Jumeirah Beach Hotel Jumeirah Road Umm Suqiem 3 AE",
+       "Gmm Tower lolow street Jumeirah Village AE" (JVC, twenty kilometres
+       away). The weak name now answers only where it stands as the
+       district itself: alone in its part ("…, Jumeirah, Dubai", "…
+       Jumeirah AE") or as "Jumeirah 1/2/3".
+   Each rule is pinned in test/place_resolve.test.mjs on the string that
+   needed it. */
 const GENERIC = new Set(['dubai', 'uae', 'ae', 'united', 'arab', 'emirates', 'emirate',
   'sharjah', 'ajman', 'abu', 'dhabi', 'fujairah', 'ras', 'khaimah', 'umm', 'quwain']);
+/* Kinds of place, not places: a name made only of these (and digits) names
+   nothing — "District 2", "Zone 1", "Industrial Area". */
+const AREA_KIND = ['district', 'zone', 'phase', 'sector', 'industrial', 'residential', 'community',
+  'complex', 'suburb', 'city', 'business', 'centre', 'center'];
 const STOP = new Set(['al', 'el', 'the', 'of', 'and', 'st', 'rd', 'dr', 'street', 'road', 'drive',
   'no', 'tower', 'building', 'bldg', 'block', 'level', 'floor', 'villa', 'apartment', 'apt',
   'office', 'shop', 'unit', 'gate', 'entrance', 'exit', 'near', 'opp', 'opposite', 'behind',
-  'unnamed', 'area']);
+  'unnamed', 'area', ...AREA_KIND]);
+/* Road words, as tokens() folds them (road→rd, street→st, drive→dr). */
+const ROAD = new Set(['rd', 'st', 'dr', 'hwy', 'highway', 'blvd', 'boulevard', 'ave', 'avenue', 'bridge',
+  'interchange', 'flyover']);
+/* A name carrying one of these names a building or a business, not an
+   area. "towers" (plural) is not here: Jumeirah Lake Towers is a community. */
+const POI = new Set(['hotel', 'hotels', 'hospital', 'clinic', 'restaurant', 'cafe', 'metro', 'station',
+  'bus', 'stop', 'school', 'university', 'bank', 'headquarters', 'hq', 'floor', 'tower', 'building', 'bldg',
+  'mall', 'near', 'next', 'beside', 'opp', 'opposite', 'shop', 'office', 'plot', 'gate', 'entrance',
+  'apartment', 'apartments', 'suites']);
+const HOTEL = new Set(['hotel', 'hotels', 'resort']);
 const WEAK = new Set(['jumeirah']);
 /* The words Google abbreviates in its own addresses ("Marasi Dr", "Sheikh
    Zayed Rd", "Al Falak St", "Dubai Int'l Airport") and the other forms spell
@@ -137,7 +193,22 @@ export function vocabularyName(name) {
      bare number with a road letter in front ("E 11"). */
   const s = plain.trim();
   if ((/[0-9]/.test(s) && !/[a-z]/.test(s) && !/\s/.test(s)) || /^[A-Z]{0,2} ?[0-9]+$/.test(s)) return false;
-  const t = tokens(plain).filter((x) => x !== BARRIER);
+  /* A name with a comma or semicolon in it is two things glued together by
+     a segment place_area() could not split — "Al Mawakeb Al Garhoud, Al
+     Garhoud", "Number One Tower Suites Dubai, Sheikh Zayed Road", "Al Barsha
+     1, Al Barsha 1" — a building and its area, or the area twice. It is not
+     one area's name, and its pieces would teach the fragment rule below
+     contexts that are not real ("Al Garhoud" preceded by "Garhoud"). */
+  const raw = tokens(plain);
+  if (raw.includes(BARRIER)) return false;
+  const t = raw;
+  /* A road is not an area: the last word, past any trailing number
+     ("Manama Road 6 1"), is a road word — "Sheikh Zayed Rd", "Al Seef St",
+     "Festival Blvd", "Al Garhoud Bridge". */
+  const words = t.filter((x) => !/^[0-9]+$/.test(x));
+  if (words.length && ROAD.has(words[words.length - 1])) return false;
+  /* Nor is a building or a business: "Latifa Hospital", "Panoramic Tower". */
+  if (t.some((x) => POI.has(x))) return false;
   /* A real WORD — three letters or more, letters only, not the city and not
      filler — has to be in it; "Street 6" and "Tower 2" have none. */
   return t.some((x) => /^[a-z]{3,}$/.test(x) && !GENERIC.has(x) && !STOP.has(x));
@@ -162,6 +233,25 @@ export function buildVocabulary(entries, { minN = 2 } = {}) {
   for (const v of byKey.values()) {
     if (!byFirst.has(v.t[0])) byFirst.set(v.t[0], []);
     byFirst.get(v.t[0]).push(v);
+    v.left = new Set();
+    v.right = new Set();
+  }
+  /* Where each name sits INSIDE a longer one: the word just before it and
+     just after it in every longer vocabulary name that contains it. "Al
+     Safa" sits in "Wadi Al Safa 5" with "wadi" on its left, so in "… Wadi Al
+     Safa 7 …" it is a fragment of a Wadi Al Safa, not Al Safa (review
+     2026-11-16). Once per build: names × their sub-sequences, a few
+     thousand look-ups. */
+  for (const w of byKey.values()) {
+    for (let a = 0; a < w.t.length; a++) {
+      for (let b = a + 1; b <= w.t.length; b++) {
+        if (b - a === w.t.length) continue;
+        const inner = byKey.get(w.t.slice(a, b).join(' '));
+        if (!inner) continue;
+        if (a > 0) inner.left.add(w.t[a - 1]);
+        if (b < w.t.length) inner.right.add(w.t[b]);
+      }
+    }
   }
   return { byFirst, size: byKey.size };
 }
@@ -178,11 +268,31 @@ export function matchName(addr, vocab) {
       let ok = true;
       for (let j = 1; j < v.t.length; j++) if (t[i + j] !== v.t[j]) { ok = false; break; }
       if (!ok) continue;
-      const m = { name: v.name, end: i + v.t.length - 1, len: v.t.length, n: v.n };
+      const end = i + v.t.length - 1;
+      const next = t[end + 1];
+      /* An area name used as a road name names the road: "Al Safa Street",
+         "Umm Suqeim Street 145", "Palm Jumeirah Rd 9". */
+      if (next && ROAD.has(next)) continue;
+      /* A fragment of a longer known name ("Al Safa" in "Wadi Al Safa 7"). */
+      if ((i > 0 && v.left?.has(t[i - 1])) || (next && v.right?.has(next))) continue;
+      /* The name of a hotel, not where it is: the Jumeirah Beach Hotel is in
+         Umm Suqeim 3. */
+      if (next && HOTEL.has(next)) continue;
+      const m = { name: v.name, end, len: v.t.length, n: v.n };
       const better = (a, b) => !b || a.end > b.end || (a.end === b.end
         && (a.len > b.len || (a.len === b.len && a.n > b.n)));
-      if (v.t.length === 1 && WEAK.has(v.t[0])) { if (better(m, weak)) weak = m; }
-      else if (better(m, best)) best = m;
+      if (v.t.length === 1 && WEAK.has(v.t[0])) {
+        /* The weak name answers only as the district itself: alone in its
+           part (everything after it, to the next barrier, is the city or
+           the country) or as Jumeirah 1, 2 or 3 — never as the brand in
+           "Jumeirah Emirates Towers Hotel" or the start of "Jumeirah
+           Village". */
+        let k = end + 1;
+        while (k < t.length && t[k] !== BARRIER && GENERIC.has(t[k])) k++;
+        const alone = k >= t.length || t[k] === BARRIER;
+        if (!alone && !/^[1-3]$/.test(next || '')) continue;
+        if (better(m, weak)) weak = m;
+      } else if (better(m, best)) best = m;
     }
   }
   const m = best || weak;
@@ -370,6 +480,7 @@ const POS_FAIL = {
   no_plate: 'no car to ask a tracker about',
   no_time: 'no time to ask the tracker at',
   cancelled: 'the booking was cancelled before any drop-off',
+  scheduled: 'a booking made in advance, so its request time is not when the car was at the pickup',
   no_fix: `no tracker fix within ${TRACKER_WINDOW_MIN} minutes`,
   unnamed_cell: 'a position on ground the fleet has never named',
 };
@@ -391,11 +502,21 @@ export function reasonText(code) {
              cancelled — a drop-off with no drop-off time on a cancelled
              booking: there was no drop-off to place, and that, not the
              missing timestamp, is the true reason.
-   ctx:    { vocab, cellArea(lat, lng) → { area, votes, seen, named_by } | null }
+             scheduled — a pickup whose `at` is the moment the booking was
+             MADE, on a booking made in advance (review, 2026-11-16). Bolt's
+             requested_at is the order's creation (src/sources/bolt_orders.js
+             requestedAt = created); on a scheduled ride that precedes the
+             pickup by as long as the rider booked ahead — hours — and the
+             car's tracker then was wherever the car was, not at the pickup.
+             On the sample's 27 Bolt rides that carry a pickup moment
+             (ended_at − duration_s), the request preceded it by a median 2.3
+             minutes and at most 14.8; a scheduled ride has no such bound. So
+             the tracker rung is not asked, and the reason says why.
+   ctx:   { vocab, cellArea(lat, lng) → { area, votes, seen, named_by } | null }
    output: { area, basis, reason, detail } — exactly one of area/reason set;
            needsFix: true when only the tracker rung is left to try. */
 export function resolveEndpoint(input, ctx) {
-  const { addr, lat, lng, plate, at, fix, cancelled } = input || {};
+  const { addr, lat, lng, plate, at, fix, cancelled, scheduled } = input || {};
   const cellArea = ctx?.cellArea || (() => null);
   let positioned = false;
 
@@ -432,6 +553,7 @@ export function resolveEndpoint(input, ctx) {
   const text = textFailure(addr);
   if (!plate) return absent(text, positioned ? 'unnamed_cell' : 'no_plate');
   if (!at) return absent(text, positioned ? 'unnamed_cell' : cancelled ? 'cancelled' : 'no_time');
+  if (scheduled) return absent(text, positioned ? 'unnamed_cell' : 'scheduled');
   if (fix === undefined) return { area: null, basis: null, reason: null, detail: null, needsFix: true };
   if (fix && isPos(fix.lat, fix.lng)) {
     const c = cellArea(Number(fix.lat), Number(fix.lng));

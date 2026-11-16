@@ -202,6 +202,42 @@ console.log('\nthe sweep wraps, and a deleted trip takes its rows with it');
     && (await q('SELECT count(*)::int n FROM booking_cell'))[0].n === 0);
 }
 
+console.log('\na booking made in advance is not placed by the tracker at its request time (review 2026-11-16)');
+{
+  /* Bolt's requested_at is the order's creation; on a scheduled ride the
+     car's tracker then is wherever the car was hours before the pickup. The
+     hotel channel's requested_at is the trip's start, so its scheduled rides
+     ARE at the pickup at that instant. Both carry a fix a minute after the
+     request, in a named cell. */
+  await trip({ id: 'SB', platform: 'bolt', plate: 'P8', req: 30, pickup: '', dropoff: '' });
+  await trip({ id: 'SH', platform: 'hotel', plate: 'P9', req: 30, pickup: '', dropoff: '' });
+  await trip({ id: 'SN', platform: 'bolt', plate: 'P10', req: 30, pickup: '', dropoff: '' });
+  await q("UPDATE trip SET is_scheduled = true WHERE external_id IN ('SB', 'SH')");
+  await q("UPDATE trip SET is_scheduled = false WHERE external_id = 'SN'");
+  await fix('P8', 29, X); await fix('P9', 29, X); await fix('P10', 29, X);
+  await resolveTripPlaces(db, { budgetMs: 60_000 });
+  const sb = await row('SB');
+  check('a scheduled Bolt order: absent, "no_address+scheduled" — not the tracker',
+    sb.pickup_area === null && sb.pickup_reason === 'no_address+scheduled', JSON.stringify([sb.pickup_area, sb.pickup_reason]));
+  check('a scheduled hotel ride (requested_at is its start): placed by the tracker',
+    (await row('SH')).pickup_basis === 'tracker');
+  check('an on-demand Bolt order: placed by the tracker', (await row('SN')).pickup_basis === 'tracker');
+}
+
+console.log('\na worker clock ahead of the database does not make the retry step spin (review 2026-11-16)');
+{
+  /* retryHours 0 makes every absent row a retry candidate; batch 1 keeps the
+     loop going while it finds one. A worker clock an hour fast used to put
+     the pass's start AFTER every resolved_at the database wrote, so the
+     rows it had just re-resolved looked untouched and were picked again,
+     batch after batch, until the budget ran out. */
+  const absent = (await q(`SELECT count(*)::int n FROM trip_place
+                            WHERE pickup_area IS NULL OR dropoff_area IS NULL`))[0].n;
+  const s = await resolveTripPlaces(db, { budgetMs: 1500, batch: 1, retryHours: 0, now: () => Date.now() + 3_600_000 });
+  check(`each of the ${absent} absent rows is retried at most once in the pass`, absent > 0 && s.retried <= absent,
+    `retried ${s.retried} of ${absent}`);
+}
+
 await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

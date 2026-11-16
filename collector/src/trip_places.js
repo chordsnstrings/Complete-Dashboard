@@ -67,9 +67,20 @@ const INPUTS = (a = 't') => `md5(concat_ws('|',
   coalesce(${a}.pickup_addr, '∅'), coalesce(${a}.pickup_lat::text, '∅'), coalesce(${a}.pickup_lng::text, '∅'),
   coalesce(${a}.dropoff_addr, '∅'), coalesce(${a}.dropoff_lat::text, '∅'), coalesce(${a}.dropoff_lng::text, '∅'),
   coalesce(${a}.plate, '∅'), coalesce(extract(epoch FROM ${a}.requested_at)::text, '∅'),
-  coalesce(extract(epoch FROM ${a}.ended_at)::text, '∅'), coalesce(${a}.status, '∅')))`;
+  coalesce(extract(epoch FROM ${a}.ended_at)::text, '∅'), coalesce(${a}.status, '∅'),
+  coalesce(${a}.is_scheduled::text, '∅')))`;
 
-const COLS = `t.platform, t.external_id, t.fleet_id, t.plate, t.status, t.requested_at, t.ended_at,
+/* Whose requested_at is the moment the car reached the pickup, so the
+   tracker at that instant IS at the pickup even on a booking made in
+   advance: the hotel channel's requested_at is the trip's startTime
+   (src/sources/hotel.js). Everyone else's is when the booking was made —
+   Bolt's is the order's `created` (src/sources/bolt_orders.js), Uber's the
+   "Trip request time" — and on a scheduled booking that can be hours
+   before the pickup (review 2026-11-16; src/place_resolve.js
+   resolveEndpoint, `scheduled`). */
+const REQUEST_IS_PICKUP = new Set(['hotel']);
+
+const COLS = `t.platform, t.external_id, t.fleet_id, t.plate, t.status, t.requested_at, t.ended_at, t.is_scheduled,
   t.pickup_addr, t.pickup_lat, t.pickup_lng, t.dropoff_addr, t.dropoff_lat, t.dropoff_lng,
   ${INPUTS('t')} AS inputs, (tp.platform IS NOT NULL) AS stored`;
 
@@ -205,7 +216,8 @@ export async function resolveBatch(db, rows, ctx) {
   if (grew) ctx.vocab = buildVocabulary(entries(ctx.counts));
 
   const input = (t, end) => (end === 'pickup'
-    ? { addr: t.pickup_addr, lat: t.pickup_lat, lng: t.pickup_lng, plate: t.plate, at: iso(t.requested_at) }
+    ? { addr: t.pickup_addr, lat: t.pickup_lat, lng: t.pickup_lng, plate: t.plate, at: iso(t.requested_at),
+      scheduled: t.is_scheduled === true && !REQUEST_IS_PICKUP.has(t.platform) }
     : { addr: t.dropoff_addr, lat: t.dropoff_lat, lng: t.dropoff_lng, plate: t.plate, at: iso(t.ended_at),
       cancelled: cancelledStatus(t.status) });
   const first = rows.map((t) => ({ pickup: resolveEndpoint(input(t, 'pickup'), ctx), dropoff: resolveEndpoint(input(t, 'dropoff'), ctx) }));
@@ -362,7 +374,16 @@ export async function resolveTripPlaces(db = pool, {
   now = () => Date.now(),
 } = {}) {
   const t0 = now();
-  const startedAt = new Date(t0).toISOString();
+  /* The pass's start on the DATABASE's clock, not the worker's. The retry
+     step skips rows this pass already touched by comparing resolved_at —
+     written by the database's now() — with this instant; read off the
+     worker's clock instead, a worker running even a second ahead of the
+     database (two machines: an App Platform container and a managed
+     Postgres) saw every row it had just re-resolved as older than the pass,
+     picked it again, and spun on the same batch until the budget ran out
+     (review 2026-11-16; test/trip_places.test.mjs pins it with a worker
+     clock an hour fast). */
+  const startedAt = (await db.query('SELECT now() AS t')).rows[0].t;
   const over = () => now() - t0 >= budgetMs;
   const stats = { fresh: 0, retried: 0, swept: 0, scanned: 0, votes: 0, fixes: 0, batches: 0, by: {}, sweep_wrapped: false };
   const add = (r) => {

@@ -1000,16 +1000,27 @@ Measured on production (GET `/api/trips/list`, 6,000 bookings, 9–15 Nov 2026):
 * `address_name` — a name the fleet's own history already uses (place_area's answers in trip_place,
   plus every place_cell name; seen at least twice), found in the one-line or comma text: Latin script
   only, never the city/emirate/country, nearest the end, longest at the same end, "Jumeirah" only as
-  a fallback. Or (rule `zone_code`) the Abu Dhabi community before the zone code.
+  a fallback. Or (rule `zone_code`) the Abu Dhabi community before the zone code. **Since the
+  independent review (2026-11-16) it never returns** a road ("Sheikh Zayed Rd", "Airport Rd" — a
+  name whose last word is a road word is not an area), an area's name used as a road's ("Al Safa
+  Street", "Palm Jumeirah Rd 9"), a kind of place ("District", "Zone 1", "Industrial Area", "Business
+  Centre"), a building or business ("Latifa Hospital", "Lake Central Tower", "… Metro Station", a
+  mall), a name glued to another by a comma ("Al Mawakeb Al Garhoud, Al Garhoud"), a fragment of a
+  longer known name ("Al Safa" inside "Wadi Al Safa 7"), a hotel's name ("Jumeirah Beach Hotel"), or
+  the weak "Jumeirah" unless it stands alone in its part or as "Jumeirah 1/2/3" — see the trap
+  "place_cell's vocabulary names roads".
 * `plus_code` — an Open Location Code in the text, short codes recovered against the emirate the
   address names (Dubai otherwise), then named by a gazetteer.
 * `coordinates` — the booking's own lat/lng (hotel ~69%, Yango ~22%, Bolt orders), named by a gazetteer.
 * `tracker` — the car's own FMS/CABMAN fix within **5 minutes** of the request time (pickup) or the
   drop-off time (drop-off), FMS first, named by a gazetteer. Where the CAR was, not what the platform
-  wrote — every surface says "placed by the car's tracker at the request time".
+  wrote — every surface says "placed by the car's tracker at the request time". Not asked for the
+  pickup of a booking made in advance (`is_scheduled`) on a channel whose request time is when the
+  booking was made — every channel but the hotel's, whose requested_at is the trip's start (review
+  2026-11-16; trap "A scheduled booking's request time is not near its pickup").
 * absent — `<text failure>+<position failure>`: `no_address` / `city_only` / `other_script` /
-  `unknown_name`, and `no_plate` / `no_time` / `cancelled` / `no_fix` / `unnamed_cell`; in words by
-  `reasonText()`, e.g. "no address, and no tracker fix within 5 minutes".
+  `unknown_name`, and `no_plate` / `no_time` / `cancelled` / `scheduled` / `no_fix` / `unnamed_cell`;
+  in words by `reasonText()`, e.g. "no address, and no tracker fix within 5 minutes".
 
 **The window, measured** (GET `/api/track`, 89 plates, 8–16 Nov): FMS reports every 6.2 min at the
 median (p75 7.0, p90 10.0), CABMAN every 5.0 (p90 52.7 — a parked car reports about hourly). Of the
@@ -1033,6 +1044,22 @@ from the sample's own week of drop-offs plus the place_cell names production pri
 Expected still unplaced: **Uber 0.8–1.1% (from 18.1%), Bolt 7.0–8.5% (from 88.4%), Yango 0% (from 100%),
 hotel 0%.** Drop-offs: Uber 97 of 5,550 not placed, 83 of them cancelled bookings that never had a
 drop-off ("…, and the booking was cancelled before any drop-off"); Bolt 44 of 199, 29 cancelled.
+
+**Revised by the independent review (2026-11-16).** The table above was measured with the matcher as
+first written, which named about one in seven of its `address_name` pickups wrongly. Re-measured on
+the same sample with the same vocabulary the review could rebuild (the fixture's names —
+place_area over the sample plus the place_cell names — and the sample's own place_area answers),
+pickups named from the address text went **Uber 440 → 392, Bolt 47 → 27, Yango 21 → 21**: 70 names
+taken away (49 roads — "Sheikh Zayed Rd" 15, "Airport Rd" 13, "Sheikh Mohammed bin Rashid Boulevard"
+3, "Palm Jumeirah" from "Palm Jumeirah Rd" 4, "Dubai Sports City" from "Dubai Sports City Street" 3,
+and single cases; 10 "District"; 4 brand or fragment "Jumeirah"; 2 "Jumeirah Beach" from the hotel;
+4 malls; 1 "Business Centre") and 4 given ("Gate 4, Dubai Hills Mall" → Dubai Hills, "DIFC District
+building 5" → DIFC, "One JLT First Al Khail Street …" → JLT, "Jumeirah Beach Road Jumeirah AE" →
+Jumeirah). The pickups taken away go on to the tracker rung, which had a fix within 5 minutes for
+93% of the empty-address Uber pickups, so the expected unplaced share moves by about 0.1 point for
+Uber (≈ 4 of 5,550) and 0.7 for Bolt (≈ 1–2 of 199) — the figures above stay the right order. The
+builder's 436 / 40 used a vocabulary the review could not exactly rebuild; the 440 / 47 baseline is
+the builder's matcher on the review's vocabulary.
 
 ## Traps that have cost time more than once
 
@@ -1058,6 +1085,35 @@ drop-off ("…, and the booking was cancelled before any drop-off"); Bolt 44 of 
   way to the rider, typically a few minutes out — and says so ("at the request time"). Shifting the
   read by +2 min moved agreement with the address from 29.8% to 30.1% (place_cell names), so the
   vocabulary, not the clock, was the gap. The drop-off is read at the drop-off time, when the car is there.
+* **place_cell's vocabulary names roads, buildings and fragments — a name matcher over it names them
+  too** (independent review, 2026-11-16). FMS's reverse geocoder names a fix by the road it is on, and
+  place_area() over 425,000 addresses has produced "District", "Zone 1", "Industrial Area", hotels,
+  malls and comma-glued pairs, each seen more than twice. The PLC name matcher took every one of them
+  as an area: on the 6,000-booking sample 59 of the 508 pickups it named came back as roads (49:
+  "Duja Tower شارع 6 Sheikh Zayed Road AE" → "Sheikh Zayed Rd"; "Le Meridien Hotel Airport Road
+  Garhoud AE" → "Airport Rd") or as "District" (10: "District 1 Al Worood 1 Street Al Thanyah AE"),
+  and a handful as a fragment of a longer place ("… Wadi Al Safa 7 …" → "Al Safa", twenty kilometres away)
+  or the hotel brand ("Jumeirah Emirates Towers Hotel …" → "Jumeirah"). A wrong area is worse than an
+  absent one: absent goes on to the tracker, wrong stops there. A vocabulary drawn from the fleet's
+  own names is not a list of areas until roads, place kinds, buildings and glued pairs are filtered
+  out of it, and a match has to be checked against its neighbours (a road word after it, a longer
+  known name around it). src/place_resolve.js `vocabularyName` and `matchName` hold the rules, each
+  pinned on its real string in test/place_resolve.test.mjs.
+* **A scheduled booking's request time is not near its pickup** (independent review, 2026-11-16).
+  Bolt's requested_at is the order's `created` (src/sources/bolt_orders.js); for an on-demand ride the
+  pickup follows within minutes (the sample's 27 Bolt rides with a pickup moment, ended_at −
+  duration_s: median 2.3 min, max 14.8), but `is_scheduled` rides are booked hours ahead, and the car's
+  tracker at the request time is wherever the car was then. The tracker rung is not asked for those
+  pickups (reason `scheduled`). The hotel channel is the exception — its requested_at is the trip's
+  startTime (src/sources/hotel.js), so its scheduled rides are at the pickup at that instant. Uber
+  Reserve and Yango's advance orders carry no flag we store, so they cannot be told apart yet.
+* **Compare a database timestamp with the database's clock** (independent review, 2026-11-16). The
+  trip_places retry step skipped rows the pass had already touched by `resolved_at < <pass start>`,
+  with resolved_at written by Postgres's now() and the pass start read off the worker's clock. The
+  worker (an App Platform container) and the database (managed Postgres) are two machines; with the
+  worker even slightly ahead, rows just re-resolved looked untouched and were picked again until the
+  budget ran out — on PGlite with the worker clock an hour fast, 325 re-resolutions of 18 rows in 1.5 s.
+  Take the start from `SELECT now()`.
 * **"Airport" in a booking's address is mostly NOT the airport** (2026-11-16, FIX-STATUS FLT9).
   No booking carries a coordinate, so an airport trip is found by its address text, and the
   commonest "airport" address on production is "Airport Rd - Al Garhoud - Dubai" — a road of
