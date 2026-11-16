@@ -125,10 +125,14 @@ export const SETTING_DEFAULTS = {
      DeepSeek V4 Pro, its GA build and Seed 2.0 Pro in 17-25 s, every
      proposal well-formed (COVERAGE "The analyst on ModelArk"). The key is
      ARK_API_KEY (config.analystModel falls back to it), already on both
-     components for the daily report. The model is the one production's own
-     measurement kept the most findings from — see COVERAGE for the A/B. */
+     components for the daily report. The model is Seed 2.0 Pro, the one
+     production's own measurement kept the most from: one pass each on
+     2026-11-16, Seed 7 confirmed of 12 measured with none refuted or
+     dropped (28 s), DeepSeek V4 Pro GA 5 of 9 with 1 refuted and 3 dropped
+     (34 s) — COVERAGE "The analyst on ModelArk". It is also the chat
+     assistant's model (AGENT_MODEL). */
   ANALYST_BASE_URL: 'https://ark.ap-southeast.bytepluses.com/api/v3',
-  ANALYST_MODEL: 'deepseek-v4-pro-ga-260813',
+  ANALYST_MODEL: 'seed-2-0-pro-260328',
   BACKFILL_MONTHS: '12',
   INCREMENTAL_DAYS: '3',
   /* Data retention (src/data_retention.js). dry_run counts what a pass would
