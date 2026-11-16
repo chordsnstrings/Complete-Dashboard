@@ -60,7 +60,9 @@
      until 02:00 is parked too. The from–to of the stay says the rest.
    · "Since" and "until" are bounds where they are bounds: `since_at_least`
      when the stay began on the earliest fix read (WHR's rule), `to_at_least`
-     when it was still there at the last moment read (12:00, or now). */
+     when it was still there at the last moment read (12:00, or now), or when
+     what follows its last fix is a stretch the tracker did not watch — then
+     the last fix is when it was last seen there, not when it left (OVN11). */
 import { whereaboutsDay, dayStartMs, localStamp, LOOK_AROUND_H, SILENT_MIN,
   STAY_RADIUS_KM, PARKED_CADENCE_MIN } from './whereabouts.js';
 
@@ -100,16 +102,29 @@ export const lastNightOf = (nowMs) => addDays(dubaiDayOfMs(nowMs), -1);
 export const nightBegun = (night, nowMs) => nowMs >= nightWindow(night).startMs;
 export const nightRunning = (night, nowMs) => nightBegun(night, nowMs) && nowMs < nightWindow(night).endMs;
 
-/* For api/cache.js: an answer whose LAST night's window has not ended moves
-   with every tracker tick (CABMAN's five-minute realtime poll advances no
-   data version), so it is never cached. The night asked is the range's end,
-   or the one night, or last night by default. A malformed value is refused
-   by the route, and a refusal is never cached either. */
+/* For api/cache.js: an answer whose LAST night's READ has not ended moves
+   with every tracker tick (CABMAN's five-minute realtime poll and FMS's
+   two-minute live tick advance no data version), so it is never cached. The
+   night asked is the range's end, or the one night, or last night by default.
+   A malformed value is refused by the route, and a refusal is never cached
+   either.
+
+   THE READ, NOT THE WINDOW (independent review, 2026-11-16, FIX-STATUS OVN9).
+   The first draft closed at 05:00, when the window ends. But the night is
+   judged on the day read to 12:00 (carNight holds now at min(now, 12:00)),
+   so from 05:00 to 12:00 the answer still moves with every tick: an FMS unit
+   quiet since 22:30 is "not known — no fix since 22:30: the tracker has not
+   reported since" at 06:30, and "parked, inferred, 22:30–06:40" once the
+   driver turns the key at 06:40 and the unit reports at the same spot.
+   Cached at 06:30, the first answer — whose reason is then FALSE — was served
+   until the next collection or rollup moved the version (up to ~20 minutes),
+   on the default view (last night) in exactly the hours an operator reads it.
+   Measured: 79 of the 136 cars /api/live listed on 2026-11-16 are FMS. */
 export function overnightOpen(query = {}, nowMs = Date.now()) {
   const pick = (v) => String(v ?? '').trim().slice(0, 10);
   const last = pick(query.to) || pick(query.night) || lastNightOf(nowMs);
   if (!okDay(last)) return false;
-  return nowMs < nightWindow(last).endMs;
+  return nowMs < nightWindow(last).readToMs;
 }
 
 /* ── the request, read once for the route and the mock ───────────────────
@@ -171,29 +186,56 @@ export function parseOvernightQuery(query = {}, nowMs = Date.now()) {
    "before"; likewise after. So the fleet-wide read (one night) and the
    driver pages' read (a month at once) hand whereaboutsDay exactly what a
    per-night read would — the same car-night says the same thing on both. */
-export function sliceNight(fixes, night, { before = [], after = [] } = {}) {
-  const w = nightWindow(night);
+/* SORTED ONCE, SLICED PER NIGHT (independent review, 2026-11-16, FIX-STATUS
+   OVN10). The first draft re-sorted a car's WHOLE range of fixes for every
+   night, with Date.parse inside the comparator, and the route re-built every
+   point per night as well: a month of ten FMS cars (73,800 fixes at the
+   measured 240 a car-day) took 4.6 s of synchronous arithmetic on the
+   review machine, 0.76 s for two cars — the event loop of a basic-xxs API,
+   held for every other reader, each time a driver's Activity tab opened.
+   Now the fixes are timed and sorted once, per tracker, and each night's
+   read and its two edges are found by binary search. The slice handed to
+   whereaboutsDay is the same set as before (test/overnight_logic §9, §11). */
+const lowerBound = (ts, x) => {
+  let lo = 0; let hi = ts.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (ts[m] < x) lo = m + 1; else hi = m; }
+  return lo;
+};
+export function nightSlicer(fixes, { before = [], after = [] } = {}) {
   const tOf = (p) => (typeof p.t === 'number' ? p.t : Date.parse(p.at));
-  const sorted = [...fixes].sort((a, b) => tOf(a) - tOf(b));
-  const lastBefore = new Map(before.filter(Boolean).map((p) => [p.source, p]));
-  const firstAfter = new Map(after.filter(Boolean).map((p) => [p.source, p]));
-  const inRead = [];
-  const localAfter = new Map();
-  for (const p of sorted) {
-    const t = tOf(p);
-    if (t < w.readFromMs) lastBefore.set(p.source, p);
-    else if (t < w.readToMs) inRead.push(p);
-    else if (!localAfter.has(p.source)) localAfter.set(p.source, p);
+  const timed = fixes.map((p, i) => ({ p, t: tOf(p), i })).sort((a, b) => a.t - b.t || a.i - b.i);
+  const ts = timed.map((x) => x.t);
+  const bySrc = new Map();
+  for (const x of timed) {
+    if (!bySrc.has(x.p.source)) bySrc.set(x.p.source, { ts: [], ps: [] });
+    const s = bySrc.get(x.p.source); s.ts.push(x.t); s.ps.push(x.p);
   }
-  for (const [s, p] of localAfter) firstAfter.set(s, p);
-  return [...lastBefore.values(), ...inRead, ...firstAfter.values()];
+  const edgeBefore = before.filter(Boolean); const edgeAfter = after.filter(Boolean);
+  return (night) => {
+    const w = nightWindow(night);
+    const lastBefore = new Map(edgeBefore.map((p) => [p.source, p]));
+    const firstAfter = new Map(edgeAfter.map((p) => [p.source, p]));
+    for (const [src, s] of bySrc) {
+      const i0 = lowerBound(s.ts, w.readFromMs); const i1 = lowerBound(s.ts, w.readToMs);
+      if (i0 > 0) lastBefore.set(src, s.ps[i0 - 1]);
+      if (i1 < s.ps.length) firstAfter.set(src, s.ps[i1]);
+    }
+    const inRead = timed.slice(lowerBound(ts, w.readFromMs), lowerBound(ts, w.readToMs)).map((x) => x.p);
+    return [...lastBefore.values(), ...inRead, ...firstAfter.values()];
+  };
 }
+export const sliceNight = (fixes, night, edges = {}) => nightSlicer(fixes, edges)(night);
 
 /* One car, one night: the WHR day for D+1, judged up to 12:00 (or now). */
 export function carNight({ plate, fleetId = null, night, points = [], nowMs = Date.now() }) {
   const w = nightWindow(night);
   const day = whereaboutsDay({ day: w.on, points, nowMs: Math.min(nowMs, w.readToMs) });
   return overnightOf(day, night, { plate, fleet_id: fleetId, nowMs });
+}
+/* One car over many nights from one read — what the route and the mock call. */
+export function carNights({ plate, fleetId = null, nights, points = [], before = [], after = [], nowMs = Date.now() }) {
+  const slice = nightSlicer(points, { before, after });
+  return nights.map((night) => carNight({ plate, fleetId, night, points: slice(night), nowMs }));
 }
 
 /* ── the choice and its words ────────────────────────────────────────────
@@ -287,9 +329,21 @@ export function overnightOf(day, night, { plate = null, fleet_id = null, nowMs =
     const reachedEnd = st.end_min >= day.minutes;
     const until = st.until ? localStamp(st.until) : null;
     const toStamp = until || { day: day.day, time: st.to };
+    /* WHEN IT LEFT IS KNOWN ONLY WHEN A DRIVE FOLLOWS (independent review,
+       2026-11-16, FIX-STATUS OVN11). A stay ends at its last fix. Followed by
+       a drive, the car left within one moving cadence of it, and "–07:00" is
+       when it left. Followed by anything else — no fix since (after_last),
+       moved while silent, a silence past a day — the last fix is only when
+       it was last SEEN there: the first draft printed "(22:10–06:00)" for a
+       CABMAN car read at 06:30 whose hourly heartbeat was due at 07:00, and
+       "still there at 07:00" half an hour later, of the same car that never
+       moved. So the end is a bound when the next stretch is one the tracker
+       did not watch (a watched drive, or a watched stay beside it, is not). */
+    const next = segs.find((s) => s.start_min === st.end_min && s.end_min > s.start_min);
+    const leftUnseen = Boolean(next) && next.kind === 'quiet' && next.quiet !== 'parked';
     return { ...out, status: 'parked', area: st.area || null, lat: st.lat ?? null, lng: st.lng ?? null,
       from: fromStamp.time, from_day: fromStamp.day, to: toStamp.time, to_day: toStamp.day,
-      since_at_least: Boolean(st.since && st.since_at_least), to_at_least: Boolean(until) || reachedEnd,
+      since_at_least: Boolean(st.since && st.since_at_least), to_at_least: Boolean(until) || reachedEnd || leftUnseen,
       minutes_in_window: best.inW, watched_min: best.watched, inferred_min: best.inferred, basis,
       how: basis === 'inferred'
         ? `inferred: a fix within ${STAY_RADIUS_KM * 1000} m either side of a silence past the tracker’s parked rhythm `

@@ -27,6 +27,7 @@ import { mountAll } from './mount.mjs';
 import { CELL } from '../src/places.js';
 import { clearRosterCache } from '../api/fleet_roster.js';
 import { overnightOpen } from '../api/overnight.js';
+import { mixedReason } from '../api/access/one_fleet.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -184,9 +185,20 @@ for (const [qs, re] of [
 }
 const def = await get('/api/overnight');
 const open = dubaiNow.getUTCHours() < 5;
-check(`no night named: last night (${yday}), ${open ? 'running — its window is still open' : 'closed'}`,
+/* `running` is the WINDOW (to 05:00); the cache rule is the READ (to 12:00,
+   review OVN9) — the first draft tied the two together here. */
+const read = dubaiNow.getUTCHours() < 12;
+check(`no night named: last night (${yday}), ${open ? 'running — its window is still open' : 'closed'}; `
+  + `${read ? 'still read to now (never cached)' : 'read to noon (cacheable)'}`,
   def.status === 200 && def.body.nights[0].night === yday && def.body.nights[0].running === open
-  && overnightOpen({}) === open, JSON.stringify(def.body.nights?.[0]).slice(0, 200));
+  && overnightOpen({}) === read, JSON.stringify(def.body.nights?.[0]).slice(0, 200));
+
+/* OVN13: a one-fleet reader is refused this route (manifest 'mixed'); the
+   reason must be true of BOTH its uses — the driver pages ask by plate, and
+   have no by-area line — not only of the fleet page's table. */
+const why = mixedReason({ method: 'GET', path: '/api/overnight' });
+check('the one-fleet refusal is true of the driver pages too: read by plate, whichever fleet', /read by plate/.test(why)
+  && /driver pages/.test(why) && /by-area line and counts/.test(why), why);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 await db.close();
