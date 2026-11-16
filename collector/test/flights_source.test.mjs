@@ -423,8 +423,12 @@ console.log('\n5 · the schedule, read the way node-cron reads it');
   const fires = (expr, d) => new TimeMatcher(expr, 'Etc/UTC').match(d);
   const hours = Array.from({ length: 24 }, (_, h) => h).filter((h) => arr && fires(arr, new Date(Date.UTC(2026, 10, 16, h, 41))));
   check('arrivals run at 01:41, 04:41 … 22:41 UTC — every third hour from just after the UTC day closes', hours.join() === '1,4,7,10,13,16,19,22', `${arr} → ${hours}`);
-  const mins = Array.from({ length: 60 }, (_, m) => m).filter((m) => liv && fires(liv, new Date(Date.UTC(2026, 10, 16, 9, m))));
-  check('the live watch polls every two minutes from minute 0 (30 an hour)', mins.length === 30 && mins[0] === 0 && mins.every((m) => m % 2 === 0), `${liv} → ${mins.length}`);
+  /* Every two minutes by an INTERVAL, not a cron line: any two-minute cron
+     pattern lands on 22/52 or 7/37 past, the four minutes Uber's live money
+     tick holds alone (test/uber_transactions.test.mjs §7, CI on PR #36). */
+  const every = idx.match(/setInterval\(\(\) => flightsLiveTick\(\)[\s\S]{0,120}?\), (\d[\d_]*)\);/)?.[1];
+  check('the live watch polls every two minutes (an interval of 120 s, 30 an hour), on no cron minute',
+    every && Number(every.replace(/_/g, '')) === 120000 && !liv, `${every} ${liv}`);
 }
 
 srv.close();

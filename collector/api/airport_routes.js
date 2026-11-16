@@ -356,17 +356,25 @@ export function airportRoutes(app, { q, wrap }) {
     const aps = airport === 'both' ? ['OMDB', 'OMDW'] : [airport];
     const span = `>= ($1::date::timestamp AT TIME ZONE 'Asia/Dubai') AND COL < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')`;
     const between = (col) => `${col} ${span.replace('COL', col)}`;
+    /* The Dubai day of a timestamp, as a LABEL to group by. The filter is the
+       range on the raw column above (`between`), which (airport, landed_at)
+       and flight_live_hour's primary key serve; this only names each row's
+       day. Written with to_char rather than (… AT TIME ZONE …)::date so
+       test/indexes.test.mjs, which reads that form anywhere in api/ as a
+       filter that needs an expression index, is not handed a filter that is
+       not one (CI on PR #36). Same text either way: 'YYYY-MM-DD'. */
+    const dayLabel = (col) => `to_char(${col} AT TIME ZONE 'Asia/Dubai', 'YYYY-MM-DD')`;
     const [coverage, landed, live, liveHours, bookings, originsDay, originsWindow, runs, check1, check2] = await Promise.all([
       q(`SELECT airport, utc_day::text AS utc_day, status, reason, landings FROM flight_day_coverage
           WHERE airport = ANY($3::text[]) AND utc_day BETWEEN ($1::date - 1) AND $2::date`, [from, day, aps]),
-      q(`SELECT airport, (landed_at AT TIME ZONE 'Asia/Dubai')::date::text AS d,
+      q(`SELECT airport, ${dayLabel('landed_at')} AS d,
                 extract(hour FROM landed_at AT TIME ZONE 'Asia/Dubai')::int AS h, count(*)::int AS n
            FROM flight_landing WHERE airport = ANY($3::text[]) AND ${between('landed_at')} GROUP BY 1, 2, 3`, [from, day, aps]),
-      q(`SELECT airport, (landed_at AT TIME ZONE 'Asia/Dubai')::date::text AS d,
+      q(`SELECT airport, ${dayLabel('landed_at')} AS d,
                 extract(hour FROM landed_at AT TIME ZONE 'Asia/Dubai')::int AS h, count(*)::int AS n
            FROM flight_live_landing WHERE airport = ANY($3::text[]) AND superseded_at IS NULL AND ${between('landed_at')}
           GROUP BY 1, 2, 3`, [day, day, aps]),
-      q(`SELECT (hour_start AT TIME ZONE 'Asia/Dubai')::date::text AS d, extract(hour FROM hour_start AT TIME ZONE 'Asia/Dubai')::int AS h,
+      q(`SELECT ${dayLabel('hour_start')} AS d, extract(hour FROM hour_start AT TIME ZONE 'Asia/Dubai')::int AS h,
                 polls, polls_ok, last_error FROM flight_live_hour WHERE ${between('hour_start')}`, [day, day]),
       /* The window's bookings, by Dubai day, hour, platform and the airport
          each end names (NULL for neither) — a few thousand groups at most.

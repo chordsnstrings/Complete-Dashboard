@@ -404,8 +404,8 @@ async function main() {
        batch (measured 2026-11-16: the day just ended was complete at 09:26Z,
        the current day 404'd), so the first slot after the day closes tries,
        and each later slot asks only for the days still missing — "not
-       published yet" is retried, a collected day never is, so a slot after
-       the day is in costs nothing. Minute 41 because nothing else starts on
+       published yet" is retried, and a collected day is asked once more
+       after 12:00Z the next day (FLT-I1), so the other slots cost nothing. Minute 41 because nothing else starts on
        it: not a multiple of five (CABMAN, the SMS flush), clear of :12/:42,
        :15/:45, :17, :07/:22/:37/:52 and the 19:53 retention minute; an
        explicit list of hours, never a stepped range (the node-cron trap in
@@ -417,8 +417,12 @@ async function main() {
     cron.schedule('41 1,4,7,10,13,16,19,22 * * *', () => flightsArrivalsTick()
       .catch((e) => log.error('scheduler', 'flights arrivals', { err: String(e) })));
     setTimeout(() => flightsArrivalsTick().catch(() => {}), 12 * 60_000);
-    cron.schedule('*/2 * * * *', () => flightsLiveTick()
-      .catch((e) => log.error('scheduler', 'flights live', { err: String(e) })));
+    /* An interval, not a cron line: every two-minute cron pattern lands on
+       22 and 52 past or on 7 and 37 past, and those four belong to Uber's live
+       money tick alone (test/uber_transactions.test.mjs §7; CI on PR #36).
+       liveStatusTick runs the same way, for the same kind of light poll. */
+    setInterval(() => flightsLiveTick()
+      .catch((e) => log.error('scheduler', 'flights live', { err: String(e) })), 120_000);
     /* Ask Uber whether the past we hold is the past it has. 05:45 Dubai —
        after the overnight incremental, the analyst and the profile pull, and
        before the morning, because it spends real Uber report slots and the
