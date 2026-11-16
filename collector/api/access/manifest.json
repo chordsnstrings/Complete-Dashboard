@@ -7536,6 +7536,23 @@
  },
  {
   "method": "GET",
+  "path": "/api/overnight",
+  "subject": "LOC",
+  "carries": [
+   "LOC",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/vehicle_routes.js (OVN, 2026-11-16; definition and words api/overnight.js). Where each car spent the night: night D is 00:00-05:00 Dubai on D+1, and the place is the WHR stay (api/whereabouts.js) with the most minutes in that window, from the tracker alone - no booking is read. ?night=YYYY-MM-DD (last night by default) is the fleet-wide table for one night, over every plate with a positioned tracker fix in the 7 days to the window's end; ?plates=L1,L2&from=&to= (at most 10 plates, 31 nights) is the driver pages' question. A night whose window has not begun, a malformed day, too many plates or nights: 400 with a reason. Body {nights[{night, window{on, from, to}, running, cars[{plate, fleet_id, night, status parked|moving|unknown|silent|no_tracker, area, lat, lng, from, from_day, to, to_day, since_at_least, to_at_least, minutes_in_window, window_min, watched_min, inferred_min, basis fixes|inferred|fixes and inferred, how, source, reason, split{longest_stay, other_stays, drive, unknown, silent, no_tracker}}], by_area[{area, n}], counts{parked, inferred, unknown, silent, no_tracker, moving}}], population (a sentence), roster{known, listed, silent_week, silent_plates} (fleet-wide only; null for plates), rules, area_why}. Subject LOC like /api/where and /api/vehicle/whereabouts: a role without locations is refused the route, and the pages print the refusal's reason. VEH: plates, fleets and the tracker named. No driver is named anywhere in the body and no booking is read. mixed: the by-area line and the counts are tallied over every car of both fleets, so filtering the rows alone would leave the other fleet in the figures; a one-fleet reader is refused with that reason (api/access/one_fleet.js, overnight)."
+ },
+ {
+  "method": "GET",
   "path": "/api/vehicle/profile",
   "subject": "VEH",
   "carries": [

@@ -28,6 +28,7 @@
    caller renders that absent with a reason rather than reaching for the
    nearest thing it has. */
 import { CELL } from '../src/places.js';
+import { canonAreaSql } from '../src/area_alias.js';
 
 /* A correlated scalar subquery rather than a join, for the reason
    custody_sql.js gives about its own: dropped into an existing SELECT it
@@ -42,6 +43,35 @@ export const placeAt = (latCol, lngCol) => `(
     FROM place_cell pc
    WHERE pc.cell_lat = round(${latCol} / ${CELL})::int
      AND pc.cell_lng = round(${lngCol} / ${CELL})::int)`;
+
+/* Where a TRACKER FIX is, in the bookings' own words first (2026-11-16).
+   ──────────────────────────────────────────────────────────────────────────
+   placeAt above reads place_cell, the modal name FMS's own reverse geocoder
+   gave a cell. PLC measured that vocabulary against the bookings: it agrees
+   with the area a booking's address names on only 29.8% of pickups, because
+   it names the ROAD or the BUILDING ("397 D90", "S-02, Mayfair Residence
+   Tower Opp. Empower", "4 Airport Rd") — exactly what the car's "Where it
+   was" stays and overnight table printed on production. booking_cell
+   (sql/schema_v126.sql, src/trip_places.js) is the modal area the drop-off
+   ADDRESSES give a cell where the car's tracker stood at a drop-off — 70.3%
+   agreement — and 2,422 cells on production after the first passes.
+
+   So a fix is named by booking_cell where that cell has one, and by
+   place_cell otherwise; `by` says which ('bookings' | 'tracker'), the votes
+   travel with the name as before, and the name is folded to one per area
+   (src/area_alias.js). A cell neither has named stays NULL and is printed
+   absent with its reason, never the nearest name. Only the stays and the
+   overnight table read this; placeAt and every page on it are unchanged. */
+export const placeAtArea = (latCol, lngCol) => `(
+  SELECT CASE WHEN x.area IS NULL THEN NULL
+              ELSE jsonb_build_object('area', ${canonAreaSql('x.area')}, 'votes', x.n, 'seen', x.observations, 'by', x.by) END
+    FROM (SELECT coalesce(bc.area, pc.area) AS area,
+                 CASE WHEN bc.area IS NOT NULL THEN bc.n ELSE pc.n END AS n,
+                 CASE WHEN bc.area IS NOT NULL THEN bc.observations ELSE pc.observations END AS observations,
+                 CASE WHEN bc.area IS NOT NULL THEN 'bookings' WHEN pc.area IS NOT NULL THEN 'tracker' END AS by
+            FROM (SELECT round(${latCol} / ${CELL})::int AS la, round(${lngCol} / ${CELL})::int AS lo) k
+            LEFT JOIN booking_cell bc ON bc.cell_lat = k.la AND bc.cell_lng = k.lo
+            LEFT JOIN place_cell pc ON pc.cell_lat = k.la AND pc.cell_lng = k.lo) x)`;
 
 /* The two ends of a segment, named. Both, because they answer different
    questions: where a car was taken FROM is the shift it left, where it ended

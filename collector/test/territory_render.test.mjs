@@ -87,6 +87,29 @@ for (const skin of ['arkiv', 'classic']) {
   }
 }
 
+/* The map caption counts every pickup, not the table's rows: the table stops
+   at 25 areas, and summing them read "0 of 249 pickups" on production for a
+   driver with 310. Served here with the area rows cut to two, so the rows sum
+   to far less than placement.total (317). */
+{
+  console.log('\nthe map caption over every pickup, not the table\'s rows');
+  const c = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: 'block', timezoneId: 'Asia/Dubai' });
+  const page = await c.newPage();
+  await page.route('**/api/driver/territory**', async (route) => {
+    const res = await route.fetch();
+    const j = await res.json();
+    j.areas = j.areas.slice(0, 2);
+    await route.fulfill({ response: res, json: j });
+  });
+  await page.goto(`${base}/?ui=desktop&skin=arkiv#driver/drv-0/territory`, { waitUntil: 'load' });
+  await page.waitForFunction(() => /How the [\d,]+ pickups were placed/.test(document.querySelector('#view')?.textContent || ''),
+    null, { timeout: 20000 }).catch(() => {});
+  const cap = await page.evaluate(() => [...document.querySelectorAll('#view p.cap')].map((x) => x.textContent.replace(/\s+/g, ' ').trim())
+    .find((t) => /pickups carry coordinates/.test(t)) || '');
+  check('the map caption is over all 317 pickups, whatever the table shows', /of 317 pickups carry coordinates/.test(cap), cap);
+  await c.close();
+}
+
 await browser.close();
 srv.close();
 console.log(`\n${pass} passed, ${fail} failed`);

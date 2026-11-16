@@ -1,6 +1,7 @@
 import { internalHeaders, isInternal } from './access/internal.js';
 import { parseRlsCacheKey } from '../src/fleet_scope.js';
 import { dubaiIso } from '../src/util.js';
+import { overnightOpen } from './overnight.js';
 import { createHash } from 'node:crypto';
 /* Response cache for read endpoints.
    ─────────────────────────────────────────────────────────────────────────
@@ -204,7 +205,18 @@ const neverToday = (req, path) => (path === '/api/driver/day'
      missing ?day= with no ?to= IS today; a week that reaches today is today
      too. A past day moves only with a collection, and caches as before. */
   || (path === '/api/vehicle/whereabouts'
-    && (String(req.query?.day || '').slice(0, 10) || String(req.query?.to || '').slice(0, 10) || dubaiIso()) >= dubaiIso());
+    && (String(req.query?.day || '').slice(0, 10) || String(req.query?.to || '').slice(0, 10) || dubaiIso()) >= dubaiIso())
+  /* Where each car spent the night (api/overnight.js, OVN 2026-11-16): a
+     night whose READ (to 12:00 Dubai on D+1 — its window is 00:00–05:00, but
+     when the car left and whether a quiet FMS unit has reported since are
+     read on to noon) has not ended is read to NOW — "parked so far", "still
+     there at 06:10", "no fix since 22:30" — and the fixes behind it arrive on
+     CABMAN's five-minute and FMS's two-minute ticks, which advance no
+     version. The night asked is the range's end, else ?night, else last
+     night. Once the read has ended the answer moves only with a collection,
+     and caches as before. The first draft closed at 05:00 and cached a
+     "not reported since" that the next tick made false (review, OVN9). */
+  || (path === '/api/overnight' && overnightOpen(req.query || {}));
 
 /* AN ANSWER THAT ALSO MOVES WITH THE TARGET, KEYED ON IT (2026-10-20).
    ─────────────────────────────────────────────────────────────────────────

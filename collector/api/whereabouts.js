@@ -538,7 +538,7 @@ export function whereaboutsBody({ plate, fleetId = null, days, points = [], book
       unknown: 'moved while the tracker was silent (on a booking or not: a booking pins its pickup and drop-off, '
         + `not the route between), before the first fix or after the last, or silent over ${SILENT_MIN / 60} hours`,
     },
-    area_why: 'An area is the fleet’s own name for a half-kilometre cell, learnt from its FMS trips; '
+    area_why: 'An area is the fleet’s own name for a half-kilometre cell: the area its bookings’ drop-off addresses give that cell, or, where no drop-off has named it, the name its FMS trips give it; '
       + 'ground the fleet has never driven near has no name and is left unnamed rather than guessed.',
   };
 }

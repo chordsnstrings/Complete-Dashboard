@@ -1662,6 +1662,22 @@ export async function renderVehicleDirectory(root) {
   const hoP = panel('Idle hours between drivers',
     'Hours a car stood still between one driver dropping off and the next picking up'); root.append(hoP.panel);
   loading(hoP.body);
+  /* WHERE CARS SPENT THE NIGHT (OVN, 2026-11-16). The operator: "add the
+     overnight parking table on the fleet page". One night of every car the
+     trackers reported that week — by area, the counts, a sortable table —
+     from /api/overnight, drawn by api/public/overnight.js. Not awaited and
+     its module fetched only now: the directory's figures above never wait
+     for it (it reads a night of every car's fixes), and a refusal or a
+     failure is said in this panel, never thrown at the page. */
+  const ovnP = panel('Where cars spent the night',
+    'The stay that held each car longest between 00:00 and 05:00 Dubai, from its tracker alone', 'veh-ovn');
+  root.append(ovnP.panel);
+  loading(ovnP.body);
+  import('./overnight.js').then((m) => m.fleetOvernight(ovnP.body)).catch((e) => {
+    if (!ovnP.body.isConnected) return;
+    ovnP.body.innerHTML = '';
+    ovnP.body.append(note(`Where cars spent the night could not be drawn: ${e?.message || e}`, 'warn'));
+  });
   const tblP = panel('Every vehicle', 'Includes cars with no trips in this window. Those are the ones worth finding.');
   /* The search sits on the table it searches under the contract. */
   if (ak) root.append(bar);

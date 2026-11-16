@@ -2,6 +2,7 @@
 // Not shipped — used only to render and screenshot the dashboard during development.
 import { custodyWindows, carRuns, movementSegments, movementTotals } from './api/day_movement.js';
 import { whereaboutsBody } from './api/whereabouts.js';
+import { parseOvernightQuery, sliceNight, carNight, overnightNight, overnightBody, addDays as ovnAdd, POPULATION_DAYS as OVN_DAYS } from './api/overnight.js';
 import express from 'express';
 import { retentionSettings, telemetryCutoff, alertCutoff } from './src/data_retention.js';
 import { RETENTION_SCHEDULE } from './api/data_retention_routes.js';
@@ -2991,6 +2992,97 @@ app.get('/api/vehicle/whereabouts', (req, r) => {
   ]);
   const journeys = source === 'fms' ? all.map((d) => ({ started_at: `${d}T07:01:00+04:00`, ended_at: `${d}T07:39:00+04:00`, distance_km: 13.4 })) : [];
   r.json(whereaboutsBody({ plate, fleetId: i % 3 === 0 ? 'egari' : 'ecosine', days, points, bookings, journeys }));
+});
+
+/* Where each car spent the night (OVN, 2026-11-16). Synthetic fixes for
+   each car-night, run through the REAL slicing, the real WHR arithmetic and
+   the real answer builder (api/overnight.js) — so the fleet panel and the
+   driver pages draw exactly what the route would hand them, every status
+   included: parked and watched (CABMAN hourly, FMS every ten minutes), an
+   FMS night quiet at one spot (inferred), moved unseen (unknown), driving
+   about at night (moving), parked on ground the fleet has never named, and
+   L40971's tracker dead for days (silent). Which a car gets is fixed by its
+   plate and the night, never by Math.random, so the classic-skin fixture's
+   frozen clock reproduces it. Any plate answers (the driver fixtures drive
+   L44251, which is not on the vehicle list). */
+const OVN_FLEET = [...plates, 'L50112', 'L50347', 'L51208', 'L52990', 'L53415', 'L54076', 'L55821', 'L56603',
+  'L57134', 'L58260', 'L59917', 'L60488'];
+const OVN_AREAS = [['Al Quoz 3', 25.135, 55.235], ['Deira', 25.271, 55.309], ['Al Barsha 1', 25.113, 55.199],
+  ['Business Bay', 25.186, 55.262], ['International City', 25.165, 55.408], ['Dubai Marina', 25.080, 55.140]];
+const ovnHash = (str) => [...String(str)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+function ovnFixes(plate, night) {
+  const on = ovnAdd(night, 1);
+  const h = ovnHash(plate);
+  /* The vehicle list's eight carry one kind each, every night, so every
+     status is on every night's table; the rest (and any other plate) vary
+     with the night. */
+  const FIXED = { L45235: 'seen', L12615: 'inferred', L46174: 'seen', L40971: 'silent', L94178: 'unknown',
+    L36397: 'moving', L76098: 'unnamed', L82923: 'seen' };
+  const kind = FIXED[plate]
+    || ['seen', 'seen', 'seen', 'inferred', 'seen', 'unknown', 'seen', 'moving', 'unnamed', 'inferred', 'seen', 'seen'][(h + ovnHash(night)) % 12];
+  /* One tracker per car, every night, so two nights' fixes are one history:
+     CABMAN on the cars whose kind is always a watched stay, FMS (which can be
+     watched, quiet, or anything between) on the rest. */
+  const source = ['L46174', 'L76098', 'L82923', 'L40971'].includes(plate) ? 'cabman' : 'fms';
+  const [homeArea, hLat, hLng] = OVN_AREAS[h % OVN_AREAS.length];
+  const [workArea, wLat, wLng] = OVN_AREAS[(h + 3) % OVN_AREAS.length];
+  const at = (m) => new Date(Date.parse(`${m >= 1440 ? on : night}T00:00:00+04:00`) + (m % 1440) * 60_000).toISOString();
+  const pt = (m, lat, lng, area, src = source, j = 0) => ({ at: at(m), lat: lat + j * 0.00004, lng, source: src, area, area_votes: area ? 60 : null });
+  const home = kind === 'unnamed' ? [null, hLat + 0.031, hLng + 0.027] : [homeArea, hLat, hLng];
+  const out = [];
+  const stayAt = (from, to, [area, lat, lng], every) => { for (let m = from; m <= to; m += every) out.push(pt(m, lat, lng, area, source, m % 3)); };
+  const driveTo = (from, to, a, b) => {
+    for (let m = from + 5; m < to; m += 5) {
+      const f = (m - from) / (to - from);
+      out.push(pt(m, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, null));
+    }
+  };
+  const work = [workArea, wLat, wLng];
+  const arrive = 1230 + (h % 6) * 20;              // home between 20:30 and 22:10
+  const leave = 1440 + 400 + (h % 5) * 25;         // off again between 06:40 and 08:20
+  const every = source === 'cabman' ? 60 : 10;
+  if (kind === 'silent') return [{ ...pt(0, hLat, hLng, homeArea, 'cabman'), at: new Date(Date.parse(`${ovnAdd(night, -3)}T14:20:00+04:00`)).toISOString() }];
+  stayAt(720, arrive - 40, work, every);            // at work from noon (yesterday's set ends there too)
+  driveTo(arrive - 40, arrive, work, home);
+  if (kind === 'seen' || kind === 'unnamed') {
+    stayAt(arrive, leave, home, every);
+  } else if (kind === 'inferred') {
+    out.push(...[0, 10, 20, 30, 40, 50, 60].map((d) => pt(arrive + d, home[1], home[2], home[0], source, d % 3)));
+    out.push(pt(leave, home[1], home[2], home[0], source));
+  } else if (kind === 'unknown') {
+    stayAt(arrive, 1440 - 50, home, 10);
+    stayAt(1440 + 250, leave, work, 10);
+  } else if (kind === 'moving') {
+    stayAt(arrive, 1440 - 20, home, 10);
+    driveTo(1440 - 20, 1440 + 40, home, work); stayAt(1440 + 40, 1440 + 90, work, 10);
+    driveTo(1440 + 90, 1440 + 150, work, home); stayAt(1440 + 150, 1440 + 200, home, 10);
+    driveTo(1440 + 200, 1440 + 260, home, work); stayAt(1440 + 260, leave, work, 10);
+  }
+  const last = out[out.length - 1];
+  driveTo(leave, leave + 40, [last.area, last.lat, last.lng], work);
+  stayAt(leave + 40, leave + 300, work, every);
+  return out;
+}
+app.get('/api/overnight', (req, r) => {
+  const now = Date.now();
+  const asked = parseOvernightQuery(req.query, now);
+  if (asked.status) return r.status(asked.status).json({ error: asked.error, ...(asked.detail ? { detail: asked.detail } : {}) });
+  const { plates: named, nights } = asked;
+  const cars = named || OVN_FLEET;
+  const fleetOf = (p) => (ovnHash(p) % 3 === 0 ? 'egari' : 'ecosine');
+  const out = nights.map((night) => overnightNight({ night, nowMs: now,
+    cars: cars.map((plate) => carNight({ plate, fleetId: fleetOf(plate), night, nowMs: now,
+      points: sliceNight([...ovnFixes(plate, ovnAdd(night, -1)), ...ovnFixes(plate, night)], night) })) }));
+  if (named) {
+    return r.json(overnightBody({ nights: out, roster: null,
+      population: `The ${named.length === 1 ? 'car' : `${named.length} cars`} asked for (${named.join(', ')}), `
+        + `${nights.length === 1 ? `the night of ${nights[0]}` : `the nights of ${nights[0]} to ${nights[nights.length - 1]}`}.` }));
+  }
+  r.json(overnightBody({ nights: out,
+    population: `Every car with a positioned tracker fix (CABMAN or FMS; a 0,0 lost lock is not a position) in the ${OVN_DAYS} days `
+      + `to the window’s end: ${cars.length} cars. 1 of the ${cars.length} plates CABMAN still lists sent no positioned fix in that week `
+      + 'and is not in the table. An FMS car that sent nothing all week is not in the table either.',
+    roster: { known: true, listed: cars.length, silent_week: 1, silent_plates: ['L77001'] } }));
 });
 
 app.get('/api/vehicle/movement', (req, r) => {

@@ -46,6 +46,8 @@ app.get('/api/online/hours', (_q, res) => { calls++; res.json({ n: calls }); });
 app.get('/api/airport', (_q, res) => { calls++; res.json({ n: calls }); });
 /* Where the car was, all day: today's segments grow with every CABMAN tick. */
 app.get('/api/vehicle/whereabouts', (_q, res) => { calls++; res.json({ n: calls }); });
+/* Where each car spent the night: a night whose read is open is read to now. */
+app.get('/api/overnight', (_q, res) => { calls++; res.json({ n: calls }); });
 const server = app.listen(0);
 const port = server.address().port;
 // The cache re-requests stale keys on itself, so it needs the real port.
@@ -419,6 +421,32 @@ check('and the hit rate is visible, so a cache that stopped working can be seen'
   const wp1 = await get('/api/vehicle/whereabouts?plate=L1&day=2026-10-01');
   const wp2 = await get('/api/vehicle/whereabouts?plate=L1&day=2026-10-01');
   check('…and a past day of them is served from the cache', wp2.body.n === wp1.body.n && wp2.cache === 'hit', JSON.stringify([wp1, wp2]));
+  /* Where each car spent the night (OVN, 2026-11-16): a night whose read
+     (to 12:00 Dubai on D+1; its window is 00:00–05:00) has not ended is read
+     to now, and CABMAN's five-minute tick moves no version. Tonight (night =
+     today) has not begun, so its read ends after now whatever the hour; a
+     range ending tonight likewise. Last night by default is open until 12:00
+     Dubai — not 05:00 (review OVN9: from 05:00 to noon "no fix since 22:30"
+     turns into "parked, inferred" on the next tick).
+     REVERSION: drop the /api/overnight clause from neverToday — the first
+     check fails (the second call is a hit). Close it at the window's end
+     (endMs) — the 05:00–12:00 case in test/overnight_logic §10 fails. */
+  const on1 = await get(`/api/overnight?night=${todayIso}`);
+  const on2 = await get(`/api/overnight?night=${todayIso}`);
+  const or1 = await get(`/api/overnight?plates=L1&from=2026-10-01&to=${todayIso}`);
+  const or2 = await get(`/api/overnight?plates=L1&from=2026-10-01&to=${todayIso}`);
+  check('a night whose window has not closed reaches the route every time — by ?night and as a range’s end',
+    on2.body.n === on1.body.n + 1 && on2.cache !== 'hit' && or2.body.n === or1.body.n + 1 && or2.cache !== 'hit',
+    JSON.stringify([on1, on2, or1, or2]));
+  const od1 = await get('/api/overnight');
+  const od2 = await get('/api/overnight');
+  const openNow = DUBAI.getUTCHours() < 12;
+  check(`last night by default is ${openNow ? 'still read (before 12:00 Dubai): never cached' : 'closed (after 12:00 Dubai): cached'}`,
+    openNow ? (od2.body.n === od1.body.n + 1 && od2.cache !== 'hit') : (od2.body.n === od1.body.n && od2.cache === 'hit'),
+    JSON.stringify([od1, od2]));
+  const op1 = await get('/api/overnight?night=2026-10-01');
+  const op2 = await get('/api/overnight?night=2026-10-01');
+  check('…and a closed night is served from the cache', op2.body.n === op1.body.n && op2.cache === 'hit', JSON.stringify([op1, op2]));
 }
 
 console.log('\ncache: the low performers — keyed on the target as well as the data');

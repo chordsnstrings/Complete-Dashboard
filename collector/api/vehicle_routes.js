@@ -14,7 +14,7 @@
 
 import { peopleCount, personKey, custodyNames } from './custody_sql.js';
 import { CABMAN_MOVE_DAYS, PARKED_SPOTS_SQL, TRACKER_SOURCES_SQL, QUIET_SQL, TRACKER_STATE_SQL, REAL_FIX } from './telemetry_sql.js';
-import { placeAt } from './place_sql.js';
+import { placeAt, placeAtArea } from './place_sql.js';
 import { fleetRoster, excludedPlates } from './fleet_roster.js';
 import { winDays, dubaiSpanSql } from './window.js';
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
@@ -22,7 +22,9 @@ import { fleetIncome, COMPLETED_SQL } from './income_sql.js';
 import { occCountsOnce, occSourceLabel, OCC_DEDUPE_RULE } from './occupancy_sql.js';
 /* Where the car was, every minute of a day (WHR, 2026-11-16) — the arithmetic
    is pure and lives beside the route that feeds it. */
-import { whereaboutsBody, dayStartMs, LOOK_AROUND_H } from './whereabouts.js';
+import { whereaboutsBody, dayStartMs, LOOK_AROUND_H, localStamp } from './whereabouts.js';
+import { parseOvernightQuery, nightWindow, carNights, overnightNight, overnightBody,
+  POPULATION_DAYS } from './overnight.js';
 import { dubaiIso } from '../src/util.js';
 /* The alerts-per-distance rule, shared with the fleet headline, both economics
    ledgers and the driver page. See api/alert_coverage_sql.js. */
@@ -1501,7 +1503,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
   const okDay = (d) => ISO_DAY.test(d) && !Number.isNaN(Date.parse(`${d}T00:00:00Z`));
   const addDays = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
   const WHERE_FIX_COLS = (a = '') => `${a}captured_at AS at, ${a}lat, ${a}lng, ${a}speed, ${a}source, ${a}fleet_id,
-         ${placeAt(`${a}lat`, `${a}lng`)} AS place`;
+         ${placeAtArea(`${a}lat`, `${a}lng`)} AS place`;
   const placeEnd = (lat, lng, addr) => `coalesce(${placeAt(lat, lng)}->>'area', place_area(${addr}))`;
   app.get('/api/vehicle/whereabouts', withVehicle(async (req, res, plate) => {
     const today = dubaiIso();
@@ -1567,9 +1569,166 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
           ORDER BY requested_at`, [plate, lo, hi]),
     ]);
     const points = [...prev, ...near, ...next].map((f) => ({ at: new Date(f.at).toISOString(), lat: f.lat, lng: f.lng,
-      speed: f.speed, source: f.source, area: f.place?.area || null, area_votes: f.place?.votes ?? null }));
+      speed: f.speed, source: f.source, area: f.place?.area || null, area_votes: f.place?.votes ?? null, area_by: f.place?.by || null }));
     const fleetId = [...near, ...prev, ...next].find((f) => f.fleet_id)?.fleet_id || null;
     res.json(whereaboutsBody({ plate, fleetId, days, points, bookings, journeys, nowMs: Date.now() }));
+  }));
+
+  /* ── where each car spent the night (OVN, 2026-11-16) ────────────────────
+     The operator: "also add the overnight parking table on the fleet page
+     also in drivers activity list and drivers day page". GET /api/overnight
+     ?night=YYYY-MM-DD (last night by default) is the fleet-wide table, ONE
+     night; ?plates=L1,L2&from=&to= (at most 10 plates, 31 nights) is the
+     driver pages' question about the cars a person drove. api/overnight.js
+     owns the definition (the window is 00:00–05:00 Dubai on D+1, the place is
+     the WHR stay with most minutes in it, tracker only) and the words; this
+     gathers the fixes and hands each car-night to whereaboutsDay through it.
+
+     ── the read, and what it costs ──────────────────────────────────────
+     Fleet-wide, three steps, all on indexes that already exist:
+       1. the POPULATION: plates × tracker with a REAL_FIX in the seven days
+          before the window's end (telemetry_captured_idx, a range scan);
+       2. every fix of the night's read, 18:00 the evening before to 12:00,
+          for every plate at once (telemetry_captured_idx again), each placed
+          on its named cell (place_cell's primary key, one probe a row);
+       3. the nearest fix before and after that read, per plate × tracker
+          seen in step 1 (telem_plate_time_idx, LATERAL, LIMIT 1 each). Only
+          the pairs step 1 found: a VALUES ('cabman'), ('fms') for every plate,
+          as the one-car handler does, would walk the whole history of a
+          CABMAN-only car looking for an FMS fix it never had.
+     Measured on production 2026-11-16 (GET /api/map/journey over 16 cars of
+     /api/live's 136, 8 CABMAN and 8 FMS, the night of 15 Nov): 0–181 fixes a
+     car in the 18-hour read, mean 80 — so step 2 is about 11,000 rows for
+     the fleet, against the ~300 a car-day /api/vehicle/whereabouts already
+     reads per request. The arithmetic is whereaboutsDay once per car.
+     Plates mode reads the plates' fixes over the whole range at once (one
+     query on telem_plate_time_idx) and slices it per night (carNights: each
+     car's fixes sorted once, each night found by binary search — OVN10), so
+     a month of one car is one query and 31 judgements, and each car-night
+     says exactly what the fleet-wide table says of it.
+
+     No driver is named: the car's night is the question, and nothing here
+     reads custody or bookings. 'mixed' in the manifest: the counts and the
+     by-area tally are over every car of both fleets, and filtering the rows
+     alone would leave the other fleet in the counts (api/access/one_fleet.js
+     says so to a one-fleet reader). Cached only once its last night's READ
+     has ended at 12:00 on D+1 — not the window's 05:00, because when the car
+     left and whether a quiet unit has reported since move until noon
+     (api/cache.js, overnightOpen; review OVN9). */
+  const OVN_FIX_COLS = (a = '') => `${a}plate, ${WHERE_FIX_COLS(a)}`;
+  const ovnPoint = (f) => ({ at: new Date(f.at).toISOString(), lat: f.lat, lng: f.lng, speed: f.speed,
+    source: f.source, area: f.place?.area || null, area_votes: f.place?.votes ?? null, area_by: f.place?.by || null });
+  const groupBy = (rows) => {
+    const m = new Map();
+    for (const r of rows) { if (!m.has(r.plate)) m.set(r.plate, []); m.get(r.plate).push(r); }
+    return m;
+  };
+  /* The nearest fix before `lo` and at/after `hi` for each (plate, source). */
+  const ovnEdges = async (plates, sources, lo, hi) => {
+    if (!plates.length) return { prev: [], next: [] };
+    const [prev, next] = await Promise.all([
+      q(`SELECT f.* FROM unnest($1::text[], $2::text[]) AS v(plate, src)
+         CROSS JOIN LATERAL (
+           SELECT ${OVN_FIX_COLS('t.')} FROM telemetry_snapshot t
+            WHERE t.plate = v.plate AND t.source = v.src AND ${REAL_FIX('t.')} AND t.captured_at < $3::timestamptz
+            ORDER BY t.captured_at DESC LIMIT 1) f`, [plates, sources, lo]),
+      q(`SELECT f.* FROM unnest($1::text[], $2::text[]) AS v(plate, src)
+         CROSS JOIN LATERAL (
+           SELECT ${OVN_FIX_COLS('t.')} FROM telemetry_snapshot t
+            WHERE t.plate = v.plate AND t.source = v.src AND ${REAL_FIX('t.')} AND t.captured_at >= $3::timestamptz
+            ORDER BY t.captured_at LIMIT 1) f`, [plates, sources, hi]),
+    ]);
+    return { prev, next };
+  };
+  const ROSTER_WHY = {
+    none: 'CABMAN’s list of cars has not been written yet',
+    unreadable: 'CABMAN’s list of cars is stored but could not be read',
+    failed: 'CABMAN’s list of cars could not be read just now',
+  };
+  app.get('/api/overnight', wrap(async (req, res) => {
+    const now = Date.now();
+    const asked = parseOvernightQuery(req.query, now);
+    if (asked.status) return res.status(asked.status).json({ error: asked.error, ...(asked.detail ? { detail: asked.detail } : {}) });
+    const { plates, nights } = asked;
+    const wFirst = nightWindow(nights[0]);
+    const wLast = nightWindow(nights[nights.length - 1]);
+    const lo = new Date(wFirst.readFromMs).toISOString();
+    const hi = new Date(wLast.readToMs).toISOString();
+
+    if (plates) {
+      /* The driver pages' read: the named cars, the whole range at once. */
+      const srcs = ['cabman', 'fms'];
+      const pairPlates = plates.flatMap((p) => srcs.map(() => p));
+      const pairSrcs = plates.flatMap(() => srcs);
+      const [fixes, edges] = await Promise.all([
+        q(`SELECT ${OVN_FIX_COLS()} FROM telemetry_snapshot
+            WHERE plate = ANY($1::text[]) AND source <> 'uber' AND ${REAL_FIX()}
+              AND captured_at >= $2::timestamptz AND captured_at < $3::timestamptz
+            ORDER BY plate, captured_at`, [plates, lo, hi]),
+        ovnEdges(pairPlates, pairSrcs, lo, hi),
+      ]);
+      const byPlate = groupBy(fixes);
+      const prevBy = groupBy(edges.prev); const nextBy = groupBy(edges.next);
+      const fleetOf = (p) => [...(byPlate.get(p) || []), ...(prevBy.get(p) || []), ...(nextBy.get(p) || [])]
+        .find((f) => f.fleet_id)?.fleet_id || null;
+      /* Each car's fixes converted and sorted ONCE, then judged night by
+         night (carNights, api/overnight.js — OVN10: per night, the first
+         draft re-built and re-sorted the whole month of every car). */
+      const perCar = plates.map((plate) => carNights({ plate, fleetId: fleetOf(plate), nights, nowMs: now,
+        points: (byPlate.get(plate) || []).map(ovnPoint),
+        before: (prevBy.get(plate) || []).map(ovnPoint), after: (nextBy.get(plate) || []).map(ovnPoint) }));
+      const out = nights.map((night, k) => overnightNight({ night, nowMs: now, cars: perCar.map((rows) => rows[k]) }));
+      return res.json(overnightBody({ nights: out, roster: null,
+        population: `The ${plates.length === 1 ? 'car' : `${plates.length} cars`} asked for (${plates.join(', ')}), `
+          + `${nights.length === 1 ? `the night of ${nights[0]}` : `the nights of ${nights[0]} to ${nights[nights.length - 1]}`}.` }));
+    }
+
+    /* Fleet-wide: one night, every car with a positioned fix in the week. */
+    const night = nights[0];
+    const popEnd = Math.min(wFirst.endMs, now);
+    const popFrom = new Date(popEnd - POPULATION_DAYS * 864e5).toISOString();
+    const [pop, fixes, roster] = await Promise.all([
+      q(`SELECT plate, source, max(fleet_id) AS fleet_id FROM telemetry_snapshot
+          WHERE source <> 'uber' AND ${REAL_FIX()}
+            AND captured_at >= $1::timestamptz AND captured_at < $2::timestamptz
+          GROUP BY plate, source`, [popFrom, new Date(popEnd).toISOString()]),
+      q(`SELECT ${OVN_FIX_COLS()} FROM telemetry_snapshot
+          WHERE source <> 'uber' AND ${REAL_FIX()}
+            AND captured_at >= $1::timestamptz AND captured_at < $2::timestamptz
+          ORDER BY plate, captured_at`, [lo, hi]),
+      fleetRoster(q),
+    ]);
+    const popPlates = [...new Set(pop.map((r) => r.plate))].sort();
+    const edges = await ovnEdges(pop.map((r) => r.plate), pop.map((r) => r.source), lo, hi);
+    const byPlate = groupBy(fixes);
+    const prevBy = groupBy(edges.prev); const nextBy = groupBy(edges.next);
+    const fleetOf = new Map();
+    for (const r of pop) if (r.fleet_id && !fleetOf.has(r.plate)) fleetOf.set(r.plate, r.fleet_id);
+    const cars = popPlates.map((plate) => carNights({ plate, fleetId: fleetOf.get(plate) || null, nights: [night], nowMs: now,
+      points: (byPlate.get(plate) || []).map(ovnPoint),
+      before: (prevBy.get(plate) || []).map(ovnPoint), after: (nextBy.get(plate) || []).map(ovnPoint) })[0]);
+
+    /* The cars CABMAN still lists that sent nothing positioned this week are
+       not in the table; counted, so "136 cars" is not read as the fleet. FMS
+       keeps no such list here, so an FMS car silent all week is simply not in
+       the table — said, not counted. */
+    const inPop = new Set(popPlates.map(normPlate));
+    const silentListed = roster?.known ? [...roster.listed].map(normPlate).filter((p) => !inPop.has(p)).sort() : null;
+    const endWord = `${localStamp(popEnd).day} ${localStamp(popEnd).time}`;
+    const population = `Every car with a positioned tracker fix (CABMAN or FMS; a 0,0 lost lock is not a position) `
+      + `in the ${POPULATION_DAYS} days to ${endWord} Dubai: ${cars.length} ${cars.length === 1 ? 'car' : 'cars'}. `
+      + (silentListed == null
+        ? `${ROSTER_WHY[roster?.state] || ROSTER_WHY.failed}, so cars it lists that sent nothing in that week cannot be counted here. `
+        : silentListed.length
+          ? `${silentListed.length} of the ${roster.listed.size} plates CABMAN still lists sent no positioned fix in that week and are not in the table. `
+          : `Every plate CABMAN still lists sent a positioned fix in that week. `)
+      + 'An FMS car that sent nothing all week is not in the table either.';
+    res.json(overnightBody({
+      nights: [overnightNight({ night, cars, nowMs: now })],
+      population,
+      roster: { known: Boolean(roster?.known), listed: roster?.known ? roster.listed.size : null,
+        silent_week: silentListed ? silentListed.length : null, silent_plates: silentListed },
+    }));
   }));
 
   /* ── safety ───────────────────────────────────────────────────────────── */

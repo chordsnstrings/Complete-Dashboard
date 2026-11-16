@@ -21,12 +21,16 @@
    trip_place share fleet_id, platform and external_id), so a caller's own
    unqualified WHERE cannot become ambiguous by gaining this join. */
 import { BASIS_TEXT, BASIS_TEXT_DROPOFF, reasonText, TRACKER_WINDOW_MIN } from '../src/place_resolve.js';
+import { canonAreaSql } from '../src/area_alias.js';
 
 export const placeJoin = (t = 't', tp = 'tp') =>
   `LEFT JOIN trip_place ${tp} ON ${tp}.platform = ${t}.platform AND ${tp}.external_id = ${t}.external_id`;
 
+/* Folded to one name per area at read time (src/area_alias.js, PLC12): the
+   stored area stays what the evidence said; what a page groups by is the
+   community, so "Marsa Dubai", "Dubai Marina" and "دبي مارينا" are one row. */
 export const placedArea = (end, t = 't', tp = 'tp') =>
-  `coalesce(${tp}.${end}_area, CASE WHEN ${tp}.platform IS NULL THEN place_area(${t}.${end}_addr) END)`;
+  canonAreaSql(`coalesce(${tp}.${end}_area, CASE WHEN ${tp}.platform IS NULL THEN place_area(${t}.${end}_addr) END)`);
 
 export const placedBasis = (end, t = 't', tp = 'tp') =>
   `CASE WHEN ${tp}.platform IS NOT NULL THEN ${tp}.${end}_basis
