@@ -114,12 +114,21 @@ export const SETTING_DEFAULTS = {
   YANGO_KEY_BASE: 'https://fleet-api.yango.tech',
   HOTEL_BASE: 'https://whale-app-iofbt.ondigitalocean.app',
   HOTEL_DOMAIN: 'hotel.ecosine.ae',
-  /* MiniMax's OpenAI-compatible surface. The previous default was ByteDance
-     ModelArk, which every analyst pass on production timed out against — the
-     stored runs show `outcome: failed, error: This operation was aborted`
-     after 242s, and the page reported the analyst as simply quiet. */
-  ANALYST_BASE_URL: 'https://api.minimax.io/v1',
-  ANALYST_MODEL: 'MiniMax-M3',
+  /* BytePlus ModelArk again (2026-11-16), with thinking switched off.
+     History: ModelArk was the first default, and every analyst pass on
+     production timed out against it (`This operation was aborted` after 242 s
+     — 120 s, twice) while the page called the analyst quiet; MiniMax replaced
+     it, and from 2026-11-11 23:10Z every pass failed there with 402, "Token
+     Plan usage limit reached". The timeouts were the model reasoning before
+     it answered: with {thinking: {type: 'disabled'}} (src/config.js
+     thinkingSwitch) production's real 30-day brief came back from
+     DeepSeek V4 Pro, its GA build and Seed 2.0 Pro in 17-25 s, every
+     proposal well-formed (COVERAGE "The analyst on ModelArk"). The key is
+     ARK_API_KEY (config.analystModel falls back to it), already on both
+     components for the daily report. The model is the one production's own
+     measurement kept the most findings from — see COVERAGE for the A/B. */
+  ANALYST_BASE_URL: 'https://ark.ap-southeast.bytepluses.com/api/v3',
+  ANALYST_MODEL: 'deepseek-v4-pro-ga-260813',
   BACKFILL_MONTHS: '12',
   INCREMENTAL_DAYS: '3',
   /* Data retention (src/data_retention.js). dry_run counts what a pass would

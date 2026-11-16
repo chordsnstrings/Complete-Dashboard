@@ -25,7 +25,7 @@
    character classes, and the names of any cookies in it. A model does not need
    the secret to say what kind of secret it is, and a credential mailed to a
    third party to be identified is a credential that has been disclosed. */
-import { config } from './config.js';
+import { config, thinkingSwitch } from './config.js';
 import { http } from './http.js';
 import { SETTING_DEFS } from './settings.js';
 import { cookieMap, cookieText } from './credkit.js';
@@ -94,7 +94,9 @@ export async function proposeKeys(blocks) {
       }) },
     ],
     max_tokens: 900, temperature: 0.1,
-    ...(/minimax/i.test(baseUrl || '') ? { thinking: { type: 'disabled' } } : {}),
+    /* Reasoning off wherever the endpoint takes the switch (src/config.js
+       thinkingSwitch): this call has 60 seconds and no retry. */
+    ...(thinkingSwitch(baseUrl) ? { thinking: { type: 'disabled' } } : {}),
   };
   let data;
   try {

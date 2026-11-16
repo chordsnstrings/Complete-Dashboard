@@ -277,6 +277,18 @@ export const config = {
    Fixed here, at the one function all seven collectors pass a plate through,
    rather than at the thirty aggregates that consume it. sql/schema_v32.sql
    cleans the rows already written. */
+/* The chat/completions endpoints that take {thinking: {type: 'disabled'}}
+   and spend nothing on a think block once told: MiniMax, and BytePlus
+   ModelArk on either region's host. Every caller of config.analystModel
+   (src/analyst.js, src/credmodel.js) asks here, so a provider switch moves
+   them together (2026-11-16: the analyst moved to ModelArk; a list kept in
+   two files had kept credmodel on MiniMax's switch alone). */
+export const thinkingSwitch = (baseUrl) => {
+  let host = '';
+  try { host = new URL(String(baseUrl || '')).hostname.toLowerCase(); } catch { return false; }
+  return ['minimax.io', 'bytepluses.com', 'volces.com'].some((d) => host === d || host.endsWith(`.${d}`));
+};
+
 export const normPlate = (p) => (p || '').toUpperCase().replace(/[\s-]+/g, '') || null;
 
 /* ── a plate that arrived without its letter code ────────────────────────────

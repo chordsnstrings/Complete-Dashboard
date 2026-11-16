@@ -25,7 +25,7 @@
    otherwise" is itself worth being able to read. */
 
 import { pool } from './db.js';
-import { config } from './config.js';
+import { config, thinkingSwitch } from './config.js';
 import { http } from './http.js';
 import { log } from './log.js';
 
@@ -580,6 +580,31 @@ claimed_value is your estimate of the segment's own value in the metric's unit, 
 you are not estimating one. Write null rather than 0: the finding prints your number beside the
 measured one, and a placeholder zero reads as a prediction that the segment earns nothing.`;
 
+/* The request propose() sends, on its own so a test can read it without a
+   network: the model, the prompt and the brief, the budget — and the
+   thinking switch, which is what kept ModelArk from answering in time. */
+export function proposeBody(prompt, brief, m = config.analystModel) {
+  return {
+    model: m.model,
+    messages: [{ role: 'system', content: prompt },
+      { role: 'user', content: JSON.stringify(brief) }],
+    max_tokens: 3000, temperature: 0.4,
+    /* Reasoning OFF, where the endpoint understands the switch.
+       MiniMax's M-series reasons by default on the OpenAI-compatible
+       surface, which spends the token budget on a think block this caller
+       throws away and pushes a 36-second call toward the 120-second
+       timeout. ModelArk's hybrid models (Seed 2.0, DeepSeek V4) take the
+       same {thinking: {type: 'disabled'}} — and ModelArk's first tenure as
+       the analyst's endpoint ended because every pass timed out (242 s:
+       120 s, twice), which is what a model thinking before it answers
+       looks like from here (2026-11-16; the list is src/config.js
+       thinkingSwitch). Sent only where it is understood: an unknown field is a 400 on a
+       stricter server, and the analyst has already spent one production
+       outage on a request that never returned. */
+    ...(thinkingSwitch(m.baseUrl) ? { thinking: { type: 'disabled' } } : {}),
+  };
+}
+
 export async function propose(brief) {
   if (!config.analystModel?.apiKey) {
     log.warn(SRC, 'no analyst model key — the analyst cannot propose, only measure');
@@ -619,20 +644,7 @@ export async function propose(brief) {
     ({ data } = await http(`${config.analystModel.baseUrl}/chat/completions`, {
       method: 'POST', timeoutMs: 120000, retries: 1,
       headers: { authorization: `Bearer ${config.analystModel.apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: config.analystModel.model,
-        messages: [{ role: 'system', content: prompt },
-          { role: 'user', content: JSON.stringify(brief) }],
-        max_tokens: 3000, temperature: 0.4,
-        /* MiniMax's M-series reasons by default on the OpenAI-compatible
-           surface, which spends the token budget on a think block this caller
-           throws away and pushes a 36-second call toward the 120-second
-           timeout. Sent only where it is understood: an unknown field is a
-           400 on a stricter server, and the analyst has already spent one
-           production outage on a request that never returned. */
-        ...(/minimax/i.test(config.analystModel.baseUrl || '')
-          ? { thinking: { type: 'disabled' } } : {}),
-      }),
+      body: JSON.stringify(proposeBody(prompt, brief)),
     }));
   } catch (e) {
     const err = String(e?.message || e).slice(0, 200);

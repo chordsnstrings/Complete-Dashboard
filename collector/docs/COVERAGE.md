@@ -11611,3 +11611,32 @@ the file, so the batch that found them merges without moving that list.
   `driver_first_online` 9,001 rows in 7.8 s, covering 2024-10-01 onward — and a page opened in
   the minutes before that showed "the roll-up has not been built yet", the true reason.
 
+
+## The analyst on ModelArk (2026-11-16)
+
+**Why it moved.** Every analyst pass failed from 2026-11-11 23:10Z: MiniMax answered 402, "Token Plan
+usage limit reached". ModelArk had been the analyst's endpoint before MiniMax and was dropped because
+every pass timed out there (`This operation was aborted` after 242 s — the 120-second limit, twice).
+
+**What the timeouts were.** The model reasoning before it answered. ModelArk's hybrid chat models take
+`{thinking: {type: 'disabled'}}` on `/chat/completions`, as MiniMax does; the analyst only sent it to
+MiniMax. `src/config.js` `thinkingSwitch` now names both providers by hostname, and both callers of
+`config.analystModel` (the analyst, and the paste box's `credmodel.js`) ask it.
+
+**Which models the skill's key can call** (`ark.py models --verify`, free): `deepseek-v4-pro-260425`,
+`deepseek-v4-pro-ga-260813`, `seed-2-0-pro-260328` and their flash/lite/mini siblings all OK;
+`deepseek-v3-1-250821` NO ACCESS. Production's key is `ARK_API_KEY` on both components (it was already
+there; `config.analystModel` falls back to it when `ANALYST_API_KEY` is unset).
+
+**Production's real 30-day brief (`GET /api/analyst/brief`, 6.2 KB) through the analyst's own
+`propose()`, thinking off, twice per model:**
+
+| model | seconds | proposals kept | rejected | dimensions it explored |
+|---|---|---|---|---|
+| `deepseek-v4-pro-ga-260813` | 20.9, 18.8 | 12, 10 | 0, 2 (tautology: premium_pct by tier) | platform, daypart, settlement, tier, weekday, hour, vehicle, driver |
+| `seed-2-0-pro-260328` | 18.0, 17.2 | 12, 12 | 0, 0 | platform, daypart, settlement — only the breakdowns the brief tabulates |
+| `deepseek-v4-pro-260425` | 23.4, 24.7 | 11, 11 | 1, 1 (the same tautology) | five to seven |
+
+All well inside the 120-second limit. Well-formed is not the test, though: the analyst proposes and the
+measurement decides, so the model that works best is the one whose claims SURVIVE production's
+measurement — recorded below once each has run there.
