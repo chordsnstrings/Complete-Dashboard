@@ -11730,6 +11730,14 @@ cannot get the scope by client credentials, and because Uber documents these sco
 grant, that is not proof Uber refused the app. A check that was issued a token forgets the process's cached Uber
 grants (`forgetUberTokens`), because nothing recovers a retired token from a 401.
 
+**Measured on production, 2026-11-16 10:56Z (deploy of `01a8b65`, the boot probe):** both fleets' clients asked
+for `vehicle_suppliers.cash_block.read` and `.write`, each alone, and Uber answered **`invalid_scope` to all four**.
+No token was issued, so no cached grant was touched, and every other Uber surface in the same pass answered (drivers,
+driver-actions, vehicles, earner-payments, transactions, both earner-history windows, the trip-report session).
+What that settles: **the dashboard's logins cannot be given the cash block today.** What it does not: whether Uber would
+grant it to the app by the Authorization Code grant — the developer dashboard's scope list is the place that says, and
+asking Uber to enable the scopes (and that grant) for both apps is the operator's step.
+
 ## OpenSky Network — flights landing at DXB and DWC (2026-11-16)
 
 The eighth upstream, and the first that is not about the fleet: the operator asked for "flight

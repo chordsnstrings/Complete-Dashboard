@@ -6987,8 +6987,8 @@ a one-fleet reader (none exists).
 
 | row | what | written | on production | proven |
 |---|---|---|---|---|
-| UCB1 | `cashScopeCheck` in `src/probe.js`: one token grant per cash-block scope per distinct client; no cash-block endpoint called; "granted" read off the token's scope list; a token issued forgets the cached grants | yes | with this PR | `test/uber_cash_scope_probe.test.mjs` (15 checks; four reversions each fail as named in its header) |
-| UCB2 | `forgetUberTokens()` in `src/auth/uber.js` | yes | with this PR | §5 of the same test |
+| UCB1 | `cashScopeCheck` in `src/probe.js`: one token grant per cash-block scope per distinct client; no cash-block endpoint called; "granted" read off the token's scope list; a token issued forgets the cached grants | yes | **yes** — PR #35 → `01a8b65`, deployed 2026-11-16 10:57Z; the boot probe answered `invalid_scope` for both scopes on both fleets' clients (COVERAGE) | `test/uber_cash_scope_probe.test.mjs` (15 checks; four reversions each fail as named in its header) |
+| UCB2 | `forgetUberTokens()` in `src/auth/uber.js` | yes | yes, `01a8b65` (not exercised: no token was issued) | §5 of the same test |
 
 The endpoints, the contradiction on Uber's page, and how to read the probe's answer are in
 `docs/COVERAGE.md` "Uber's per-driver cash block".
