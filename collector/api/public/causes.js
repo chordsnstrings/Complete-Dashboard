@@ -705,10 +705,15 @@ function webLeadsPanel(host, w) {
       cards: true, cardLead: 'title' }));
   }
   host.append(el('p', 'cap',
-    'Found by web search — a direction, not a measurement. Once a day a model on BytePlus ModelArk searches the web '
-    + 'for public events in Dubai over the next 21 days: concerts, sports, conferences and exhibitions, festivals, '
-    + 'holidays and closures, major disruptions. Confidence is the model’s own estimate that an event moves ride demand; '
-    + 'a source link appears only where the search itself cited the page, and a crowd figure only where a source stated one. '
+    /* The search is BytePlus SearchInfinity and the reading is the analyst
+       model on ModelArk (src/sources/events_web.js, EVW2): said as two steps,
+       because the link is the search's and the dates and confidence are the
+       model's reading of what the search returned. */
+    'Found by web search — a direction, not a measurement. Once a day BytePlus SearchInfinity searches the web for public '
+    + 'events in Dubai over the next 21 days — concerts, sports, conferences and exhibitions, festivals, holidays and '
+    + 'closures, major disruptions — and a model on BytePlus ModelArk reads only the pages it returned into this list. '
+    + 'Confidence is the model’s own estimate that an event moves ride demand; the source link is the page the search '
+    + 'returned for it, and a crowd figure appears only where a source stated one. '
     + 'Nothing here has been measured against a trip.'));
 }
 

@@ -55,8 +55,32 @@
    measured on ModelArk shows a credit allowance or that header — it prices
    by tokens and tool calls. The header is still read and kept in raw when a
    response carries it, which costs nothing and settles the question on the
-   first real run; it is not a budget this tier enforces. */
+   first real run; it is not a budget this tier enforces.
+
+   SEARCHINFINITY, AND WHY THE TIER NOW SEARCHES FIRST AND READS SECOND
+   (2026-11-16, FIX-STATUS EVW2). Production's first run (11:28Z) drew the same
+   403 on /responses. The operator then said "Searchinfinity is already active
+   in modelark" and supplied its key: BytePlus SearchInfinity is the account's
+   web search, a separate API rather than the Responses tool. MEASURED with the
+   operator's key, 2026-11-16 14:17Z: POST
+   https://torchlight.byteintlapi.com/search_api/web_search, Authorization:
+   Bearer <key>, body {Query, Count, TimeRange} → HTTP 200 in 2.8 s,
+   {ResponseMetadata, Result: {ResultCount, WebResults[], …}}, each result
+   {Title, Url, Snippet, Summary, SiteName, PublishTime, …} — ten current Dubai
+   event pages for "Dubai events concerts exhibitions November December 2026"
+   (Time Out Dubai 9 Nov, Gulf News 1 Nov, What's On, The National, few.ae on
+   National Day). A business refusal arrives as ResponseMetadata.Error {Code,
+   CodeN, Message}: 700901 invalid key, 700429 rate, 10403 forbidden or quota.
+
+   So where SEARCHINFINITY_API_KEY is set the tier runs a handful of searches
+   for the window's months, keeps the pages they return, and hands ONLY those —
+   numbered — to the analyst model on /chat/completions, which may name an
+   event only by citing the numbers of the pages that state it. A source link
+   is therefore always a page the search returned: the citation is checked
+   against the list, not taken from the model. Without the key the Responses
+   path below is tried as before, and its own reason is the one reported. */
 import { config, thinkingSwitch } from '../config.js';
+import { get } from '../settings.js';
 import { http } from '../http.js';
 import { pool, upsertMany, logRun } from '../db.js';
 import { lastJsonArray } from '../analyst.js';
@@ -78,6 +102,8 @@ export const EFFECTS = ['demand_up', 'demand_down', 'unknown'];
 /* The reasons, word for word, because #causes and /api/status print them and
    a test holds them to the cause each one names. */
 export const REASON = {
+  siKey: 'SearchInfinity refused the API key (700901 invalid_api_key) — the key in SEARCHINFINITY_API_KEY is not valid; replace it in DigitalOcean',
+  siNoModel: 'SearchInfinity is configured but no model is — neither ANALYST_API_KEY nor ARK_API_KEY is set for the collector, so nothing can read the search results into events',
   accessDenied: 'ModelArk’s built-in web search is not enabled for this account — an account owner switches it on in the BytePlus console',
   noModel: 'no model configured — neither ANALYST_API_KEY nor ARK_API_KEY is set for the collector, so nothing can search the web',
   notArk: (host) => `the analyst model’s endpoint is ${host || 'not a valid URL'}, not BytePlus ModelArk — `
@@ -224,7 +250,7 @@ const titleKey = (title) => {
    answer, however late in the text it sits. */
 const eventArray = (v) => v.every((x) => x && typeof x === 'object' && !Array.isArray(x));
 
-export function parseWebEvents(answer, { from, to, citations = [], foundOn = from, call = null } = {}) {
+export function parseWebEvents(answer, { from, to, citations = [], foundOn = from, call = null, sources = null } = {}) {
   const { arr, error } = lastJsonArray(answer, { accept: eventArray });
   if (!arr) return { rows: [], rejected: [], error, offered: 0 };
   const cited = new Map(citations.map((c) => [urlKey(c.url), c]).filter(([k]) => k));
@@ -241,7 +267,13 @@ export function parseWebEvents(answer, { from, to, citations = [], foundOn = fro
     const code = `${titleKey(title)}:${starts}`;
     if (codes.has(code)) { rejected.push({ raw: e, reason: 'a second entry for the same event' }); continue; }
     codes.add(code);
-    const modelUrl = typeof e.url === 'string' ? e.url.trim() : null;
+    /* SearchInfinity path: the model names its sources by NUMBER, and the
+       number is resolved here against the list it was given — so the link is
+       a page the search returned, whatever the model would have typed. */
+    const srcNums = Array.isArray(e.sources) ? e.sources.map(Number).filter((x) => Number.isInteger(x)) : [];
+    const fromList = sources ? srcNums.map((x) => sources[x - 1]).filter(Boolean) : [];
+    if (sources && !fromList.length) { rejected.push({ raw: e, reason: 'cites none of the search results it was given' }); continue; }
+    const modelUrl = fromList.length ? fromList[0].url : (typeof e.url === 'string' ? e.url.trim() : null);
     const hit = modelUrl ? cited.get(urlKey(modelUrl)) : null;
     const att = Number(e.expected_attendance);
     const attendance = e.expected_attendance != null && Number.isFinite(att) && att > 0 ? Math.round(att) : null;
@@ -260,12 +292,143 @@ export function parseWebEvents(answer, { from, to, citations = [], foundOn = fro
         venue, area, expected_attendance: attendance, found_on: foundOn,
         ...(modelUrl && !hit ? { model_url: modelUrl.slice(0, 500), model_url_unverified: true } : {}),
         ...(hit ? { citation: hit } : {}),
+        ...(fromList.length ? { sources: fromList.map((x) => ({ url: x.url, title: x.title, site: x.site, published: x.published })) } : {}),
         citations: citations.slice(0, 25),
         ...(call ? { call } : {}),
       },
     });
   }
   return { rows, rejected, error: null, offered: arr.length };
+}
+
+/* ── SearchInfinity ───────────────────────────────────────────────────────── */
+export const SI_URL_DEFAULT = 'https://torchlight.byteintlapi.com/search_api/web_search';
+export const searchInfinityConfig = () => {
+  const apiKey = get('SEARCHINFINITY_API_KEY');
+  return apiKey ? { apiKey, url: get('SEARCHINFINITY_URL', SI_URL_DEFAULT) } : null;
+};
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September',
+  'October', 'November', 'December'];
+
+/* The searches for a window: what is on in each month it touches, and the
+   kinds of event that move rides, said the way a person searching would say
+   them. Seven at most (a two-month window) — at SearchInfinity's measured
+   2–3 s a call, well inside a run, and a handful of calls a day. */
+export function siQueries({ from, to }) {
+  const months = [];
+  for (const d of [from, to]) {
+    const [y, mo] = d.split('-').map(Number);
+    const label = `${MONTHS[mo - 1]} ${y}`;
+    if (!months.includes(label)) months.push(label);
+  }
+  const qs = [];
+  for (const m of months) qs.push(`Dubai events ${m}`, `Dubai concerts ${m}`);
+  qs.push(`Dubai exhibitions conferences ${months[0]}`, `Dubai sports events ${months[0]}`,
+    `Dubai road closures ${months[0]}`);
+  return qs;
+}
+
+/* One search. Resolves {results} or {error}; never throws. */
+export async function siSearch(cfg, query, { httpImpl = http, timeoutMs = 30000 } = {}) {
+  let res;
+  try {
+    res = await httpImpl(cfg.url, { method: 'POST', timeoutMs, retries: 0,
+      headers: { authorization: `Bearer ${cfg.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ Query: query, Count: 10, TimeRange: 'OneMonth' }) });
+  } catch (e) {
+    return { error: `SearchInfinity did not answer (${String(e?.message || e).slice(0, 160)})` };
+  }
+  const d = res?.data;
+  const be = d && typeof d === 'object' ? d.ResponseMetadata?.Error : null;
+  if (be && (be.Code || be.CodeN || be.Message)) {
+    if (be.CodeN === 700901 || be.Code === 'invalid_api_key') return { error: REASON.siKey, fatal: true };
+    return { error: `SearchInfinity refused the search (code ${be.CodeN ?? be.Code ?? '?'}): ${String(be.Message || '').slice(0, 200)}`,
+      fatal: be.CodeN === 10403 || be.CodeN === 700429 };
+  }
+  if (!res?.ok) {
+    const body = typeof d === 'string' ? d : JSON.stringify(d || {});
+    return { error: `SearchInfinity answered HTTP ${res?.status}: ${body.slice(0, 200)}`, fatal: res?.status === 401 || res?.status === 403 };
+  }
+  const list = Array.isArray(d?.Result?.WebResults) ? d.Result.WebResults : [];
+  return { results: list.filter((r) => typeof r?.Url === 'string' && r.Url.trim()).map((r) => ({
+    title: text(r.Title, 300) || r.Url.trim(), url: r.Url.trim(), site: text(r.SiteName, 120),
+    published: text(r.PublishTime, 40), text: text(r.Summary, 900) || text(r.Snippet, 600) })) };
+}
+
+/* What the model is given: the numbered pages and the rules. It may name an
+   event only by the numbers of the pages that state it. */
+export function siPrompt({ from, to }, results) {
+  const list = results.map((r, i) => `[${i + 1}] ${r.title}${r.site ? ` — ${r.site}` : ''}${r.published ? ` (published ${r.published.slice(0, 10)})` : ''}\n${r.text || ''}`).join('\n\n');
+  return `Below are ${results.length} web search results about events in Dubai. From THESE RESULTS ONLY, list public events in Dubai, UAE between ${from} and ${to} (both inclusive) that would move demand for taxis and ride-hailing: concerts, sports fixtures, conferences and exhibitions, festivals, public holidays and road or venue closures, and major disruptions.
+
+Answer with ONLY a JSON array and nothing before or after it. One object per event:
+{"title": "...", "starts_on": "YYYY-MM-DD", "ends_on": "YYYY-MM-DD", "venue": "..." or null, "area": "..." or null, "category": "${CATEGORIES.join('|')}", "expected_attendance": number or null, "expected_effect": "${EFFECTS.join('|')}", "confidence": 0 to 1, "sources": [result numbers]}
+
+Rules:
+- Only events a result below states, with a date a result below states. Nothing from memory.
+- sources lists the numbers of the results that state the event — at least one.
+- starts_on and ends_on must fall inside the window; a one-day event has ends_on equal to starts_on.
+- expected_attendance only when a result states it; otherwise null, never 0.
+- confidence is how likely the event is to move Dubai ride demand materially.
+- If no result states an event inside the window, answer [].
+
+${list}`;
+}
+
+/* Search, then read. Rows to write, or the true reason there are none. */
+export async function searchInfinityWeb({ now = new Date(), m = config.analystModel, cfg = searchInfinityConfig(),
+  httpImpl = http, timeoutMs = TIMEOUT_MS } = {}) {
+  const win = webWindow(now);
+  const base = { ...win, rows: [], rejected: [], citations: [], searches: 0, provider: 'searchinfinity' };
+  if (!m?.apiKey) return { ...base, status: 'error', reason: REASON.siNoModel };
+  const queries = siQueries(win);
+  const seen = new Map(); const failed = [];
+  const t0 = Date.now();
+  for (const query of queries) {
+    const r = await siSearch(cfg, query, { httpImpl });
+    base.searches += 1;
+    if (r.error) { failed.push({ query, error: r.error }); if (r.fatal) break; continue; }
+    for (const x of r.results) { const k = urlKey(x.url); if (k && !seen.has(k)) seen.set(k, x); }
+  }
+  const results = [...seen.values()].slice(0, 40);
+  const call = { provider: 'searchinfinity', queries: queries.length, searched: base.searches, results: results.length,
+    failed: failed.length ? failed.slice(0, 5) : undefined, search_ms: Date.now() - t0, model: m.model };
+  if (!results.length) {
+    return { ...base, call, status: 'error',
+      reason: failed.length ? failed[0].error : `SearchInfinity returned no page for any of the ${queries.length} searches` };
+  }
+  const citations = results.map((r) => ({ url: r.url, title: r.title }));
+  let res;
+  try {
+    res = await httpImpl(`${String(m.baseUrl).replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST', timeoutMs, retries: 0,
+      headers: { authorization: `Bearer ${m.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: m.model, messages: [{ role: 'user', content: siPrompt(win, results) }],
+        max_tokens: 3000, temperature: 0.2,
+        ...(thinkingSwitch(m.baseUrl) ? { thinking: { type: 'disabled' } } : {}) }),
+    });
+  } catch (e) {
+    return { ...base, citations, call, status: 'error',
+      reason: `the model that reads the search results did not answer (${String(e?.message || e).slice(0, 200)})` };
+  }
+  if (!res?.ok) {
+    const er = res?.data?.error || res?.data;
+    return { ...base, citations, call, status: 'error',
+      reason: `the model that reads the search results answered HTTP ${res?.status}: ${String(er?.message || JSON.stringify(er || {})).slice(0, 200)}` };
+  }
+  const answer = String(res.data?.choices?.[0]?.message?.content || '');
+  call.usage = res.data?.usage ?? null;
+  if (!answer.trim()) return { ...base, citations, call, status: 'error', reason: 'the model that reads the search results answered with no text' };
+  const parsed = parseWebEvents(answer, { ...win, citations, foundOn: win.from, call, sources: results });
+  if (parsed.error) {
+    return { ...base, citations, call, status: 'error',
+      reason: `the model’s reading of the search results could not be parsed (${parsed.error}): ${JSON.stringify(answer.slice(0, 160))}` };
+  }
+  if (parsed.offered > 0 && !parsed.rows.length) {
+    return { ...base, citations, call, rejected: parsed.rejected, status: 'error',
+      reason: `all ${parsed.offered} events the model read from the search results failed validation (first: ${parsed.rejected[0]?.reason})` };
+  }
+  return { ...base, citations, call, rows: parsed.rows, rejected: parsed.rejected, status: 'ok', reason: null };
 }
 
 /* One call to ModelArk, and what came of it: rows to write, or the true
@@ -327,11 +490,22 @@ export async function searchWeb({ now = new Date(), m = config.analystModel, tim
     rateLimitRemaining: remaining, status: 'ok', reason: null };
 }
 
+/* A reason that only the ModelArk Responses path gives. */
+export const responsesPathReason = (why) => typeof why === 'string'
+  && (why === REASON.accessDenied || why === REASON.noModel || why.startsWith('the analyst model’s endpoint is')
+    || /^ModelArk answered/.test(why));
+
 /* Is a search due? `last` is the newest web row in collection_run. Pure, so
    the cadence is tested without a clock. */
-export function webDue(last, now = new Date()) {
+export function webDue(last, now = new Date(), { searchInfinity = false } = {}) {
   if (!last?.finished_at) return true;
   const at = new Date(last.finished_at);
+  /* A refusal of the OLD path does not hold back a path never tried. The six
+     hours exist so a failing call is not repeated every half hour; a failure
+     of ModelArk's Responses tool (the 403 production drew at 11:28Z on
+     2026-11-16) says nothing about SearchInfinity, so the first run after the
+     key is set is due at once rather than at 17:28Z. */
+  if (searchInfinity && last.status === 'error' && responsesPathReason(last.error)) return true;
   if (last.status === 'error') return now - at >= RETRY_FAILED_AFTER_MS;
   return dubaiIso(at) !== dubaiIso(now);
 }
@@ -341,8 +515,9 @@ export async function collectWeb({ now = new Date(), m = config.analystModel, fo
   const { rows: [last] } = await pool.query(
     `SELECT status, error, finished_at FROM collection_run
       WHERE source = $1 AND mode = $2 ORDER BY finished_at DESC LIMIT 1`, [SRC, WEB_MODE]);
-  if (!force && !webDue(last, now)) return { ran: false, written: 0, last };
-  const out = await searchWeb({ now, m });
+  const si = searchInfinityConfig();
+  if (!force && !webDue(last, now, { searchInfinity: Boolean(si) })) return { ran: false, written: 0, last };
+  const out = si ? await searchInfinityWeb({ now, m, cfg: si }) : await searchWeb({ now, m });
   /* THE CODE IS THE ROW'S IDENTITY, NOT THE TITLE'S SPELLING.
      ─────────────────────────────────────────────────────────────────────────
      world_event's key is (source, code, starts_on, title), so a lead found
@@ -366,7 +541,7 @@ export async function collectWeb({ now = new Date(), m = config.analystModel, fo
     status: out.status, rows_written: written, error: out.reason });
   (out.status === 'ok' ? log.info : log.warn)(SRC, 'web search tier', {
     status: out.status, events: out.rows.length, written, rejected: out.rejected.length,
-    citations: out.citations.length, searches: out.searches,
+    citations: out.citations.length, searches: out.searches, provider: out.provider || 'modelark-responses',
     ...(out.rateLimitRemaining != null ? { rate_limit_remaining: out.rateLimitRemaining } : {}),
     ...(out.reason ? { reason: out.reason } : {}) });
   return { ran: true, written, ...out };

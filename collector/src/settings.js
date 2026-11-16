@@ -78,6 +78,9 @@ export const SETTING_DEFAULTS = {
      remain today (its X-Rate-Limit-Remaining header), so a backfill can never
      spend the whole day's allowance. */
   OPENSKY_CREDIT_FLOOR: '600',
+  /* BytePlus SearchInfinity, the account's web search (src/sources/events_web.js,
+     FIX-STATUS EVW2). Ends in _URL, so environment-only: the API key is sent to it. */
+  SEARCHINFINITY_URL: 'https://torchlight.byteintlapi.com/search_api/web_search',
   /* Uber's fares, hourly at five past — src/run.js fareRefresh says why. Five
      past so it queues behind the :00 incremental and lands before the :15
      rollup; hourly because Uber publishes a ride's fare hours after it and
@@ -426,6 +429,14 @@ export const SETTING_DEFS = [
     hint: 'UTC days back the arrivals collector fills where a day is missing. 30 days costs about 1,800 of the 4,000 daily credits, once.' },
   { key: 'OPENSKY_CREDIT_FLOOR', group: 'Flights (OpenSky)', label: 'Credits to leave unspent', secret: false,
     hint: 'The arrivals collector stops for the day once OpenSky reports fewer credits left than this.' },
+  /* BytePlus SearchInfinity — the web search behind "Coming up in Dubai" on
+     #causes. A Bearer key from console.byteplus.com → SearchInfinity → API key
+     (the key, not its numeric key id). Without it the tier tries ModelArk's
+     built-in Responses tool, which production's account refuses (403). */
+  { key: 'SEARCHINFINITY_API_KEY', group: 'Events (SearchInfinity)', label: 'API key', secret: true,
+    hint: 'From the BytePlus console, SearchInfinity \u2192 API key. Used once a day for a handful of searches about events in Dubai.' },
+  { key: 'SEARCHINFINITY_URL', group: 'Events (SearchInfinity)', label: 'Search endpoint', secret: false,
+    hint: 'SearchInfinity\u2019s web search endpoint. Set in DigitalOcean, not here: the API key is sent to it.' },
   { key: 'TESLA_REGION', group: 'Tesla', label: 'Fleet API region', secret: false,
     hint: 'eu for the Middle East, na for the Americas and Asia-Pacific, cn for China' },
   { key: 'TESLA_CRON', group: 'Collector', label: 'Tesla schedule (cron)', secret: false,

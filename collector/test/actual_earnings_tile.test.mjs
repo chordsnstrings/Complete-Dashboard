@@ -20,7 +20,8 @@
         than the total" on a driver whose every unpriced booking sits inside an
         Uber statement or was never completed — production driver 1 of October
         2026, measured: 30 unpriced of 502, 43 not completed, the statement on
-        31 of 31 days, dark_bookings 0. The gate is dark_bookings.
+        31 of 31 days, dark_bookings 0. The gate is unpriced_unstated (since
+        the Money in fix of 2026-11-16), with dark_bookings as the fallback.
      5. ABSENT WITH THE TRUE REASON, NEVER NOUGHT — and a nought the platforms
         published stays a number.
 
@@ -103,12 +104,21 @@ console.log('\n4 · a floor only where money is missing by construction');
   const t = actualEarningsTile(OCT, W);
   check('30 unpriced bookings inside a full statement are not a floor',
     !/at least/.test(t.value) && !/floor/.test(t.sub) && t.tone == null, JSON.stringify([t.value, t.tone]));
-  const d = actualEarningsTile({ ...OCT, dark_bookings: 3 }, W);
-  check('3 bookings on a channel reporting no money for them: "at least", and the reason leads',
-    d.value === 'at least AED 21,699.83' && /^3 bookings on a channel that reports no money for them are not in it, so this is a floor\. What the work earned/.test(d.sub),
-    JSON.stringify([d.value, d.sub.slice(0, 120)]));
-  check('…one booking reads in the singular', /^1 booking on a channel that reports no money for it is not in it/.test(
-    actualEarningsTile({ ...OCT, dark_bookings: 1 }, W).sub));
+  /* The gate is now /api/driver/kpis `unpriced_unstated` — completed bookings
+     with no fare that no statement covers — the same count Money in uses, so
+     the two tiles (one figure) cannot disagree about whether it is a floor
+     (test/money_in_floor.test.mjs). dark_bookings is the fallback for a
+     response from before that field, and both are tested here. */
+  const d = actualEarningsTile({ ...OCT, unpriced_unstated: 3 }, W);
+  check('3 completed bookings no statement or fare reports: "at least", and the reason leads',
+    d.value === 'at least AED 21,699.83' && /^3 completed bookings with no fare that any statement or booking reports are not in it, so this is a floor\. What the work earned/.test(d.sub),
+    JSON.stringify([d.value, d.sub.slice(0, 140)]));
+  check('…one booking reads in the singular', /^1 completed booking with no fare that any statement or booking reports is not in it/.test(
+    actualEarningsTile({ ...OCT, unpriced_unstated: 1 }, W).sub));
+  check('…an older response without the field falls back to dark_bookings',
+    /^at least/.test(actualEarningsTile({ ...OCT, dark_bookings: 2 }, W).value));
+  check('…and the field, where present, wins over dark_bookings',
+    !/at least/.test(actualEarningsTile({ ...OCT, dark_bookings: 2, unpriced_unstated: 0 }, W).value));
   /* The statements reaching fewer days than the window: a week not filed yet,
      or an account begun mid-window. True by the definition of driver_day.money
      whatever the cause, so the sentence names no cause. */

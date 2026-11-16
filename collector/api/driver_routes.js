@@ -2051,6 +2051,37 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          FROM driver_day
         WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date`, p);
 
+    /* THE BOOKINGS WHOSE MONEY IS GENUINELY NOT IN day_money — the only honest
+       ground for "at least" on Money in and Actual earnings (the operator,
+       2026-11-16: "fix the Money in 'at least' bug").
+       ─────────────────────────────────────────────────────────────────────
+       moneyInTile printed "at least … this is a floor rather than the total"
+       whenever trips > priced_trips. That counted two kinds of booking whose
+       money is NOT missing. A ride nobody took has no fare and never will.
+       And an Uber booking on a day an Uber statement covers carries no fare
+       on the trip row because Uber's export has no fare column — its money is
+       INSIDE the statement's net, which is what driver_day.money takes on such
+       a day. Measured on production for October on the driver ERN sampled:
+       30 of 502 bookings unpriced, 43 never completed, the statement on 31 of
+       31 days, dark_bookings 0 — and the Overview said "at least".
+
+       What is missing is a COMPLETED booking with no fare that no statement
+       covers: an Uber booking on a day its weekly statement has not reached
+       yet (the case the floor was written for — 2026-09-10, nine Uber
+       bookings before the week's report landed), or a booking on a channel
+       that files no statement and sent no fare. Keyed on the booking's own
+       account and Dubai day against driver_day.stmt_net, the column that
+       decides whether driver_day.money took the statement for that day. */
+    const [unstated] = await q(
+      `SELECT count(*)::int AS n,
+              count(*) FILTER (WHERE n.platform = 'uber')::int AS uber
+         FROM trip_norm n
+        WHERE ${TW} AND n.is_booking AND (${COMPLETED_SQL('n.status')}) AND NOT n.has_fare
+          AND NOT (n.platform = 'uber' AND EXISTS (
+                SELECT 1 FROM driver_day dd
+                 WHERE dd.driver_ext_id = n.driver_ext_id AND dd.day = n.local_day
+                   AND dd.stmt_net IS NOT NULL))`, p);
+
     /* THE CASH THE TRIP FEED KNOWS ABOUT, which is not the cash the statements
        report, and is the difference between a true dash and a false one.
        ─────────────────────────────────────────────────────────────────────
@@ -2145,6 +2176,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       day_payout_days: dday?.day_payout_days ?? null,
       day_fares_days: dday?.day_fares_days ?? null,
       day_rows: dday?.day_rows ?? null,
+      /* Completed bookings whose money no statement and no fare carries —
+         see the query above. `_uber` is the part waiting on Uber's weekly
+         statement, so the tile can say why. */
+      unpriced_unstated: unstated?.n ?? null,
+      unpriced_unstated_uber: unstated?.uber ?? null,
       /* The trip feed's own answer to "did this person handle cash", so a card
          whose figure comes from the statements can tell a real absence from a
          channel that simply never files one. */

@@ -1626,6 +1626,12 @@ app.get('/api/driver/kpis', (req, r) => {
     day_payout_days: 7,
     day_fares_days: 7,
     day_rows: 12,
+    /* Completed bookings whose money no statement and no fare carries (MIF,
+       2026-11-16): none on this fixture driver, whose statement covers the
+       window — so Money in is a plain figure, as it is on production for a
+       driver like them. */
+    unpriced_unstated: 0,
+    unpriced_unstated_uber: 0,
     /* Money in, and the two halves it is made of. Deliberately dominated by the
        payout: on this fleet a driver's fares are the few hotel bookings they
        happened to take, so a fixture where the halves are comparable would let

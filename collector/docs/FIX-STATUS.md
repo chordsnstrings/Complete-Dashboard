@@ -7269,3 +7269,39 @@ ONLY=driver/drv-0/earnings` 2, `signed` 14, `fare_reason_shared` 8, `interlinkin
 `trips > priced_trips` (COVERAGE trap above) — left alone here because it is a different tile in two
 shells; the phone shell (`api/public/m/`) has no Platform earnings tile, so it was not given this one.
 No HANDOFF row: nothing here is live, and the integrator adds one on deploy.
+
+## MIF – "at least" on Money in only where money is genuinely missing (2026-11-16)
+
+The operator: "fix the Money in 'at least' bug". `moneyInTile` (ui.js, the Overview and the phone) printed "at least …
+this is a floor rather than the total — Uber files its fares in a weekly payments report" whenever `trips >
+priced_trips`. That counted rides nobody took (no fare, ever) and Uber bookings on days Uber's statement covers (no
+fare column in Uber's export; the money is inside the statement's net, which `driver_day.money` takes that day). On the
+October driver ERN measured: 30 unpriced of 502, 43 never completed, the statement on 31 of 31 days, `dark_bookings` 0 —
+and "at least" with a reason that was not true. Found by the ERN agent (COVERAGE trap below).
+
+| row | what | written | on production | proven |
+|---|---|---|---|---|
+| MIF1 | `/api/driver/kpis` returns `unpriced_unstated` — completed bookings with no fare that no statement covers (an Uber booking on a day no statement reaches; any other channel's unpriced completed booking) — and `unpriced_unstated_uber`, the part waiting on Uber's weekly report | yes | with this PR | `test/money_in_floor.test.mjs` §1 on PGlite; reversions: the statement-day clause (4 fail), the completed filter (4) |
+| MIF2 | `moneyInTile` gates "at least" on that count and names the parts ("9 on Uber, whose weekly payments report has not reached their days yet", "1 on a channel that sent no fare for it"); a response without the field falls back to `dark_bookings`, never to trips minus priced | yes | with this PR | same file §2; reversion to trips − priced (5 fail) |
+| MIF3 | Actual earnings uses the same count, so the two tiles — one figure — agree on whether it is a floor | yes | with this PR | same file §3; `actual_earnings_tile` 26 (4 checks rewritten for the gate); reversion to dark_bookings alone (2 fail) |
+
+Classic `driver/drv-0` re-recorded: the diff against production's front end is the Money in tile alone — "at least … 172
+bookings here carry no fare yet" on a mock driver whose statement covers the window, now a plain figure.
+
+## EVW2 – Dubai events searched by SearchInfinity, read by the model (2026-11-16)
+
+Production's first web run (11:28Z) drew 403 AccessDenied on ModelArk's Responses tool. The operator: "Searchinfinity is
+already active in modelark", with its key. BytePlus SearchInfinity is a separate web search API, not the Responses tool
+(COVERAGE "SearchInfinity"). The tier now searches with it and has the analyst model read only what came back.
+
+| row | what | written | on production | proven |
+|---|---|---|---|---|
+| EVW2-1 | `siQueries` — the window's months and the kinds that move rides (7 searches on a two-month window, 5 on one); `siSearch` — POST with the Bearer key, `{Query, Count 10, TimeRange OneMonth}`, results mapped; 700901 named as the key and fatal, 10403/700429 fatal and quoted, an HTTP failure one failed search | yes | with this PR | `test/events_searchinfinity.test.mjs` §1–2 |
+| EVW2-2 | `searchInfinityWeb` — pages folded by URL (40 kept), handed NUMBERED to the analyst model on /chat/completions with thinking off; an event's link is the page its number names (resolved in `parseWebEvents`), never an address the model typed; an event citing none of the pages is refused; neither key leaves the function | yes | with this PR | same file §3; reversions: the source resolution (1 fail), the cites-none refusal (1) |
+| EVW2-3 | The reasons: no model, every search refused (stops at the first fatal one), no page; the Responses path stays the fallback when no key is set | yes | with this PR | §4; reversion of the fatal break (1 fail) |
+| EVW2-4 | `webDue`: a refusal of the Responses path does not hold back SearchInfinity — the first run after the key is set is due at once, not six hours after the 11:28Z 403 | yes | with this PR | §4b; reversion (1 fail) |
+| EVW2-5 | Settings `SEARCHINFINITY_API_KEY` (secret) and `SEARCHINFINITY_URL` (environment-only by the _URL rule); the key set on the collector in DigitalOcean as SECRET (2026-11-16 ~14:40Z); #causes' caption names the two steps | yes | the key: yes; the code: with this PR | `settings_env_only` 13, `deploy_scripts` 73, Classic `causes` re-recorded (the caption only) |
+
+Measured through this code against the real service, 2026-11-16 for the window 16 Nov – 6 Dec: 7 searches, each 10
+results in 1.3–2.3 s, 10.3 s in all; 57 distinct pages, 40 kept; a prompt of about 39,600 characters.
+

@@ -13,7 +13,7 @@
        polls THE id the POST returned, prints each phase once, and ends on
        ACTIVE (0), ERROR / CANCELED / SUPERSEDED (1) or a timeout (1);
      - the committed spec says what production is (two components, sizes,
-       branch, health check, 41 and 45 env keys, COMMIT_SHA bound to
+       branch, health check, 41 and 46 env keys, COMMIT_SHA bound to
        ${_self.COMMIT_HASH}) and holds no value;
      - redaction leaves no secret in anything compared or printed;
      - the structural diff is silent when the live spec matches and names each
@@ -188,12 +188,13 @@ check('the health check is /api/health, 30 s initial delay, every 15 s',
 /* 43 + COMMIT_SHA and 45 + COMMIT_SHA at the 2026-11-12 audit; three fewer on
    each since 2026-11-16, when the analyst's MiniMax variables
    (ANALYST_API_KEY, ANALYST_BASE_URL, ANALYST_MODEL) were removed; two more on
-   the worker the same day, OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET (FLT). */
-check('40 + COMMIT_SHA env keys on the api, 44 + COMMIT_SHA on the worker',
-  Object.keys(api.envs).length === 41 && Object.keys(worker.envs).length === 45,
+   the worker the same day, OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET (FLT), and one more,
+   SEARCHINFINITY_API_KEY (EVW2). */
+check('40 + COMMIT_SHA env keys on the api, 45 + COMMIT_SHA on the worker',
+  Object.keys(api.envs).length === 41 && Object.keys(worker.envs).length === 46,
   `${Object.keys(api.envs).length} ${Object.keys(worker.envs).length}`);
-check('18 and 21 of them encrypted (type SECRET)',
-  Object.values(api.envs).filter((e) => e.type === 'SECRET').length === 18 && Object.values(worker.envs).filter((e) => e.type === 'SECRET').length === 21);
+check('18 and 22 of them encrypted (type SECRET)',
+  Object.values(api.envs).filter((e) => e.type === 'SECRET').length === 18 && Object.values(worker.envs).filter((e) => e.type === 'SECRET').length === 22);
 check('no analyst variable names MiniMax any more — the analyst runs on its defaults and ARK_API_KEY',
   !Object.keys(api.envs).some((k) => k.startsWith('ANALYST_')) && !Object.keys(worker.envs).some((k) => k.startsWith('ANALYST_'))
     && 'ARK_API_KEY' in api.envs && 'ARK_API_KEY' in worker.envs);
@@ -205,8 +206,9 @@ check('every other value is the redaction placeholder',
   const values = [...specText.matchAll(/^\s+value:\s*(.*)$/gm)].map((m) => m[1].trim());
   check('no value line in the file holds anything else (read as text, not parsed)',
     /* 41 + 45 value lines (90 until the analyst's three MiniMax keys left both components, 2026-11-16;
-       84 until OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET joined the collector, FLT, the same day). */
-    values.length === 86 && values.every((v) => v === `"${REDACTED}"` || v === '"${_self.COMMIT_HASH}"'), `${values.length} ${values.find((v) => v !== `"${REDACTED}"`)}`);
+       84 until OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET joined the collector, FLT, the same day;
+       86 until SEARCHINFINITY_API_KEY did, EVW2). */
+    values.length === 87 && values.every((v) => v === `"${REDACTED}"` || v === '"${_self.COMMIT_HASH}"'), `${values.length} ${values.find((v) => v !== `"${REDACTED}"`)}`);
 }
 check('the database is the production PG cluster fleet-dashboard-db',
   JSON.stringify(committed.databases) === JSON.stringify({ db: { engine: 'PG', production: true, cluster_name: 'fleet-dashboard-db' } }));
