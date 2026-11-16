@@ -979,8 +979,85 @@ Measured on production 2026-09-07, the first build under the v67 rule:
 **4,855 cells, 709 distinct names, 410,627 observations**, naming 221 of one
 driver's 222 tracker fixes.
 
+### Every pickup and drop-off placed — the address forms, measured 2026-11-16 (FIX-STATUS PLC)
+
+The operator, on a driver's Territory tab where "(unparsed)" was the second-largest row (35 of ~230
+pickups): "let's try figuring out how we can get as many data as possible so that unparsed doesn't
+exist." `place_area()` reads one shape — Google's dash form — and each channel writes others.
+Measured on production (GET `/api/trips/list`, 6,000 bookings, 9–15 Nov 2026):
+
+| channel | pickups | read by `place_area()` | the forms it does not read |
+|---|---:|---:|---|
+| Uber | 5,550 | 4,547 (81.9%) | 456 Uber's ONE-LINE form, no dashes ("Al Zarouni Block A Al Muraqqabat Deira AE" — the dash form with dashes, city and country removed, "AE" appended); **401 with an EMPTY address** (~7% every day, evenly: 346 completed, 52 rider-cancelled; 124 of them have no drop-off address either); 111 mostly Arabic ("Duja Tower شارع 6 Sheikh Zayed Road AE"); 31 "Dubai - United Arab Emirates" alone; Chinese-locale strings ("阿拉伯联合酋长国迪拜酋长国", sometimes with a plus code run straight on); 2 bare plus codes ("35J6+VH - Dubai - United Arab Emirates") |
+| Bolt | 199 | 23 (11.6%) | the COMMA form, "<place or street> <number>, <city>" ("Sheikh Rashid Road 137, Dubai", "Blue Bay Tower, Marasi Drive Level 8, No 807, Dubai"), a few in Arabic or Cyrillic |
+| Yango | 23 | 0 | Yandex's comma hierarchy ("Shemara Tower, Jumeirah Beach Residence, Dubai Marina, Jumeirah, Dubai") |
+| hotel | 228 | 227 | one bare plus code |
+| (Abu Dhabi, any channel) | — | — | 14 of 11,100 endpoints: the dash form carries a zone code where Dubai carries the community ("… - Al Bateen - W44 - Abu Dhabi - …"), which `place_area()` refuses as a code |
+
+**What each basis means** (`trip_place.<end>_basis`, src/place_resolve.js, most direct first):
+
+* `address` — `place_area()`, exactly as before. Unchanged wherever it already worked.
+* `address_name` — a name the fleet's own history already uses (place_area's answers in trip_place,
+  plus every place_cell name; seen at least twice), found in the one-line or comma text: Latin script
+  only, never the city/emirate/country, nearest the end, longest at the same end, "Jumeirah" only as
+  a fallback. Or (rule `zone_code`) the Abu Dhabi community before the zone code.
+* `plus_code` — an Open Location Code in the text, short codes recovered against the emirate the
+  address names (Dubai otherwise), then named by a gazetteer.
+* `coordinates` — the booking's own lat/lng (hotel ~69%, Yango ~22%, Bolt orders), named by a gazetteer.
+* `tracker` — the car's own FMS/CABMAN fix within **5 minutes** of the request time (pickup) or the
+  drop-off time (drop-off), FMS first, named by a gazetteer. Where the CAR was, not what the platform
+  wrote — every surface says "placed by the car's tracker at the request time".
+* absent — `<text failure>+<position failure>`: `no_address` / `city_only` / `other_script` /
+  `unknown_name`, and `no_plate` / `no_time` / `cancelled` / `no_fix` / `unnamed_cell`; in words by
+  `reasonText()`, e.g. "no address, and no tracker fix within 5 minutes".
+
+**The window, measured** (GET `/api/track`, 89 plates, 8–16 Nov): FMS reports every 6.2 min at the
+median (p75 7.0, p90 10.0), CABMAN every 5.0 (p90 52.7 — a parked car reports about hourly). Of the
+401 empty-address Uber pickups, the car's nearest fix was within 3 min for 358, within **5 for 373
+(93.0%)**, within 10 for 379; 12 were in cars with no tracker that week.
+
+**The gazetteer that names a position** — see the trap below: `booking_cell` (the bookings' own words,
+from drop-off votes) first, `place_cell` (FMS's words) second, recorded per endpoint in `named_by`.
+
+**After, on the same sample** (the text rungs exact; the position rungs named by a booking_cell built
+from the sample's own week of drop-offs plus the place_cell names production printed on 160 driver-days
+— a SMALLER gazetteer than production's, so these are upper bounds on what stays unplaced):
+
+| channel | pickups | address | address_name | plus_code | tracker | fix, cell unnamed here | not placed |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Uber | 5,550 | 4,547 | 436 | 5 | 499 | 21 | 42 (28 no address + no fix, 7 unknown name + no fix, 4 city only + no plate, 3 other script + no fix) |
+| Bolt | 199 | 23 | 40 | 0 | 119 | 3 | 14 |
+| Yango | 23 | 0 | 21 | 0 | 2 | 0 | 0 |
+| hotel | 228 | 227 | 0 | 1 | 0 | 0 | 0 |
+
+Expected still unplaced: **Uber 0.8–1.1% (from 18.1%), Bolt 7.0–8.5% (from 88.4%), Yango 0% (from 100%),
+hotel 0%.** Drop-offs: Uber 97 of 5,550 not placed, 83 of them cancelled bookings that never had a
+drop-off ("…, and the booking was cancelled before any drop-off"); Bolt 44 of 199, 29 cancelled.
+
 ## Traps that have cost time more than once
 
+* **The tracker's gazetteer does not speak the bookings' language** (2026-11-16, FIX-STATUS PLC).
+  `place_cell` is FMS's reverse geocoder (InfoTrack); the bookings are Google's. Where a booking had
+  a dash-form address AND a tracker fix within 5 min (160 production driver-days, 9–15 Nov), the
+  place_cell name equalled the address's area on **29.8% of pickups and 24.6% of drop-offs** — the
+  positions are right, the words differ: "Al Barsha 1" / "Al Barsha", "Za'abeel 2" / "Trade Center
+  Second", "Al Garhoud" / "Dubai Int'l Airport", "260 Sheikh Zayed Rd" / "Business Bay". Naming a
+  tracker position through place_cell would put a second row on every area list. `booking_cell`
+  (votes: the drop-off address's area at the car's position at the drop-off time) named the pickup's
+  own area on **70.3%** (2,594 of 3,691) from one week of votes; and a plus code decoded through it
+  named the address's own area on **84.5%** (729 of 863 dash-form addresses that start with a code),
+  0 when the position was moved 5 km. Name positions with booking_cell first.
+* **Google's own dash form already splits one place under two names** (2026-11-16). On the 6,000-booking
+  sample `place_area()` returns "Nakhlat Jumeira" 338 times and "Palm Jumeirah" 37 ("The Palm Jumeirah"
+  5); "Marsa Dubai" 523 and "Dubai Marina" 14; "Hadaeq Sheikh Mohammed Bin Rashid" 156 and "Dubai Hills"
+  10. The name matcher returns the spelling the text uses, so a one-line "… Palm Jumeirah AE" lands under
+  "Palm Jumeirah", beside the dash form's "Nakhlat Jumeira". That split predates PLC and is not a matcher
+  error; folding synonyms is a separate, reviewed list nobody has written yet.
+* **Uber's request time is not its pickup time** (2026-11-16). TRIP_ACTIVITY carries "Trip request time"
+  and "Trip drop-off time" and no pickup time, so the tracker rung reads the car at the REQUEST — on its
+  way to the rider, typically a few minutes out — and says so ("at the request time"). Shifting the
+  read by +2 min moved agreement with the address from 29.8% to 30.1% (place_cell names), so the
+  vocabulary, not the clock, was the gap. The drop-off is read at the drop-off time, when the car is there.
 * **"Airport" in a booking's address is mostly NOT the airport** (2026-11-16, FIX-STATUS FLT9).
   No booking carries a coordinate, so an airport trip is found by its address text, and the
   commonest "airport" address on production is "Airport Rd - Al Garhoud - Dubai" — a road of

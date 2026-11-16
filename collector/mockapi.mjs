@@ -2179,8 +2179,20 @@ app.get('/api/driver/territory', (req, r) => {
     pickups: spots.map(([addr, lat, lng], i) => ({ lat, lng, n: Math.round((60 - i * 6) * (1 + (seed % 3) * .2)),
       addr, avg_km: +rnd(6, 22).toFixed(1), avg_fare: +rnd(22, 88).toFixed(2) })),
     dropoffs: spots.slice().reverse().map(([addr, lat, lng], i) => ({ lat: lat + .01, lng: lng + .012, n: 40 - i * 4, addr })),
-    areas: spots.map(([addr], i) => ({ area: addr.split(' - ')[0], n: Math.round(60 - i * 6),
-      avg_km: +rnd(6, 22).toFixed(1), avg_fare: +rnd(22, 88).toFixed(2) })),
+    /* PLC (2026-11-16): each area says how its pickups were placed, and what
+       the ladder could not place is a row named by its reason — never
+       "(unparsed)". `placement` is the caption's totals over every pickup. */
+    areas: [...spots.map(([addr], i) => ({ area: addr.split(' - ')[0], n: Math.round(60 - i * 6),
+      avg_km: +rnd(6, 22).toFixed(1), avg_fare: +rnd(22, 88).toFixed(2),
+      by_basis: i === 0 ? { address: 49, address_name: 7, tracker: 4 }
+        : i === 3 ? { address: 38, tracker: 4 } : { address: Math.round(60 - i * 6) } })),
+    { area: null, reason: 'no_address+no_fix', unplaced: true, n: 5, avg_km: 9.4, avg_fare: 31.5,
+      label: 'Not placed — no address, and no tracker fix within 5 minutes' }],
+    placement: { total: 317, placed: 312, tracker_window_min: 5,
+      by_basis: [{ basis: 'address', label: 'from the address', n: 297 },
+        { basis: 'address_name', label: 'named from the address text', n: 7 },
+        { basis: 'tracker', label: "placed by the car's tracker at the request time", n: 8 }],
+      unplaced: [{ reason: 'no_address+no_fix', label: 'no address, and no tracker fix within 5 minutes', n: 5 }] },
     idle: [{ lat: 25.253, lng: 55.365, fixes: 88 }, { lat: 25.078, lng: 55.139, fixes: 41 },
       { lat: 25.196, lng: 55.276, fixes: 22 }],
     /* One cluster on a map beside a table of 139 pickups across 25 areas is not

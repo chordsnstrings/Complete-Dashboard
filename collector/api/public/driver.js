@@ -1861,7 +1861,11 @@ async function tabTerritory(root, id) {
     : 'Circles are pickup clusters, sized by trips. Hollow markers are places the vehicle sat still between jobs.');
   mapP.panel.classList.add('mapwrap'); g.append(mapP.panel);
   const node = el('div', 'mapnode'); mapP.body.append(node);
-  const areas = panel('Busiest pickup areas', 'From the address the platform recorded'); g.append(areas.panel);
+  /* Not "from the address" any more (FIX-STATUS PLC): where the address names
+     no area, a name in its text, a plus code, the booking's coordinates or the
+     car's own tracker places the pickup, and the caption under the table says
+     how many came from which. */
+  const areas = panel('Busiest pickup areas', 'From the address the platform recorded, or the car\'s tracker where it named no area'); g.append(areas.panel);
   const dmix = panel('Trip distance mix', 'Short hops or long runs'); root.append(dmix.panel);
   [areas.body, dmix.body].forEach(loading);
 
@@ -1914,11 +1918,14 @@ async function tabTerritory(root, id) {
       ${ak ? '<span><i class="terr-still-key" style="background:var(--grey);border-radius:50%"></i>waiting spots</span>'
         : '<span><i style="border:1.5px dashed var(--s5);background:none"></i>waiting spots</span>'}
       ${pts.length ? `<span>${terr.pickups.length} pickup clusters · ${terr.idle.length} waiting spots</span>` : ''}`));
+    /* "The other N have an address and no position" stopped being true when
+       the table took in the pickups with NO address (PLC): the tracker places
+       most of those, and the rest are counted by reason. */
     if (pts.length && areaTrips > plotted) {
       mapP.body.append(el('p', 'cap',
         `${fmt(plotted)} of ${fmt(areaTrips)} pickups carry coordinates and are on this map. The other `
-        + `${fmt(areaTrips - plotted)} have an address and no position — the table beside this is over `
-        + 'all of them, so it will name areas the map does not show.'));
+        + `${fmt(areaTrips - plotted)} have no position here — the table beside this is over all of them, `
+        + 'placed by their address or the car\'s tracker, so it will name areas the map does not show.'));
     }
   }
 
@@ -1936,8 +1943,16 @@ async function tabTerritory(root, id) {
         + 'Uber records the pickup address; the FMS telematics feed records neither address nor '
         + 'position, so a window with only telematics journeys in it has nothing here.'));
   } else {
+    /* A row the ladder could not place is named by its REASON, never
+       "(unparsed)"; a placed row whose pickups did not all come from the
+       address says so on hover, and the caption below gives the totals. */
+    const basisTip = (r) => Object.entries(r.by_basis || {})
+      .map(([b, n]) => `${fmt(n)} ${(terr.placement?.by_basis || []).find((x) => x.basis === b)?.label || b}`).join(' · ');
     areas.body.append(tableFrom(terr.areas.slice(0, 12), [
-      { label: 'Area', key: 'area' },
+      { label: 'Area', key: 'area',
+        render: (r) => (r.unplaced ? `<span class="ent-off">${esc(r.label || 'Not placed')}</span>`
+          : r.by_basis && Object.keys(r.by_basis).some((b) => b !== 'address')
+            ? `<span title="${esc(basisTip(r))}">${esc(r.area)}</span>` : esc(r.area)) },
       { label: 'Pickups', key: 'n', num: true },
       { label: 'Avg trip', key: 'avg_km', num: true, render: (r) => (r.avg_km ? `${fmt(r.avg_km, 1)} km` : '—') },
       { label: 'Avg fare', key: 'avg_fare', num: true, absent: UBER_FARE,
@@ -1947,6 +1962,17 @@ async function tabTerritory(root, id) {
     if ((terr.areas || []).length > 12) {
       areas.body.append(el('p', 'cap',
         `The 12 busiest of ${countOf(terr.areas.length, 'area')} this driver picked up in.`));
+    }
+    /* How each pickup was placed, over every pickup in the window: "212 from
+       the address, 9 named from the address text, 14 placed by the car's
+       tracker at the request time, 2 not placed: no address, and no tracker
+       fix within 5 minutes". The words come from the API, which has them from
+       src/place_resolve.js — one wording, every surface. */
+    const pl = terr.placement;
+    if (pl && pl.total) {
+      const parts = (pl.by_basis || []).map((b) => `${fmt(b.n)} ${b.label}`)
+        .concat((pl.unplaced || []).map((u) => `${fmt(u.n)} not placed: ${u.label}`));
+      areas.body.append(el('p', 'cap', `How the ${countOf(pl.total, 'pickup')} were placed: ${esc(parts.join(', '))}.`));
     }
   }
 
