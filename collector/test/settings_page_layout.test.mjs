@@ -220,6 +220,14 @@ console.log('\nthe admin panel says what the SERVER does, not what it wishes');
     !(mode.open && /(changes|writes) require the admin token/i.test(txt)), txt.slice(0, 300));
 }
 
+/* The Data retention panel (RET) loads with this page, not with the first
+   screen (INT1, 2026-11-12), so it lands after the rest of the page: it must
+   still be there and visible. Visible text, matched without case — Arkiv sets
+   panel headings in capitals and innerText reports "DATA RETENTION" (a first
+   version of this check matched case and failed on a visible panel).
+   REVERSION: drop the panel from V.settings — this fails. */
+check('the Data retention panel is on the page, and visible',
+  await page.evaluate(() => /data retention/i.test(document.querySelector('#view')?.innerText || '')));
 check('no page error anywhere on this view', errs.length === 0, JSON.stringify(errs));
 
 await browser.close();

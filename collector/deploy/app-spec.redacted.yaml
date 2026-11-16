@@ -32,6 +32,12 @@
 #
 # Not recorded here (and not compared): ingress rules, domains (none), app
 # alerts (none on 2026-11-12), features.
+#
+# 2026-11-16: ANALYST_API_KEY, ANALYST_BASE_URL and ANALYST_MODEL removed from both
+# components — they named MiniMax, which refused every pass with 402 from
+# 2026-11-11. The analyst now runs on its code defaults (ModelArk) with
+# ARK_API_KEY, which both components already hold (COVERAGE "The analyst on
+# ModelArk").
 
 name: fleet-dashboard
 region: fra
@@ -114,13 +120,6 @@ services:
         value: "<set in DigitalOcean>"
       - key: ARK_API_KEY
         type: SECRET
-        value: "<set in DigitalOcean>"
-      - key: ANALYST_API_KEY
-        type: SECRET
-        value: "<set in DigitalOcean>"
-      - key: ANALYST_BASE_URL
-        value: "<set in DigitalOcean>"
-      - key: ANALYST_MODEL
         value: "<set in DigitalOcean>"
       - key: UBER_CLIENT_ID_EGARI
         value: "<set in DigitalOcean>"
@@ -246,13 +245,6 @@ workers:
         value: "<set in DigitalOcean>"
       - key: ARK_API_KEY
         type: SECRET
-        value: "<set in DigitalOcean>"
-      - key: ANALYST_API_KEY
-        type: SECRET
-        value: "<set in DigitalOcean>"
-      - key: ANALYST_BASE_URL
-        value: "<set in DigitalOcean>"
-      - key: ANALYST_MODEL
         value: "<set in DigitalOcean>"
       - key: UBER_CLIENT_ID_EGARI
         value: "<set in DigitalOcean>"
