@@ -11737,7 +11737,11 @@ for).
 3 time_position, 4 last_contact, 5 lon, 6 lat, 7 baro_altitude (m), 8 on_ground, 9 velocity (m/s),
 10 true_track (deg), 11 vertical_rate (m/s), 12 sensors, 13 geo_altitude, 14 squawk, 15 spi,
 16 position_source, 17 category. The box is under one square degree (0.53), OpenSky's cheapest
-area band.
+area band. An empty box is `{"time": …, "states": null}` (OpenSky's documented empty answer, not
+yet seen live) — that is an answered poll that saw nothing. Anything else — a 404, a 200 with no
+`states` field — is a FAILED poll and is recorded as one (review of 2026-11-16, FIX-STATUS
+FLT-R4): the collector's client resolves every 404 because on `/flights/*` a 404 is an answer, and
+the live poll used to inherit that and draw an unmeasured hour as "0 landings, live estimate".
 
 **Sharjah is in the box.** OMSJ (25.3286, 55.5172) is about 9.5 nm north-east of DXB (25.2528,
 55.3644) with a runway parallel to DXB's (12/30); DWC is 24.8960, 55.1610. The two fields' extended

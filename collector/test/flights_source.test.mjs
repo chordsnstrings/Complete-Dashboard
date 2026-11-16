@@ -134,6 +134,9 @@ const srv = createServer((req, res) => {
   }
   if (u.pathname === '/api/states/all') {
     fake.states++;
+    if (fake.mode.states404) return send(404, null, { 'X-Rate-Limit-Remaining': '3997' });
+    if (fake.mode.statesBare) return send(200, { time: STATES.time }, { 'X-Rate-Limit-Remaining': '3997' });
+    if (fake.mode.statesEmpty) return send(200, { time: STATES.time, states: null }, { 'X-Rate-Limit-Remaining': '3997' });
     return send(200, STATES, { 'X-Rate-Limit-Remaining': '3998' });
   }
   return send(404, null);
@@ -272,6 +275,34 @@ console.log('\n4 · the live poll');
   const pb = await pollLive({ db, cfg: CFG, nowMs: t0 + 360_000 });
   check('after a 429 the poller backs off for OpenSky’s retry-after, and says so', /429/.test(pr.error || '') && /backing off/.test(pb.skipped || '') && fake.states === statesBefore,
     `${pr.error} | ${pb.skipped}`);
+  /* A 404, or a 200 without a `states` field, is not an empty sky. Review of
+     2026-11-16 (FIX-STATUS FLT-R4): pollLive read both as zero aircraft and
+     counted the poll as answered, so the hour turned "watched" and the page
+     drew 0 landings as a live estimate for an hour nothing measured.
+     OpenSky's own empty answer, `states: null`, still counts.
+     REVERSION: drop the status / states-field guard in pollLive — the first
+     two checks fail. */
+  const hourOf = (ms) => new Date(Math.floor(ms / 3600e3) * 3600e3).toISOString();
+  const tq = t0 + 3 * 3600e3;
+  resetLive();   // the 429 above set a back-off; these hours are past it anyway
+  fake.mode.states404 = true;
+  const q404 = await pollLive({ db, cfg: CFG, nowMs: tq });
+  fake.mode.states404 = false;
+  const h404 = (await rows('SELECT polls, polls_ok, last_error FROM flight_live_hour WHERE hour_start = $1', [hourOf(tq)]))[0];
+  check('a 404 on the live positions is a failed poll with its reason, never an empty sky',
+    /HTTP 404/.test(q404.error || '') && h404?.polls === 1 && h404.polls_ok === 0 && /HTTP 404/.test(h404.last_error || ''), JSON.stringify({ q404, h404 }));
+  const tb = t0 + 4 * 3600e3;
+  fake.mode.statesBare = true;
+  const qb = await pollLive({ db, cfg: CFG, nowMs: tb });
+  fake.mode.statesBare = false;
+  const hb = (await rows('SELECT polls_ok FROM flight_live_hour WHERE hour_start = $1', [hourOf(tb)]))[0];
+  check('…and so is a 200 that carries no states field', /without a states field/.test(qb.error || '') && hb?.polls_ok === 0, JSON.stringify({ qb, hb }));
+  const te = t0 + 5 * 3600e3;
+  fake.mode.statesEmpty = true;
+  const qe = await pollLive({ db, cfg: CFG, nowMs: te });
+  fake.mode.statesEmpty = false;
+  const he = (await rows('SELECT polls_ok FROM flight_live_hour WHERE hour_start = $1', [hourOf(te)]))[0];
+  check('…while OpenSky’s own empty answer (states: null) is an answered poll that saw nothing', qe.seen === 0 && !qe.error && he?.polls_ok === 1, JSON.stringify({ qe, he }));
   const pn = await pollLive({ db, cfg: null, nowMs: t0 + 7200_000 });
   const hn = (await rows(`SELECT polls_ok, last_error FROM flight_live_hour WHERE hour_start = $1`, [new Date(Math.floor((t0 + 7200_000) / 3600e3) * 3600e3).toISOString()]))[0];
   check('no client: the live hour records the reason, and no poll counts as answered', pn.skipped === NO_CLIENT && hn?.polls_ok === 0 && hn.last_error === NO_CLIENT, JSON.stringify(hn));

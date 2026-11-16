@@ -424,7 +424,20 @@ export async function pollLive({ db = pool, cfg = clientConfig(), client = null,
   const c = client || makeClient(cfg);
   try {
     const r = await c.getJson('/states/all', { ...LIVE_BOX, extended: 1 });
-    const states = r.status === 200 && Array.isArray(r.data?.states) ? r.data.states : [];
+    /* Only a 200 carrying a `states` field is an answer. getJson resolves a
+       404 (an ANSWER on /flights/*, where it means "no flights"), and this
+       read used to take a 404 — or a 200 with no `states` in it — as an
+       empty sky: the poll counted as answered, the hour as watched, and the
+       Airport page drew "0 landings, live estimate" for an hour nothing was
+       measured. A moved endpoint or a wrong OPENSKY_API_URL would have done
+       that to every hour (review of 2026-11-16; FIX-STATUS FLT-R4). OpenSky
+       sends `states: null` when the box is empty — that IS an answer. */
+    if (r.status !== 200 || !r.data || typeof r.data !== 'object' || !('states' in r.data)) {
+      throw new OpenSkyError('http', r.status !== 200
+        ? `OpenSky answered HTTP ${r.status} for the live positions`
+        : 'OpenSky answered the live positions without a states field', { status: r.status, credits: r.credits });
+    }
+    const states = Array.isArray(r.data.states) ? r.data.states : [];
     let landing = 0, sharjah = 0;
     for (const sv of states) {
       const det = approachOf(sv);
