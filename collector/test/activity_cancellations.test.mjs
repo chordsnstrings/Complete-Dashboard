@@ -35,6 +35,7 @@
      · cancelOf's outcome fallback removed → §5 fails
      · the z-index on .sh-track>i.c removed from app.css → §4 "drawn above"
        fails
+     · the jobs column back at 32px with no nowrap → §3 "on one line" fails
 
    Synthetic people and places only. */
 import { chromium } from 'playwright';
@@ -123,6 +124,13 @@ const got = await p.page.evaluate(([d1, d2]) => {
     rowTitle1: row(d1)?.title || '',
     jobsTile: jobsTile ? jobsTile.innerText.replace(/\s+/g, ' ') : null,
     caps: [...document.querySelectorAll('.cap')].map((c) => c.innerText).join(' | '),
+    /* Every line box in the day's jobs cell, by its top. One line puts them
+       within a pixel or two of each other (the dim suffix sits a pixel off the
+       figure's baseline); a wrap puts the second a line-height below — 20px
+       at the old 32px column, where "3 +5✕" wrapped (seen on production). */
+    colTops: (() => { const c = row(d1)?.querySelector('.sh-t'); if (!c) return [];
+      const r = document.createRange(); r.selectNodeContents(c);
+      return [...new Set([...r.getClientRects()].map((x) => Math.round(x.top)))]; })(),
     overflow: document.documentElement.scrollWidth > window.innerWidth + 1,
   };
 }, [D1, D2]);
@@ -152,6 +160,8 @@ check('the legend names each form drawn, and "no dropoff reported" because one i
   && /offer the driver declined/i.test(got.legend) && /does not say by whom/i.test(got.legend) && /no dropoff reported/i.test(got.legend),
   got.legend);
 check('the day\'s jobs column counts the three jobs and marks the five cancelled apart', /^3\s*\+5✕/.test(got.col1.trim()), got.col1);
+check('…on one line, so a day with a cancellation is not drawn taller than one without',
+  got.colTops.length > 0 && Math.max(...got.colTops) - Math.min(...got.colTops) < 6, JSON.stringify(got.colTops));
 check('the row\'s title says the same in words', /3 jobs and 5 cancelled/.test(got.rowTitle1) && /2 by the rider/.test(got.rowTitle1), got.rowTitle1);
 check('the Jobs tile counts jobs, and says the cancellations by party — not "with no dropoff"',
   got.jobsTile && /jobs 4\b/i.test(got.jobsTile) && /7 more cancelled/i.test(got.jobsTile) && /by the rider/.test(got.jobsTile)
