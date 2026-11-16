@@ -3082,7 +3082,7 @@ app.get('/api/overnight', (req, r) => {
     population: `Every car with a positioned tracker fix (CABMAN or FMS; a 0,0 lost lock is not a position) in the ${OVN_DAYS} days `
       + `to the window’s end: ${cars.length} cars. 1 of the ${cars.length} plates CABMAN still lists sent no positioned fix in that week `
       + 'and is not in the table. An FMS car that sent nothing all week is not in the table either.',
-    roster: { known: true, listed: cars.length, silent_week: 1, silent_plates: ['L77001'] } }));
+    roster: { known: true, listed: cars.length, silent_week: 1, silent_plates: ['L77001'], set_aside: 0, set_aside_plates: [] } }));
 });
 
 app.get('/api/vehicle/movement', (req, r) => {

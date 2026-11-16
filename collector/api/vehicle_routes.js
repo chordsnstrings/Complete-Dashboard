@@ -1698,12 +1698,27 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
           ORDER BY plate, captured_at`, [lo, hi]),
       fleetRoster(q),
     ]);
-    const popPlates = [...new Set(pop.map((r) => r.plate))].sort();
-    const edges = await ovnEdges(pop.map((r) => r.plate), pop.map((r) => r.source), lo, hi);
-    const byPlate = groupBy(fixes);
+    /* THE CARS THE TRACKER STOPPED LISTING ARE NOT THE FLEET (2026-11-16, on
+       production). The first fleet-wide answer counted 215 cars where /api/live
+       lists 136, and 113 of them read "silent" — 108 of those CABMAN plates
+       whose last fix was 14 Nov 09:0x–09:5x: plates CABMAN stopped returning,
+       which telemetry_snapshot keeps for ever. api/fleet_roster.js measured
+       exactly this trap (175 held, 48 polled) and every fleet figure sets them
+       aside with ROSTER_KEEP; this table did not. Now a CABMAN plate the roster
+       has set aside (departed, or not yet admitted) is out of the population —
+       its FMS fixes, if it has any, keep it in — and the sentence counts them.
+       An unknown roster sets nothing aside, and the sentence says it cannot. */
+    const setAsideAll = new Set(excludedPlates(roster) || []);
+    const dropped = (r) => r.source === 'cabman' && setAsideAll.has(r.plate);
+    const popKept = pop.filter((r) => !dropped(r));
+    const keptPlates = new Set(popKept.map((r) => r.plate));
+    const setAside = [...new Set(pop.filter(dropped).map((r) => r.plate))].filter((p) => !keptPlates.has(p)).sort();
+    const popPlates = [...keptPlates].sort();
+    const edges = await ovnEdges(popKept.map((r) => r.plate), popKept.map((r) => r.source), lo, hi);
+    const byPlate = groupBy(fixes.filter((r) => !dropped(r)));
     const prevBy = groupBy(edges.prev); const nextBy = groupBy(edges.next);
     const fleetOf = new Map();
-    for (const r of pop) if (r.fleet_id && !fleetOf.has(r.plate)) fleetOf.set(r.plate, r.fleet_id);
+    for (const r of popKept) if (r.fleet_id && !fleetOf.has(r.plate)) fleetOf.set(r.plate, r.fleet_id);
     const cars = popPlates.map((plate) => carNights({ plate, fleetId: fleetOf.get(plate) || null, nights: [night], nowMs: now,
       points: (byPlate.get(plate) || []).map(ovnPoint),
       before: (prevBy.get(plate) || []).map(ovnPoint), after: (nextBy.get(plate) || []).map(ovnPoint) })[0]);
@@ -1722,12 +1737,17 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
         : silentListed.length
           ? `${silentListed.length} of the ${roster.listed.size} plates CABMAN still lists sent no positioned fix in that week and are not in the table. `
           : `Every plate CABMAN still lists sent a positioned fix in that week. `)
+      + (setAside.length
+        ? `${setAside.length} ${setAside.length === 1 ? 'plate' : 'plates'} CABMAN has stopped listing (or has listed too few times to be believed) `
+          + `sent fixes that week and ${setAside.length === 1 ? 'is' : 'are'} set aside, as on every fleet page. `
+        : '')
       + 'An FMS car that sent nothing all week is not in the table either.';
     res.json(overnightBody({
       nights: [overnightNight({ night, cars, nowMs: now })],
       population,
       roster: { known: Boolean(roster?.known), listed: roster?.known ? roster.listed.size : null,
-        silent_week: silentListed ? silentListed.length : null, silent_plates: silentListed },
+        silent_week: silentListed ? silentListed.length : null, silent_plates: silentListed,
+        set_aside: setAside.length, set_aside_plates: setAside.slice(0, 200) },
     }));
   }));
 
