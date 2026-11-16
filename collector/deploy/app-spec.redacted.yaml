@@ -288,6 +288,14 @@ workers:
       - key: CABMAN_EGARI_PASS
         type: SECRET
         value: "<set in DigitalOcean>"
+      # OpenSky Network API client (flights landing at DXB/DWC, FLT, 2026-11-16):
+      # the collector alone calls OpenSky; the API reads what it stored.
+      - key: OPENSKY_CLIENT_ID
+        type: SECRET
+        value: "<set in DigitalOcean>"
+      - key: OPENSKY_CLIENT_SECRET
+        type: SECRET
+        value: "<set in DigitalOcean>"
 databases:
   # The managed cluster both components reach through DATABASE_URL.
   - name: db

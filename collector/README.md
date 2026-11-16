@@ -14,6 +14,7 @@ normalized on **license plate** so a driver/vehicle rolls up across every platfo
 | **CABMAN/DT** | Ecosine | realtime only | poll `GetIVDData`, append snapshots | no history param |
 | **Bolt** | Egari (roster) | portal blocked | FI API roster; portal trips/earnings need a fresh refresh token | ~7-day token |
 | **PowerDrive** (YoCharge, charging) | both, as fleet groups | every session | `/open/v1/users` (all customers, pruned to ours) + `/open/v1/mini-transactions` + `/v3/mini-transactions?user_id=`; GET only | 40 users/page (more times out) · MENA host + tenant `client-id` · `src/sources/yocharge.js` (2026-11-03) |
+| **OpenSky Network** (flights, not fleet data) | Dubai's airports: OMDB (DXB), OMDW (DWC) | yesterday and back 30 days; today only as live estimates | `/api/flights/arrival` per airport per UTC day (30 credits) + `/api/states/all` over Dubai every 2 min (1 credit, a separate pool); OAuth2 client credentials | 4,000 credits a day each · published in a nightly batch (today 404s) · no aircraft type · `src/sources/flights.js` (2026-11-16) |
 
 ## Run
 
@@ -45,6 +46,12 @@ Local (no Docker): `npm install && npm run migrate && npm run backfill && npm st
     (`src/sources/yocharge.js`; job mode `charging` for a run on demand). Between them, at 03:17,
     09:17, 15:17 and 21:17 (`YOCHARGE_WALLETS_CRON`), our customers' wallets only, one by one, with
     the day's sessions (job mode `charging-wallets`).
+  - **Flights (OpenSky)** at 01:41 UTC and every third hour after: arrivals at DXB and DWC for each
+    UTC day not yet collected, back `OPENSKY_BACKFILL_DAYS` (30), never below
+    `OPENSKY_CREDIT_FLOOR`; and every two minutes, the live state vectors over Dubai, from which
+    landings are inferred by the final-approach rule (`src/sources/flights.js`; read by
+    `/api/airport` and the Airport page). Silent but for "no OpenSky client configured" until
+    `OPENSKY_CLIENT_ID` and `OPENSKY_CLIENT_SECRET` are set.
 - All writes are **idempotent upserts** keyed on the source's natural id (Uber Trip UUID, Yango order
   id, FMS `plate|start`, CABMAN `plate|fix-time`), so re-runs never duplicate.
 

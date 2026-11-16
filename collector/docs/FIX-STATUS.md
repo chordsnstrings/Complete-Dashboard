@@ -6987,8 +6987,201 @@ a one-fleet reader (none exists).
 
 | row | what | written | on production | proven |
 |---|---|---|---|---|
-| UCB1 | `cashScopeCheck` in `src/probe.js`: one token grant per cash-block scope per distinct client; no cash-block endpoint called; "granted" read off the token's scope list; a token issued forgets the cached grants | yes | with this PR | `test/uber_cash_scope_probe.test.mjs` (15 checks; four reversions each fail as named in its header) |
-| UCB2 | `forgetUberTokens()` in `src/auth/uber.js` | yes | with this PR | §5 of the same test |
+| UCB1 | `cashScopeCheck` in `src/probe.js`: one token grant per cash-block scope per distinct client; no cash-block endpoint called; "granted" read off the token's scope list; a token issued forgets the cached grants | yes | **yes** — PR #35 → `01a8b65`, deployed 2026-11-16 10:57Z; the boot probe answered `invalid_scope` for both scopes on both fleets' clients (COVERAGE) | `test/uber_cash_scope_probe.test.mjs` (15 checks; four reversions each fail as named in its header) |
+| UCB2 | `forgetUberTokens()` in `src/auth/uber.js` | yes | yes, `01a8b65` (not exercised: no token was issued) | §5 of the same test |
 
 The endpoints, the contradiction on Uber's page, and how to read the probe's answer are in
 `docs/COVERAGE.md` "Uber's per-driver cash block".
+
+## FLT – flights landing and airport trips (2026-11-16)
+
+The operator: "add flight details and flights actually landing, and how that impacts the airport
+trips. use api - any free api." They supplied an OpenSky Network API client (a free account, 4,000
+credits a day); the secret is a setting and never in the repository. Built end to end on branch
+`fix/flights` from `e40a8c7`: a collector (`src/sources/flights.js`), migration v125, the read
+`GET /api/airport`, the page `#airport` (Today › Airport). COVERAGE "OpenSky Network" has what was
+measured about the provider; AUDIT "#airport" has the rendering pass. **Nothing here is on
+production, and the client is not set there yet** — until it is, the page says "no OpenSky client
+configured" on every hour, which is the true reason.
+
+| # | what | file:line | test | state |
+|---|---|---|---|---|
+| FLT1 | **The OpenSky client.** OAuth2 client credentials (Basic auth was switched off by OpenSky on 2026-03-18) to `OPENSKY_TOKEN_URL`; the token cached until a minute before `expires_in`, keyed by the endpoint, the client id and a hash of the secret (a replaced secret never gets the old token); a 401 on a data call forgets it and signs in once more, a second 401 is an error naming the two settings and never the secret; a 429 carries `X-Rate-Limit-Retry-After-Seconds`; a 404 is an ANSWER (`/flights/*` says "no flights" with it), not a throw; `X-Rate-Limit-Remaining` is read on every call | `src/sources/flights.js:169` (makeClient), `:159` (clientConfig) | `flights_source` §2 (a fake OpenSky on a local port) | written, not deployed |
+| FLT2 | **The nightly confirmed arrivals.** One query per airport per UTC day (`/flights/arrival`, 30 credits), yesterday and back `OPENSKY_BACKFILL_DAYS` (30), newest first, until the plan is done, `OPENSKY_CREDIT_FLOOR` (600 left) is reached or OpenSky refuses. Each landing stored with `landed_at` = OpenSky's `lastSeen`, the estimated origin (null kept null: 163 of 438 at OMDB on 11-15) and the raw row, upserted on (airport, icao24, landed_at). Each airport-day recorded in `flight_day_coverage`: collected, not_published (yesterday's 404 — the nightly batch has not run), none_returned (an older day's 404, asked at most three times) or failed (with the reason); a collected day is never asked again | `src/sources/flights.js:307` (collectArrivals), `:229` (planDays), `:256` (storeLandings) | `flights_source` §3 | written, not deployed |
+| FLT3 | **The live watch and its final-approach rule.** `/states/all` over a 0.75° × 0.70° box (1 credit, a separate allowance) every two minutes. OpenSky's receivers do not see Dubai's ground traffic, so a landing is INFERRED: the airport ahead along the track within 6 nm (0.5 nm past allowed), within 1.5 nm of the line through it, track within 20° of 12/30, ≤ 900 m and descending at ≥ 0.5 m/s. Sharjah (OMSJ, 9.5 nm NE, parallel runway) is a decoy entry: detected, named, never stored. On the real snapshot of 2026-11-16, UAE375 and FDB1134 on final for DXB 30 count and ABY739 (Air Arabia) on final for OMSJ 30 does not. One row per aircraft and airport within 20 minutes (a second poll refines it); polls counted per clock hour (`flight_live_hour`); a 429 backs the watch off for OpenSky's retry-after | `src/sources/flights.js:108` (approachOf), `:67` (APPROACH_AIRPORTS), `:397` (storeLive), `:413` (pollLive) | `flights_source` §1, §4 | written, not deployed |
+| FLT4 | **Superseded by the confirmed list.** Once a UTC day is collected at an airport, its live estimates are marked superseded and pointed at the confirmed landing of the same aircraft within 30 minutes when there is one — which is what lets the API say how many real landings the live watch caught (`live.checked`, `matched`, `confirmed_watched`, `caught`) | `src/sources/flights.js:293` (supersedeLive) | `flights_source` §3 "supersedes the live estimate…" | written, not deployed |
+| FLT5 | **Absent, never zero, with no client.** Both reads record "no OpenSky client configured — set OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET on the Settings page" (a `collection_run` row, source `opensky`, on `/api/status`; the live hour's `last_error`) and write no landing and no coverage row. No `credential_state` row is written for OpenSky: the banner and the ntfy alerts are about the fleet's providers, and a flight feed going quiet must not page anyone — its state is on `/api/status` and on the page | `src/sources/flights.js:59` (NO_CLIENT), `collectArrivals`, `pollLive` | `flights_source` §3, §4 "no client…" | written, not deployed |
+| FLT6 | **Scheduled.** Arrivals at `41 1,4,7,10,13,16,19,22 * * *` (01:41 UTC = 05:41 Dubai, the first slot after the UTC day closes that no other pass starts on; the later slots retry a late batch at no cost) and once 12 minutes after the worker starts; live at a step of 2 from minute 0. Both under their own one-at-a-time flags, settings pinned per tick. Checked through node-cron's own matcher, not by eye | `src/index.js:417`, `src/run.js:587`, `:597` | `flights_source` §5; `collector_invariants` 132/0 | written, not deployed |
+| FLT7 | **Migration v125**: `flight_landing`, `flight_day_coverage`, `flight_live_landing`, `flight_live_hour` — no fleet_id (not fleet data; v124's row-level security has nothing to secure). Registered after v124 | `sql/schema_v125.sql`, `src/schema_files.js` | `migrate` 34/0; every PGlite test applies it | written, not deployed |
+| FLT8 | **Settings.** `OPENSKY_CLIENT_ID`, `OPENSKY_CLIENT_SECRET` (secret), `OPENSKY_API_URL`, `OPENSKY_TOKEN_URL`, `OPENSKY_BACKFILL_DAYS`, `OPENSKY_CREDIT_FLOOR`, group "Flights (OpenSky)". The two `_URL` keys are environment-only by the suffix rule (SEC1): the secret is POSTed to one and the token sent to the other. `settings_env_only`' list of destinations gained the two | `src/settings.js:65` (defaults), `:417` (defs) | `settings_env_only` 13/0; `credential_visibility` 19/0 | written, not deployed |
+| FLT9 | **One strict airport rule, SQL and JS.** An address is the airport only when it names it ("Dubai Int'l / International / Intl Airport", "(DXB)", a Terminal 1/2/3 beside the word airport or a meeting point / customs / arrivals, Al Maktoum International Airport, "(DWC)", Arabic مطار دبي / مطار آل مكتوم), and never when it is the Free Zone or Al Quds St, "opposite / opp / oppo / near" something, the E11 / Al Ittihad Rd, a hotel or inn named after the airport, or another airport. Written once; the SQL builder turns JS `\b` into Postgres `\y` (in Postgres `\b` is a backspace). Measured on production, 17 Oct – 15 Nov: the word "airport" alone matched 1,455 pickups; the rule keeps 391 at DXB (Uber 240, hotel 151, Bolt 0, Yango 0) and 2 at DWC — 13.0 DXB pickups a day (6–19) | `api/airport_sql.js:77` (NOT_AIRPORT), `:109` (airportOfAddress), `:123` (airportOfSql) | `airport_classifier` 26/0: 72 real addresses through both engines | written, not deployed |
+| FLT10 | **GET /api/airport** — landings by Dubai hour (each hour judged on the UTC day it falls in; confirmed where collected, the live estimate where the hour was watched — at least 2/3 of its polls — labelled; otherwise absent with the coverage row's reason, the arrivals run's error or the watch's), airport pickups and drop-offs by hour and platform (any outcome), top origins with names, and the impact over `days` (7–90, default 28): Pearson r at lags 0–3 h over CONFIRMED days only, the best lag, pickups per 10 landings there and the marginal slope, daily totals, the share of bookings that are airport pickups; under 7 complete days or 20 pickups → absent with that reason; the caveat (correlation is not causation) in the response. `fleet=` narrows the bookings and never the sky | `api/airport_routes.js:106` (airportShape), `:140` (cell), `:242` (lags), `:333` (the route); `api/server.js` (import, mount) | `airport_api` 33/0 (mountAll over PGlite: real arrivals × 11 days, pickups seeded at lag 1 → best lag 1, r > 0.8) | written, not deployed |
+| FLT11 | **The route's three declarations**: the handler; `api/access/manifest.json` (subject BK, aggregate, fleet param, SYS fields `arrivals_run` and `live`; no names, no addresses); the page that calls it. mockapi's fixture is the route's own `airportShape` over the real 2026-11-15 lists shifted a day at a time | `api/access/manifest.json` (last entry), `mockapi.mjs:9158` | `access_manifest` 17/0 (reverted: the entry removed → "every route in code has an entry" names it); `endpoint_coverage` 4/0; `route_smoke` 60/0 | written, not deployed |
+| FLT12 | **The page #airport** (Today › Airport): 00 at a glance (landings as hero — "so far" and how many hours are live estimates when the day is incomplete, absent with the reason when nothing measured it), the day / airport / window controls (`#airport/<day>/<dwc or both>`), landings and airport pickups as two aligned hour-by-hour charts (live bars hatched; an unmeasured hour has no bar and the caption says why), the hours table (each absent landing a dash with its reason on hover), the impact (one short visible line and the caveat; the long sentence folds under ⓘ; lags; days), origins, platforms, the † band (OpenSky's coverage is partial and estimated; no aircraft type so no passengers; today's are live estimates; airport trips by address text and "Airport Rd" is not the airport). A lazy module (PAGE_OF); NO_FILTER with its own APPLIES_WHY; VIEW_SUBJECT BK, aggregate | `api/public/airport.js:43`; `api/public/app.js:403, 982, 3144`; `access.js`, `data.js`, `shell.js`, `ui.js` (SOURCE_LABEL `opensky`) | `airport_page` 30/0 (Chromium on mockapi, 1280 and 390, light and dark, Arkiv and Classic, a fixed clock for the live and no-client states, the phone shell); `lazy_pages` 27/0 (first screen 19 modules, 1,252 KB); `nav_sections`, `window_honesty`, `arkiv_shell`, `consistency`, `arkiv_skin`, `page_contract`, `kpi_one_tile`, `imports_resolve` green | written, not deployed |
+| FLT13 | **Not built**: an answer-line rule for #airport (`answers.js`; optional in the brief — its browser check pins the actions' destinations to a list, and the page's own 00 band already states the finding); landings by aircraft type or seats (OpenSky's arrivals carry none); departures (not asked for). | — | — | not started |
+
+**Revert-proved** (each made, each failed the named checks, each restored byte for byte — the
+test files' headers list them): `flights_source` (cross-track test dropped; the OMSJ decoy
+dropped; the 401 retry dropped; the upsert made a plain INSERT; the collected-day skip dropped;
+every 404 read as not published; the arrivals cron as a stepped range), `airport_api` (the Dubai
+hour judged on its own UTC day; any airport accepted for one; incomplete days in the impact;
+`isFuture` always false), `airport_classifier` (no `\b`→`\y`; no free-zone exclusion; no `(DXB)`
+rule; a terminal number without an airport word), `airport_page` (live bars not hatched; an absent
+hour printed without its reason; the hero without its reason), `access_manifest` (the entry
+removed).
+
+**For the operator** (nothing here is done by this branch): set `OPENSKY_CLIENT_ID` and
+`OPENSKY_CLIENT_SECRET` on the Settings page (or as app secrets on the **collector** component —
+the API reads only what the collector stored). The first arrivals run fills 30 days (about 1,800
+of the day's 4,000 credits) and the live watch starts within two minutes.
+
+### FLT — the independent review of 2026-11-16 (branch `fix/flights`)
+
+Read the whole diff from `e40a8c7`, traced realistic inputs through it, re-ran every touched test one
+at a time and revert-proved the builder's key claims (the 401 retry and the OMSJ decoy in
+`flights_source`). What it found, each fixed on the branch in its own commit and each revert-proved:
+
+| # | what was wrong | measured | fix | test | state |
+|---|---|---|---|---|---|
+| FLT-R1 | **A one-fleet reader was given false reasons.** The OpenSky collector files its runs with `fleet_id` NULL; v124's policy shows a scoped reader no NULL-fleet row, so inside the scope `/api/airport` read no run: `arrivals_run` was null and an hour nothing covered read "not collected — older than the 30 days the collector fills" (or "not asked yet") where an unrestricted reader, on the same data, read "no OpenSky client configured". `rls_routes` could not see it: its fixture holds no OpenSky run | `rls_routes` §3 on the unchanged route: unscoped `{"status":"error","error":"no OpenSky client configured …"}`, scoped `null` | the runs query reads outside the scope (`outsideFleetScope`, as `api/target_weights.js` does); the bookings stay inside it | `rls_routes` §3 (6/0; 5/1 with the fix reverted) | written, not deployed |
+| FLT-R2 | **The UTC day in progress was "not asked yet" every night 00:00–03:59 Dubai.** `confirmedWhy` compared a UTC day with `today`, the DUBAI day; from 20:00 to 23:59 UTC they differ, so today's 00:00–03:59 and yesterday's 04:00–23:59 (UTC days the collector never asks for, because OpenSky has not published them) read "not asked yet — the arrivals collector has not reached this day" instead of "not published yet" | `airportShape` at 21:00Z on 16 Nov: both hours "not asked yet …" | compare with the UTC day of `nowMs` | `airport_api` §B (34/0; 33/1 with the fix reverted) | written, not deployed |
+| FLT-R3 | **Four sentences on #airport that the answer did not support.** (a) The head said the airport trips were "the fleet's, both fleets" whatever the answer held — but the access gate writes a one-fleet reader's fleet into `?fleet=` and the route then counts that fleet's bookings only. (b) The impact's lead said "Pickups follow landings … — r 0.12": the best lag is the highest r however small. (c) Reasons passed through `esc()` before `empty()`, which escapes again: "&lt;!DOCTYPE". (d) The landings chart's empty state said "No hour of this day has a landing figure: no hour of this day has a landing figure: …" (the API's `total_why` already opens with it) | `airport_page` §5 on the unchanged page: the caption without the fleet, "Pickups follow landings in the same hour — r 0.12", the doubled sentence | the caption from `d.fleet` (`fleetLabel`, else "both fleets"); the verb carries the strength (closely / — / weakly / do not follow); reasons go to `empty()` as plain text; `total_why` printed as it stands | `airport_page` §5 (36/0; 31/4 and 35/1 with the fixes reverted); `lazy_pages` 27/0 (19 modules, 1,252 KB: `access.js` is already on the first screen); `page_contract` 96/0; `timezone` 19/0 | written, not deployed |
+| FLT-R4 | **The live watch read a 404 as an empty sky.** `getJson` resolves a 404 (on `/flights/*` it is an answer: "no flights"), and `pollLive` took any non-200, or a 200 with no `states` field, as zero aircraft: the poll counted as answered, the hour turned "watched", and `/api/airport` gave that hour `n: 0, basis: 'live'` — a zero for an hour nothing measured. A moved endpoint or a wrong `OPENSKY_API_URL` would have done it to every hour | `flights_source` §4 on the unchanged poller: a 404 → `{"seen":0}` and the hour `{"polls":1,"polls_ok":1,"last_error":null}` | only a 200 carrying a `states` field is an answer (`states: null`, OpenSky's empty box, still is); anything else throws and is recorded as a failed poll with its reason | `flights_source` §4 (49/0; 47/2 with the guard reverted); `collector_invariants` 132/0 | written, not deployed |
+| FLT-R5 | **A 200 that was not a list froze a day as "collected, 0 landings".** `storeLandings` keeps array rows only, so an arrivals answer of HTTP 200 holding text (the sign-in page a silent redirect lands on — `http()` follows redirects and leaves a non-JSON body as text) or an object stored nothing, and the day was written `collected` with 0: never asked again (`planDays` skips collected days) and, to `/api/airport`, a complete day on which nothing landed — entering the correlation as 24 zero hours. A 200 with `[]` did the same. The FMS hole `src/http.js` records, in a new collector | `flights_source` §3 on the unchanged run: the HTML day `{"status":"collected","landings":0,"reason":null}`, both empty-list days the same | a 200 that is not a list throws (`failed`, with the reason, retried); an empty list is read exactly as a 404 (not published yet for yesterday, none returned for an older day) | `flights_source` §3 (51/0; 49/2 with the fix reverted). COVERAGE trap "OpenSky's `/flights/*` 404 is an answer" gained "the other half" | written, not deployed |
+| FLT-R6 | **The live watch moved the response cache's version, and today's answer was cached anyway.** `pollLive` logged mode `live`; `api/cache.js` VERSION_SQL counts every mode but `realtime`, and each move restarts the warmer's 89 aggregates (the CABMAN load of 2026-09-29 that `realtime` exists to prevent; `uber_transactions.js` MODE). So every half hour, and on every ok↔error flip of a flaky feed (every two minutes at worst), every cached page went stale. Meanwhile `/api/airport` for TODAY was cached like any page: its live estimates and the answer's own clock ("so far", the hour in progress) froze until the next collection | `flights_source` §4 on the unchanged poller: the run's mode `live` and VERSION_SQL `10:43:55.326Z → 10:43:55.352Z` across one poll; `cache` with no clause: today's second read a `hit` | the live run logs `realtime` (`LIVE_MODE`), the route reads it as the watch's state; today's `/api/airport` (or no `day=`) is in `neverToday`, as `/api/online/hours` is; a past day still caches | `flights_source` §4 (52/0; 51/1 with `live`); `airport_api` §A "realtime run is read as its state" (35/0; 34/1 reverted); `cache` 61/0 (60/1 reverted) | written, not deployed |
+
+
+### FLT at integration (2026-11-16)
+
+Two of the review's open items fixed while merging `fix/flights` with `fix/events` and UCB, each revert-proved:
+
+| # | what | fix | test | state |
+|---|---|---|---|---|
+| FLT-I1 | **A first list that was partial would have stayed partial for good.** Only "2026-11-15 held 438 at OMDB when asked at 09:26Z on the 16th" was measured; whether the 01:41Z slot can get a partial batch was not, and a collected day was never asked again. | `planDays` re-asks a day collected before 12:00Z on the following day (36 h from its start, `SETTLE_MS`) once after it; `replaceDay` swaps the first list for the second: it releases that day's live estimates, upserts, then deletes the rows the new list lacks, so a landing whose `lastSeen` moved between batches is held once. A re-ask that answers none, or fails, leaves the day collected with its first list. `collected_at` is now the run's clock, not the database's `now()`. About 60 credits a day. | `flights_source` §3, 10 new checks (62 pass). Reversions: the recheck branch removed (6 fail), `replaceDay` swapped for `storeLandings` (4 fail), the empty-answer guard removed (2 fail) | written; on production with the flights deploy |
+| FLT-I2 | **A cruise terminal was one word from counting as DXB.** "Hamdan bin Mohammed Cruise terminal 3" and "Mina Rashid, cruise terminal 3" are in production; TERMINAL plus an "Arrivals" would have made either DXB. | `\bcruise\b` and `mina\s+rashid` in NOT_AIRPORT | `airport_classifier`, two addresses; with the exclusion removed both read OMDB in JS and SQL (2 fail) | written |
+| FLT-I3 | The origins caption counted confirmed landings while the hero's "so far" includes live estimates. | It says "confirmed landings". | `airport_page` (36 pass) | written |
+| FLT-I4 | **CI on PR #36, two suites red.** (a) `indexes`: `/api/airport` grouped by `(landed_at AT TIME ZONE 'Asia/Dubai')::date`, which the suite reads anywhere in api/ as a Dubai-day FILTER needing an expression index. Here it was only a label; the filter is the range on the raw column, served by `(airport, landed_at)` and `flight_live_hour`'s key. (b) `uber_transactions` §7: the live watch's `*/2` lands on 22 and 52 past, two of the four minutes Uber's live money tick holds alone — and every two-minute cron pattern hits two of them. | (a) the label is written `to_char(… AT TIME ZONE 'Asia/Dubai', 'YYYY-MM-DD')`, the same text; (b) the live watch runs on `setInterval(…, 120_000)`, as `liveStatusTick` does. | Both reproduced on the unfixed head (11/1 and 87/1), both pass after; `flights_source`'s schedule check now asks for the 120 s interval and no cron line; `airport_api` 35, `airport_page` 36, `credential_save_check` 109 | written |
+
+## EVW – Dubai events by ModelArk web search (2026-11-16)
+
+The operator: "for events maybe we could use modelark to search on google and use that as a
+direction". Branch `fix/events`. **Written and tested; not deployed; never run against ModelArk with
+the tool enabled** — the only account it was tried on refuses the tool (below), so not one real
+answer has been parsed.
+
+**What it is.** A fourth tier in the events layer, `src/sources/events_web.js`, called from
+`events.collect()` in its own try. Once a Dubai day it asks BytePlus ModelArk's **Responses API**
+(`POST {ANALYST_BASE_URL}/responses`, the analyst's model and key — `seed-2-0-pro-260328`,
+`ARK_API_KEY` by fallback) with the built-in `web_search` tool for public events in Dubai over the
+next 21 days (today .. today+20) that move taxi and ride-hailing demand, as a strict JSON array:
+title, starts_on, ends_on, venue, area, category, expected_attendance, expected_effect
+(demand_up | demand_down | unknown), confidence, url. The request is exactly the measured shape —
+model, input, `tools: [{type: 'web_search'}]`, `thinking: {type: 'disabled'}` — and nothing else.
+Rows go to `world_event` with source `web`, code `<normalised title>:<starts_on>`, upserted on
+the table's existing key. No migration (v126 not used): `url`, `summary` and `raw` already hold
+everything.
+
+**What it believes, and what it does not.** Parsed with `src/analyst.js` `lastJsonArray` (the
+bracket matcher factored out of `parseProposals`, now shared — think blocks dropped, the last
+array that parses wins). Refused: no title, no start date, a date that is not a calendar day, an
+event wholly outside the window, a second entry for the same event. A url is kept **only when it is
+one of the pages the search's own `url_citation` annotations carry** (matched ignoring scheme,
+`www.` and a trailing slash, stored as the search spelled it); a model-written address the search
+did not cite stays in `raw.model_url` marked unverified and is never a link. Attendance 0 is a
+placeholder (null); confidence outside 0..1 is dropped, not rescaled. `raw` keeps venue, area,
+attendance, `found_on`, the matched citation, up to 25 citations and the call (`response_id`,
+`usage`, number of `web_search_call` items, and `X-Rate-Limit-Remaining` when the response
+carries one — kept, not enforced: the "4,000 credits a day" note relayed with this task is
+OpenSky's REST allowance and header, not ModelArk's; see the review below).
+
+**When it cannot run, the true reason** — recorded as its own `collection_run` row, source
+`events`, mode `web`, so `/api/status` carries it under the events source and it survives the
+thirty-minute incremental runs that do not search:
+
+| condition | reason written |
+|---|---|
+| 403 `AccessDenied` whose message names the built-in tool | "ModelArk's built-in web search is not enabled for this account — an account owner switches it on in the BytePlus console" |
+| 403 that does not name the tool (e.g. a model not activated) | `ModelArk answered HTTP 403 AccessDenied: <message, verbatim>` — not blamed on the switch |
+| no `ANALYST_API_KEY` / `ARK_API_KEY` | "no model configured — neither ANALYST_API_KEY nor ARK_API_KEY is set for the collector, …" |
+| analyst endpoint not ModelArk (e.g. MiniMax) | "the analyst model's endpoint is <host>, not BytePlus ModelArk — …" |
+| timeout (150 s, no retry: a retried search is a second bill) | `the web search call timed out after 150 s (<runtime message>)` |
+| any other HTTP status / network error | verbatim |
+| 200, no array / every lead refused | the parse error with the first 160 characters, or "all N events … failed validation (first: …)" |
+
+Cadence: once a Dubai day after a success; six hours after a failure (a console switch flipped
+mid-morning should not wait for tomorrow, and a refused call is not retried every half hour).
+
+**`GET /api/events/web`** (new; manifest entry; called by `#causes`; mockapi fixture):
+`{today, tier, events}` — the newest web run (status, error, finished_at, rows_written, window)
+or null, and every web row not yet ended in Dubai, soonest first, with venue/area/attendance/
+found_on/source_title/url_unverified/citations_n flattened from `raw`. A separate route because
+`#causes` asks `/api/events` over the record, which ends with the current month, so a lead for
+next month could never reach the page through it.
+
+**`#causes`.** A new panel, "Coming up in Dubai — found by web search, a direction, not a
+measurement": the leads with a `web search` label, a `source` link only where the search cited the
+page ("source not cited by the search" where the model named one it did not), the model's
+confidence, the crowd figure, the day each was last found; cards at phone width. With no leads the
+panel is the house empty state carrying the reason (never folded by the Arkiv focus pass); with
+earlier leads in hand and a failed latest attempt, the reason heads them as a warning, cause first.
+The record's events table marks web rows the same way. Render-checked in Chromium against mockapi
+(`serviceWorkers: 'block'`) at 1280 and 390, Arkiv and Classic, light and dark, in five states —
+leads, refused, never run, searched-and-found-nothing, refused-with-earlier-leads — 69 checks, no
+page error, no horizontal page scroll.
+
+**classifyNews (the news tier) sent no thinking switch** to ModelArk, the one caller of
+`config.analystModel` that did not — it now posts `classifyBody()`, which adds
+`{thinking: {type: 'disabled'}}` for ModelArk and MiniMax only (src/config.js `thinkingSwitch`).
+It also reads the answer with `lastJsonArray` instead of `txt.match(/\[[\s\S]*\]/)` (a revised
+answer threw), and an answer with no readable array is reported in the run's error instead of
+returning nothing silently.
+
+**Proof.** `test/events_web.test.mjs`, 52 checks: a fake Responses server behind ModelArk's real
+host (200 with an output message and `url_citation` annotations; 403 naming the tool; 403 not
+naming it; malformed text; a timeout), parsing and validation, the PGlite upsert (idempotent on the
+next day's rerun), the cadence, the reason on the real mounted `/api/status` and
+`/api/events/web`, and the classifier's request over the socket. Each of eight reversions fails
+the file as its header names (url kept uncited; window checks removed; the console-switch match
+forced off; cadence always due; the code carrying found_on; the run's error dropped; the thinking
+spread removed; the greedy regex restored). Neighbours green, one at a time: analyst,
+analyst_model, run_honesty, break_month_grain, hijri_offline, access_manifest, endpoint_coverage,
+timezone, mockapi, route_smoke.
+
+**Not proven, and what it waits on.** That production's `ARK_API_KEY` account has the built-in
+tool enabled (if not, the first run writes the console-switch reason, which is the point); the
+shape of a real answer (citations in `url_citation` annotations are the OpenAI Responses form and
+what the parser reads — a ModelArk answer that carries them elsewhere will show every lead as
+"source not cited by the search", visibly, rather than wrongly); the cost per call (see COVERAGE
+"Events by web search"); whether ModelArk sends `X-Rate-Limit-Remaining`.
+
+### EVW review (2026-11-16, independent reviewer, branch `fix/events`)
+
+Every builder claim re-run: `test/events_web.test.mjs` 52/52 at de82bd4 and the neighbours one at a
+time. Five defects found and fixed on the branch, each revert-proven (the reverted file fails the
+named check; restored and confirmed with `cmp`):
+
+| id | defect | proof | fix |
+|---|---|---|---|
+| EVW-R1 | **A search-grounded answer ending in citation markers parsed to nothing.** `lastJsonArray` kept the LAST array that parses, and in "a fenced `[ {…} ]`, then `Sources: [1] … [2] …`" that is `[2]`: the one valid event was refused as "not an object" and the run reported "all 1 events the model returned failed validation" — an error whose reason is not the true one | reproduced: `parseWebEvents` → rows 0, offered 1, rejected "not an object" | `lastJsonArray(text, {accept})` (default unchanged for the analyst and the classifier); the web tier accepts only an array of objects or `[]`. §1 "trailing citation markers" — reverted to no `accept`: 2 checks fail |
+| EVW-R2 | **Web leads became break candidates, unlabelled, ahead of the record's own events.** `detectBreaks` read `world_event` with no source and ranked on confidence, LIMIT 8; a month after shipping every lead sits in a finished month, a model's 0.95 outranks every derived date, and the copy on the card carried no source | reproduced on PGlite: nine 0.95 leads pushed a 0.6 seasonal row out of the eight | candidates carry `source` and `url`; `ORDER BY (source = 'web'), confidence DESC`; the break card labels a lead "web search" and links a cited source; mockapi `/api/breaks` carries one. §3 two checks — reverted ordering: both fail; reverted columns: the source check fails |
+| EVW-R3 | **"The code is stable" did not make it the row's identity.** The key is (source, code, starts_on, title), so the same lead re-found as "DUBAI RUN." (same slug, same start, same code) became a second row beside "Dubai Run" | reproduced on PGlite: two rows for `dubai-run:2026-11-23` | a re-found lead keeps the title it was first stored under, so the upsert lands on its row. §3 "re-found under another spelling" — reverted: 3 checks fail |
+| EVW-R4 | **Every title with no Latin letter shared the code `event:<day>`**, so a second Arabic-titled event on a day was refused as "a second entry for the same event" | reproduced: two titles → one row, one rejection | an FNV-1a hash of the folded title when the slug is empty. §1 "two different non-Latin titles" — reverted: fails |
+| EVW-R5 | **#causes prefaced every failure with "The web search did not run."** — false for a timeout (possibly billed), an unreadable answer or all leads refused, all of which ran | read off `webLeadsPanel` | "The latest web search gave no leads. <reason>." and, with earlier leads, "<reason> — so the latest attempt (…) added nothing". Render-checked |
+
+And one record corrected: the "4,000 credits per day … X-Rate-Limit-Remaining" note relayed with
+this task was written into the code, this section and COVERAGE as **ModelArk's** budget. It is
+what OpenSky documents for a registered user's REST calls (the flights work); nothing measured
+on ModelArk shows a credit allowance or that header. The tier still keeps the header in
+`raw.call` if one ever arrives; it enforces no credit budget, and the docs now say so.
+
+Render: Chromium against mockapi on :8322 (`serviceWorkers: 'block'`) — 1280 and 390, Arkiv and
+Classic, light and dark with the mock's leads, and refused-no-leads and timeout-with-earlier-leads
+by route fixture; the break card's web candidate labelled and linked, the calendar candidate not.
+Still not proven, unchanged from above: a real ModelArk answer, the cost per call, production's
+account switch.
+
+### EVW at integration (2026-11-16)
+
+| # | what | fix | test | state |
+|---|---|---|---|---|
+| EVW-I1 | **Two browser suites the builder could not run went red in the full run.** `arkiv_work` pinned #causes' section order without the new "Coming up in Dubai"; `arkiv_classic_frozen`'s `causes` hash moved. The Classic diff, production's front end (`01a8b65`) against this branch on the same mock, is three hunks and only EVW's: the "web search" pill and source link on the two web events in the break cards and the events table, and the new `causes-web` panel. Production's own front end on the new mock also moved (443b0b1f), because mockapi's /api/events now carries web rows. | The order check names the new section after "What was on in Dubai"; the Classic `causes` hash is re-recorded (as INT6 did for RET's panel). | `arkiv_work` 137, `arkiv_classic_frozen ONLY=causes` 2, `chart_marks` 151 | written |

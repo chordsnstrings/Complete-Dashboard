@@ -1056,6 +1056,9 @@ export const SOURCE_LABEL = {
   /* Uber's live per-trip money feed (src/sources/uber_transactions.js,
      2026-11-12), named so its runs never reach a reader as the database key. */
   uber_transactions: 'Uber live money',
+  /* Flights landing at DXB and DWC from the OpenSky Network
+     (src/sources/flights.js, 2026-11-16): its arrivals and live runs. */
+  opensky: 'OpenSky flights',
 };
 /* One threshold for "how did this go", used by every surface that judges it.
    ─────────────────────────────────────────────────────────────────────────

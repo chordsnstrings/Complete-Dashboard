@@ -11,7 +11,7 @@ import { refreshRollups } from './rollup.js';
 import { recordCredentialVisibility, withPinnedSettings, get } from './settings.js';
 import { runDiscovery } from './sources/discovery.js';
 import { liveMoneyTick } from './sources/uber_transactions.js';
-import { backfill, incremental, catchUp, fareRefresh, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk, payoutAudit, chargingTick, walletsTick } from './run.js';
+import { backfill, incremental, catchUp, fareRefresh, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk, payoutAudit, chargingTick, walletsTick, flightsArrivalsTick, flightsLiveTick } from './run.js';
 import { clearCheckpoint } from './checkpoint.js';
 import { config } from './config.js';
 import { log } from './log.js';
@@ -397,6 +397,32 @@ async function main() {
        and never ran (COVERAGE trap; test/yocharge.test.mjs pins the hours). */
     cron.schedule(get('YOCHARGE_WALLETS_CRON', '17 3,9,15,21 * * *'), () => walletsTick().then(skipped('charging wallets'))
       .catch((e) => log.error('scheduler', 'charging wallets', { err: String(e) })), { timezone: 'Asia/Dubai' });
+    /* FLIGHTS LANDING AT DXB AND DWC — OpenSky (src/sources/flights.js).
+       ─────────────────────────────────────────────────────────────────────
+       The confirmed arrivals at 41 minutes past every third hour from 01:41
+       UTC (05:41 Dubai). OpenSky publishes a UTC day's flights in a nightly
+       batch (measured 2026-11-16: the day just ended was complete at 09:26Z,
+       the current day 404'd), so the first slot after the day closes tries,
+       and each later slot asks only for the days still missing — "not
+       published yet" is retried, and a collected day is asked once more
+       after 12:00Z the next day (FLT-I1), so the other slots cost nothing. Minute 41 because nothing else starts on
+       it: not a multiple of five (CABMAN, the SMS flush), clear of :12/:42,
+       :15/:45, :17, :07/:22/:37/:52 and the 19:53 retention minute; an
+       explicit list of hours, never a stepped range (the node-cron trap in
+       COVERAGE). Once twelve minutes after the worker starts, too, so a
+       deploy fills its backfill without waiting for a slot.
+       The live watch every two minutes: one credit a call from OpenSky's
+       separate states allowance (720 of 4,000 a day). Both are silent but
+       for a "no OpenSky client configured" run until the client is set. */
+    cron.schedule('41 1,4,7,10,13,16,19,22 * * *', () => flightsArrivalsTick()
+      .catch((e) => log.error('scheduler', 'flights arrivals', { err: String(e) })));
+    setTimeout(() => flightsArrivalsTick().catch(() => {}), 12 * 60_000);
+    /* An interval, not a cron line: every two-minute cron pattern lands on
+       22 and 52 past or on 7 and 37 past, and those four belong to Uber's live
+       money tick alone (test/uber_transactions.test.mjs §7; CI on PR #36).
+       liveStatusTick runs the same way, for the same kind of light poll. */
+    setInterval(() => flightsLiveTick()
+      .catch((e) => log.error('scheduler', 'flights live', { err: String(e) })), 120_000);
     /* Ask Uber whether the past we hold is the past it has. 05:45 Dubai —
        after the overnight incremental, the analyst and the profile pull, and
        before the morning, because it spends real Uber report slots and the

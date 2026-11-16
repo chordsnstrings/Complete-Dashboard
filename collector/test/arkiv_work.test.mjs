@@ -386,9 +386,11 @@ if (want('causes')) {
     const { ctx, page, answer } = await open('arkiv', 'causes');
     const s = await shape(page);
     const T = answer('/api/trend/monthly'), B = answer('/api/breaks');
-    check('the plan\'s order: 00, the trend, what moved, drivers | per driver, the cards, gaps, events, fewer drivers, †',
+    /* "Coming up in Dubai" (EVW, 2026-11-16): the leads the web search found
+       for the next 21 days, beside the events already on the record. */
+    check('the plan\'s order: 00, the trend, what moved, drivers | per driver, the cards, gaps, events, coming up, fewer drivers, †',
       JSON.stringify(s.heads) === JSON.stringify(['At a glance', 'Trips per month', 'What moved, at each break', 'How many drivers', 'What each one did',
-        'Big jumps between months', 'Coverage gaps', 'What was on in Dubai', 'Fewer drivers, or less work?', '† What this page does not know']), JSON.stringify(s.heads));
+        'Big jumps between months', 'Coverage gaps', 'What was on in Dubai', 'Coming up in Dubai', 'Fewer drivers, or less work?', '† What this page does not know']), JSON.stringify(s.heads));
     check('the largest move is the hero, and no tile repeats the verdict\'s figure', s.hero === 'Largest move'
       && !Object.values(s.values).includes(await txtOf(page, '#view .cband .vdct-fig > b')), JSON.stringify(s.values));
     const all = [...(T.breaks || [])].sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));

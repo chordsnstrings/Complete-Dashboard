@@ -130,9 +130,12 @@ console.log('\n4 · every page still draws, and fetches its module only then');
   const first = [...new Set(js)];
   check(`#overview fetched ${first.length} modules and none of the pages’`, first.every((f) => !pageFiles.has(f)) && first.length < 22,
     first.filter((f) => pageFiles.has(f)).join(' ') || first.join(' '));
-  /* The fifteen pages routes_list.mjs does not reach, at their plain address. */
+  /* The pages routes_list.mjs does not reach, at their plain address —
+     #airport (2026-11-16, FIX-STATUS FLT) among them, kept out of that list
+     so the classic skin's frozen record (arkiv_classic_frozen) is not
+     re-recorded by a page that did not exist when it was taken. */
   const EXTRA = ['hr-roster', 'import-sheet', 'same-person', 'advances', 'cancellations', 'charging', 'deposits', 'messages',
-    'opening', 'payouts', 'policy', 'salary', 'supply', 'target', 'trip'];
+    'opening', 'payouts', 'policy', 'salary', 'supply', 'target', 'trip', 'airport'];
   const routes = [...ROUTES.filter((r) => PAGE_OF[r.split(/[/?]/)[0]]), ...EXTRA];
   const broke = [], late = [], slow = [];
   for (const r of routes) {

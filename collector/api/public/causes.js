@@ -18,7 +18,7 @@
       claims to have proved anything. */
 
 import { empty, markForm, gapBars, hbars } from './charts.js';
-import { el, esc, panel, loading, tableFrom, kpiRow, pill, note, dayStr, dateStr, fmt, pct,
+import { el, esc, panel, loading, tableFrom, kpiRow, pill, note, dayStr, dateStr, dtStr, fmt, pct,
   sourceLabel, countOf, plural, signed, verdict, money } from './ui.js';
 import { api, qChan, href, hrefFilter } from './data.js';
 import { contract, glance, glanceBand, bandTiles, absenceBand, pageFoot } from './ui.js';
@@ -227,7 +227,8 @@ function breakCard(b, { ak = false } = {}) {
     <p class="bk-fix"><b>What this implies</b> ${esc(copy.fix)}</p>
     ${events.length ? `<div class="bk-ev"><div class="bk-k">What else was happening</div>${
       events.map((e) => `<div class="bk-evrow">
-        <span class="bk-evt">${esc(e.title)}</span>
+        <span class="bk-evt">${esc(e.title)}</span>${e.source === 'web'
+          ? ` ${pill('web search', null, 'Found by web search — a direction, not a measurement')}${sourceLink(e)}` : ''}
         ${pill(String(e.expected_effect || '').replace(/_/g, ' ') || 'unknown',
           e.expected_effect === 'demand_up' ? 'ok' : e.expected_effect === 'demand_down' ? 'warn' : null)}
         <span class="cap">${e.confidence != null ? `confidence ${Math.round(e.confidence * 100)}%` : ''}</span>
@@ -265,7 +266,11 @@ export async function renderCauses(root) {
   const brk = panel('Big jumps between months', 'Moves above 30% from one month to the next, split into drivers and work'); g.append(brk.panel);
   g.append(gapP.panel);
   const evP = panel('What was on in Dubai', 'Holidays, seasons and events that change how much work there is'); root.append(evP.panel);
-  [trend.body, brk.body, gapP.body, evP.body].forEach(loading);
+  /* The forward view, in its own panel because its rows are not the record's:
+     leads for the next three weeks that a model found by web search (EVW). */
+  const webP = panel('Coming up in Dubai', 'Found by web search — a direction, not a measurement', 'causes-web');
+  root.append(webP.panel);
+  [trend.body, brk.body, gapP.body, evP.body, webP.body].forEach(loading);
 
   /* The chips, sent. Both of these bind fleet and platform server-side — the
      handlers say so, having been fixed for exactly this — and the page was
@@ -289,9 +294,12 @@ export async function renderCauses(root) {
   const evTo = lastMonth
     ? `${lastMonth}-${String(new Date(Date.UTC(+lastMonth.slice(0, 4), +lastMonth.slice(5, 7), 0)).getUTCDate()).padStart(2, '0')}`
     : '2027-12-31';
-  const [breaks, events] = await Promise.all([
+  const [breaks, events, webLeads] = await Promise.all([
     qChan('/api/breaks').catch(() => []),
     api(`/api/events?from=${encodeURIComponent(evFrom)}&to=${encodeURIComponent(evTo)}`).catch(() => []),
+    /* null, not [], on a failure: "the server could not be asked" is not
+       "the search found nothing", and the panel says which. */
+    api('/api/events/web').catch(() => null),
   ]);
   const observed = months.filter((m) => !m.no_data);
   const attributable = observed.filter((m) => m.drivers_known);
@@ -584,7 +592,13 @@ export async function renderCauses(root) {
     evP.body.append(tableFrom(evs.slice(0, 40), [
       { label: 'Starts', key: 'starts_on', render: (r) => dateStr(r.starts_on) },
       { label: 'Ends', key: 'ends_on', render: (r) => dateStr(r.ends_on) },
-      { label: 'Event', key: 'title' },
+      /* A web-search lead is marked where it sits among the record's events:
+         it is a model's reading of a search result, not a derived date or a
+         classified headline, and the confidence beside it is the model's. */
+      { label: 'Event', key: 'title', sortValue: (r) => String(r.title || ''),
+        render: (r) => esc(r.title || '—') + (r.source === 'web'
+          ? ` ${pill('web search', null, 'Found by web search — a direction, not a measurement')}${sourceLink(r)}`
+          : '') },
       { label: 'Overlaps', key: '_o',
         sortValue: (r) => touches(r).length,
         render: (r) => {
@@ -605,13 +619,97 @@ export async function renderCauses(root) {
       `Bounded to the record — ${dateStr(evFrom)} to ${dateStr(evTo)} — because an event eighteen months `
       + 'after the last trip we hold cannot explain anything on this page. '
       + (evs.length > 40 ? `Showing 40 of ${countOf(evs.length, 'event')}. ` : '')
-      + 'Seasonal and religious dates are derived; news items are classified by an LLM from regional coverage. '
+      + 'Seasonal and religious dates are derived; news items are classified by an LLM from regional coverage; '
+      + 'rows marked web search were found by a model searching the web, and their confidence is the model’s own. '
       + 'Confidence is how strongly the event is expected to move Dubai ride demand, not how certain we are it occurred.'));
   }
+
+  webLeadsPanel(webP.body, webLeads);
   if (ak) {
     causesCharts(decoP, drvP, perP, months, allBreaks);
     causesAbsence(root, { months, allBreaks, stored });
   }
+}
+
+/* Only an http(s) address becomes a link. The collector keeps a url only when
+   the search cited it (src/sources/events_web.js); this is the page's own
+   guard as well, because an href can execute where a table cell cannot. */
+const safeUrl = (u) => (typeof u === 'string' && /^https?:\/\/[^\s"<>]+$/i.test(u) ? u : null);
+const sourceLink = (r) => (safeUrl(r.url)
+  ? ` <a class="lnk" href="${esc(safeUrl(r.url))}" target="_blank" rel="noopener noreferrer"`
+    + `${r.source_title ? ` title="${esc(r.source_title)}"` : ''}>source</a>`
+  : r.url_unverified
+    ? ' <span class="ent-off" title="the model named a page the search did not cite, so it is not linked">'
+      + 'source not cited by the search</span>'
+    : '');
+
+/* ── coming up in Dubai: the web-search leads (EVW, 2026-11-16) ─────────────
+   Three states, each said rather than left to an empty table:
+     · the tier has never run → no row in collection_run, said as such;
+     · its last attempt failed → the run's own reason, verbatim — the
+       BytePlus console switch, no key, a timeout;
+     · it ran → the leads, or "searched and found nothing".
+   With no leads to show, the state is the house empty state (charts.js
+   empty(): "Nothing to show" with the reason), which the Arkiv focus pass
+   never folds — the reason IS the panel. With leads from an earlier search
+   still in hand, a failed latest attempt heads them as a warning, reason
+   first, so the one line the focus pass keeps on the face is the cause, not
+   a preamble. The confidence is the MODEL'S, and the caption says so in the
+   words the operator was promised: a direction, not a measurement. Dates are
+   dayStr (the year only when it is not this one), and the table becomes
+   cards at phone width rather than a nine-column scroller. */
+function webLeadsPanel(host, w) {
+  host.innerHTML = '';
+  if (!w || typeof w !== 'object' || !Array.isArray(w.events)) {
+    empty(host, 'The web search leads could not be read from the server, so whether a search ran is not known here.');
+    return;
+  }
+  const tier = w.tier || null;
+  const evs = w.events;
+  const Cap = (s) => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1);
+  const reason = tier?.status === 'error' ? Cap(tier.error || 'the last attempt recorded no reason') : null;
+  const when = tier?.finished_at ? dtStr(tier.finished_at) : null;
+  if (!evs.length) {
+    empty(host, !tier
+      ? 'The web search has not run yet: it runs once a day with the events collection, and no run is on record.'
+      : reason
+        /* "gave no leads", not "did not run": half the reasons in the
+           error column are a search that DID run — a timeout (possibly
+           billed), an answer that could not be read, every lead refused — and
+           "did not run" in front of those is a preface that is not true
+           (EVW review, 2026-11-16). The reason after it says which. */
+        ? `The latest web search gave no leads. ${reason}.${when ? ` Last attempt ${when}.` : ''}`
+        : `The search${when ? ` on ${when}` : ''} found no public event in Dubai between ${dayStr(tier.window_start)} `
+          + `and ${dayStr(tier.window_end)} that it expects to move ride demand.`);
+  } else {
+    if (reason) {
+      host.append(note(`${reason} — so the latest attempt${when ? ` (${when})` : ''} added nothing; `
+        + 'the leads below are from earlier searches, dated by the day each was last found.', 'warn'));
+    }
+    host.append(tableFrom(evs, [
+      { label: 'Starts', key: 'starts_on', render: (r) => dayStr(r.starts_on) },
+      { label: 'Ends', key: 'ends_on', render: (r) => (r.ends_on && r.ends_on !== r.starts_on ? dayStr(r.ends_on) : '—') },
+      { label: 'Event', key: 'title', sortValue: (r) => String(r.title || ''),
+        render: (r) => `${esc(r.title || '—')} ${pill('web search', null, 'Found by web search — a direction, not a measurement')}${sourceLink(r)}` },
+      { label: 'Where', key: 'venue', render: (r) => esc([r.venue, r.area].filter(Boolean).join(', ') || '—') },
+      { label: 'Category', key: 'category', render: (r) => pill(r.category || '—') },
+      { label: 'Expected effect', key: 'expected_effect', render: (r) => pill(
+        String(r.expected_effect || 'unknown').replace(/_/g, ' '),
+        r.expected_effect === 'demand_up' ? 'ok' : r.expected_effect === 'demand_down' ? 'warn' : null) },
+      { label: 'Expected crowd', key: 'expected_attendance', num: true,
+        render: (r) => (r.expected_attendance != null ? fmt(r.expected_attendance) : '—') },
+      { label: 'Model confidence', key: 'confidence', num: true,
+        render: (r) => (r.confidence != null ? pct(r.confidence * 100) : '—') },
+      { label: 'Found', key: 'found_on', render: (r) => (r.found_on ? dayStr(r.found_on) : '—') },
+    ], { sortable: true, sortId: 'webleads', defaultSort: { key: 'starts_on', dir: 'asc' },
+      cards: true, cardLead: 'title' }));
+  }
+  host.append(el('p', 'cap',
+    'Found by web search — a direction, not a measurement. Once a day a model on BytePlus ModelArk searches the web '
+    + 'for public events in Dubai over the next 21 days: concerts, sports, conferences and exhibitions, festivals, '
+    + 'holidays and closures, major disruptions. Confidence is the model’s own estimate that an event moves ride demand; '
+    + 'a source link appears only where the search itself cited the page, and a crowd figure only where a source stated one. '
+    + 'Nothing here has been measured against a trip.'));
 }
 
 /* ── #causes under the page contract ───────────────────────────────────────
