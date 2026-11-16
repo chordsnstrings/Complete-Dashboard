@@ -7281,7 +7281,7 @@ and "at least" with a reason that was not true. Found by the ERN agent (COVERAGE
 
 | row | what | written | on production | proven |
 |---|---|---|---|---|
-| MIF1 | `/api/driver/kpis` returns `unpriced_unstated` — completed bookings with no fare that no statement covers (an Uber booking on a day no statement reaches; any other channel's unpriced completed booking) — and `unpriced_unstated_uber`, the part waiting on Uber's weekly report | yes | with this PR | `test/money_in_floor.test.mjs` §1 on PGlite; reversions: the statement-day clause (4 fail), the completed filter (4) |
+| MIF1 | `/api/driver/kpis` returns `unpriced_unstated` — completed bookings with no fare that no statement covers (an Uber booking on a day no statement reaches; any other channel's unpriced completed booking) — and `unpriced_unstated_uber`, the part waiting on Uber's weekly report | yes | **yes**, `4a95cd8` — the October driver: 0 | `test/money_in_floor.test.mjs` §1 on PGlite; reversions: the statement-day clause (4 fail), the completed filter (4) |
 | MIF2 | `moneyInTile` gates "at least" on that count and names the parts ("9 on Uber, whose weekly payments report has not reached their days yet", "1 on a channel that sent no fare for it"); a response without the field falls back to `dark_bookings`, never to trips minus priced | yes | with this PR | same file §2; reversion to trips − priced (5 fail) |
 | MIF3 | Actual earnings uses the same count, so the two tiles — one figure — agree on whether it is a floor | yes | with this PR | same file §3; `actual_earnings_tile` 26 (4 checks rewritten for the gate); reversion to dark_bookings alone (2 fail) |
 
@@ -7304,4 +7304,9 @@ already active in modelark", with its key. BytePlus SearchInfinity is a separate
 
 Measured through this code against the real service, 2026-11-16 for the window 16 Nov – 6 Dec: 7 searches, each 10
 results in 1.3–2.3 s, 10.3 s in all; 57 distinct pages, 40 kept; a prompt of about 39,600 characters.
+
+**On production** (deploy of `4a95cd8`, 14:51Z): the first SearchInfinity run finished 14:53:46Z — status ok, 19 events
+written, every one with a link to a page the search returned; #causes' "Coming up in Dubai" renders the 19 with 19 source
+links and no script error. Money in on the October driver: `unpriced_unstated` 0, no "at least" on the Overview or on
+Actual earnings.
 
