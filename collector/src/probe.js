@@ -35,7 +35,7 @@
 import { config, loadSettings } from './config.js';
 import { http, qs } from './http.js';
 import { upsert } from './db.js';
-import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST } from './auth/uber.js';
+import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST, forgetUberTokens } from './auth/uber.js';
 import { fiToken } from './sources/bolt.js';
 import { dotDate, iso, daysAgo } from './util.js';
 import { log } from './log.js';
@@ -326,6 +326,72 @@ export const RAW_ALIASES = {
   vehicle_profile: {},
 };
 
+/* Is this Uber API client approved for the per-driver cash block? (2026-11-16)
+   ──────────────────────────────────────────────────────────────────────────
+   Uber documents POST /v1/vehicle-suppliers/cash-block-action, on scope
+   vehicle_suppliers.cash_block.write, and POST
+   /v1/vehicle-suppliers/query-cash-block-actions, on ….cash_block.read: a fleet
+   can stop or allow cash trips for named drivers. The operator asked whether
+   Uber has approved either for us, checked through production — the only
+   place the two fleets' client secrets exist.
+
+   What this asks, and what it does not:
+   - ONE token grant per scope, with the same client, the same grant and the
+     same token endpoint every Uber collector already uses — only the scope
+     differs. It calls neither cash-block endpoint: approval is a property of
+     the grant, and an endpoint call adds nothing but risk.
+   - Each scope alone, because a request naming both is refused whole when
+     either is missing, and "which one" is the answer.
+   - The token itself is never kept, logged or returned. A record says which
+     scope was asked, whether it was granted, and Uber's short error code.
+
+   Reading the answer. "yes" is conclusive. "no" with invalid_scope means this
+   client cannot be granted the scope by client_credentials — and Uber's page
+   marks both endpoints "Authorization Code", so a client Uber HAS approved for
+   the browser-consent flow may still answer "no" here. That caveat travels
+   with the row (its note) rather than living only in this comment. Some OAuth
+   servers issue a token and silently drop a scope instead of refusing, so
+   "granted" is read off the scope list the token came back with, never off
+   the bare fact that a token was issued.
+
+   A check that WAS issued a token calls forgetUberTokens(): Uber does not
+   document whether a new client-credentials token retires the older ones,
+   and nothing recovers a retired cached token from a 401. */
+export const CASH_BLOCK_SCOPES = ['vehicle_suppliers.cash_block.read', 'vehicle_suppliers.cash_block.write'];
+export async function cashScopeCheck(oauth, opts = {}) {
+  const httpImpl = opts.httpImpl || http;
+  const forget = opts.forget || forgetUberTokens;
+  const tokenUrl = opts.tokenUrl || config.uber.oauth.tokenUrl;
+  const data = [];
+  let issued = false;
+  for (const scope of CASH_BLOCK_SCOPES) {
+    const body = new URLSearchParams({ client_id: oauth.clientId, client_secret: oauth.clientSecret,
+      grant_type: 'client_credentials', scope }).toString();
+    let r;
+    try {
+      r = await httpImpl(tokenUrl, { method: 'POST', body, timeoutMs: 30000, retries: 0,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+    } catch (e) {
+      data.push({ asked: scope, granted: 'unknown', uber_said: String(e?.message || e).slice(0, 48) });
+      continue;
+    }
+    const d = r?.data || {};
+    if (d.access_token) {
+      issued = true;
+      const listed = typeof d.scope === 'string' ? d.scope.split(/\s+/) : null;
+      data.push({ asked: scope,
+        granted: listed ? (listed.includes(scope) ? 'yes' : 'no') : 'unknown',
+        uber_said: listed ? (listed.includes(scope) ? 'granted' : 'token issued without this scope')
+          : 'token issued with no scope list' });
+    } else {
+      data.push({ asked: scope, granted: 'no',
+        uber_said: String(d.error || d.message || `HTTP ${r?.status ?? '?'}`).slice(0, 48) });
+    }
+  }
+  if (issued) forget();
+  return { data, status: 200 };
+}
+
 export function surfaces({ from, to }) {
   const list = [];
   const add = (provider, surface, cols, note, run, aliases) =>
@@ -443,6 +509,20 @@ export function surfaces({ from, to }) {
           });
         return { data: { accepted: data?.status === 'success' }, status };
       });
+
+    /* Has Uber approved each fleet's API client for the per-driver CASH BLOCK?
+       One surface per distinct client — a fleet that falls back to the shared
+       pair would only ask the same question twice. cashScopeCheck says what it
+       asks, why only the token endpoint, and how to read the answer. */
+    const askedClients = new Set();
+    for (const o of config.uber.oauthOrgs || []) {
+      if (askedClients.has(o.oauth.clientId)) continue;
+      askedClients.add(o.oauth.clientId);
+      add('uber', `cash-block-scope:${o.fleet}`, null,
+        `Is ${o.fleet}'s API client approved for vehicle_suppliers.cash_block.read / .write? Asks the token endpoint only; `
+        + 'Uber documents these scopes on the Authorization Code grant, so "no" here may mean the grant type, not a refusal',
+        () => cashScopeCheck(o.oauth));
+    }
   }
 
   /* FMS / InfoTrack — the surfaces documented at the top of sources/fms.js.
