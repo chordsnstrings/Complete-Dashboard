@@ -416,7 +416,7 @@ export const OVERNIGHT_RULES = Object.freeze({
   moving: 'no stay held most of the window and the car drove, or stood at more than one place, for most of it',
   no_tracker: 'no tracker position has ever been recorded for the plate',
 });
-export const OVERNIGHT_AREA_WHY = 'An area is the fleet’s own name for a half-kilometre cell, learnt from its FMS trips; '
+export const OVERNIGHT_AREA_WHY = 'An area is the fleet’s own name for a half-kilometre cell: the area its bookings’ drop-off addresses give that cell, or, where no drop-off has named it, the name its FMS trips give it; '
   + 'ground the fleet has never driven near has no name and is left unnamed rather than guessed.';
 
 export function overnightBody({ nights, population, roster = null }) {

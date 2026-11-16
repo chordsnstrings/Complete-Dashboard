@@ -14,7 +14,7 @@
 
 import { peopleCount, personKey, custodyNames } from './custody_sql.js';
 import { CABMAN_MOVE_DAYS, PARKED_SPOTS_SQL, TRACKER_SOURCES_SQL, QUIET_SQL, TRACKER_STATE_SQL, REAL_FIX } from './telemetry_sql.js';
-import { placeAt } from './place_sql.js';
+import { placeAt, placeAtArea } from './place_sql.js';
 import { fleetRoster, excludedPlates } from './fleet_roster.js';
 import { winDays, dubaiSpanSql } from './window.js';
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
@@ -1503,7 +1503,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
   const okDay = (d) => ISO_DAY.test(d) && !Number.isNaN(Date.parse(`${d}T00:00:00Z`));
   const addDays = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
   const WHERE_FIX_COLS = (a = '') => `${a}captured_at AS at, ${a}lat, ${a}lng, ${a}speed, ${a}source, ${a}fleet_id,
-         ${placeAt(`${a}lat`, `${a}lng`)} AS place`;
+         ${placeAtArea(`${a}lat`, `${a}lng`)} AS place`;
   const placeEnd = (lat, lng, addr) => `coalesce(${placeAt(lat, lng)}->>'area', place_area(${addr}))`;
   app.get('/api/vehicle/whereabouts', withVehicle(async (req, res, plate) => {
     const today = dubaiIso();
@@ -1569,7 +1569,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
           ORDER BY requested_at`, [plate, lo, hi]),
     ]);
     const points = [...prev, ...near, ...next].map((f) => ({ at: new Date(f.at).toISOString(), lat: f.lat, lng: f.lng,
-      speed: f.speed, source: f.source, area: f.place?.area || null, area_votes: f.place?.votes ?? null }));
+      speed: f.speed, source: f.source, area: f.place?.area || null, area_votes: f.place?.votes ?? null, area_by: f.place?.by || null }));
     const fleetId = [...near, ...prev, ...next].find((f) => f.fleet_id)?.fleet_id || null;
     res.json(whereaboutsBody({ plate, fleetId, days, points, bookings, journeys, nowMs: Date.now() }));
   }));
@@ -1617,7 +1617,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
      (api/cache.js, overnightOpen; review OVN9). */
   const OVN_FIX_COLS = (a = '') => `${a}plate, ${WHERE_FIX_COLS(a)}`;
   const ovnPoint = (f) => ({ at: new Date(f.at).toISOString(), lat: f.lat, lng: f.lng, speed: f.speed,
-    source: f.source, area: f.place?.area || null, area_votes: f.place?.votes ?? null });
+    source: f.source, area: f.place?.area || null, area_votes: f.place?.votes ?? null, area_by: f.place?.by || null });
   const groupBy = (rows) => {
     const m = new Map();
     for (const r of rows) { if (!m.has(r.plate)) m.set(r.plate, []); m.get(r.plate).push(r); }

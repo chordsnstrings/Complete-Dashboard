@@ -243,7 +243,7 @@ export async function tabWhereabouts(root, plate) {
       why: 'Past a day a parked car and a dead tracker look the same until the car moves, so a day’s silence is never called parked: '
         + '“no reading since” is all that can be said.' },
     { label: 'Areas', fig: unnamed ? `${unnamed} unnamed` : null, none: 'All named',
-      why: 'An area is the fleet’s own name for a half-kilometre cell, learnt from its FMS trips — not a street address. '
+      why: 'An area is the fleet’s own name for a half-kilometre cell — the area its bookings’ drop-off addresses give it, else the name its FMS trips give it; not a street address. '
         + 'Ground the fleet never drove near has no name and is left unnamed rather than guessed.' },
   ];
   if (ak) absenceBand(body, cells);
