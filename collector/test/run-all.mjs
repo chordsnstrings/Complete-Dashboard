@@ -34,7 +34,7 @@ if (!files.length) { console.error('no test files found — is the cwd the colle
 const opts = parseRunArgs(process.argv.slice(2));
 if (opts.error) { console.error(opts.error); process.exit(2); }
 /* What is left out, and why, is printed before anything runs: a CI run that
-   skips 88 files must say so on its first screen, not leave it to be inferred
+   skips ~100 files (88 when this was written, 101 on 2026-11-16) must say so on its first screen, not leave it to be inferred
    from a smaller total at the end. */
 const needBrowser = opts.skipBrowser ? browserFiles(files) : new Map();
 let runFiles = files.filter((f) => !needBrowser.has(f));

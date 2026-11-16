@@ -103,9 +103,15 @@ for (const id of drivers) {
     if (status !== 200) deadDriver.push(`${page}?id=${id} → ${status}`);
   }
 }
+/* /api/vehicle/whereabouts is the vehicle twin of /api/driver/day: it is
+   read fix by fix, ONE calendar day (or at most a week) at a time, and refuses
+   a month's window with a 400 that says so — the "Where it was" tab asks for
+   ?day=, never for the shared window. So it is opened on a day, like the
+   driver's day page above (WHR, 2026-11-16; CI on PR #42 caught the month). */
+const vehicleExtra = (page) => (page === '/api/vehicle/whereabouts' ? '&day=2026-08-25' : '');
 for (const plate of plates) {
   for (const page of VEHICLE_PAGES) {
-    const { status } = await get(`${page}?plate=${encodeURIComponent(plate)}&${WIN}`);
+    const { status } = await get(`${page}?plate=${encodeURIComponent(plate)}&${WIN}${vehicleExtra(page)}`);
     if (status !== 200) deadVehicle.push(`${page}?plate=${plate} → ${status}`);
   }
 }
@@ -151,7 +157,7 @@ check('every vehicle a list names opens on every one of its pages',
 
   const unknownV = [];
   for (const page of VEHICLE_PAGES) {
-    const { status } = await get(`${page}?plate=NOSUCHPLATE&${WIN}`);
+    const { status } = await get(`${page}?plate=NOSUCHPLATE&${WIN}${vehicleExtra(page)}`);
     if (status !== 404) unknownV.push(`${page} → ${status}`);
   }
   check('an unknown vehicle is refused rather than answered with zeros',
