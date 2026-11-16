@@ -104,6 +104,7 @@ export const GROUPS = [
   ['Dubai Sports City', ['dubai sports city', 'مدينة دبي الرياضية']],
   ['Dubai Internet City', ['dubai internet city', 'مدينة دبي للإنترنت']],
   ['Dubai Media City', ['dubai media city', 'مدينة دبي للإعلام']],
+  ['Academic City', ['academic city', 'dubai international academic city', 'المدينة الأكاديمية', 'مدينة دبي الأكاديمية العالمية']],
 ];
 
 /* Prefix rules: every "JLT Cluster X" is in JLT. Kept separate from the
