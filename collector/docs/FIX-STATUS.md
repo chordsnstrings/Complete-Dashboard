@@ -7187,3 +7187,27 @@ account switch.
 |---|---|---|---|---|
 | EVW-P | **On production** — `6ad5d00`: the first web run (11:28Z) was refused 403 AccessDenied; `/api/status` and #causes give the true reason. | — | measured by GET and in Chromium through the mirror | **live; waits on the operator** (HANDOFF 0.21) |
 | EVW-I1 | **Two browser suites the builder could not run went red in the full run.** `arkiv_work` pinned #causes' section order without the new "Coming up in Dubai"; `arkiv_classic_frozen`'s `causes` hash moved. The Classic diff, production's front end (`01a8b65`) against this branch on the same mock, is three hunks and only EVW's: the "web search" pill and source link on the two web events in the break cards and the events table, and the new `causes-web` panel. Production's own front end on the new mock also moved (443b0b1f), because mockapi's /api/events now carries web rows. | The order check names the new section after "What was on in Dubai"; the Classic `causes` hash is re-recorded (as INT6 did for RET's panel). | `arkiv_work` 137, `arkiv_classic_frozen ONLY=causes` 2, `chart_marks` 151 | written |
+
+## CXA – cancellations on the Activity bars, said by whom (2026-11-16)
+
+The operator, on a driver's 1–15 November: "the specific rider cancelled or driver cancelled on the activity
+doesn't show properly, it shows as red bar. we need to fix it and give users better information."
+
+Measured on production, on that driver: **all twenty of "122 jobs · 20 with no dropoff reported" were
+cancellations** (16 Uber, 4 Bolt). `/api/driver/shift` returned every booking as {s, e, outcome}, and the page drew any
+e = null as the hatched "no dropoff reported" marker — a claim about the channel's record that is false of a ride
+nobody took (4,371 of the 4,427 cancelled bookings since 1 October carry no `ended_at`). Of the driver's five red
+"unbooked journey" bars, one (1 Nov 18:32–21:13, 130 km) had a rider-cancelled Uber request on the same car at 20:56
+inside it, and the bar said nothing about it; the other four had no booking near them. Across the latest 300 unbooked
+journeys, 21 had a cancelled booking on the same car from 45 minutes before to their end (14 Uber rider cancellations).
+
+| row | what | written | on production | proven |
+|---|---|---|---|---|
+| CXA1 | `/api/driver/shift`: each job carries `status`, `cancel_by` (rider / driver / unattributed, from `api/cancellation_sql.js` CANCEL_CASE — the Cancellations page's own definition) and `declined` (a Bolt offer turned down or let pass, apart from a dispatch abandoned); each day and the window carry `cancelled` and `cancelled_by`; `unknown_end` counts only bookings that were NOT cancelled. Time arithmetic unchanged, so the panel and `driver_day` still agree (the 56 cancellations with an end, 47 Yango, still count request to end as `src/rollup.js` does). | yes | with this PR | `test/shift.test.mjs` 25 (7 new); reversions: the unknown-count guard (2 fail), `cancel_by` left off (5), `declined` left off (1) |
+| CXA2 | The strip: a cancellation is a struck box at its request, by who ended it — rider (hollow), driver after accepting (solid), an offer declined (dotted), not said by whom (grey) — never the hatch; titles in words ("rider cancelled", "the rider did not show", "driver cancelled after accepting", "offer declined by the driver", "cancelled — the channel does not say by whom"); the legend names only the forms drawn; the jobs column reads "3 +5✕"; the Jobs tile counts jobs and says the cancellations by party; a caption says what a cancellation is on this chart. An older response (outcome only) is read as "not said by whom", never as a missing dropoff. | yes | with this PR | `test/activity_cancellations.test.mjs` 19, in Chromium; reversions: the drawing branch (11 fail), the outcome fallback (3) |
+| CXA3 | A red bar names a cancelled booking on THE SAME CAR inside it ("on this car during it: 20:56 uber booking, rider cancelled. A cancelled booking is not a ride, so it does not explain this journey"), and the cancellation is drawn above it. The reconciler is unchanged: a ride nobody took does not explain a journey. | yes | with this PR | same file §4; reversions: the naming (1 fail), the z-index (1) |
+
+Unchanged on purpose: pages with no cancellations render byte-identically (`arkiv_classic_frozen ONLY=driver/`, 15 routes
+pass), and `driver_day.unknown_end` in the stored record still counts every booking with no end — read by nothing that
+calls it a missing dropoff today.
+

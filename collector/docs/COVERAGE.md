@@ -11891,3 +11891,13 @@ built-in tool too: `POST /responses` with `tools:[{type:"web_search"}]` answered
 access to the built in tool"). The tier recorded "ModelArk's built-in web search is not enabled for this account — an
 account owner switches it on in the BytePlus console" on `/api/status` (events / web) and on #causes, and retries every
 six hours. Nothing about the answer's shape, its citations or its cost is measured until the tool is on.
+
+## Trap: a cancelled booking's missing end time is not a missing dropoff (2026-11-16, FIX-STATUS CXA)
+
+Belongs with "Traps that have cost time more than once". `ended_at IS NULL` on a booking means two different things:
+the channel did not send a dropoff for a ride that happened, or the ride never happened. Measured on production, 4,371
+of the 4,427 cancelled bookings since 1 October carry no `ended_at` (the 56 that do: 47 Yango `cancelled`, 5 Bolt
+`client_cancelled`, 4 Bolt `client_did_not_show`). Any count or drawing keyed on `ended_at IS NULL` alone — "N with no
+dropoff reported" — counts every cancellation as a gap in the record. Split on `outcome = 'not_completed'` first, and say
+who ended it with `api/cancellation_sql.js` (CANCEL_CASE, DECLINED_SQL), never a second reading of the status words.
+

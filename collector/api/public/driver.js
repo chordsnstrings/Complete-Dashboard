@@ -316,7 +316,20 @@ async function unbookedOnBars(barsHost, host, id, prof) {
       i.className = r.named ? 'x' : 'xc';
       i.style.left = `${pct(piece.s)}%`;
       i.style.width = `${pct(Math.max(6, piece.e - piece.s))}%`;
-      i.title = w.line;
+      /* A cancelled booking on THIS car inside the journey (or in the ten
+         minutes before it) is named in the mark's title. It explains
+         nothing — src/reconcile.js matches completed bookings only, rightly:
+         a ride nobody took is not the journey — but a reader looking at a
+         red bar with a cancellation marker on it should be told what the
+         two are, not left to assume the bar IS the cancellation (the
+         operator's reading, 2026-11-16). Measured on production: 21 of the
+         latest 300 unbooked journeys had a cancelled booking on the same
+         car from 45 minutes before to their end. */
+      const inside = [...track.querySelectorAll('i.c')].filter((c) => c.dataset.plate === String(r.plate || '')
+        && Number(c.dataset.s) <= piece.e && Number(c.dataset.e) >= piece.s - 10).map((c) => c.dataset.what);
+      i.title = w.line + (inside.length
+        ? ` — on this car during it: ${inside.join('; ')}. A cancelled booking is not a ride, so it does not explain this journey.`
+        : '');
       track.append(i);
       drawn.add(i.className);
       marked += 1;
@@ -354,6 +367,53 @@ async function unbookedOnBars(barsHost, host, id, prof) {
   host.dataset.marked = String(marked);
 }
 
+/* WHO ENDED A BOOKING THAT DID NOT RUN, said the way an operator says it
+   (the operator, 2026-11-16: "the specific rider cancelled or driver
+   cancelled on the activity doesn't show properly … give users better
+   information"). /api/driver/shift now names the party from the one
+   definition of it, api/cancellation_sql.js; a response from before that (a
+   cached copy, an older fixture) still says outcome 'not_completed', and is
+   read as "cancelled, not said by whom" rather than as a missing dropoff —
+   the false reason this replaces. */
+export function cancelOf(j) {
+  if (j?.cancel_by) return j.cancel_by;
+  return String(j?.outcome || '').trim().toLowerCase() === 'not_completed' ? 'unattributed' : null;
+}
+export function cancelKind(j) {
+  const by = cancelOf(j);
+  if (!by) return null;
+  if (by === 'rider') return 'cr';
+  if (by === 'driver') return j.declined ? 'co' : 'cd';
+  return 'cu';
+}
+export function cancelWord(j) {
+  const k = cancelKind(j);
+  const st = String(j?.status || '').toLowerCase().replace(/^optional_ride_/, '');
+  if (k === 'cr') return st === 'client_did_not_show' ? 'the rider did not show' : 'rider cancelled';
+  if (k === 'cd') return 'driver cancelled after accepting';
+  if (k === 'co') return st === 'driver_did_not_respond' ? 'offer not answered by the driver' : 'offer declined by the driver';
+  if (k === 'cu') return 'cancelled — the channel does not say by whom';
+  return null;
+}
+const CANCEL_LEGEND = {
+  cr: 'cancelled by the rider',
+  cd: 'cancelled by the driver after accepting',
+  co: 'an offer the driver declined or let pass',
+  cu: 'cancelled, the channel does not say by whom',
+};
+/* "15 by the rider, 4 by the driver, 1 not said by whom" — the parts in a
+   fixed order, only the ones that happened. */
+export function cancelParties(jobs) {
+  const n = { cr: 0, cd: 0, co: 0, cu: 0 };
+  for (const j of jobs || []) { const k = cancelKind(j); if (k) n[k] += 1; }
+  const parts = [];
+  if (n.cr) parts.push(`${n.cr} by the rider`);
+  if (n.cd) parts.push(`${n.cd} by the driver after accepting`);
+  if (n.co) parts.push(`${n.co} ${n.co === 1 ? 'offer' : 'offers'} the driver declined`);
+  if (n.cu) parts.push(`${n.cu} not said by whom`);
+  return { n, total: n.cr + n.cd + n.co + n.cu, words: parts.join(', ') };
+}
+
 function shiftBars(host, days, meta = {}, shiftId = null) {
   host.innerHTML = '';
   const all = (days || []).filter((d) => d.first_min != null);
@@ -377,6 +437,7 @@ function shiftBars(host, days, meta = {}, shiftId = null) {
     + '<div class="sh-j">on job</div><div class="sh-o">online</div>'
     + '<div class="sh-w">waiting</div><div class="sh-t">jobs</div>';
   wrap.append(hd);
+  const drawnCancel = new Set();
   rows.forEach((d, i) => {
     const pctOf = (m) => (m / 1440) * 100;
     /* Drawn in ascending order of start so a later job paints over an earlier
@@ -384,6 +445,25 @@ function shiftBars(host, days, meta = {}, shiftId = null) {
        the next rider assigned before the current is dropped — and the count is
        shown rather than the geometry being fudged. */
     const segs = [...d.jobs].sort((a, b) => a.s - b.s).map((j) => {
+      /* A cancellation is drawn as what it was — a booking that did not run,
+         marked at its request by who ended it — and never as the hatched
+         "no dropoff reported", which is a claim about the channel's record
+         that is not true of a ride nobody took. Drawn above the unbooked-
+         journey marks (z-index in app.css): a cancelled request inside a red
+         bar is the single most useful fact about that bar. */
+      const ck = cancelKind(j);
+      if (ck) {
+        drawnCancel.add(ck);
+        const spans = j.e != null && j.e > j.s;
+        const w = spans ? Math.max(j.e - j.s, 6) : 10;
+        const what = cancelWord(j);
+        const t = `${hhmm(j.s)}${spans ? `–${hhmm(j.e)}` : ''}${j.platform ? ' · ' + j.platform : ''} · ${what}`
+          + (spans ? ' — the channel sent an end time, so request to end counts as time on the job, as the stored record counts it'
+            : ' — no ride, so no fare and no gap in the record');
+        return `<i class="c ${ck}" data-s="${j.s}" data-e="${spans ? j.e : j.s}" data-plate="${esc(j.plate || '')}" `
+          + `data-what="${esc(`${hhmm(j.s)}${j.platform ? ' ' + j.platform : ''} booking, ${what}`)}" `
+          + `style="left:${pctOf(j.s)}%;width:${pctOf(w)}%;animation-delay:${i * 18}ms" title="${esc(t)}"></i>`;
+      }
       const known = j.e != null;
       /* A floor, so a two-minute job is still visible — and a wider one for the
          unknowns, which are a MARKER rather than a duration: drawn at their
@@ -423,6 +503,10 @@ function shiftBars(host, days, meta = {}, shiftId = null) {
     const idleMin = d.online ? Math.max(0, onlineMin - (d.on_job_min || 0)) : null;
 
     const share = d.span_min ? Math.round((d.wait_min / d.span_min) * 100) : null;
+    /* Counted from the jobs themselves, so a response from before the server
+       named the party still splits cancellations from missing dropoffs. */
+    const dayCx = cancelParties(d.jobs);
+    const dayNoEnd = (d.jobs || []).filter((j) => j.e == null && !cancelOf(j)).length;
     /* A row is an address now. The month view could total a day's waiting and
        never say what happened inside it; the day page answers that, and the
        bar for that day is the obvious way in. */
@@ -438,13 +522,16 @@ function shiftBars(host, days, meta = {}, shiftId = null) {
       <div class="sh-o num">${d.online ? `${fmt(onlineMin / 60, 1)}h` : '<span class="dim">—</span>'}</div>
       <div class="sh-w num">${d.wait_min ? `${fmt(d.wait_min / 60, 1)}h${
         share != null ? ` <span class="dim">${share}%</span>` : ''}` : '<span class="dim">—</span>'}</div>
-      <div class="sh-t num">${d.bookings}</div>`;
-    r.title = `${dayStr(d.day)} · ${d.bookings} bookings · on job ${fmt(d.on_job_min / 60, 1)} h`
+      <div class="sh-t num">${d.bookings - dayCx.total}${dayCx.total
+        ? ` <span class="dim" title="${esc(`${dayCx.total} cancelled: ${dayCx.words}`)}">+${dayCx.total}✕</span>` : ''}</div>`;
+    r.title = `${dayStr(d.day)} · ${d.bookings} bookings`
+      + (dayCx.total ? ` — ${d.bookings - dayCx.total} jobs and ${dayCx.total} cancelled (${dayCx.words})` : '')
+      + ` · on job ${fmt(d.on_job_min / 60, 1)} h`
       + ` · waiting ${fmt(d.wait_min / 60, 1)} h`
       + (d.online ? ` · online ${fmt(onlineMin / 60, 1)} h, of which ${fmt(idleMin / 60, 1)} h `
         + 'available and not dispatched' : '')
       + (d.overlaps ? ` · ${d.overlaps} overlapping` : '')
-      + (d.unknown_end ? ` · ${d.unknown_end} with no dropoff` : '');
+      + (dayNoEnd ? ` · ${dayNoEnd} with no dropoff` : '');
     wrap.append(r);
   });
 
@@ -456,13 +543,22 @@ function shiftBars(host, days, meta = {}, shiftId = null) {
        there. */
     ...(anyOnline ? [['o', 'online, waiting for a job']] : []),
     ['w', anyOnline ? 'not online' : 'waiting between jobs'],
-    ['u', 'no dropoff reported'],
+    /* Only the marks drawn: a completed booking with no end, and each kind of
+       cancellation that happened in these rows. */
+    ...(rows.some((d) => (d.jobs || []).some((j) => j.e == null && !cancelOf(j))) ? [['u', 'no dropoff reported']] : []),
+    ...['cr', 'cd', 'co', 'cu'].filter((k) => drawnCancel.has(k)).map((k) => [`c ${k}`, CANCEL_LEGEND[k]]),
   ]));
   host.append(wrap);
 
   const onJob = rows.reduce((a, d) => a + (d.on_job_min || 0), 0);
   const waited = rows.reduce((a, d) => a + (d.wait_min || 0), 0);
   const span = rows.reduce((a, d) => a + (d.span_min || 0), 0);
+  const allCx = cancelParties(rows.flatMap((d) => d.jobs || []));
+  if (allCx.total) {
+    host.append(el('p', 'cap', esc(`${countOf(allCx.total, 'booking')} in these days ${allCx.total === 1 ? 'was' : 'were'} `
+      + `cancelled — ${allCx.words}. Each is marked where it was requested and is not counted as a job; `
+      + 'a cancellation with no end time adds nothing to on job or waiting.')));
+  }
   host.append(el('p', 'cap', esc(
     `Across these ${rows.length} days: ${fmt(onJob / 60, 1)} h on job, ${fmt(waited / 60, 1)} h `
     + `waiting between jobs — ${span ? Math.round((waited / span) * 100) : 0}% of the time between `
@@ -1699,7 +1795,12 @@ function activityGlance(AKB, shift) {
   const onlineMin = covered.reduce((a, d) => a + d.online.reduce((x, o) => x + (o.e - o.s), 0), 0);
   const idle = Math.max(0, onlineMin - covered.reduce((a, d) => a + (d.on_job_min || 0), 0));
   const jobs = sum((d) => (d.jobs || []).length);
-  const noDrop = sum((d) => d.unknown_end);
+  /* Cancellations are counted apart from missing dropoffs, from the jobs
+     themselves (see cancelOf): "20 with no dropoff reported" was twenty
+     cancellations told to the reader as gaps in the channel's record. */
+  const cx = cancelParties(rows.flatMap((d) => d.jobs || []));
+  const noDrop = rows.reduce((a, d) => a + (d.jobs || []).filter((j) => j.e == null && !cancelOf(j)).length, 0);
+  const done = jobs - cx.total;
   const h = (m) => `${fmt(m / 60, 1)} h`;
   const over = all.length > rows.length ? ` · over the last ${fmt(rows.length)} days drawn` : '';
   const noAvail = 'none of these days carries availability — only Uber publishes it, and only for 31 days';
@@ -1713,7 +1814,10 @@ function activityGlance(AKB, shift) {
       sub: `${span ? Math.round((waited / span) * 100) : 0}% of first request to last dropoff` } : { label: 'Waiting between jobs', na: noJob },
     covered.length ? { label: 'Online', value: h(onlineMin), sub: `availability for ${fmt(covered.length)} of ${countOf(rows.length, 'day')}` }
       : { label: 'Online', na: noAvail },
-    { label: 'Jobs', value: fmt(jobs), sub: noDrop ? `${fmt(noDrop)} with no dropoff reported` : (jobs ? 'every one with a dropoff time' : 'no job in this window') },
+    { label: 'Jobs', value: fmt(done),
+      sub: [cx.total ? `${fmt(cx.total)} more cancelled — ${cx.words}` : null,
+        noDrop ? `${fmt(noDrop)} with no dropoff reported` : null].filter(Boolean).join(' · ')
+        || (done ? 'every one with a dropoff time' : 'no job in this window') },
   ]);
 }
 function activityAbsence(root, shift, kept) {
