@@ -11656,3 +11656,44 @@ DeepSeek's extra claims went to hours and weekdays and came back refuted (15:00 
 immaterial; Seed's extras were smaller but real (longer trips in the morning, on Uber, and from Hotel).
 **The default is Seed 2.0 Pro.** One pass per model is a small sample — the nightly passes will tell more;
 `ANALYST_MODEL` in DigitalOcean overrides the default without a code change.
+
+## Uber's per-driver cash block — documented, and whether we are approved — 2026-11-16
+
+The operator asked whether the Uber API can stop or allow cash trips for specific drivers. **It can, on paper,
+through two documented endpoints. Uber has to grant each one first, and the page says "Privileged and
+Confidential … still under development and is subject to change without notice".**
+
+| | write | read |
+|---|---|---|
+| endpoint | `POST /v1/vehicle-suppliers/cash-block-action` | `POST /v1/vehicle-suppliers/query-cash-block-actions` |
+| scope | `vehicle_suppliers.cash_block.write` | `vehicle_suppliers.cash_block.read` |
+| grant | Authorization Code (not client credentials) | Authorization Code |
+| body | `{supplier_uuid, earner_cash_block_actions:[{earner_uuid, action}], effective_at}`; several drivers per call; `effective_at` schedules an unblock | `{supplier_uuid, earner_uuids[]}` |
+| answer | `cash_block_overrides[] {supplier_uuid, earner_uuid, effective_at, expires_at, override_activity, block_type}` | the overrides in force; a driver with none is left out |
+
+Sources: developer.uber.com/docs/vehicles/references/api/v1/driver-management/cash-block-action and
+…/query-cash-block-actions; supplier types "Fleets"; 2000 requests an hour.
+
+- **Uber's page contradicts itself on what the actions mean.** Its enum table says `CASH_BLOCK_ACTION_ENABLE`
+  "Enables block on cash trips to the fleet driver". Its notes say "Suppliers can CASH_BLOCK_ACTION_DISABLE
+  cash dispatch for fleet drivers with outstanding cash arrears", and to use ENABLE once they have paid. The
+  sample ENABLE answer comes back `OVERRIDE_ACTIVITY_BLOCK`, which sides with the table. Ask Uber before building
+  a switch on it.
+- `block_type` says who set a block: `BLOCK_TYPE_ADHOC` (by hand in the Supplier Portal), `BLOCK_TYPE_CONFIG`
+  (automatic, by an Uber rule we cannot see) or `BLOCK_TYPE_API`. So a per-driver block exists in the portal today.
+- **Uber documents no per-driver cash balance or arrears field.** `netOutstanding` is net earnings, not cash held.
+  We have cash per trip (`uber_live_transaction.cash_collected`) but no remittance event, so who is over a cash limit
+  stays unmeasurable (see the cash-position note above).
+- Both fleets already have their own OAuth client (`UBER_CLIENT_ID[_EGARI]` on the collector). Neither asks for a
+  cash-block scope (`src/config.js`, `config.uber.oauth.scope`), and nothing calls either endpoint.
+- Uber's authorization guide says the scopes an app holds are listed in the developer dashboard, in the app's
+  settings, as "Scopes Authorized" under Access Token. It does not say whether issuing a new client-credentials
+  token retires older ones.
+
+**Checked from production.** The nightly provider probe (`src/probe.js`, `cashScopeCheck`) asks each distinct client
+for each cash-block scope at the token endpoint, alone, and calls neither cash-block endpoint. It runs at every
+collector boot and at 22:20 UTC; the answer is the `uber / cash-block-scope:<fleet>` row of `/api/probe/results`:
+`granted` yes / no / unknown and Uber's short code. "yes" is conclusive. "no" with `invalid_scope` means the client
+cannot get the scope by client credentials, and because Uber documents these scopes on the Authorization Code
+grant, that is not proof Uber refused the app. A check that was issued a token forgets the process's cached Uber
+grants (`forgetUberTokens`), because nothing recovers a retired token from a 401.

@@ -57,6 +57,18 @@ import { noteCredential } from '../auth_state.js';
    reproduced by the fix for it. */
 const cache = new Map();
 
+/* Drop every cached grant, so the next call asks Uber afresh.
+   ─────────────────────────────────────────────────────────────────────────
+   For src/probe.js's cash-block scope check (2026-11-16), which asks the token
+   endpoint for a scope the collectors never use. Uber's authorization guide
+   does not say whether issuing a client-credentials token retires the ones
+   issued before it, and nothing in this module recovers from a 401: a cached
+   token Uber had retired would fail every Uber call for up to 30 days
+   (expires_in). So a check that was ISSUED a token forgets this process's
+   cache, and the next real call is granted a token newer than the check's. A
+   refused check was issued nothing and forgets nothing. */
+export function forgetUberTokens() { cache.clear(); }
+
 /**
  * @param o an entry from config.uber.orgs, or null for the shared client.
  *   The probes pass nothing and keep the behaviour they have always had.

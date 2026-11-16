@@ -6982,3 +6982,13 @@ and screenshots through `bin/prod-mirror.mjs`):
 (they run only once sign-in is required); PKY and SSO (off until the Owner turns them on); RLS for
 a one-fleet reader (none exists).
 
+
+## UCB – is Uber's per-driver cash block approved for us? (2026-11-16)
+
+| row | what | written | on production | proven |
+|---|---|---|---|---|
+| UCB1 | `cashScopeCheck` in `src/probe.js`: one token grant per cash-block scope per distinct client; no cash-block endpoint called; "granted" read off the token's scope list; a token issued forgets the cached grants | yes | with this PR | `test/uber_cash_scope_probe.test.mjs` (15 checks; four reversions each fail as named in its header) |
+| UCB2 | `forgetUberTokens()` in `src/auth/uber.js` | yes | with this PR | §5 of the same test |
+
+The endpoints, the contradiction on Uber's page, and how to read the probe's answer are in
+`docs/COVERAGE.md` "Uber's per-driver cash block".
