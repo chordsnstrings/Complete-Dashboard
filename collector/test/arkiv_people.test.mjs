@@ -300,16 +300,37 @@ if (want('driver-earnings')) {
   console.log('\n#driver/earnings');
   {
     const { ctx, page } = await open('classic', 'driver/drv-0/earnings');
-    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), rings: document.querySelectorAll('#view svg.donut').length }));
+    const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'), rings: document.querySelectorAll('#view svg.donut').length,
+      labels: [...document.querySelectorAll('#view .kpis:not(.glance) > .kpi .l')].map((l) => l.textContent.trim()) }));
     check('old skin: no 00 band, how riders paid still a ring', !r.band && r.rings === 1, JSON.stringify(r));
+    /* ERN (2026-11-16): the operator asked for it on production, which can
+       still draw this skin, so the old row carries it too. REVERSION: delete
+       the actualEarningsTile(...) line from driver.js. */
+    check('old skin: seven tiles, Actual earnings directly after Platform earnings',
+      r.labels.length === 7 && r.labels.indexOf('Actual earnings') === r.labels.indexOf('Platform earnings') + 1
+      && r.labels.indexOf('Platform earnings') >= 0, JSON.stringify(r.labels));
     await ctx.close();
   }
   {
     const { ctx, page, answer } = await open('arkiv', 'driver/drv-0/earnings');
     const s = await shape(page);
     const k = answer('/api/driver/kpis');
-    check('00: the six tiles, booked revenue the hero, the same figures, untoned', s.glance === 6 && s.hero === 'Booked revenue'
+    /* Seven since 2026-11-16 (ERN): Actual earnings, the operator's "actual
+       earning just after platform share". It is k.day_money — the figure the
+       Overview prints as Money in — and not the payout beside it.
+       REVERSION: delete the actualEarningsTile(...) line from driver.js and
+       the count, the order and the value all fail; read k.reported_earnings
+       for its value and the third fails. */
+    check('00: the seven tiles, booked revenue the hero, the same figures, untoned', s.glance === 7 && s.hero === 'Booked revenue'
       && s.values['Booked revenue'] === aedOf(k.revenue) && (await toned(page)).length === 0, JSON.stringify(s.values));
+    check('00: Actual earnings sits directly after Platform earnings',
+      s.labels.indexOf('Platform earnings') >= 0 && s.labels.indexOf('Actual earnings') === s.labels.indexOf('Platform earnings') + 1,
+      JSON.stringify(s.labels));
+    check('…reading day_money (Money in\'s figure), not the payout, and saying what is in it',
+      s.values['Actual earnings'] === aedOf(k.day_money) && s.values['Actual earnings'] !== aedOf(k.reported_earnings)
+      && /the driver\u2019s cash in hand included, not netted off/.test(s.subs['Actual earnings'] || '')
+      && /It is Money in on the Overview, the same figure/.test(s.subs['Actual earnings'] || ''),
+      JSON.stringify([s.values['Actual earnings'], aedOf(k.day_money), (s.subs['Actual earnings'] || '').slice(0, 90)]));
     const mix = answer('/api/driver/mix');
     const bar = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => /How riders paid/.test(x.querySelector('h3')?.textContent || ''));
       const segs = p ? [...p.querySelectorAll('svg rect[data-share], svg rect')].map((r) => r.getAttribute('fill') || r.style.fill) : [];
@@ -323,6 +344,19 @@ if (want('driver-earnings')) {
   {
     const { ctx, page } = await open('arkiv', 'driver/drv-0/earnings', { width: 390 });
     check('#driver/earnings at 390: nothing scrolls sideways', (await shape(page)).overflowX <= 0);
+    await ctx.close();
+  }
+  {
+    /* NOTHING REACHED THESE DATES: day_money null. The tile is ABSENT with its
+       reason in the value slot (bandTiles' na), never AED 0 — and the payout
+       beside it is named as not the earnings. REVERSION: render the absent
+       branch as money(0) in api/public/actualearnings.js. */
+    const { ctx, page } = await open('arkiv', 'driver/drv-0/earnings', { fixtures: {
+      '/api/driver/kpis': (_q, real) => ({ ...real, day_money: null, day_stmt_net: null, day_cash: null }) } });
+    const s = await shape(page);
+    check('no money record: Actual earnings absent with the true reason, not nought',
+      /^no platform statement and no priced booking covers this window, so what their \d[\d,]* bookings earned is not measured — the AED [\d,.]+ under Platform earnings is the payout report/.test(s.na['Actual earnings'] || '')
+      && !/AED 0/.test(s.values['Actual earnings'] || ''), JSON.stringify([s.na['Actual earnings'], s.values['Actual earnings']]));
     await ctx.close();
   }
 }

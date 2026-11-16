@@ -38,9 +38,9 @@ let n = 0;
 const trip = (day, from, to, o = {}) => q(
   `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
      requested_at, ended_at, distance_km, status)
-   VALUES ($1,$2,'ecosine','L900',$3,'Shift Tester',$4,$5,8,'completed')`,
+   VALUES ($1,$2,'ecosine','L900',$3,'Shift Tester',$4,$5,8,$6)`,
   [o.platform || 'uber', `s${n++}`, DRV, `${day}T${from}:00+04:00`,
-    to == null ? null : `${o.endDay || day}T${to}:00+04:00`]);
+    to == null ? null : `${o.endDay || day}T${to}:00+04:00`, o.status || 'completed']);
 
 /* 06:00–06:40, then a 50-minute gap, then 07:30–08:00. */
 await trip(DAY, '06:00', '06:40');
@@ -53,6 +53,24 @@ await trip(DAY, '10:00', '11:00');
 await trip(DAY, '10:40', '11:20');
 /* And a job that runs past midnight into the next Dubai day. */
 await trip(DAY, '23:40', '00:25', { endDay: '2026-08-21' });
+
+/* A DAY OF CANCELLATIONS (the operator, 2026-11-16: "the specific rider
+   cancelled or driver cancelled on the activity doesn't show properly"). Every
+   cancellation came back as a booking with e = null and was counted — and
+   drawn — as "no dropoff reported": on the operator's driver, all twenty of
+   "122 jobs, 20 with no dropoff reported" were cancellations. One of each
+   party the Cancellations page distinguishes, in the channels' own words, a
+   Yango cancellation that carries an end (47 of the 56 cancelled rows with an
+   end since 1 October are Yango's), and one completed booking whose dropoff
+   is genuinely missing, which is the only "no dropoff" on the day. */
+const CXDAY = '2026-08-22';
+await trip(CXDAY, '08:00', '08:30');
+await trip(CXDAY, '09:00', null, { status: 'rider_cancelled' });
+await trip(CXDAY, '10:00', null, { status: 'driver_cancelled' });
+await trip(CXDAY, '11:00', null, { platform: 'bolt', status: 'driver_rejected' });
+await trip(CXDAY, '12:00', null, { platform: 'bolt', status: 'client_did_not_show' });
+await trip(CXDAY, '13:00', '13:20', { platform: 'yango', status: 'cancelled' });
+await trip(CXDAY, '14:00', null);
 
 const { server, get } = await mountAll(db, { serverRoutes: false });
 const r = await get(`/api/driver/shift?id=${DRV}&days=365`);
@@ -109,8 +127,37 @@ check('the response states, in words, that the ride cannot be separated from '
   + 'the approach — so no renderer invents a third band',
   /pickup time/i.test(r.body.basis || '') && /approach/i.test(r.body.basis || ''),
   r.body.basis);
-check('and how many bookings across the window carry no dropoff at all',
-  r.body.unknown_end === 1, String(r.body.unknown_end));
+check('and how many bookings across the window carry no dropoff at all — one on each day; '
+  + 'the five cancellations are not among them',
+  r.body.unknown_end === 2, String(r.body.unknown_end));
+
+console.log('\nshift: a cancellation is a cancellation, not a missing dropoff');
+const cx = (r.body.days || []).find((d) => d.day === CXDAY) || {};
+const at = (m) => (cx.jobs || []).find((j) => j.s === m) || {};
+/* REVERSIONS (each run, each failing as named):
+     · the job builder's `if (!j.cancel_by)` guard on the unknown count
+       removed → "only the completed booking" fails (5, not 1)
+     · cancel_by left off the job → "each says who ended it" fails
+     · `declined` left off → "a Bolt offer declined" fails */
+check('only the completed booking with no end counts as no dropoff reported',
+  cx.unknown_end === 1, String(cx.unknown_end));
+check('each cancellation says who ended it, in the Cancellations page\'s words',
+  at(540).cancel_by === 'rider' && at(600).cancel_by === 'driver' && at(660).cancel_by === 'driver'
+    && at(720).cancel_by === 'rider' && at(780).cancel_by === 'unattributed' && at(480).cancel_by === null
+    && at(840).cancel_by === null,
+  JSON.stringify((cx.jobs || []).map((j) => [j.s, j.cancel_by])));
+check('a Bolt offer declined is told apart from a dispatch the driver abandoned',
+  at(660).declined === true && at(600).declined === false, JSON.stringify([at(660), at(600)]));
+check('the channel\'s own word comes with it, so the page can say "did not show"',
+  at(720).status === 'client_did_not_show' && at(540).status === 'rider_cancelled', JSON.stringify(at(720)));
+check('the day counts them by party: 2 rider, 2 driver, 1 not said by whom',
+  cx.cancelled === 5 && cx.cancelled_by?.rider === 2 && cx.cancelled_by?.driver === 2 && cx.cancelled_by?.unattributed === 1,
+  JSON.stringify([cx.cancelled, cx.cancelled_by]));
+check('…and so does the window', r.body.cancelled === 5 && r.body.cancelled_by?.rider === 2
+  && r.body.cancelled_by?.driver === 2 && r.body.cancelled_by?.unattributed === 1, JSON.stringify([r.body.cancelled, r.body.cancelled_by]));
+check('the time arithmetic is unchanged: 30 min on the completed job + 20 on the Yango '
+  + 'cancellation that carries an end, as src/rollup.js counts it',
+  cx.on_job_min === 50, String(cx.on_job_min));
 
 const none = await get('/api/driver/shift?id=nobody-at-all');
 check('an unknown driver is a clean 404, not a 500',

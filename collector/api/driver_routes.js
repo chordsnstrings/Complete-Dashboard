@@ -25,6 +25,7 @@ const listWordsPlain = (xs) => (xs.length < 2 ? (xs[0] || '') : `${xs.slice(0, -
 /* One definition of a driver's position among their peers — see the pct()
    helper below, which used to be a second copy of it. */
 import { position } from './performance_sql.js';
+import { CANCEL_CASE, DECLINED_SQL } from './cancellation_sql.js';
 import { fleetIncome, COMPLETED_SQL } from './income_sql.js';
 /* The alerts-per-distance rule, shared with the fleet headline and both
    economics ledgers so this page cannot disagree with the tables that link
@@ -2396,8 +2397,18 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               (ended_at IS NOT NULL
                AND (ended_at AT TIME ZONE 'Asia/Dubai')
                  >= ((requested_at AT TIME ZONE 'Asia/Dubai')::date + 1)) AS past_midnight,
-              platform, plate, outcome
-         FROM trip_norm
+              platform, plate, outcome, n.status,
+              /* WHO ENDED A BOOKING THAT DID NOT RUN, from the one definition
+                 of it (api/cancellation_sql.js) rather than a second reading
+                 of the status words: 'rider', 'driver' or 'unattributed', NULL
+                 for anything that was not cancelled. 'declined' separates a
+                 Bolt offer the driver turned down or let pass from a dispatch
+                 they accepted and then abandoned — the Cancellations page
+                 counts the two apart and so does this. See the long note at
+                 the job builder below for what this fixed. */
+              ${CANCEL_CASE} AS cancel_by,
+              (n.outcome = 'not_completed' AND ${DECLINED_SQL}) AS declined
+         FROM trip_norm n
         WHERE ${TW} AND is_booking
         ORDER BY 1, 2`, p);
 
@@ -2427,13 +2438,46 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
            agree. `over` still marks the row either way; a bad timestamp is
            worth seeing. */
         const e = r.e == null ? null : (r.past_midnight ? 1440 : Math.max(r.e, s));
+        /* A CANCELLED BOOKING IS NOT A BOOKING WITH A MISSING DROPOFF (the
+           operator, 2026-11-16, on a driver's 1–15 November: "the specific
+           rider cancelled or driver cancelled on the activity doesn't show
+           properly").
+           ─────────────────────────────────────────────────────────────────
+           Every booking came back as {s, e, outcome} and the page drew any
+           e = null as the hatched "no dropoff reported" marker. A cancelled
+           ride has no end because no ride happened — measured on production,
+           4,371 of the 4,427 cancelled bookings since 1 October carry no
+           ended_at — so
+           every cancellation was drawn and counted as MISSING DATA. On the
+           operator's driver that was all twenty of "122 jobs, 20 with no
+           dropoff reported": 16 Uber rider and driver cancellations and 4
+           Bolt ones, each told to the reader as a gap in the channel's
+           record. A reason that is not the true one, on the page whose
+           subject is how the day was spent.
+
+           So each job now says who ended it, in the words the Cancellations
+           page uses, and the status the channel sent; the page draws a
+           cancellation as a cancellation. The time arithmetic below is
+           UNCHANGED — a cancelled row with no end contributed nothing to on
+           job or waiting before and contributes nothing now, and the few that
+           carry an end (56 of 4,427: 47 Yango `cancelled`, 9 Bolt) still count
+           as src/rollup.js counts them — request to end, which on a booking
+           cancelled after the drive out is time spent on the job — so this
+           panel and the stored driver_day record go on agreeing to the
+           minute. Only the COUNT of unknown ends changes: it
+           is the bookings whose end is genuinely missing, and the
+           cancellations are counted beside it by party. */
+        const cancelBy = r.outcome === 'not_completed' ? (r.cancel_by || 'unattributed') : null;
         return { s, e, over: Boolean(r.past_midnight) || (r.e != null && r.e < s),
-          platform: r.platform, plate: r.plate, outcome: r.outcome };
+          platform: r.platform, plate: r.plate, outcome: r.outcome, status: r.status || null,
+          cancel_by: cancelBy, declined: cancelBy === 'driver' && Boolean(r.declined) };
       });
       let onJob = 0, unknown = 0, overlaps = 0, wait = 0, longest = 0;
       let cursor = null;
+      const cx = { rider: 0, driver: 0, unattributed: 0 };
+      for (const j of jobs) if (j.cancel_by) cx[j.cancel_by] = (cx[j.cancel_by] || 0) + 1;
       for (const j of jobs) {
-        if (j.e == null) { unknown += 1; continue; }
+        if (j.e == null) { if (!j.cancel_by) unknown += 1; continue; }
         onJob += Math.max(0, j.e - j.s);
         if (cursor != null) {
           const gap = j.s - cursor;
@@ -2445,8 +2489,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       const known = jobs.filter((j) => j.e != null);
       const first = jobs.length ? Math.min(...jobs.map((j) => j.s)) : null;
       const last = known.length ? Math.max(...known.map((j) => j.e)) : first;
+      const cancelled = cx.rider + cx.driver + cx.unattributed;
       return { day, jobs, bookings: jobs.length, on_job_min: onJob, wait_min: wait,
         longest_wait_min: longest, overlaps, unknown_end: unknown,
+        cancelled, cancelled_by: cx,
         first_min: first, last_min: last,
         span_min: first == null || last == null ? null : Math.max(0, last - first) };
     }).sort((x, y) => (x.day < y.day ? -1 : 1));
@@ -2577,6 +2623,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
           + 'three-hourly pull and covers at most the last 31 days.',
       online_days: covered,
       unknown_end: out.reduce((a, x) => a + x.unknown_end, 0),
+      cancelled: out.reduce((a, x) => a + x.cancelled, 0),
+      cancelled_by: ['rider', 'driver', 'unattributed'].reduce((o, k) =>
+        ({ ...o, [k]: out.reduce((a, x) => a + (x.cancelled_by[k] || 0), 0) }), {}),
     });
   }));
 

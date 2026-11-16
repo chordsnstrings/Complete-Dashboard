@@ -7187,3 +7187,76 @@ account switch.
 |---|---|---|---|---|
 | EVW-P | **On production** — `6ad5d00`: the first web run (11:28Z) was refused 403 AccessDenied; `/api/status` and #causes give the true reason. | — | measured by GET and in Chromium through the mirror | **live; waits on the operator** (HANDOFF 0.21) |
 | EVW-I1 | **Two browser suites the builder could not run went red in the full run.** `arkiv_work` pinned #causes' section order without the new "Coming up in Dubai"; `arkiv_classic_frozen`'s `causes` hash moved. The Classic diff, production's front end (`01a8b65`) against this branch on the same mock, is three hunks and only EVW's: the "web search" pill and source link on the two web events in the break cards and the events table, and the new `causes-web` panel. Production's own front end on the new mock also moved (443b0b1f), because mockapi's /api/events now carries web rows. | The order check names the new section after "What was on in Dubai"; the Classic `causes` hash is re-recorded (as INT6 did for RET's panel). | `arkiv_work` 137, `arkiv_classic_frozen ONLY=causes` 2, `chart_marks` 151 | written |
+
+## CXA – cancellations on the Activity bars, said by whom (2026-11-16)
+
+The operator, on a driver's 1–15 November: "the specific rider cancelled or driver cancelled on the activity
+doesn't show properly, it shows as red bar. we need to fix it and give users better information."
+
+Measured on production, on that driver: **all twenty of "122 jobs · 20 with no dropoff reported" were
+cancellations** (16 Uber, 4 Bolt). `/api/driver/shift` returned every booking as {s, e, outcome}, and the page drew any
+e = null as the hatched "no dropoff reported" marker — a claim about the channel's record that is false of a ride
+nobody took (4,371 of the 4,427 cancelled bookings since 1 October carry no `ended_at`). Of the driver's five red
+"unbooked journey" bars, one (1 Nov 18:32–21:13, 130 km) had a rider-cancelled Uber request on the same car at 20:56
+inside it, and the bar said nothing about it; the other four had no booking near them. Across the latest 300 unbooked
+journeys, 21 had a cancelled booking on the same car from 45 minutes before to their end (14 Uber rider cancellations).
+
+| row | what | written | on production | proven |
+|---|---|---|---|---|
+| CXA1 | `/api/driver/shift`: each job carries `status`, `cancel_by` (rider / driver / unattributed, from `api/cancellation_sql.js` CANCEL_CASE — the Cancellations page's own definition) and `declined` (a Bolt offer turned down or let pass, apart from a dispatch abandoned); each day and the window carry `cancelled` and `cancelled_by`; `unknown_end` counts only bookings that were NOT cancelled. Time arithmetic unchanged, so the panel and `driver_day` still agree (the 56 cancellations with an end, 47 Yango, still count request to end as `src/rollup.js` does). | yes | with this PR | `test/shift.test.mjs` 25 (7 new); reversions: the unknown-count guard (2 fail), `cancel_by` left off (5), `declined` left off (1) |
+| CXA2 | The strip: a cancellation is a struck box at its request, by who ended it — rider (hollow), driver after accepting (solid), an offer declined (dotted), not said by whom (grey) — never the hatch; titles in words ("rider cancelled", "the rider did not show", "driver cancelled after accepting", "offer declined by the driver", "cancelled — the channel does not say by whom"); the legend names only the forms drawn; the jobs column reads "3 +5✕"; the Jobs tile counts jobs and says the cancellations by party; a caption says what a cancellation is on this chart. An older response (outcome only) is read as "not said by whom", never as a missing dropoff. | yes | with this PR | `test/activity_cancellations.test.mjs` 19, in Chromium; reversions: the drawing branch (11 fail), the outcome fallback (3) |
+| CXA3 | A red bar names a cancelled booking on THE SAME CAR inside it ("on this car during it: 20:56 uber booking, rider cancelled. A cancelled booking is not a ride, so it does not explain this journey"), and the cancellation is drawn above it. The reconciler is unchanged: a ride nobody took does not explain a journey. | yes | with this PR | same file §4; reversions: the naming (1 fail), the z-index (1) |
+
+Unchanged on purpose: pages with no cancellations render byte-identically (`arkiv_classic_frozen ONLY=driver/`, 15 routes
+pass), and `driver_day.unknown_end` in the stored record still counts every booking with no end — read by nothing that
+calls it a missing dropoff today.
+
+## ERN – Actual earnings tile on the driver Money tab (2026-11-16)
+
+The operator, over a screenshot of a driver's "00 AT A GLANCE" row for October 2026 (Booked revenue,
+Average fare, Platform earnings, Tips, Cash collected, Revenue per km): "also add another modal for
+actual earning just after platform share as well." That row is the driver page's **Earnings** tab
+(`#driver/<id>/earnings`, `tabEarnings`); the tab labelled Money is the ledger and carries none of
+those tiles. Built on branch `fix/actual-earnings` from production's head `fac7894`. **Not deployed.**
+
+**The definition.** Actual earnings is `driver_day.money` — the platform statement's net where a channel
+filed one, the bookings' own fares where it did not — read as `day_money` off the `/api/driver/kpis`
+response the tab already fetches. It is the figure the Overview prints as Money in and the Money tab as
+Income, so the three cannot disagree; the API is unchanged. Platform earnings beside it is
+`driver_payout_day`, which for Uber is netOutstanding, the bank transfer after the cash the driver already
+took — one of the two places the money lands, not the money. Refused, with the measurement for each in
+the header of `api/public/actualearnings.js`: Counted (the same payout rows by day — a re-label),
+Platform earnings + Cash collected (overshoots by AED 421–621 a month; the identity closed on 1 of 260
+driver-windows), Bank deposit (the bank side alone), the statement net alone (Uber's half only), and
+fleetIncome's `accounted` (never printed on this page; counts Yango on its payout).
+
+| # | what | file | test | state |
+|---|---|---|---|---|
+| ERN1 | **The tile**, directly after Platform earnings, in both skins. Value `day_money`. Sub-line: what the work earned, the driver's cash in hand included and not netted off, the statements' tips not; the statement half after commission and the priced half before it, each with its amount; the weekly grain in Money in's words (`grainClause`); "It is Money in on the Overview, the same figure"; Platform earnings named as the payout report (for Uber the bank transfer) and not added | `api/public/actualearnings.js`; `api/public/driver.js` (import, EARN_TILES); `ui.js` exports `moneyParts`, `grainClause` (no behaviour change) | `actual_earnings_tile` 24/0; `arkiv_people ONLY=driver-earnings` 10/0 | written, not deployed |
+| ERN2 | **Absent with the true reason, never nought.** `day_money` null → a dash (an `na` in the Arkiv band) reading "no platform statement and no priced booking covers this window, so what their N bookings earned is not measured", or the wider "no booking of any kind…" where the driver did not work — and where a payout exists, it is named as not the earnings. A published nought (Uber's 0.00 statements) stays AED 0.00 through moneyInTile's own branch | `actualearnings.js` | `actual_earnings_tile` §5; `arkiv_people` "no money record…" (a fixture with `day_money` null); `driver_empty_window_page` 67/0 | written, not deployed |
+| ERN3 | **Partial: a floor only where money is missing by construction.** "at least" and a leading sentence when fleetIncome's `dark_bookings` > 0 (a channel reporting no money for bookings); NOT on `trips > priced_trips`, which on production driver 1 (30 unpriced of 502, 43 not completed, statement on 31 of 31 days, `dark_bookings` 0) would be a false reason. Where the statements reach fewer of the window's days than it has: "on the others only a booking's own fare counts" | `actualearnings.js` | `actual_earnings_tile` §4 | written, not deployed |
+| ERN4 | **The tab's "none of it carries a money figure" banner** counts `day_money` too, so it cannot deny a figure this tab now prints | `driver.js` (`moneyMeasured`) | `actual_earnings_tile` §6 | written, not deployed |
+| ERN5 | **Classic fixture** re-recorded for `driver/drv-0/earnings` only: the base (`fac7894`) and this branch differ by the new tile and the row's `--kpi-n` 6 → 4 (seven tiles lay out 4 + 3), nothing else | `test/fixtures/arkiv_classic_frozen.json` | `arkiv_classic_frozen ONLY=driver/drv-0` 12/0 | written |
+
+**Production, October 2026** (`/api/driver/kpis?from=2026-10-01&to=2026-10-31`, GET only), what the tile
+would show beside Platform earnings: driver 1 **AED 21,699.83** against 18,177.30; driver 2 **AED
+21,680.86** against 19,181.28; driver 3 **AED 15,570.80** against 13,758.13. COVERAGE "What a driver
+actually earned, against what the platform paid" has the parts.
+
+**Revert-proved** (each made, each failed the named checks, each restored byte for byte):
+the value read from `reported_earnings` (`actual_earnings_tile` 4 fail; `arkiv_people` 1); the value read
+from `accounted` (4 fail); the floor gated on `trips > priced_trips` (5 fail); the absent branch rendered as
+`money(0)` (`actual_earnings_tile` 2; `arkiv_people` 1); the tile's line deleted from `driver.js`
+(`actual_earnings_tile` 1; `arkiv_people` 5).
+
+**Rendered** in Chromium against mockapi on :8323, `#driver/drv-1/earnings`, Arkiv and Classic at 1280 and
+390, service workers blocked: the tile fourth, after Platform earnings; no horizontal overflow; no page
+or console error. Neighbours run one at a time: `driver_money_tiles` 82, `driver_fares` 19,
+`lazy_pages` 27 (first screen 1,252 KB), `held_fields` 45, `components` 17, `arkiv_fils
+ONLY=driver/drv-0/earnings` 2, `signed` 14, `fare_reason_shared` 8, `interlinking` 11,
+`pinned_identity` 105, `query_params` 12, `kpi_one_tile` 20, `endpoint_coverage` 4, `agent_units` 59.
+
+**Not done:** the Overview's Money in still writes "at least … a floor rather than the total" on
+`trips > priced_trips` (COVERAGE trap above) — left alone here because it is a different tile in two
+shells; the phone shell (`api/public/m/`) has no Platform earnings tile, so it was not given this one.
+No HANDOFF row: nothing here is live, and the integrator adds one on deploy.
