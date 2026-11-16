@@ -36,7 +36,9 @@ const hhmm = (m) => (m >= 1440 ? '24:00'
 const dur = (m) => (m == null ? '—' : m < 60 ? `${m} min`
   : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`);
 const pct = (x) => (x == null ? null : `${Number(x).toFixed(1)}%`);
-const shiftDay = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
+/* Midday UTC, the house anchor (test/timezone.test.mjs): date arithmetic on a
+   YYYY-MM-DD, never a clock read, and noon cannot cross a date either way. */
+const shiftDay = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
 const UNNAMED = 'unnamed ground';
 const UNNAMED_WHY = 'no trip in the fleet’s history has named this half-kilometre cell';
 const trackerWord = (s) => (s === 'fms' ? 'FMS' : s === 'cabman' ? 'CABMAN' : sourceLabel(s));
