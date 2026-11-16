@@ -111,8 +111,12 @@ console.log('\n§2 a past day, at 1280');
     const cs = getComputedStyle(x);
     return [x.dataset.kind, { bg: cs.backgroundColor, img: cs.backgroundImage, border: cs.borderStyle }];
   })));
-  check('watched is solid, inferred is hatched, unknown is outlined', style.stay.img === 'none' && style.stay.bg !== 'rgba(0, 0, 0, 0)'
-    && /repeating-linear-gradient/.test(style.parked.img) && /repeating-linear-gradient/.test(style.booking.img)
+  /* Independent review, 2026-11-16: a booking in a silence is unknown (its
+     ends pinned, its route not), so it is OUTLINED like every unknown
+     stretch — hatched, it read as inferred. REVERSION: .whr-booking back to
+     the hatched gradient in app.css — this fails. */
+  check('watched is solid, inferred is hatched, unknown is outlined — a booking in a silence too', style.stay.img === 'none' && style.stay.bg !== 'rgba(0, 0, 0, 0)'
+    && /repeating-linear-gradient/.test(style.parked.img) && style.booking.img === 'none' && style.booking.border === 'dashed'
     && style.moved.border === 'dashed', JSON.stringify(style));
   const anchors = await page.$$eval('.whr-pins > .whr-anchor', (xs) => xs.map((x) => x.title));
   check('a booking in a quiet stretch anchors the car — "from a booking, not a tracker fix"', anchors.length === 2
@@ -123,6 +127,11 @@ console.log('\n§2 a past day, at 1280');
   const stays = await page.$$eval('[data-panel="whr-stays"] tbody tr', (rs) => rs.map((r) => r.innerText.replace(/\s+/g, ' ')));
   check('the stays table lists each stay with how it is known', stays.length === 4 && /Al Barsha 1/.test(stays[0])
     && /parked with the tracker quiet .* \(inferred\)/.test(stays[0]) && /tracker fixes every/.test(stays[1]), JSON.stringify(stays));
+  /* Independent review, 2026-11-16: the stay carried in says since when — the
+     mock's evening stay began after a drive home at 18:15, so exactly, never
+     "at least". REVERSION: drop the time from the From column — this fails. */
+  check('…a stay carried in from the day before says since when (exactly, after a drive)',
+    /\(since 18:15 the day before\)/.test(stays[0]) && !/at least/.test(stays[0]), stays[0]);
   const log = await page.$$eval('[data-panel="whr-log"] tbody tr', (rs) => rs.length);
   check('the log has a row for every stretch on the strip', log === segs.length, `${log} vs ${segs.length}`);
   check('the drive with an FMS journey says whose distance it is', /FMS journey/.test(text));
@@ -130,8 +139,10 @@ console.log('\n§2 a past day, at 1280');
   check('the † band names all four things the page cannot know', JSON.stringify(band)
     === JSON.stringify(['Position between fixes', 'Parked with the tracker quiet', 'Silent over a day', 'Areas'])
     && /half-kilometre cell/.test(text), JSON.stringify(band));
-  check('…each with its figure sized: 35 min moved unseen, 4 h parked-quiet, no day-long silence',
-    /Position between fixes 35 min/i.test(text) && /Parked with the tracker quiet 4 h/i.test(text) && /Silent over a day No/i.test(text), text.slice(-900));
+  /* 35 min moved unseen plus the 35-minute booking in that silence: a job
+     pins its ends, not the road between (independent review, 2026-11-16). */
+  check('…each with its figure sized: 1 h 10 min unplaced (moved unseen, on a booking or not), 4 h parked-quiet, no day-long silence',
+    /Position between fixes 1 h 10 min/i.test(text) && /Parked with the tracker quiet 4 h/i.test(text) && /Silent over a day No/i.test(text), text.slice(-900));
   check('the page says what it was built from', /never both mixed/.test(text) && /FMS's own journeys/.test(text));
   const foot = await page.evaluate(() => document.querySelector('#pageFoot .pf-colophon')?.innerText || '');
   check('the colophon names the car, the day and the tracker', /L45235/.test(foot) && foot.includes(YDAY) && /FMS/.test(foot), foot);

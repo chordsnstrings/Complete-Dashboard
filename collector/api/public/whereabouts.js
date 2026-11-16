@@ -55,6 +55,7 @@ const where = (s) => {
   return '—';
 };
 const BASIS_WORD = { fixes: 'tracker fixes', inferred: 'inferred', unknown: 'not known' };
+const sinceTime = (iso) => new Date(Date.parse(iso) + 4 * 3600e3).toISOString().slice(11, 16);
 
 export async function tabWhereabouts(root, plate) {
   const gen = currentGen();
@@ -108,9 +109,12 @@ export async function tabWhereabouts(root, plate) {
     { label: 'Positioned by fixes', value: pct(c.positioned_pct), hero: true,
       sub: `${dur(c.positioned_min)} of ${dur(c.minutes)} — the tracker watched it stand or drive` },
     { label: 'Inferred', value: pct(c.inferred_pct),
-      sub: `${dur(c.inferred_min)} — parked with the tracker quiet${wb ? ', or on a booking while it was silent' : ''}` },
+      sub: `${dur(c.inferred_min)} — parked with the tracker quiet` },
+    /* A booking in a silence is counted here, with its two ends pinned
+       above the strip: the job places the car at its pickup and drop-off,
+       not on the road between (independent review, 2026-11-16). */
     { label: 'Unknown', value: pct(c.unknown_pct),
-      sub: `${dur(c.unknown_min)} — moved unseen, before the first fix or after the last, or silent` },
+      sub: `${dur(c.unknown_min)} — moved unseen${wb ? ' (on a booking or not)' : ''}, before the first fix or after the last, or silent` },
     /* A tracker that sent nothing this day is named with its silence, never
        as "0 fixes" beside its name — which reads as a tracker that worked and
        found nothing (the render pass caught it on a unit dead for days). */
@@ -173,9 +177,11 @@ export async function tabWhereabouts(root, plate) {
   stripP.body.append(legend);
   if (!wb) stripP.body.append(note(`Bookings: ${withheldSentence('BK', { level: 'A' })} So the quiet stretches are left as the tracker left them; a job that ran in one is not shown.`));
   else if (wb.bookings) {
+    /* Stretches, not bookings: one job that runs quiet–watched–quiet is two
+       stretches, and counting them as bookings said "2" of one. */
     const inQuiet = segs.filter((s) => s.quiet === 'booking').length;
     stripP.body.append(el('p', 'cap', esc(`${wb.bookings} completed ${wb.bookings === 1 ? 'booking' : 'bookings'} in this car that day; `
-      + `${inQuiet ? `${inQuiet} fell in a quiet stretch and place${inQuiet === 1 ? 's' : ''} the car there, labelled “from a booking”` : 'none fell in a quiet stretch'}.`)));
+      + `${inQuiet ? `${inQuiet} quiet ${inQuiet === 1 ? 'stretch was' : 'stretches were'} on a booking — its pickup and drop-off pin the car there, labelled “from a booking”, the route between is not known` : 'none fell in a quiet stretch'}.`)));
   }
   if (tr.second) {
     stripP.body.append(el('p', 'cap', esc(`This car also carries a ${trackerWord(tr.second.source)} unit (${tr.second.fixes} fixes that day). `
@@ -192,7 +198,10 @@ export async function tabWhereabouts(root, plate) {
     stayP.body.append(tableFrom(stays, [
       { label: 'Area', key: 'area', render: (s) => (s.area ? esc(s.area)
         : `<span class="dim" title="${esc(UNNAMED_WHY)}">${esc(UNNAMED)}</span>`) },
-      { label: 'From', key: 'start_min', render: (s) => esc(s.from) + (s.carried_in ? ' <span class="dim">(since the day before)</span>' : '') },
+      /* The time it was there since, and "at least" when that is the earliest
+         fix the day was read with — the stay may reach further back. */
+      { label: 'From', key: 'start_min', render: (s) => esc(s.from) + (s.carried_in
+        ? ` <span class="dim">(since ${s.since_at_least ? 'at least ' : ''}${esc(sinceTime(s.since))} the day before)</span>` : '') },
       { label: 'To', key: 'end_min', render: (s) => esc(s.to) + (s.carried_on ? ' <span class="dim">(and on)</span>' : '') },
       { label: 'For', key: 'minutes', num: true, render: (s) => esc(dur(s.minutes)) },
       { label: 'How it is known', key: 'basis', render: (s) => esc(s.how) },
@@ -218,9 +227,13 @@ export async function tabWhereabouts(root, plate) {
   const minsOf = (k) => segs.filter((s) => kindOf(s) === k).reduce((a, s) => a + s.minutes, 0);
   const unnamed = stays.filter((s) => !s.area).length;
   const cells = [
-    { label: 'Position between fixes', fig: minsOf('moved') ? dur(minsOf('moved')) : null, none: 'None today',
+    /* A booking in a silence is movement nobody tracked as well: its two ends
+       are pinned, the minutes between are not placed. "None", never "None
+       today": the tab draws any day. */
+    { label: 'Position between fixes', fig: minsOf('moved') + minsOf('booking') ? dur(minsOf('moved') + minsOf('booking')) : null, none: 'None',
       why: 'Trackers send points, not routes. A drive is “from → to” with the distance its fixes walked; a stretch the car moved through '
-        + 'while the tracker was silent has no route at all — its two ends and how far apart they are, and nothing drawn between.' },
+        + 'while the tracker was silent has no route at all — its two ends and how far apart they are, and nothing drawn between. '
+        + 'A booking in such a stretch pins where the job began and ended, not the road between.' },
     { label: 'Parked with the tracker quiet', fig: minsOf('parked') ? dur(minsOf('parked')) : null, none: 'None',
       why: `Inferred, never watched: a fix at one spot either side and no report between. Trackers file on movement, but past their rhythm `
         + `(CABMAN ${r.rules?.parked_cadence_min?.cabman ?? 70} min, FMS ${r.rules?.parked_cadence_min?.fms ?? 30}) whether the unit was alive in between is not known.` },

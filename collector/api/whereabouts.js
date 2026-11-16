@@ -81,8 +81,15 @@
    · A booking never becomes a tracker fix. Where a completed booking's span
      falls in a quiet stretch it says the car was on a job then, and its
      drop-off (and its pickup, where the trip's duration places it) anchors
-     the car's ground at that minute — labelled "from a booking", counted as
-     inferred. A booking inside a "parked, tracker quiet" stretch proves the
+     the car's ground AT THAT MINUTE — labelled "from a booking". The minutes
+     of the job between those two pins are counted UNKNOWN, not inferred
+     (independent review, 2026-11-16): a job says what the car was doing and
+     where it began and ended, not where it was at 12:40 — exactly what a
+     "moved while the tracker was silent" stretch says, and this module
+     counts that unknown when its two ends are fixes 21 minutes apart. Read
+     as inferred, a 40-minute job in a silence moved 40 minutes from unknown
+     to inferred on the page's headline while placing the car at two minutes
+     of them. A booking inside a "parked, tracker quiet" stretch proves the
      car did NOT stand still, so the stretch around it becomes "moved while
      the tracker was silent".
    · Coverage is three figures — watched, inferred, unknown — and never one.
@@ -136,8 +143,10 @@ const round1 = (x) => Math.round(x * 10) / 10;
 const fmtDur = (m) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`);
 const placeWord = (a) => a || 'ground the fleet has no name for';
 
-/* The three bases a minute can rest on. */
-export const BASIS = Object.freeze({ stay: 'fixes', drive: 'fixes', parked: 'inferred', booking: 'inferred',
+/* The three bases a minute can rest on. A booking's span is 'unknown': its
+   two ends are pinned (anchors), the minutes between are not placed — see
+   "WHAT IS NEVER DONE" above. */
+export const BASIS = Object.freeze({ stay: 'fixes', drive: 'fixes', parked: 'inferred', booking: 'unknown',
   moved: 'unknown', before_first: 'unknown', after_last: 'unknown', silent: 'unknown', no_tracker: 'unknown' });
 
 /* Interval class from its two ends. Exported for the test. */
@@ -254,7 +263,17 @@ export function whereaboutsDay({ day, points = [], bookings = [], journeys = [],
     for (const x of iv) push(x.cls, x.a.t, x.b.t, { iv: x, run: x.run, last: x.a, next: x.b });
     const last = P[P.length - 1];
     if (last.t < end) {
-      const quietFor = (end - last.t) / MIN;
+      /* Quiet until NOW, not until the end of the day (independent review,
+         2026-11-16). The route reads the first fix after the day, so a last
+         fix with nothing after it is a tracker that has not reported since —
+         and the interval rule above calls a gap over a day 'silent' the moment
+         a next fix closes it. Measured to the day's end instead, a unit that
+         died at 01:00 on the 10th and is still dark on the 16th drew the 10th
+         as "after the last fix of the day", and the † band answered "Silent
+         over a day: No" for a tracker six days dark — the same silence named
+         two ways depending on whether it had ended. On a running day now IS
+         the end, so today reads exactly as before. */
+      const quietFor = (nowMs - last.t) / MIN;
       push(quietFor > SILENT_MIN ? 'silent' : 'after_last', Math.max(last.t, d0), end, { last });
     }
   }
@@ -323,6 +342,16 @@ export function whereaboutsDay({ day, points = [], bookings = [], journeys = [],
       const first = pts[0]; const lastP = pts[pts.length - 1];
       s.lat = first?.lat ?? null; s.lng = first?.lng ?? null;
       s.since = first && first.t < d0 ? first.at : null;
+      /* "Since" is a lower bound when the run begins on the EARLIEST fix this
+         day was handed (independent review, 2026-11-16). The route reads
+         LOOK_AROUND_H before midnight plus the one fix before that, so a
+         CABMAN car parked from 10:00 the day before reaches this module as a
+         run starting at its 17:05 heartbeat, and the page said "there since
+         17:05 the day before" of a car that had stood there seven hours
+         longer. Nothing before P[0] was read, so the run may reach further
+         back: it is "since at least". A run that begins after an earlier fix
+         (a drive or a silence before it) began where it says. */
+      s.since_at_least = Boolean(s.since) && first === P[0];
       s.until = lastP && lastP.t > end ? lastP.at : null;
     }
     if (s.kind === 'stay') {
@@ -332,7 +361,10 @@ export function whereaboutsDay({ day, points = [], bookings = [], journeys = [],
         && p.t <= d0 + s.end_min * MIN + 30_000).length;
       s.how = `tracker fixes every ${s.every_min} min`;
       s.say = `Stood in ${placeWord(s.area)}; ${s.how}`
-        + (s.since && s.start_min === 0 ? `, there since ${localStamp(s.since).time} the day before` : '') + '.';
+        + (s.since && s.start_min === 0
+          ? `, there since ${s.since_at_least ? 'at least ' : ''}${localStamp(s.since).time} the day before`
+            + (s.since_at_least ? ' (the earliest fix read for this day)' : '')
+          : '') + '.';
     } else if (s.kind === 'drive') {
       let fixKm = 0;
       for (const x of s.ivs) {
@@ -398,8 +430,8 @@ export function whereaboutsDay({ day, points = [], bookings = [], journeys = [],
         const j = s.job;
         s.platform = j.platform;
         s.from_area = j.pickup_area || null; s.to_area = j.dropoff_area || null;
-        s.say = `On a ${j.platform} booking — from a booking, not a tracker fix: `
-          + `${j.pick != null ? `picked up in ${placeWord(s.from_area)}, ` : ''}dropped off in ${placeWord(s.to_area)} at ${localStamp(j.e).time}.`;
+        s.say = `On a ${j.platform} booking while the tracker was silent — route not known; its ends are from a booking, not a tracker fix: `
+          + `${j.pick != null ? `picked up in ${placeWord(s.from_area)} at ${localStamp(j.pick).time}, ` : ''}dropped off in ${placeWord(s.to_area)} at ${localStamp(j.e).time}.`;
         const anchors = [];
         if (j.pick != null && j.pick >= d0 && j.pick < end) anchors.push({ at: new Date(j.pick).toISOString(), minute: toMin(j.pick), area: s.from_area, end: 'pickup' });
         if (j.e >= d0 && j.e <= end) anchors.push({ at: new Date(j.e).toISOString(), minute: toMin(j.e), area: s.to_area, end: 'dropoff' });
@@ -435,7 +467,8 @@ function staysOf(segs, d0) {
       continue;
     }
     rows.push({ run: s.run, area: s.area, area_votes: s.area_votes, lat: s.lat, lng: s.lng,
-      start_min: s.start_min, end_min: s.end_min, since: s.since, until: s.until, fixes: s.fixes || 0,
+      start_min: s.start_min, end_min: s.end_min, since: s.since, since_at_least: Boolean(s.since_at_least),
+      until: s.until, fixes: s.fixes || 0,
       watched_min: s.kind === 'stay' ? s.minutes : 0, inferred_min: s.kind === 'stay' ? 0 : s.minutes,
       every: s.every_min ? [s.every_min] : [] });
   }
@@ -501,9 +534,9 @@ export function whereaboutsBody({ plate, fleetId = null, days, points = [], book
       watched: `two fixes at one spot within the tracker's parked rhythm (CABMAN ${PARKED_CADENCE_MIN.cabman} min, `
         + `FMS ${PARKED_CADENCE_MIN.fms} min), or at different spots within ${MOVING_CADENCE_MIN} minutes: `
         + 'the tracker files on movement, so it would have reported in between',
-      inferred: 'parked with the tracker quiet past its rhythm (a fix at one spot either side, nothing between), '
-        + 'or on a booking while the tracker was silent',
-      unknown: `moved while the tracker was silent, before the first fix or after the last, or silent over ${SILENT_MIN / 60} hours`,
+      inferred: 'parked with the tracker quiet past its rhythm (a fix at one spot either side, nothing between)',
+      unknown: 'moved while the tracker was silent (on a booking or not: a booking pins its pickup and drop-off, '
+        + `not the route between), before the first fix or after the last, or silent over ${SILENT_MIN / 60} hours`,
     },
     area_why: 'An area is the fleet’s own name for a half-kilometre cell, learnt from its FMS trips; '
       + 'ground the fleet has never driven near has no name and is left unnamed rather than guessed.',

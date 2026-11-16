@@ -2618,9 +2618,11 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 .whr-stay{background:var(--s1)}
 .whr-drive{background:var(--s3)}
 .whr-parked{background:repeating-linear-gradient(45deg,var(--s1) 0 3px,transparent 3px 7px)}
-/* On a booking: movement known from the job, not the tracker — the drive's
-   colour, hatched the other way from parked-and-quiet. */
-.whr-booking{background:repeating-linear-gradient(-45deg,var(--s3) 0 3px,transparent 3px 6px)}
+/* On a booking while the tracker was silent: its two ends are pinned by the
+   job, the route between is not known — so it is OUTLINED like every unknown
+   stretch (independent review, 2026-11-16: hatched, it read as inferred),
+   dashed in the drive's colour to tell it from a silence nobody explains. */
+.whr-booking{border:2px dashed var(--s3)}
 .whr-moved{border:1.5px dashed var(--rule-strong)}
 .whr-before_first,.whr-after_last,.whr-silent,.whr-no_tracker{border:1px dotted var(--rule-strong)}
 .whr-strip>.whr-future{position:absolute;top:0;bottom:0;background:var(--surface)}

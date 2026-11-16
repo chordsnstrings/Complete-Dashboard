@@ -11979,9 +11979,9 @@ Every interval between two consecutive fixes of ONE tracker is judged by its two
 | **stay** | two fixes within 150 m, inside the tracker's parked rhythm (CABMAN 70 min, FMS 30 min); a run of them lasting 10 min or more | watched (`fixes`) |
 | **drive** | two fixes at different spots within 20 min (`GAP_MIN`, the journey map's step); a same-spot pause under 10 min stays inside the drive. km from the fixes, or FMS's own journey distance where a journey lies inside the drive (±10 min) | watched |
 | **quiet: parked** | two fixes within 150 m with a gap past the rhythm: "parked, tracker quiet" | **inferred** |
-| **quiet: booking** | a completed booking's span inside a quiet stretch; its drop-off (and its pickup, where `ended_at − duration_s` places it) anchors the car's area at that minute, "from a booking, not a tracker fix". A booking inside a parked-and-quiet stretch breaks the inference: the rest becomes "moved" | **inferred** |
+| **quiet: booking** | a completed booking's span inside a quiet stretch; its drop-off (and its pickup, where `ended_at − duration_s` places it) anchors the car's area AT THAT MINUTE, "from a booking, not a tracker fix". The minutes between the two pins are not placed: the job says what the car was doing, not where it was at 12:40 (independent review, 2026-11-16 — it was counted inferred, which moved a whole job from unknown to inferred on the headline). A booking inside a parked-and-quiet stretch breaks the inference: the rest becomes "moved" | unknown (its two ends pinned) |
 | **quiet: moved** | different spots, gap over 20 min: "moved while the tracker was silent — route not known", with both ends and how far apart they are in a straight line | unknown |
-| **quiet: before_first / after_last** | no fix of the tracker before (after) the stretch at all | unknown |
+| **quiet: before_first / after_last** | no fix of the tracker before (after) the stretch at all; after the last fix only while the silence, measured to NOW, is under a day — past that it is **silent** (review, 2026-11-16) | unknown |
 | **quiet: silent** | any gap over 24 h, whatever its two ends say: "no reading since …" | unknown |
 | **quiet: no_tracker** | the car has never sent a position | unknown |
 
@@ -12038,4 +12038,20 @@ fetched fixes; the area names were not part of this measurement (the journey rou
   parked FMS hour watched.
 * A gap over a day is never "parked", even when both ends are the same spot: past a day a parked car and a dead unit look
   the same until the car moves.
+* **A stay's "since" is only as early as the earliest fix the day was read with** (independent review, 2026-11-16). The
+  route reads six hours before midnight and the one fix before that, so a CABMAN car parked since 10:00 reaches the
+  segmenter from its 17:05 heartbeat. A run that begins on that earliest fix says "since at least" (`since_at_least`); a
+  run that begins after a drive or a silence began where it says.
+* **A silence with no fix after it is measured to now, not to the end of the day** (same review). The interval rule calls
+  a gap over a day "silent" as soon as a next fix closes it; measured to 24:00, a unit dark for six days drew its last day
+  as "after the last fix of the day" and the † band said "Silent over a day: No".
+
+### Independent review, 2026-11-16 — what changed and what did not
+
+Three corrections, each revert-proven (FIX-STATUS WHR-R1–R3): a booking's minutes in a silence are unknown with two
+pinned ends, not inferred; "since" is "since at least" when the stay begins on the earliest fix read; a silence after the
+last fix is measured to now. None of them moves the coverage measured above: that measurement ran on the trackers' fixes
+alone (no bookings), and "after the last fix" and "silent" are both unknown. What the first changes is
+`coverage_with_bookings`, which can now only move minutes from inferred to unknown (a booking breaking a parked
+inference), never from unknown to inferred.
 

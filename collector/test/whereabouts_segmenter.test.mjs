@@ -163,13 +163,27 @@ console.log('\n§3 quiet gaps: parked (inferred) and moved (unknown)');
 console.log('\n§4 first and last of the day, a dead tracker, no tracker');
 {
   const pts = series(D, '07:00', '20:00', 10);
-  const r = whereaboutsDay({ day: D, points: pts, nowMs: PAST });
+  /* Read the next morning, ten hours after the last fix: "after the last
+     fix" is a silence under a day. (Read on the 20th it is nine days of
+     silence — the review's check below.) */
+  const r = whereaboutsDay({ day: D, points: pts, nowMs: Date.parse(at(NEXT, '06:00')) });
   check('before the first fix of the day is said as such', r.segments[0]?.quiet === 'before_first'
     && r.segments[0].to === '07:00' && /first fix of the day/.test(r.segments[0].say), JSON.stringify(r.segments[0]));
   const last = r.segments[r.segments.length - 1];
   check('…and after the last', last?.quiet === 'after_last' && last.from === '20:00' && last.to === '24:00'
     && /last fix of the day/.test(last.say), JSON.stringify(last));
   check('…both unknown', r.coverage.unknown_min === 7 * 60 + 4 * 60, JSON.stringify(r.coverage));
+  /* Independent review, 2026-11-16: the same last fix with the tracker still
+     dark NINE DAYS later is a silence over a day, the rule the interval
+     classifier applies the moment a next fix closes the gap — never "after the
+     last fix of the day" beside a † band answering "Silent over a day: No".
+     REVERSION: measure after_last's quiet to the day's end (`end - last.t`)
+     instead of to now — this fails, the stretch reads after_last. */
+  const darkSince = whereaboutsDay({ day: D, points: pts, nowMs: PAST });
+  const tailDark = darkSince.segments[darkSince.segments.length - 1];
+  check('a last fix with the tracker dark ever since (over a day, to now) is "no reading since", not "after the last fix"',
+    tailDark?.quiet === 'silent' && tailDark.from === '20:00' && tailDark.to === '24:00'
+    && /No reading since 2026-11-10 20:00/.test(tailDark.say) && tailDark.basis === 'unknown', JSON.stringify(tailDark));
   // A fix the evening before at the same spot: the morning is parked-and-quiet, not "before the first fix".
   const r2 = whereaboutsDay({ day: D, points: [fix('2026-11-09', '22:00'), ...pts], nowMs: PAST });
   check('with a fix the evening before at the same spot, the morning is parked, tracker quiet',
@@ -233,6 +247,23 @@ console.log('\n§5 Dubai midnight');
   check('the first day knows the stay goes on past midnight', a.stays[a.stays.length - 1]?.carried_on === true,
     JSON.stringify(a.stays[a.stays.length - 1]));
   check('both days tile exactly', tiles(a) && tiles(b), `${kinds(a)} | ${kinds(b)}`);
+  check('…and a stay that began after a drive says exactly since when, not "at least"', b.stays[0]?.since_at_least === false
+    && !/at least/.test(firstB.say), JSON.stringify(b.stays[0]));
+  /* Independent review, 2026-11-16: the route reads six hours before
+     midnight and one fix before that. A run that begins on that EARLIEST fix
+     may reach further back, so its "since" is a bound: a CABMAN car parked
+     since 10:00 reached the module from its 17:05 heartbeat and was said to be
+     "there since 17:05". REVERSION: set since_at_least to false always — this
+     fails. */
+  const edge = [...series(D, '17:05', '23:05', 60, () => [0, 0], 'cabman'),
+    ...series(NEXT, '00:05', '08:05', 60, () => [0, 0], 'cabman'),
+    ...series(NEXT, '08:10', '08:40', 5, (i) => [(i + 1) * 800, 0], 'cabman', 'Road'),
+    ...series(NEXT, '09:00', '23:00', 60, () => [8000, 0], 'cabman', 'Far Quarter'),
+    fix('2026-11-12', '00:00', 8000, 0, 'cabman', 'Far Quarter')];
+  const w = whereaboutsDay({ day: NEXT, points: edge, nowMs: PAST });
+  check('a stay that begins on the earliest fix read says "since at least", in the segment and the stays table',
+    w.stays[0]?.carried_in === true && w.stays[0].since_at_least === true && w.stays[0].since === at(D, '17:05')
+    && /there since at least 17:05 the day before/.test(w.segments[0]?.say || ''), JSON.stringify([w.stays[0], w.segments[0]?.say]));
   check('the day before 18:00 had no fix: said, not drawn', a.segments[0]?.quiet === 'before_first' && a.segments[0].to === '18:00',
     JSON.stringify(a.segments[0]));
 }
@@ -250,8 +281,13 @@ console.log('\n§6 a booking in a quiet stretch');
   const bk = r.segments.find((s) => s.quiet === 'booking');
   check('…the booking’s span is "from a booking, not a tracker fix"', bk?.from === '11:00' && bk?.to === '11:40'
     && /from a booking, not a tracker fix/.test(bk.say), JSON.stringify(bk));
-  check('…counted inferred, never positioned', bk?.basis === 'inferred' && r.coverage.inferred_min === 40
-    && r.coverage.positioned_min === 600 + 600, JSON.stringify(r.coverage));
+  /* Independent review, 2026-11-16: a job pins where it began and ended, not
+     the road between — the minutes of a booking in a silence are unknown, as
+     a "moved" stretch with two fixes for ends is. REVERSION: BASIS.booking
+     back to 'inferred' — this fails (inferred 40). */
+  check('…counted unknown, never inferred or positioned: its route is not known', bk?.basis === 'unknown'
+    && /route not known/.test(bk.say) && r.coverage.inferred_min === 0
+    && r.coverage.positioned_min === 600 + 600 && r.coverage.unknown_min === 240, JSON.stringify(r.coverage));
   check('…and its pickup (by the trip’s duration) and drop-off anchor the car’s ground',
     r.anchors.length === 2 && r.anchors[0].end === 'pickup' && r.anchors[0].time === '11:10'
     && r.anchors[0].area === 'Pickup Quarter' && r.anchors[1].end === 'dropoff' && r.anchors[1].time === '11:40'
@@ -268,7 +304,7 @@ console.log('\n§6 a booking in a quiet stretch');
     kinds(rp) === 'stay quiet:moved quiet:booking quiet:moved stay', kinds(rp));
   check('…and says why', rp.segments.filter((s) => s.quiet === 'moved').every((s) => s.broken_by_booking === true
     && /did not stand still/.test(s.say)), JSON.stringify(rp.segments.filter((s) => s.quiet === 'moved')));
-  check('…so none of it is counted parked', rp.coverage.inferred_min === 30, JSON.stringify(rp.coverage));
+  check('…so none of it is counted parked (nor the job itself inferred)', rp.coverage.inferred_min === 0, JSON.stringify(rp.coverage));
   // A booking that began while the tracker watched and ended in the silence:
   // its pickup (09:30, watched) anchors nothing; its drop-off (11:40) does.
   const rl = whereaboutsDay({ day: D, points: pts, nowMs: PAST, bookings: [{ ...bookings[0],

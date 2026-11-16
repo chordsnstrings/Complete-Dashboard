@@ -136,14 +136,19 @@ console.log('\n§2 bookings: completed only, and only where bookings may be seen
     kinds(wb.segments));
   const bk = wb.segments.find((s) => s.quiet === 'booking');
   check('the booking is 12:10–12:40, from a booking, never a fix', bk?.from === '12:10' && bk.to === '12:40'
-    && bk.basis === 'inferred' && /from a booking, not a tracker fix/.test(bk.say), JSON.stringify(bk));
+    && bk.basis === 'unknown' && /route not known/.test(bk.say) && /from a booking, not a tracker fix/.test(bk.say), JSON.stringify(bk));
   check('its pickup is named from the address, its drop-off from the coordinates', bk?.from_area === 'Pickup Town'
     && bk.to_area === 'Home Quarter', JSON.stringify(bk));
   check('both ends anchor the car (pickup by the trip’s duration)', wb.anchors.length === 2 && wb.anchors[0].time === '12:20'
     && wb.anchors[1].time === '12:40' && wb.anchors.every((a) => a.basis === 'booking'), JSON.stringify(wb.anchors));
   check('no driver is named anywhere in the answer', !JSON.stringify(r.body).includes('A Driver'));
-  check('coverage with bookings counts the 30 minutes as inferred', wb.coverage.inferred_min === 270
-    && r.body.coverage_with_bookings.inferred_min === 270 && r.body.coverage.inferred_min === 240, JSON.stringify(wb.coverage));
+  /* Independent review, 2026-11-16: the job pins its two ends, not the road
+     between, so its 30 minutes stay unknown — the with-bookings account moves
+     no minute from unknown to inferred. REVERSION: BASIS.booking back to
+     'inferred' in api/whereabouts.js — inferred reads 270 and this fails. */
+  check('coverage with bookings counts the 30 minutes as unknown — its ends pinned, its route not', wb.coverage.inferred_min === 240
+    && r.body.coverage_with_bookings.inferred_min === 240 && r.body.coverage.inferred_min === 240
+    && wb.coverage.unknown_min === r.body.coverage.unknown_min, JSON.stringify(wb.coverage));
   // Through the real shaper, with each role's real levels.
   const manifest = JSON.parse(readFileSync('api/access/manifest.json', 'utf8'));
   const entry = manifest.find((e) => e.method === 'GET' && e.path === '/api/vehicle/whereabouts');

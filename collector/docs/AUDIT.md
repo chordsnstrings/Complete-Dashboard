@@ -3246,8 +3246,8 @@ dead for days on L40971. Port 8325, `serviceWorkers: 'block'`, `reducedMotion: '
 - **The three figures are never one:** the verdict states positioned, inferred and unknown; the hero is the positioned
   share and the two others are tiles beside it.
 - **Hatched is inferred, outlined is not known, solid is watched** — the strip draws the coverage. A booking in a quiet
-  stretch is the drive's colour hatched the other way (movement known from the job, not the tracker); its pickup and
-  drop-off are pins above the strip, never marks inside it.
+  stretch is outlined, dashed in the drive's colour (its route is not known; review 2026-11-16 — it was hatched, which
+  read as inferred); its pickup and drop-off are pins above the strip, never marks inside it.
 - **Found and fixed in this pass:** (1) the area labels repeated "Al Barsha 1" three times over one stay (a label per
   stretch); now one label per stay, from the stays table. (2) A tracker silent for days read "CABMAN · 0 fixes that day" —
   a tracker that worked and found nothing; now absent with its silence. (3) Booking pins drawn inside the strip were
@@ -3267,6 +3267,13 @@ dead for days on L40971. Port 8325, `serviceWorkers: 'block'`, `reducedMotion: '
 statically (1); the verdict with one figure (2); a label per stretch (1); the withheld-bookings sentence dropped (2);
 the dead tracker's tile as "0 fixes" (1); anchors not drawn (1); the strip from the tracker's account when bookings may
 be seen (1); parked-quiet drawn solid (1); the strip 1,200 px wide (1).
+
+**Independent review pass (2026-11-16, FIX-STATUS WHR-R1–R4).** Re-rendered against mockapi on :8325 with
+`serviceWorkers: 'block'`: L45235 (FMS) and L12615 (CABMAN) at 1280 light (desktop), 390 dark (phone shell) and 390
+light (desktop shell) — 0 page errors, `scrollWidth` 1280 / 390 / 390. After the fixes the noon booking is a dashed
+outline (2 px, `--s3`) beside the 1.5 px moved-unseen outline, both "not known" in the log; the stays table reads
+"00:00 (since 18:15 the day before)"; the † band's first cell reads "1 h 10 min" (35 min moved unseen + the 35-minute
+job); the Inferred tile is parked-quiet alone (4 h). `test/whereabouts_page.test.mjs` 33/33.
 
 To repeat: `node test/whereabouts_page.test.mjs` (port 8325); `PORT=8325 node mockapi.mjs &` then
 `ONLY='vehicle/L45235/whereabouts?day=<yesterday>' SETTLE=2500 node bin/focus-rows-audit.mjs http://127.0.0.1:8325
