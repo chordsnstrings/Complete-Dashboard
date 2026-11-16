@@ -7345,6 +7345,8 @@ a pass; meanwhile the Territory tab reads "Not placed yet" only for one-line/com
 reached, and dash-form addresses read as before. Read the first `trip_places pass` log lines (batches, ms) before
 trusting the estimate.
 
+**On production (2026-11-16, a565ac8, PR #42).** v126 migrated at 16:53:35Z; the first `trip_places pass` at 17:00:48Z resolved 46,000 bookings in 91,658 ms over 93 batches (fresh 31,350, swept 14,650, 40,549 tracker fixes read, 33,496 drop-off votes). Pickups: address 80.72%, tracker 9.63%, address text 7.41%, coordinates 0.88%, plus code 0.12%; not placed 1.24% (no address and no fix 0.52%, unknown name and no fix 0.37%, the rest under 0.2% each). Drop-offs: placed 97.39%; of the rest 1.70% are cancelled bookings, which the completed-only drop-off table leaves out. `booking_cells: 0` on that pass — the drop-off gazetteer is built from the votes on the next. The busiest driver of 1–16 Nov: pickups 309 of 310 placed (259 address, 24 text, 1 plus code, 25 tracker; 1 "an address naming only the city, and a position on ground the fleet has never named"), drop-offs 283 of 284. Screenshots at 1280 and 390 (Arkiv): no "(unparsed)", both captions, nothing sideways. Seen on the page and recorded as the next step: one area under two spellings ("Jumeirah Lakes Towers" 13, "Jumeirah Lake Towers" 7, "JLT Cluster J" 5) — the synonym trap, not yet folded.
+
 ## WHR – where the car was, all day (2026-11-16)
 
 The operator: "whether pick up or drop off, we should ideally know where the car was at all times. currently we just
@@ -7404,3 +7406,6 @@ Not built (optional in the brief): a fleet-level "Where cars spent the night" ta
 green: `indexes` 12, `imports_resolve` 4, `tokens` 150, `assets` 40, `route_smoke` 60, `vehicle_routes` 89,
 `vehicle_place` 11, `driver_day_movement` 33, `page_contract` 96, `sql_module_names` 15, `query_params` 12, `cache` 63,
 `lazy_pages` 27. The full suite was not run (the brief).
+
+
+**On production (2026-11-16, a565ac8, PR #42).** `GET /api/vehicle/whereabouts?plate=L18379&day=2026-11-15` (FMS, 94 fixes): 45.6% positioned / 44.4% inferred / 9.9% unknown, 7 stays (00:34–11:33 Al Satwa "fixes and inferred"); L12615 (CABMAN, 136 fixes): 65.3 / 18.2 / 16.5, 9 stays. The tab drawn through the production mirror at 1280 (Arkiv) and 390 (Classic): no page error, nothing sideways. Stays are named by place_cell, FMS's geocoder, so some read as a building or a road ("397 D90", "S-02, Mayfair Residence Tower Opp. Empower") — PLC found the same vocabulary names roads; naming a stay by booking_cell first, place_cell second, is the follow-up.
