@@ -50,7 +50,7 @@ import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { applySchema } from './schema.mjs';
-import { approachOf, APPROACH_AIRPORTS, APPROACH_RULE, makeClient, forgetToken, OpenSkyError, planDays,
+import { approachOf, APPROACH_AIRPORTS, APPROACH_RULE, makeClient, forgetToken, OpenSkyError, planDays, SETTLE_MS,
   storeLandings, collectArrivals, pollLive, resetLive, NO_CLIENT, LIVE_BOX } from '../src/sources/flights.js';
 import { VERSION_SQL } from '../api/cache.js';
 
@@ -131,6 +131,8 @@ const srv = createServer((req, res) => {
     const h = { 'X-Rate-Limit-Remaining': String((fake.credits -= 30)) };
     if (fake.mode.arrivalsHtml) { res.writeHead(200, { 'content-type': 'text/html', ...h }); res.end('<!DOCTYPE html><html><body>Sign in</body></html>'); return; }
     if (fake.mode.arrivalsEmpty) return send(200, [], h);
+    if (fake.mode.arrivalsFail) return send(500, { error: 'boom' }, h);
+    if (fake.mode.arrivalsOverride && day === '2026-11-15' && airport === 'OMDB') return send(200, fake.mode.arrivalsOverride, h);
     if (day === '2026-11-15') return send(200, airport === 'OMDB' ? OMDB : OMDW, h);
     if (day === '2026-11-13') return send(500, { error: 'boom' }, h);
     return send(404, null, h);
@@ -276,6 +278,65 @@ const rows = async (t, p = []) => (await db.query(t, p)).rows;
   check('an empty list is read as a 404 is: yesterday not published, an older day none returned — never collected',
     emp['2026-11-26']?.status === 'not_published' && emp['2026-11-25']?.status === 'none_returned'
       && /an empty list/.test(emp['2026-11-25'].reason || '') && emp['2026-11-25'].landings == null, JSON.stringify(emp));
+
+  /* The settled re-ask (integration, 2026-11-16). Whether OpenSky's first
+     list for a day can be partial was not measured, and a collected day was
+     never asked again; a day collected before 12:00Z on the following day is
+     now re-asked once after it, and the second list REPLACES the first.
+     REVERSIONS: planDays' recheck branch removed → "re-asked once" fails;
+     replaceDay swapped for storeLandings → "replaces" and "no aircraft
+     twice" fail; the recheck guard on the empty answer removed → "keeps the
+     first list" fails. */
+  const cov15 = (a, at) => ({ airport: a, utc_day: '2026-11-15', status: 'collected', landings: 438, collected_at: at });
+  const at1341 = Date.parse('2026-11-16T13:41:00Z');
+  const pR = planDays({ nowMs: at1341, days: 1, airports: ['OMDB'], coverage: [cov15('OMDB', '2026-11-16T01:45:00Z')] });
+  check('a day collected before it settled is re-asked once after 12:00Z the next day (36 h from its start)',
+    SETTLE_MS === 36 * 3600e3 && pR.length === 1 && pR[0].recheck === true && pR[0].had === 438, JSON.stringify(pR));
+  check('…not before it settles', planDays({ nowMs: Date.parse('2026-11-16T11:41:00Z'), days: 1, airports: ['OMDB'],
+    coverage: [cov15('OMDB', '2026-11-16T01:45:00Z')] }).length === 0);
+  check('…and not again once a settled ask is in', planDays({ nowMs: at1341, days: 1, airports: ['OMDB'],
+    coverage: [cov15('OMDB', '2026-11-16T13:41:30Z')] }).length === 0);
+
+  await db.query(`UPDATE flight_day_coverage SET collected_at = '2026-11-16T01:45:00Z' WHERE airport = 'OMDB' AND utc_day = '2026-11-15'`);
+  await db.query(`UPDATE flight_day_coverage SET collected_at = '2026-11-16T12:30:00Z' WHERE airport = 'OMDW' AND utc_day = '2026-11-15'`);
+  const count15 = async () => (await rows(`SELECT count(*)::int n FROM flight_landing WHERE airport = 'OMDB' AND utc_day = '2026-11-15'`))[0].n;
+  const keep896 = OMDB.findIndex((f) => f.icao24 === '896621');
+  /* The second list: the first ten landings gone, and one landing whose
+     lastSeen moved a minute between the two batches. 896621 stays in it. */
+  const drop = OMDB.map((f, i) => i).filter((i) => i !== keep896).slice(0, 10);
+  const moved = OMDB.find((f, i) => !drop.includes(i) && f.icao24 !== '896621');
+  const second = OMDB.filter((f, i) => !drop.includes(i)).map((f) => (f === moved ? { ...f, lastSeen: f.lastSeen + 60 } : f));
+  fake.mode.arrivalsOverride = second;
+  const askedR = fake.asks.length;
+  await collectArrivals({ db, cfg: CFG, nowMs: at1341, days: 1, floor: 0 });
+  fake.mode.arrivalsOverride = null;
+  check('only the unsettled airport-day is re-asked', fake.asks.slice(askedR).join() === 'OMDB|2026-11-15', fake.asks.slice(askedR).join());
+  const n15 = await count15();
+  check(`the second list replaces the first (${OMDB.length} → ${second.length})`, n15 === second.length, `${n15}`);
+  const twiceMoved = (await rows(`SELECT count(*)::int n FROM flight_landing WHERE airport = 'OMDB' AND icao24 = $1 AND utc_day = '2026-11-15'`, [moved.icao24]))[0].n;
+  const movedOrig = OMDB.filter((f) => f.icao24 === moved.icao24).length;
+  check('…and a landing whose lastSeen moved is held once, not twice', twiceMoved === movedOrig, `${twiceMoved} vs ${movedOrig}`);
+  const cR = (await rows(`SELECT status, landings, collected_at FROM flight_day_coverage WHERE airport = 'OMDB' AND utc_day = '2026-11-15'`))[0];
+  check('the day stays collected with the new count, and its collected_at moves past the settle point',
+    cR.status === 'collected' && cR.landings === second.length && new Date(cR.collected_at).getTime() > Date.parse('2026-11-16T12:00:00Z'), JSON.stringify(cR));
+  const lvR = (await rows(`SELECT superseded_at IS NOT NULL s, confirmed_id FROM flight_live_landing WHERE icao24 = '896621'`))[0];
+  const idNow = (await rows(`SELECT id FROM flight_landing WHERE airport = 'OMDB' AND icao24 = '896621'`))[0]?.id;
+  check('the live estimate is matched again, to the landing that is held now', lvR?.s && String(lvR.confirmed_id) === String(idNow), JSON.stringify({ lvR, idNow }));
+
+  await db.query(`UPDATE flight_day_coverage SET collected_at = '2026-11-16T01:45:00Z' WHERE airport = 'OMDB' AND utc_day = '2026-11-15'`);
+  fake.mode.arrivalsEmpty = true;
+  await collectArrivals({ db, cfg: CFG, nowMs: at1341, days: 1, floor: 0 });
+  fake.mode.arrivalsEmpty = false;
+  const cE = (await rows(`SELECT status, landings FROM flight_day_coverage WHERE airport = 'OMDB' AND utc_day = '2026-11-15'`))[0];
+  check('a settled re-ask that answers none keeps the first list', cE.status === 'collected' && cE.landings === second.length
+    && await count15() === second.length, JSON.stringify(cE));
+  await db.query(`UPDATE flight_day_coverage SET collected_at = '2026-11-16T01:45:00Z' WHERE airport = 'OMDB' AND utc_day = '2026-11-15'`);
+  fake.mode.arrivalsFail = true;
+  await collectArrivals({ db, cfg: CFG, nowMs: at1341, days: 1, floor: 0 });
+  fake.mode.arrivalsFail = false;
+  const cF = (await rows(`SELECT status, landings FROM flight_day_coverage WHERE airport = 'OMDB' AND utc_day = '2026-11-15'`))[0];
+  check('…and one that fails leaves the day collected (a held day is never printed as missing)',
+    cF.status === 'collected' && cF.landings === second.length && await count15() === second.length, JSON.stringify(cF));
 }
 
 console.log('\n4 · the live poll');

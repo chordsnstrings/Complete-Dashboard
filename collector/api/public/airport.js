@@ -242,7 +242,7 @@ export async function renderAirport(root, param, sub) {
         { label: 'Landings', key: 'n', num: true, render: (x) => fmt(x.n) },
         { label: 'Share', key: 'share_pct', num: true, render: (x) => pct(x.share_pct) },
       ], { compact: true }));
-      originP.body.append(el('p', 'cap', `${fmt(og.unknown)} of the ${fmt(og.total)} landings in ${esc(ogWhat)} have no origin: OpenSky could not tell where those flights started, and none is guessed.`));
+      originP.body.append(el('p', 'cap', `${fmt(og.unknown)} of the ${fmt(og.total)} confirmed landings in ${esc(ogWhat)} have no origin: OpenSky could not tell where those flights started, and none is guessed.`));
     }
 
     /* ── 05 ── */

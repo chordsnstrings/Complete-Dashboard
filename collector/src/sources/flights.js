@@ -226,6 +226,19 @@ const dayStartSec = (day) => Math.floor(Date.parse(`${day}T00:00:00Z`) / 1000);
     from yesterday back `days`, except those already collected, an old day
     OpenSky has answered "none" for three times, and nothing from today
     (which OpenSky has not published by construction). */
+/* A day's list is asked for ONCE MORE after it has settled (integration,
+   2026-11-16). OpenSky publishes flights in a nightly batch; all we measured
+   is that 2026-11-15 held 438 OMDB arrivals when asked at 09:26Z on the 16th.
+   Whether a list asked at the first slot (01:41Z) can be PARTIAL was not
+   measured, and a collected day was never asked again — so a partial first
+   answer would have stayed undercounted for good, on the very figure the
+   Airport page compares pickups against (the review's first open item). A day
+   collected before 12:00Z on the following day (36 h after it began) is
+   re-asked once after that point: 30 credits per airport per day, inside an
+   allowance of 4,000. The second list replaces the first (replaceDay). */
+export const SETTLE_MS = 36 * 3600e3;
+const settledAt = (day) => Date.parse(`${day}T00:00:00Z`) + SETTLE_MS;
+
 export function planDays({ nowMs, days, coverage, airports = ['OMDB', 'OMDW'] }) {
   const have = new Map(coverage.map((c) => [`${c.airport}|${c.utc_day}`, c]));
   const out = [];
@@ -233,7 +246,13 @@ export function planDays({ nowMs, days, coverage, airports = ['OMDB', 'OMDW'] })
     const day = utcDayOf(nowMs - k * DAY_MS);
     for (const airport of airports) {
       const c = have.get(`${airport}|${day}`);
-      if (c?.status === 'collected') continue;
+      if (c?.status === 'collected') {
+        const at = c.collected_at ? Date.parse(c.collected_at) : NaN;
+        if (Number.isFinite(at) && at < settledAt(day) && nowMs >= settledAt(day)) {
+          out.push({ airport, day, recheck: true, had: c.landings ?? null });
+        }
+        continue;
+      }
       if (c?.status === 'none_returned' && (c.attempts || 0) >= 3) continue;
       out.push({ airport, day });
     }
@@ -274,16 +293,40 @@ export async function storeLandings(db, airport, day, flights) {
   return uniq.length;
 }
 
-async function noteDay(db, { airport, day, status, landings = null, reason = null, credits = null }) {
+/* collected_at is the RUN's clock (nowMs), not the database's now(): planDays
+   compares it with the settle point on that same clock, and a run told what
+   time it is must not record another (integration 2026-11-16). */
+async function noteDay(db, { airport, day, status, landings = null, reason = null, credits = null, nowMs = Date.now() }) {
   await db.query(`INSERT INTO flight_day_coverage
       (airport, utc_day, status, landings, reason, attempts, credits_remaining, collected_at)
-    VALUES ($1, $2::date, $3, $4, $5, 1, $6, CASE WHEN $3 = 'collected' THEN now() END)
+    VALUES ($1, $2::date, $3, $4, $5, 1, $6, CASE WHEN $3 = 'collected' THEN $7::timestamptz END)
     ON CONFLICT (airport, utc_day) DO UPDATE SET
       status = EXCLUDED.status, landings = EXCLUDED.landings, reason = EXCLUDED.reason,
       attempts = flight_day_coverage.attempts + 1, credits_remaining = EXCLUDED.credits_remaining,
       last_tried_at = now(),
-      collected_at = CASE WHEN EXCLUDED.status = 'collected' THEN now() ELSE flight_day_coverage.collected_at END`,
-  [airport, day, status, landings, reason, credits]);
+      collected_at = CASE WHEN EXCLUDED.status = 'collected' THEN EXCLUDED.collected_at ELSE flight_day_coverage.collected_at END`,
+  [airport, day, status, landings, reason, credits, new Date(nowMs).toISOString()]);
+}
+
+/** A settled re-ask's list REPLACES the first one for that airport-day.
+    Upserting alone would keep a landing the second list no longer carries,
+    and a landing whose lastSeen moved between the two batches would be held
+    twice (the key includes landed_at). So: the live estimates of that day are
+    released (supersedeLive matches them again afterwards), the new rows are
+    upserted, and only then are the rows the new list lacks deleted — in that
+    order, so a run that dies half-way leaves the old list plus the new, and
+    the next run (collected_at not yet moved) re-asks and finishes it. */
+export async function replaceDay(db, airport, day, flights) {
+  await db.query(`UPDATE flight_live_landing SET superseded_at = NULL, confirmed_id = NULL
+    WHERE airport = $1 AND landed_at >= ($2::date::timestamp AT TIME ZONE 'UTC')
+      AND landed_at < (($2::date + 1)::timestamp AT TIME ZONE 'UTC')`, [airport, day]);
+  const n = await storeLandings(db, airport, day, flights);
+  const keep = (Array.isArray(flights) ? flights : []).filter((f) => f && f.icao24 && Number.isFinite(f.lastSeen))
+    .map((f) => landingRow(airport, day, f));
+  await db.query(`DELETE FROM flight_landing WHERE airport = $1 AND utc_day = $2::date
+      AND (icao24, landed_at) NOT IN (SELECT k.i, k.t FROM unnest($3::text[], $4::timestamptz[]) AS k(i, t))`,
+  [airport, day, keep.map((r) => r.icao24), keep.map((r) => r.landed_at)]);
+  return n;
 }
 
 /** Once a day's confirmed list is in, the live estimates for that UTC day at
@@ -312,13 +355,13 @@ export async function collectArrivals({ db = pool, cfg = clientConfig(), client 
     return { skipped: NO_CLIENT };
   }
   const c = client || makeClient(cfg);
-  const coverage = (await db.query(`SELECT airport, utc_day::text AS utc_day, status, attempts FROM flight_day_coverage
+  const coverage = (await db.query(`SELECT airport, utc_day::text AS utc_day, status, attempts, landings, collected_at FROM flight_day_coverage
                                      WHERE utc_day >= $1::date`, [span.window_start])).rows;
   const todo = planDays({ nowMs, days, coverage });
   const yesterday = utcDayOf(nowMs - DAY_MS);
   const chunks = [];
   let written = 0, credits = null, stopped = null, fatal = null;
-  for (const { airport, day } of todo) {
+  for (const { airport, day, recheck, had } of todo) {
     if (credits != null && credits < floor) { stopped = `stopped at ${credits} credits left, under the floor of ${floor}`; break; }
     try {
       const begin = dayStartSec(day);
@@ -341,6 +384,15 @@ export async function collectArrivals({ db = pool, cfg = clientConfig(), client 
         throw new OpenSkyError('http', `OpenSky answered HTTP 200 without a list of arrivals (${typeof r.data === 'string'
           ? 'a page of text — a redirect to a sign-in page, perhaps' : `a${r.data === null ? ' null' : 'n object'}`})`, { status: 200, credits: r.credits });
       }
+      if (recheck && (r.status === 404 || r.data.length === 0)) {
+        /* A settled re-ask that answers "none" for a day OpenSky already gave
+           a list for keeps the first list: a day does not lose its landings
+           because a later ask came back empty. collected_at moves, so it is
+           not asked a third time. */
+        await noteDay(db, { airport, day, status: 'collected', landings: had, credits, nowMs });
+        chunks.push({ from: day, to: day, rows: 0, kind: airport, note: 'settled re-ask answered none; the first list is kept' });
+        continue;
+      }
       if (r.status === 404 || r.data.length === 0) {
         /* A 404 means "no flights for that interval". For yesterday that is
            the nightly batch not having run yet — measured: today 404'd while
@@ -349,15 +401,16 @@ export async function collectArrivals({ db = pool, cfg = clientConfig(), client 
         const fresh = day >= yesterday;
         const reason = fresh ? 'OpenSky has not published this day yet — its flights arrive in a nightly batch'
           : `OpenSky answered that it holds no arrivals for this day (${r.status === 404 ? 'HTTP 404' : 'an empty list'})`;
-        await noteDay(db, { airport, day, status: fresh ? 'not_published' : 'none_returned', reason, credits });
+        await noteDay(db, { airport, day, status: fresh ? 'not_published' : 'none_returned', reason, credits, nowMs });
         chunks.push({ from: day, to: day, rows: 0, kind: airport, note: reason });
         continue;
       }
-      const n = await storeLandings(db, airport, day, r.data);
-      await noteDay(db, { airport, day, status: 'collected', landings: n, credits });
+      const n = recheck ? await replaceDay(db, airport, day, r.data) : await storeLandings(db, airport, day, r.data);
+      await noteDay(db, { airport, day, status: 'collected', landings: n, credits, nowMs });
       await supersedeLive(db, airport, day);
       written += n;
-      chunks.push({ from: day, to: day, rows: n, kind: airport });
+      chunks.push({ from: day, to: day, rows: n, kind: airport,
+        ...(recheck ? { note: `settled re-ask: ${had ?? '?'} landings first, ${n} now` } : {}) });
     } catch (e) {
       const msg = String(e?.message || e).slice(0, 300);
       if (e instanceof OpenSkyError && (e.kind === 'auth' || e.kind === 'rate')) {
@@ -365,14 +418,17 @@ export async function collectArrivals({ db = pool, cfg = clientConfig(), client 
            not this one: the run stops and says so, and the day keeps the
            state it had (a rate limit is still written on it, so the page can
            say why the newest day is late). */
-        if (e.kind === 'rate') await noteDay(db, { airport, day, status: 'failed', reason: msg, credits: e.credits });
+        if (e.kind === 'rate' && !recheck) await noteDay(db, { airport, day, status: 'failed', reason: msg, credits: e.credits, nowMs });
         fatal = msg;
         chunks.push({ from: day, to: day, rows: 0, kind: airport, error: msg });
         break;
       }
-      await noteDay(db, { airport, day, status: 'failed', reason: msg, credits });
-      chunks.push({ from: day, to: day, rows: 0, kind: airport, error: msg });
-      log.warn?.(SOURCE, 'arrivals day failed', { airport, day, err: msg });
+      /* A failed settled re-ask leaves the day collected with its first list:
+         marking it failed would print a held day as missing. It is asked
+         again next run, because collected_at has not moved. */
+      if (!recheck) await noteDay(db, { airport, day, status: 'failed', reason: msg, credits, nowMs });
+      chunks.push({ from: day, to: day, rows: 0, kind: airport, error: recheck ? `settled re-ask: ${msg}` : msg });
+      log.warn?.(SOURCE, 'arrivals day failed', { airport, day, recheck: Boolean(recheck), err: msg });
     }
   }
   /* A run with nothing to ask is 'ok' with no windows: every day in the span

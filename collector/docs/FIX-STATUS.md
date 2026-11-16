@@ -7051,6 +7051,16 @@ at a time and revert-proved the builder's key claims (the 401 retry and the OMSJ
 | FLT-R6 | **The live watch moved the response cache's version, and today's answer was cached anyway.** `pollLive` logged mode `live`; `api/cache.js` VERSION_SQL counts every mode but `realtime`, and each move restarts the warmer's 89 aggregates (the CABMAN load of 2026-09-29 that `realtime` exists to prevent; `uber_transactions.js` MODE). So every half hour, and on every ok↔error flip of a flaky feed (every two minutes at worst), every cached page went stale. Meanwhile `/api/airport` for TODAY was cached like any page: its live estimates and the answer's own clock ("so far", the hour in progress) froze until the next collection | `flights_source` §4 on the unchanged poller: the run's mode `live` and VERSION_SQL `10:43:55.326Z → 10:43:55.352Z` across one poll; `cache` with no clause: today's second read a `hit` | the live run logs `realtime` (`LIVE_MODE`), the route reads it as the watch's state; today's `/api/airport` (or no `day=`) is in `neverToday`, as `/api/online/hours` is; a past day still caches | `flights_source` §4 (52/0; 51/1 with `live`); `airport_api` §A "realtime run is read as its state" (35/0; 34/1 reverted); `cache` 61/0 (60/1 reverted) | written, not deployed |
 
 
+### FLT at integration (2026-11-16)
+
+Two of the review's open items fixed while merging `fix/flights` with `fix/events` and UCB, each revert-proved:
+
+| # | what | fix | test | state |
+|---|---|---|---|---|
+| FLT-I1 | **A first list that was partial would have stayed partial for good.** Only "2026-11-15 held 438 at OMDB when asked at 09:26Z on the 16th" was measured; whether the 01:41Z slot can get a partial batch was not, and a collected day was never asked again. | `planDays` re-asks a day collected before 12:00Z on the following day (36 h from its start, `SETTLE_MS`) once after it; `replaceDay` swaps the first list for the second: it releases that day's live estimates, upserts, then deletes the rows the new list lacks, so a landing whose `lastSeen` moved between batches is held once. A re-ask that answers none, or fails, leaves the day collected with its first list. `collected_at` is now the run's clock, not the database's `now()`. About 60 credits a day. | `flights_source` §3, 10 new checks (62 pass). Reversions: the recheck branch removed (6 fail), `replaceDay` swapped for `storeLandings` (4 fail), the empty-answer guard removed (2 fail) | written; on production with the flights deploy |
+| FLT-I2 | **A cruise terminal was one word from counting as DXB.** "Hamdan bin Mohammed Cruise terminal 3" and "Mina Rashid, cruise terminal 3" are in production; TERMINAL plus an "Arrivals" would have made either DXB. | `\bcruise\b` and `mina\s+rashid` in NOT_AIRPORT | `airport_classifier`, two addresses; with the exclusion removed both read OMDB in JS and SQL (2 fail) | written |
+| FLT-I3 | The origins caption counted confirmed landings while the hero's "so far" includes live estimates. | It says "confirmed landings". | `airport_page` (36 pass) | written |
+
 ## EVW – Dubai events by ModelArk web search (2026-11-16)
 
 The operator: "for events maybe we could use modelark to search on google and use that as a

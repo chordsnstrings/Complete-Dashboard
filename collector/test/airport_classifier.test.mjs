@@ -65,6 +65,9 @@ const CASES = {
   ],
   '“Airport Rd – Al Garhoud” and its hotels are not the airport': [
     ['Airport Rd - Al Garhoud - Dubai - United Arab Emirates', null],
+    // A cruise terminal is numbered and has arrivals; it is not the airport (integration 2026-11-16).
+    ['Hamdan bin Mohammed Cruise Terminal 3, Arrivals - Mina Rashid - Dubai', null],
+    ['Mina Rashid, cruise terminal 3 - Departures - Dubai - United Arab Emirates', null],
     ['Airport Rd - Al Garhoud - Dubai - Объединенные Арабские Эмираты', null],
     ['24 Airport Rd - Al Garhoud - Dubai - United Arab Emirates', null],
     ['Le Meridien Dubai Airport Road Garhoud AE', null],

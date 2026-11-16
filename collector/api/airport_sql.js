@@ -78,6 +78,12 @@ const NOT_AIRPORT = [
   'opposite', '\\bopp\\b', '\\boppo\\b', '\\bnear\\b',
   'free\\s*zone', '\\bdafza\\b', 'al\\s+quds\\s+st', 'al\\s+ittihad\\s+r', '\\be11\\b',
   '\\bhotel\\b', '\\binn\\b',
+  /* Dubai's CRUISE terminals are numbered too: production holds "Mina Rashid,
+     cruise terminal 3" and "Hamdan bin Mohammed Cruise terminal 3". Neither
+     says airport today, but one carrying "Arrivals" would have been counted
+     as DXB through TERMINAL + AIRWORD (integration 2026-11-16, the review's
+     open item). */
+  '\\bcruise\\b', 'mina\\s+rashid',
   'zayed\\s+international', 'abu\\s+dhabi\\s+international\\s+airport',
   'sharjah\\s+(international\\s+|intl\\.?\\s+)?airport', 'مطار\\s+الشارقة',
 ];
