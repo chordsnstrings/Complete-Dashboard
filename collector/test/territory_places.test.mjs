@@ -103,6 +103,45 @@ console.log('\na booking the resolver has not reached');
   check('after the pass the pending row is gone', !t2.areas.some((a) => a.reason === 'pending'), JSON.stringify(t2.areas));
 }
 
+console.log('\nthe busiest drop-off areas, the same way, over completed trips');
+{
+  /* The operator: "also show dropoff areas the same way". The same ladder,
+     the other end — and only over trips somebody rode: a cancelled booking
+     here carries a drop-off address, and must not be counted where this
+     driver ends up. */
+  const add = (id, hour, status, dropoff, ended) => q(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name, requested_at, ended_at,
+                       distance_km, status, price, pickup_addr, dropoff_addr)
+     VALUES ('uber', $1, 'ecosine', 'L47001', $2, 'Noor Test', $3, $4, 8, $5, 30, $6, $7)`,
+    [id, DRV, `2026-11-12T${hour}:00:00+04:00`, ended ? `2026-11-12T${hour}:20:00+04:00` : null, status, BB, dropoff]);
+  await add('d-marina', '21', 'completed', 'Marina Walk - Dubai Marina - Dubai - United Arab Emirates', true);
+  await add('d-cancel', '22', 'rider_cancelled', 'Cluster A - Jumeirah Lake Towers - Dubai - United Arab Emirates', false);
+  await add('d-track', '23', 'completed', '', true);
+  // the car's tracker, a minute after the 23:20 drop-off, in Business Bay
+  await q(`INSERT INTO telemetry_snapshot (source, plate, captured_at, lat, lng)
+           VALUES ('fms', 'L47001', '2026-11-12T23:21:00+04:00', 25.185, 55.27)`);
+  await q(`DELETE FROM source_state WHERE source = 'trip_places'`);
+  await resolveTripPlaces(db, { budgetMs: 60_000 });
+  const t = await get(`/api/driver/territory?id=${DRV}&${W}`);
+  const d = t.dropoff_areas || [];
+  check('the route answers with drop-off areas and their placement', Array.isArray(t.dropoff_areas) && t.dropoff_placement,
+    JSON.stringify(Object.keys(t)));
+  check('a dash-form drop-off is in its area, from the address',
+    d.find((a) => a.area === 'Dubai Marina')?.by_basis?.address === 1, JSON.stringify(d));
+  check('an empty drop-off the tracker saw a minute later is in Business Bay, by the tracker',
+    d.find((a) => a.area === 'Business Bay')?.by_basis?.tracker === 1, JSON.stringify(d));
+  check('the cancelled booking\'s drop-off address is not counted — nobody was dropped there',
+    !d.some((a) => a.area === 'Jumeirah Lake Towers') && !d.some((a) => a.reason === 'cancelled'), JSON.stringify(d));
+  const dp = t.dropoff_placement;
+  check('the caption covers every completed trip (11), and only those',
+    dp.total === 11 && dp.placed === 2 && d.reduce((s, a) => s + a.n, 0) === 11, JSON.stringify(dp));
+  check('…in the drop-off\'s own words: the tracker at the drop-off time',
+    dp.by_basis.find((b) => b.basis === 'tracker')?.label === "placed by the car's tracker at the drop-off time", JSON.stringify(dp.by_basis));
+  check('no drop-off row is "(unparsed)"; the rest is one row named by its reason',
+    !d.some((a) => a.area === '(unparsed)') && d.filter((a) => !a.area).length === 1
+      && d.find((a) => !a.area)?.label === 'Not placed — no address, and no tracker fix within 5 minutes', JSON.stringify(d.filter((a) => !a.area)));
+}
+
 server.close();
 await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);

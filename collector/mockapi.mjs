@@ -2193,6 +2193,16 @@ app.get('/api/driver/territory', (req, r) => {
         { basis: 'address_name', label: 'named from the address text', n: 7 },
         { basis: 'tracker', label: "placed by the car's tracker at the request time", n: 8 }],
       unplaced: [{ reason: 'no_address+no_fix', label: 'no address, and no tracker fix within 5 minutes', n: 5 }] },
+    /* Drop-offs the same way, over completed bookings (PLC, 2026-11-16). */
+    dropoff_areas: [...spots.slice().reverse().map(([addr], i) => ({ area: addr.split(' - ')[0], n: Math.round(52 - i * 5),
+      avg_km: +rnd(6, 22).toFixed(1), avg_fare: +rnd(22, 88).toFixed(2),
+      by_basis: i === 1 ? { address: 40, tracker: 7 } : { address: Math.round(52 - i * 5) } })),
+    { area: null, reason: 'no_address+no_fix', unplaced: true, n: 3, avg_km: 11.2, avg_fare: 36,
+      label: 'Not placed — no address, and no tracker fix within 5 minutes' }],
+    dropoff_placement: { total: 264, placed: 261, tracker_window_min: 5,
+      by_basis: [{ basis: 'address', label: 'from the address', n: 254 },
+        { basis: 'tracker', label: "placed by the car's tracker at the drop-off time", n: 7 }],
+      unplaced: [{ reason: 'no_address+no_fix', label: 'no address, and no tracker fix within 5 minutes', n: 3 }] },
     idle: [{ lat: 25.253, lng: 55.365, fixes: 88 }, { lat: 25.078, lng: 55.139, fixes: 41 },
       { lat: 25.196, lng: 55.276, fixes: 22 }],
     /* One cluster on a map beside a table of 139 pickups across 25 areas is not

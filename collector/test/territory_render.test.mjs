@@ -11,6 +11,7 @@
      · the caption that says how every pickup was placed, in the resolver's
        words, the tracker named as the car's and not the platform's;
      · the subtitle no longer claiming every area came from the address;
+     · "Busiest drop-off areas" beside it, the same way, over completed trips;
      · at 390, nothing scrolls sideways.
    Screenshots go to $SHOTS when it is set, for a human look. */
 import { app as mock } from '../mockapi.mjs';
@@ -25,11 +26,11 @@ await new Promise((r) => srv.once('listening', r));
 const base = `http://127.0.0.1:${PORT}`;
 const browser = await launchChromium();
 
-const READ = () => {
+const READ = (title) => {
   const view = document.querySelector('#view');
   const txt = (e) => (e ? e.textContent.replace(/\s+/g, ' ').trim() : '');
   const heads = [...view.querySelectorAll('h2, h3, h4, .ph, .panel-title')];
-  const head = heads.find((h) => /Busiest pickup areas/.test(h.textContent));
+  const head = heads.find((h) => new RegExp(title).test(h.textContent));
   let panel = head;
   while (panel && panel !== view && !panel.querySelector('table')) panel = panel.parentElement;
   const rows = panel ? [...panel.querySelectorAll('tbody tr')].map((tr) => txt(tr.querySelector('td'))) : [];
@@ -54,7 +55,8 @@ for (const skin of ['arkiv', 'classic']) {
     await page.goto(`${base}/?ui=desktop&skin=${skin}#driver/drv-0/territory`, { waitUntil: 'load' });
     await page.waitForFunction(() => /How the [\d,]+ pickups were placed/.test(document.querySelector('#view')?.textContent || ''),
       null, { timeout: 20000 }).catch(() => {});
-    const r = await page.evaluate(READ);
+    const r = await page.evaluate(READ, 'Busiest pickup areas');
+    const dr = await page.evaluate(READ, 'Busiest drop-off areas');
     if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/territory-${skin}-${width}.png`, fullPage: true });
     check('the "Busiest pickup areas" panel is drawn', r.found && r.rows.length > 0, JSON.stringify(r.rows));
     check('no "(unparsed)" anywhere on the page', !/\(unparsed\)/.test(r.all));
@@ -67,6 +69,18 @@ for (const skin of ['arkiv', 'classic']) {
       cap);
     check('the subtitle no longer claims every area came from the address',
       /From the address the platform recorded, or the car's tracker where it named no area/.test(r.all));
+    /* Drop-offs the same way (the operator: "also show dropoff areas the same
+       way"): its own panel, its own residual row and caption, over completed
+       trips, the tracker read at the drop-off time. */
+    check('the "Busiest drop-off areas" panel is drawn, with a Drop-offs column',
+      dr.found && dr.rows.length > 0 && /Drop-offs/.test(dr.all), JSON.stringify(dr.rows));
+    check('…its residual row named by its reason',
+      dr.rows.includes('Not placed — no address, and no tracker fix within 5 minutes'), JSON.stringify(dr.rows));
+    const dcap = dr.caps.find((x) => /^How the/.test(x)) || '';
+    check('…and its caption over completed drop-offs, the tracker at the drop-off time',
+      dcap === 'How the 264 completed drop-offs were placed: 254 from the address, '
+        + "7 placed by the car's tracker at the drop-off time, 3 not placed: no address, and no tracker fix within 5 minutes.",
+      dcap);
     if (width === 390) check('nothing scrolls sideways at 390', r.overflowX <= 0, String(r.overflowX));
     check('no page error', errs.length === 0, errs.join(' | '));
     await c.close();
