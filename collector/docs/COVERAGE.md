@@ -11901,3 +11901,37 @@ of the 4,427 cancelled bookings since 1 October carry no `ended_at` (the 56 that
 dropoff reported" — counts every cancellation as a gap in the record. Split on `outcome = 'not_completed'` first, and say
 who ended it with `api/cancellation_sql.js` (CANCEL_CASE, DECLINED_SQL), never a second reading of the status words.
 
+## What a driver actually earned, against what the platform paid — 2026-11-16 (FIX-STATUS ERN)
+
+Measured for the Earnings tab's Actual earnings tile, `GET /api/driver/kpis?from=2026-10-01&to=2026-10-31`
+on production, three of the busiest drivers in `/api/drivers/directory?days=30` (numbers only):
+
+| | booked revenue | Platform earnings (`reported_earnings`) | Actual earnings (`day_money`) | statement net | priced, no statement | statement cash | `accounted` |
+|---|---|---|---|---|---|---|---|
+| driver 1 | 28,184.56 | 18,177.30 | 21,699.83 | 20,951.83 | 748.00 | 3,945.01 | 21,699.82 |
+| driver 2 | 28,510.79 | 19,181.28 | 21,680.86 | 20,726.86 | 954.00 | 3,120.79 | 21,680.90 |
+| driver 3 | 21,194.60 | 13,758.13 | 15,570.80 | 14,997.80 | 573.00 | 2,233.80 | 15,570.84 |
+
+* **Platform earnings is Uber's bank side, every time.** `reported_payout_platforms` is `["uber"]` on all
+  three, and the payout sits AED 1,812.67 to 3,522.53 under `day_money`. It is the transfer, not the
+  earnings.
+* **Payout + statement cash still overshoots the statement**, by AED 422.48, 621.21 and 421.13 — the
+  non-closure recorded above ("`gross = bank + cash` does not hold") is still true on October's data.
+  Never build a figure as Platform earnings + Cash collected.
+* **`day_money` and fleetIncome's `accounted` agree to within AED 0.04** on all three (rounding: one is
+  summed per day, the other per platform). They part only on Yango, which `accounted` counts on its
+  payout and `day_money` on its fares.
+* **Uber's statement reached every day of the month** (`day_stmt_days` 31 of 31), and for
+  2026-11-01..16 it reached all 16 days although the last closed statement week ended on the 15th
+  (`statement_fare_to` 2026-11-15): the open week is already spread across its days.
+
+### Trap: an unpriced booking is not missing money where a statement covers its day
+
+`moneyInTile` (ui.js) prints "at least" and "this is a floor rather than the total — Uber files its fares
+in a weekly payments report" whenever `k.trips > k.priced_trips`. On driver 1 above that is 30 unpriced of
+502 — with 43 bookings never completed (a ride nobody took has no fare and never will), the Uber statement
+on 31 of 31 days (an unpriced Uber booking's money is INSIDE the statement's net), and fleetIncome's
+`dark_bookings` **0**. So the Overview's Money in reads "at least" with a reason that is not the true one.
+The honest floor is `dark_bookings` — bookings on a channel that reports no money for them at all
+(`api/income_sql.js` darkOf) — which is what `api/public/actualearnings.js` gates on. The Overview tile
+itself is unchanged by ERN and is a separate fix.

@@ -2046,8 +2046,9 @@ export function avatar(name, pictureUrl, cls = '', absentReason = null) {
    is money in. The tile says that now instead of inviting the subtraction.
 
    Both shells call these, so neither can drift (api/public/driver.js,
-   api/public/m/screens.js). */
-const moneyParts = (k) => {
+   api/public/m/screens.js); the Earnings tab's Actual earnings tile reads
+   the same parts (api/public/actualearnings.js). */
+export const moneyParts = (k) => {
   /* `!= null` before Number(), because Number(null) is 0 and 0 is finite —
      the trap that already put "the day-by-day record holds AED 0" one edit
      away from production. */
@@ -2111,7 +2112,7 @@ const moneyParts = (k) => {
    a property of the statement basis all three share, and printing the same
    thirty words under three cards in a row is how a caption stops being read.
    It is stated once, on the card the group leads with. */
-const grainClause = (p, what, { alignment = false } = {}) => (p.shared
+export const grainClause = (p, what, { alignment = false } = {}) => (p.shared
   ? ` — a ${fmt(p.periodDays)}-day statement shared evenly across its days, `
     + `not ${what} ${p.windowDays === 1 ? 'on this one' : 'over these ' + fmt(p.windowDays)}`
   : alignment && p.spread
