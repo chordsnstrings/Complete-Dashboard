@@ -7179,3 +7179,9 @@ Classic, light and dark with the mock's leads, and refused-no-leads and timeout-
 by route fixture; the break card's web candidate labelled and linked, the calendar candidate not.
 Still not proven, unchanged from above: a real ModelArk answer, the cost per call, production's
 account switch.
+
+### EVW at integration (2026-11-16)
+
+| # | what | fix | test | state |
+|---|---|---|---|---|
+| EVW-I1 | **Two browser suites the builder could not run went red in the full run.** `arkiv_work` pinned #causes' section order without the new "Coming up in Dubai"; `arkiv_classic_frozen`'s `causes` hash moved. The Classic diff, production's front end (`01a8b65`) against this branch on the same mock, is three hunks and only EVW's: the "web search" pill and source link on the two web events in the break cards and the events table, and the new `causes-web` panel. Production's own front end on the new mock also moved (443b0b1f), because mockapi's /api/events now carries web rows. | The order check names the new section after "What was on in Dubai"; the Classic `causes` hash is re-recorded (as INT6 did for RET's panel). | `arkiv_work` 137, `arkiv_classic_frozen ONLY=causes` 2, `chart_marks` 151 | written |
