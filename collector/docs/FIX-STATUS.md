@@ -7207,6 +7207,15 @@ journeys, 21 had a cancelled booking on the same car from 45 minutes before to t
 | CXA2 | The strip: a cancellation is a struck box at its request, by who ended it — rider (hollow), driver after accepting (solid), an offer declined (dotted), not said by whom (grey) — never the hatch; titles in words ("rider cancelled", "the rider did not show", "driver cancelled after accepting", "offer declined by the driver", "cancelled — the channel does not say by whom"); the legend names only the forms drawn; the jobs column reads "3 +5✕"; the Jobs tile counts jobs and says the cancellations by party; a caption says what a cancellation is on this chart. An older response (outcome only) is read as "not said by whom", never as a missing dropoff. | yes | with this PR | `test/activity_cancellations.test.mjs` 19, in Chromium; reversions: the drawing branch (11 fail), the outcome fallback (3) |
 | CXA3 | A red bar names a cancelled booking on THE SAME CAR inside it ("on this car during it: 20:56 uber booking, rider cancelled. A cancelled booking is not a ride, so it does not explain this journey"), and the cancellation is drawn above it. The reconciler is unchanged: a ride nobody took does not explain a journey. | yes | with this PR | same file §4; reversions: the naming (1 fail), the z-index (1) |
 
+| CXA4 | **Seen on production after the deploy of `1255092`:** the jobs column (32px) wrapped "5 +1✕" onto a second line, so a day with a cancellation drew taller than one without. The column is 56px (52px under 760px) and does not wrap. | yes | with the follow-up PR | `activity_cancellations` §3 "on one line" (20 pass); with the 32px column restored it fails (tops 1199 and 1219) |
+
+On production (deploy of `1255092`, 2026-11-16 13:53Z), on the operator's driver for 1–15 November: `/api/driver/shift`
+answers `unknown_end` 0 (it was 20) and `cancelled` 20 — all by the rider, 16 Uber `rider_cancelled` and 4 Bolt
+`client_cancelled`. The strip draws 20 cancellation marks and no hatch; the legend reads "cancelled by the rider"; the Jobs
+tile "102 · 20 more cancelled — 20 by the rider"; and the 1 Nov 18:32–21:13 red bar's title ends "on this car during
+it: 20:56 uber booking, rider cancelled. A cancelled booking is not a ride, so it does not explain this journey." The
+Earnings tab shows Actual earnings fourth, right after Platform earnings, with no script error (FIX-STATUS ERN).
+
 Unchanged on purpose: pages with no cancellations render byte-identically (`arkiv_classic_frozen ONLY=driver/`, 15 routes
 pass), and `driver_day.unknown_end` in the stored record still counts every booking with no end — read by nothing that
 calls it a missing dropoff today.

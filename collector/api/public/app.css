@@ -1763,7 +1763,11 @@ a.kpi:hover .kpi-who,a.kpi:focus-visible .kpi-who{opacity:1;transform:translateX
 
 /* shift bars ─ first trip to last trip, one row per day */
 .shifts{display:flex;flex-direction:column;gap:5px}
-.shift{display:grid;grid-template-columns:62px 1fr 96px 48px 60px 80px 32px;align-items:center;gap:11px;font-size:var(--t5)}
+/* The jobs column is 56px, not 32: since cancellations are counted apart
+   (FIX-STATUS CXA) a day reads "12 +3✕", and at 32px that wrapped onto a
+   second line, so a day with a cancellation drew taller than a day without —
+   seen on production on the operator's driver, 2026-11-16. */
+.shift{display:grid;grid-template-columns:62px 1fr 96px 48px 60px 80px 56px;align-items:center;gap:11px;font-size:var(--t5)}
 .sh-d{color:var(--grey);font-family:"IBM Plex Mono",monospace;font-size:var(--t4);white-space:nowrap}
 .sh-track{position:relative;height:13px;background:var(--surface-2);border-radius:4px}
 /* THREE STATES, THREE COLOURS.
@@ -1841,7 +1845,7 @@ a.kpi:hover .kpi-who,a.kpi:focus-visible .kpi-who{opacity:1;transform:translateX
 .sh-head{color:var(--grey);font-size:var(--t3);letter-spacing:.04em;text-transform:uppercase;margin-bottom:2px}
 .sh-head>div{color:inherit;font-family:"IBM Plex Mono",monospace}
 .sh-v{font-family:"IBM Plex Mono",monospace;font-size:var(--t4);color:var(--grey-strong);text-align:right}
-.sh-t{font-family:"IBM Plex Mono",monospace;font-size:var(--t5);text-align:right;color:var(--ink)}
+.sh-t{font-family:"IBM Plex Mono",monospace;font-size:var(--t5);text-align:right;color:var(--ink);white-space:nowrap}
 
 /* directory cards ─ the top of the roster, read as a ranking */
 .dircards{display:grid;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));gap:12px}
@@ -1899,7 +1903,7 @@ a.kpi:hover .kpi-who,a.kpi:focus-visible .kpi-who{opacity:1;transform:translateX
   .idcard{flex-direction:column;gap:12px}
   .pbar{grid-template-columns:1fr 44px;grid-template-areas:"l l" "t v"}
   .pb-l{grid-area:l} .pb-track{grid-area:t} .pb-v{grid-area:v}
-  .shift{grid-template-columns:54px 1fr 42px 56px 30px}
+  .shift{grid-template-columns:54px 1fr 42px 56px 52px}
   .sh-v,.sh-o{display:none}
 }
 
