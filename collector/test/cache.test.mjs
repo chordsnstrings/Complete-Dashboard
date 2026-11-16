@@ -42,6 +42,8 @@ app.post('/api/thing', (_q, res) => { calls++; res.json({ n: calls }); });
 app.get('/api/driver/day', (_q, res) => { calls++; res.json({ n: calls }); });
 /* Uber online by hour: today's hours read the live status feed. */
 app.get('/api/online/hours', (_q, res) => { calls++; res.json({ n: calls }); });
+/* Flights and airport trips: today's landings are live estimates. */
+app.get('/api/airport', (_q, res) => { calls++; res.json({ n: calls }); });
 const server = app.listen(0);
 const port = server.address().port;
 // The cache re-requests stale keys on itself, so it needs the real port.
@@ -386,6 +388,19 @@ check('and the hit rate is visible, so a cache that stopped working can be seen'
   const o1 = await get('/api/online/hours?day=2026-10-01');
   const o2 = await get('/api/online/hours?day=2026-10-01');
   check('…and a past day of it is served from the cache', o2.body.n === o1.body.n && o2.cache === 'hit', JSON.stringify([o1, o2]));
+  /* Flights landing and airport trips (review of 2026-11-16, FIX-STATUS
+     FLT-R6): today's landings are live estimates written by a 'realtime'
+     tick that moves no version. REVERSION: drop the /api/airport clause from
+     neverToday — the first check fails (the second call is a hit). */
+  const a1 = await get(`/api/airport?day=${todayIso}&airport=OMDB&days=28`);
+  const a2 = await get(`/api/airport?day=${todayIso}&airport=OMDB&days=28`);
+  const d1 = await get('/api/airport?airport=both');
+  const d2 = await get('/api/airport?airport=both');
+  check("today's airport page reaches the route every time, asked by date or by default",
+    a2.body.n === a1.body.n + 1 && a2.cache !== 'hit' && d2.body.n === d1.body.n + 1 && d2.cache !== 'hit', JSON.stringify([a1, a2, d1, d2]));
+  const y1 = await get('/api/airport?day=2026-10-01&airport=OMDB&days=28');
+  const y2 = await get('/api/airport?day=2026-10-01&airport=OMDB&days=28');
+  check('…and a past day of it is served from the cache', y2.body.n === y1.body.n && y2.cache === 'hit', JSON.stringify([y1, y2]));
 }
 
 console.log('\ncache: the low performers — keyed on the target as well as the data');

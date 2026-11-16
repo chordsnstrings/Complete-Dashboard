@@ -129,6 +129,10 @@ export function titleFor(view, param) {
     opening: ['Starting balances', 'What each driver was holding when counted'],
     'import-sheet': ['Bring a sheet in', 'History from a spreadsheet'],
     policy: ['The lending line', 'The percentage obligations are kept within'],
+    /* Flights landing and the fleet's airport trips (2026-11-16): a desktop
+       page with two charts and four tables; named here so the phone's
+       fallback header is not the router's word. */
+    airport: ['Airport', 'Built for a bigger screen'],
   }[view];
   return { title: t ? t[0] : (view || 'Fleet'), sub: t ? t[1] : 'Built for a bigger screen' };
 }

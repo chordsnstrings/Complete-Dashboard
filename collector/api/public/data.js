@@ -526,6 +526,9 @@ export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'ac
   /* Sign-in and access pages: about people and settings, never a window. */
   'account', 'access', 'fleet-names', 'approvals',
   'online-time', 'online-hours',
+  /* #airport carries its own day, airport and window (./airport.js), and the
+     landings are the same for both fleets and every channel. */
+  'airport',
   /* #same-person is the whole queue of unsettled pairs, and /api/same-person
      takes no window, no platform and no fleet: a pair is a pair whenever
      either record drove. All three controls would govern nothing, and would

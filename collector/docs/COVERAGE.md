@@ -981,6 +981,29 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **"Airport" in a booking's address is mostly NOT the airport** (2026-11-16, FIX-STATUS FLT9).
+  No booking carries a coordinate, so an airport trip is found by its address text, and the
+  commonest "airport" address on production is "Airport Rd - Al Garhoud - Dubai" — a road of
+  warehouses and hotels. Over 17 Oct – 15 Nov the word alone matched 1,455 pickups; the strict
+  rule keeps 391. "Dubai Int…" is also Internet City, International City, DIFC and a dozen
+  schools; "DXB"/"DWC" alone are codes in other things (AE-DXB-YTS, DXB5, "Logistics City DWC");
+  Google files the Free Zone's offices under "Dubai Int'l Airport"; "opposite to Airport Terminal
+  3" is Emirates HQ. Use `api/airport_sql.js` (`airportOfSql` / `airportOfAddress`), never a
+  fresh `ILIKE '%airport%'`. And in a Postgres regular expression `\b` is a BACKSPACE: a pattern
+  copied from JS matches nothing there until `\b` becomes `\y` (the builder does it).
+* **OpenSky's `/flights/*` 404 is an answer, and today is never there** (2026-11-16, COVERAGE
+  "OpenSky Network"). Flights are published in a nightly batch after the UTC day ends, so the
+  current day 404s, and a 404 is also "no flights in that interval". Read yesterday's as "not
+  published yet" and retry; read an older day's as "none returned". Today's landings exist only as
+  live estimates from the final approach. **The other half of the trap** (review of 2026-11-16,
+  FIX-STATUS FLT-R4, FLT-R5): because the client resolves a 404, every caller must decide what
+  else is NOT an answer. The live poll took a 404 as an empty sky (an unmeasured hour drawn as "0
+  landings, live estimate"), and the arrivals run took a 200 that was not a list — the sign-in page
+  a silent redirect lands on is text — as a day collected with 0 landings, never asked again. That
+  is the FMS hole `src/http.js` already records ("asked and answered with nothing"), arriving in
+  a new collector. Only a list is an arrivals answer (an empty one is read as a 404); only a 200
+  with a `states` field is a live one.
+
 * **`innerText` reports CSS `text-transform`, so a case-sensitive match on it fails on visible
   text** (2026-11-12, twice in one day; FIX-STATUS INT5). Arkiv sets panel headings and the phone
   card's date-and-channel line in mono capitals; `innerText` returns "DATA RETENTION" and
@@ -11697,3 +11720,98 @@ collector boot and at 22:20 UTC; the answer is the `uber / cash-block-scope:<fle
 cannot get the scope by client credentials, and because Uber documents these scopes on the Authorization Code
 grant, that is not proof Uber refused the app. A check that was issued a token forgets the process's cached Uber
 grants (`forgetUberTokens`), because nothing recovers a retired token from a 401.
+
+## OpenSky Network — flights landing at DXB and DWC (2026-11-16)
+
+The eighth upstream, and the first that is not about the fleet: the operator asked for "flight
+details and flights actually landing, and how that impacts the airport trips. use api - any free
+api", and supplied an OpenSky Network API client (a free account). Collector
+`src/sources/flights.js`, tables in `sql/schema_v125.sql`, read by `GET /api/airport`, shown on
+`#airport` (FIX-STATUS FLT). Everything below was measured on 2026-11-16 with the operator's client
+from another session; the responses are saved, credential-free, in
+`collector/test/fixtures/opensky/` (the arrivals gzipped).
+
+**Credential shape and lifetime.** An API client: `OPENSKY_CLIENT_ID` + `OPENSKY_CLIENT_SECRET`,
+exchanged by OAuth2 client credentials — `POST
+https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token` with
+`grant_type=client_credentials&client_id=…&client_secret=…` as a form → `{access_token,
+expires_in: 1800}` (30 minutes), sent as `Authorization: Bearer`. **Basic auth (username and
+password on the REST API) was removed by OpenSky on 2026-03-18**; an old snippet that sends one
+gets nothing. The client does not expire that we know of; the token does, and the collector
+re-mints it a minute before. Both endpoints are settings ending in `_URL`, so environment-only.
+
+**Credits: two allowances, both 4,000 a day on the free account.** Read from the
+`X-Rate-Limit-Remaining` header on every answer (the collector records it on each coverage row);
+a 429 carries `X-Rate-Limit-Retry-After-Seconds`.
+
+| endpoint | what | cost, measured |
+|---|---|---|
+| `GET /api/flights/arrival?airport=OMDB&begin=<unix>&end=<unix>` | arrivals at one airport over one UTC day | **30 credits a query** (3970 → 3940 → 3910) |
+| `GET /api/states/all?lamin=24.70&lomin=54.95&lamax=25.45&lomax=55.65&extended=1` | live state vectors over Dubai | **1 credit**, from a SEPARATE pool (3999 → 3998) |
+
+So the first run's backfill of 30 days at two airports is 60 queries, 1,800 credits; a day after
+that is 2 queries, 60 credits; the live watch every two minutes is 720 of the other pool.
+`OPENSKY_CREDIT_FLOOR` (600) stops an arrivals run before it spends the day.
+
+**The nightly batch — the trap here.** `/flights/*` is published by a batch process after the UTC
+day ends: the same arrivals query for the CURRENT UTC day answered **404** while yesterday's held
+438 landings at OMDB. And a 404 is also what OpenSky answers for "no flights in that interval".
+So a 404 is an answer, not an error, and what it means depends on the day: for yesterday, "not
+published yet" (retried at every slot); for an older day, "none returned" (asked three times, then
+left, the reason kept). Today's landings can only be ESTIMATED, from the live feed. When exactly
+the batch lands is not measured — 11-15 was complete by 09:26Z on 11-16 — so the collector tries at
+01:41Z and every third hour after, asking only for what is still missing.
+
+**What an arrival carries** (438 at OMDB and 74 at OMDW for 2026-11-15): `icao24` (the
+transponder, lower-case hex), `callsign` (space-padded), `firstSeen`, `lastSeen` (unix seconds;
+**lastSeen is the landing, to within minutes** — the last position report near the field),
+`estArrivalAirport`, `estDepartureAirport` (**null for 163 of 438** at OMDB: OpenSky could not
+tell where the flight started; 182 of the 512 at both), `estArrivalAirportHorizDistance` /
+`…VertDistance` (metres from the field at the last report), `estDepartureAirport…Distance`, and the
+two candidate counts. The departure airport is an ESTIMATE from where OpenSky first saw the
+aircraft: 16 OMDB arrivals at OMDB "came from OMDB" (a go-around, a test or positioning flight, or
+the estimate), and some codes are not ICAO at all (`KE-6029`, an OurAirports ident).
+
+**What it does NOT give us.** No aircraft type, seat count, airline name or passenger number — so
+landings cannot be turned into passengers, and the page says so. No gate, terminal or scheduled
+time (no "delayed"). Not every landing: **438 seen at DXB against roughly 550–600 a day by public
+traffic figures** — about three in four, an ESTIMATE that varies by day; the page says "landings
+OpenSky's receivers saw", never "all landings". No ground traffic at Dubai: the live snapshot had
+about four aircraft within 8 nm of DXB and **none on the ground**, so a live landing is inferred
+from the final approach (FIX-STATUS FLT3), never watched. No departures are collected (not asked
+for).
+
+**The state vector** (`/states/all`, arrays): 0 icao24, 1 callsign, 2 origin_country,
+3 time_position, 4 last_contact, 5 lon, 6 lat, 7 baro_altitude (m), 8 on_ground, 9 velocity (m/s),
+10 true_track (deg), 11 vertical_rate (m/s), 12 sensors, 13 geo_altitude, 14 squawk, 15 spi,
+16 position_source, 17 category. The box is under one square degree (0.53), OpenSky's cheapest
+area band. An empty box is `{"time": …, "states": null}` (OpenSky's documented empty answer, not
+yet seen live) — that is an answered poll that saw nothing. Anything else — a 404, a 200 with no
+`states` field — is a FAILED poll and is recorded as one (review of 2026-11-16, FIX-STATUS
+FLT-R4): the collector's client resolves every 404 because on `/flights/*` a 404 is an answer, and
+the live poll used to inherit that and draw an unmeasured hour as "0 landings, live estimate".
+
+**Sharjah is in the box.** OMSJ (25.3286, 55.5172) is about 9.5 nm north-east of DXB (25.2528,
+55.3644) with a runway parallel to DXB's (12/30); DWC is 24.8960, 55.1610. The two fields' extended
+centre lines are about 8 nm apart laterally, so the cross-track test (≤ 1.5 nm) cannot give one
+aircraft to both — and OMSJ is in the rule as a decoy so its arrivals are named and dropped. The
+saved snapshot holds one: ABY739 (Air Arabia, based at Sharjah), 267 m, descending, 3.2 nm out on
+OMSJ's 30.
+
+**When it runs.** Arrivals `41 1,4,7,10,13,16,19,22 * * *` UTC and 12 minutes after the worker
+starts; live every two minutes. Status rows under source `opensky` (modes `arrivals`, `realtime`)
+on `/api/status`. The live watch is `realtime` ON PURPOSE (review of 2026-11-16, FIX-STATUS
+FLT-R6): the response cache's version moves on any other mode, each move restarts the warmer, and a
+two-minute tick that wrote `live` moved it at least every half hour and on every ok↔error flip.
+Today's `/api/airport` is read uncached instead (`api/cache.js` neverToday). No `credential_state`
+row is written: OpenSky is not one of the fleet's channels, and the banner and the ntfy alerts
+should not page anyone about a flight feed.
+
+**The fleet's airport trips, measured against it** (production `/api/trips/list`, 17 Oct – 15 Nov
+2026, every booking whose address mentions airport, terminal, Maktoum, DWC, DXB or مطار — 2,995
+bookings): the word "airport" alone matched **1,455 pickups and 1,825 drop-offs**; the strict rule
+(`api/airport_sql.js`) keeps **391 pickups at DXB** (Uber 240, the hotel channel 151, **Bolt 0,
+Yango 0**) and 2 at DWC, and **1,314 drop-offs at DXB** (Uber 986, hotel 284, Bolt 42, Yango 2)
+and 26 at DWC. That is **13.0 DXB pickups a day (6 to 19)** — enough for a relationship over a
+week or more, and few enough per HOUR (about half a pickup) that an hourly correlation is noisy.
+Bolt and Yango drop passengers at the airport and pick none up there in this month.

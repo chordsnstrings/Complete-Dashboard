@@ -19,6 +19,7 @@ import * as hotel from './sources/hotel.js';
 import * as external from './sources/external.js';
 import * as events from './sources/events.js';
 import * as yocharge from './sources/yocharge.js';
+import * as flights from './sources/flights.js';
 import { reconcile } from './reconcile.js';
 import { computeInsights } from './insights.js';
 import { runAnalyst } from './analyst.js';
@@ -573,6 +574,35 @@ export async function walletsTick() {
     log.error('yocharge', 'wallets tick failed', { err: String(e).slice(0, 200) });
     return { error: String(e) };
   } finally { chargingBusy = false; }
+}
+
+/* FLIGHTS from OpenSky (src/sources/flights.js): the nightly confirmed
+   arrivals and the two-minute live watch, each under its own one-at-a-time
+   flag — an arrivals backfill of 60 queries can outlast a slot, and a live
+   poll that has not answered must not stack the next one on it. Settings are
+   loaded and pinned per tick, so a client pasted on the Settings page is
+   used within a tick, as every other collector's is. */
+let arrivalsBusy = false;
+let liveBusy = false;
+export async function flightsArrivalsTick() {
+  if (arrivalsBusy) return { skipped: 'an arrivals run is already going' };
+  arrivalsBusy = true;
+  try {
+    return await withPinnedSettings(async () => { await loadSettings(); return flights.collectArrivals(); });
+  } catch (e) {
+    log.error('opensky', 'arrivals tick failed', { err: String(e).slice(0, 200) });
+    return { error: String(e) };
+  } finally { arrivalsBusy = false; }
+}
+export async function flightsLiveTick() {
+  if (liveBusy) return { skipped: 'the previous live poll is still going' };
+  liveBusy = true;
+  try {
+    return await withPinnedSettings(async () => { await loadSettings(); return flights.pollLive(); });
+  } catch (e) {
+    log.error('opensky', 'live tick failed', { err: String(e).slice(0, 200) });
+    return { error: String(e) };
+  } finally { liveBusy = false; }
 }
 
 export async function uberProfileTick(opts) { return withPinnedSettings(() => uberProfileTickPinned(opts)); }

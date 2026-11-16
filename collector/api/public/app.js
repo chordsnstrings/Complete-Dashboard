@@ -396,6 +396,11 @@ const VIEWS = [
   { id: 'playbook', label: 'To-do list', ic: '☑', sec: 'Today', sub: 'Jobs to do this month to earn more, each with the sums behind it' },
   { id: 'overview', label: 'Fleet activity', ic: '◱', sec: 'Today', sub: 'How many trips the fleet ran, on which platforms, and how they ended' },
   { id: 'compare', label: 'Today vs yesterday', ic: '⧉', sec: 'Today', sub: 'Two days side by side, both counted up to the same Dubai minute' },
+  /* The operator, 2026-11-16: "add flight details and flights actually
+     landing, and how that impacts the airport trips" — landings at DXB and
+     DWC from the OpenSky Network beside the fleet's airport pickups, hour by
+     hour, and the relationship over a window (./airport.js, /api/airport). */
+  { id: 'airport', label: 'Airport', ic: '✈', sec: 'Today', sub: 'Flights landing at DXB and DWC hour by hour, the fleet’s airport pickups, and how the two move together' },
   { id: 'analyst', label: 'Analyst', ic: '◑', sec: 'Today', sub: 'Claims the model made, checked against the database, with the numbers behind each' },
   { id: 'unit', label: 'Money per car and driver', ic: '◆', sec: 'Money', sub: 'What each car and driver earned per day, per km and per trip, including zero earners' },
   { id: 'revenue', label: 'Money by platform', ic: '◇', sec: 'Money', sub: 'What each platform reports about money, and which ones report nothing' },
@@ -974,6 +979,7 @@ const PAGE_OF = {
   'same-person': './sameperson.js',
   'top-performers': './performers.js',
   advances: './advances.js',
+  airport: './airport.js',
   analyst: './analyst.js',
   cancellations: './cancellations.js',
   capacity: './capacity.js',
@@ -3133,6 +3139,9 @@ V.opening = async (root) => (await page('opening')).renderOpening(root);
 V['import-sheet'] = async (root) => (await page('import-sheet')).renderImport(root);
 V.policy = async (root) => (await page('policy')).renderPolicy(root);
 V.charging = async (root) => (await page('charging')).renderCharging(root);
+/* Flights landing at Dubai and the fleet's airport trips (./airport.js):
+   the day in the address, the airport after it (#airport/2026-11-15/both). */
+V.airport = async (root) => (await page('airport')).renderAirport(root, state.param, state.sub);
 /* Sign-in and access (collector/docs/ULM-DESIGN.md): my account, Set up →
    Access, and the fleets as the platforms name them. Loaded on demand — most
    readers never open them, and none of their code belongs on the path to a

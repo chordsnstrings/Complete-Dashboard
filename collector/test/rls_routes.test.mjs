@@ -46,6 +46,7 @@ import { seedFleet } from './fixture.mjs';
 import { refreshRollups } from '../src/rollup.js';
 import { secureFleetScope, probeFleetScope, pgliteRunner, scopedPglite, enterFleetScope, RLS_ROLE } from '../src/fleet_scope.js';
 import { READ_CAPS } from '../api/access/middleware.js';
+import { NO_CLIENT } from '../src/sources/flights.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -166,6 +167,33 @@ console.log('\n2. why \'rows\' routes are not narrowed in the database');
     all.status === 200 && one.status === 200 && shrunk.length > 0,
     `${all.status}/${one.status}; first days: ${JSON.stringify([...a.entries()].slice(0, 3))} vs ${JSON.stringify([...b.entries()].slice(0, 3))}`);
   if (shrunk.length) console.log(`     e.g. ${shrunk[0][0]}: ${shrunk[0][1]} drivers active across the company, ${b.get(shrunk[0][0])} inside Egari's scope`);
+}
+
+/* ══ 3. /api/airport: the collector's state is nobody's fleet ════════════
+   The OpenSky collector (src/sources/flights.js) files its runs in
+   collection_run with fleet_id NULL — the sky is not a fleet's. v124's
+   policy shows a one-fleet reader no NULL-fleet row, so inside the scope
+   the route read no run at all: arrivals_run came back null and every hour
+   nothing covered gave "not asked yet — the arrivals collector has not
+   reached this day" where an unrestricted reader, on the same data, was
+   told the true reason, "no OpenSky client configured" (review of
+   2026-11-16). The route now reads those runs outside the scope
+   (outsideFleetScope), as api/target_weights.js reads the company's.
+   Section 1 could not see it: the fixture holds no OpenSky run, so both
+   answers were the same empty one. REVERSION: drop the outsideFleetScope
+   around the runs query in api/airport_routes.js — this fails. */
+console.log('\n3. /api/airport: the OpenSky collector\'s state is the same for every reader');
+{
+  await pg.query(`INSERT INTO collection_run (source, fleet_id, mode, status, rows_written, error, started_at, finished_at)
+                  VALUES ('opensky', NULL, 'arrivals', 'error', 0, $1, now(), now())`, [NO_CLIENT]);
+  const p = '/api/airport?fleet=egari&day=2026-08-15&days=7';
+  const before = await call(p, null);
+  const scoped = await call(p, 'egari');
+  const why = (r) => r.body?.landings?.hours?.[10]?.why || '';
+  check('a one-fleet reader is told the collector\'s true state, as an unrestricted one is',
+    before.body?.arrivals_run?.error === NO_CLIENT && scoped.body?.arrivals_run?.error === NO_CLIENT
+      && /no OpenSky client configured/.test(why(before)) && why(scoped) === why(before),
+    `unscoped: ${JSON.stringify(before.body?.arrivals_run)} "${why(before)}" · scoped: ${JSON.stringify(scoped.body?.arrivals_run)} "${why(scoped)}"`);
 }
 
 h.server.close();

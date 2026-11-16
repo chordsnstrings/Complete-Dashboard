@@ -31,6 +31,13 @@ import { monthViewOf, monthWorkbookOf } from './api/target_month.js';
 import { lowperfOf, watchOf, periodOf, spansOf, HOTEL_MODES as LP_HOTEL } from './api/lowperf.js';
 import { lowperfWorkbookOf, watchWorkbookOf } from './api/lowperf_workbook.js';
 import { cabmanSeat } from './api/feed_routes.js';
+/* The Airport page's response is built by the route's own pure half, from
+   the REAL OpenSky arrivals of 2026-11-15 (test/fixtures/opensky/), shifted a
+   day at a time — so the mock's landings have Dubai's real hourly shape and
+   the page is reviewed against the shape the route returns. */
+import { airportShape, addDays as apAddDays } from './api/airport_routes.js';
+import { readFileSync as apRead } from 'node:fs';
+import { gunzipSync as apGunzip } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -9136,6 +9143,79 @@ app.get('/api/charging/vehicle', (req, r) => {
     basis: { session_plate: has ? 2 : 0, only_car: has ? 8 : 0, nearest_trip: has ? 1 : 0 },
     recent: has ? [0, 1].map((k) => ({ started_at: new Date(Date.now() - (k + 1) * 3e7).toISOString(), kwh: 38.2 - k * 4, cost: 27.5 - k * 3,
       plate_basis: k ? 'only_car' : 'session_plate', site: 'Al Quoz Hub', driver: drivers[k], person_id: String(401 + k) })) : [] });
+});
+
+/* GET /api/airport (api/airport_routes.js): thirty collected UTC days at
+   both airports from the real 2026-11-15 lists; today not yet published, its
+   past hours from the live watch at about seven in ten of the confirmed
+   shape; bookings whose airport pickups follow the landings of the hour
+   before. Deterministic — no Math.random — so the page draws the same twice. */
+const AP_FIX = (() => {
+  const read = (a) => { try { return JSON.parse(apGunzip(apRead(join(__dir, 'test', 'fixtures', 'opensky', `arrivals_${a}_2026-11-15.json.gz`))).toString('utf8')); } catch { return []; } };
+  return { OMDB: read('OMDB'), OMDW: read('OMDW') };
+})();
+const AP_BASE = Date.parse('2026-11-15T00:00:00Z') / 1000;
+app.get('/api/airport', (req, r) => {
+  const nowMs = Date.now();
+  const today = dubaiDay(new Date(nowMs));
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || '')) && req.query.day <= today ? String(req.query.day) : today;
+  const airport = ['OMDB', 'OMDW', 'both'].includes(req.query.airport) ? req.query.airport : 'OMDB';
+  const days = Math.min(90, Math.max(7, Number.parseInt(req.query.days, 10) || 28));
+  const from = apAddDays(day, -(days - 1));
+  const coverage = []; const landedMap = new Map(); const origins = { day: new Map(), window: new Map() };
+  for (let k = 1; k <= 30; k++) {
+    const ud = apAddDays(today, -k);
+    if (ud < apAddDays(from, -1) || ud > day) continue;
+    for (const ap of ['OMDB', 'OMDW']) {
+      const list = AP_FIX[ap];
+      coverage.push({ airport: ap, utc_day: ud, status: 'collected', landings: list.length });
+      const shift = Date.parse(`${ud}T00:00:00Z`) / 1000 - AP_BASE;
+      for (const f of list) {
+        const t = new Date((f.lastSeen + shift + 4 * 3600) * 1000);
+        const d = t.toISOString().slice(0, 10); const h = t.getUTCHours();
+        if (d < from || d > day) continue;
+        const key = `${ap}|${d}|${h}`; landedMap.set(key, (landedMap.get(key) || 0) + 1);
+        if (airport === 'both' || airport === ap) {
+          const o = f.estDepartureAirport || null;
+          origins.window.set(o, (origins.window.get(o) || 0) + 1);
+          if (d === day) origins.day.set(o, (origins.day.get(o) || 0) + 1);
+        }
+      }
+    }
+  }
+  coverage.push({ airport: 'OMDB', utc_day: today, status: 'not_published', reason: 'OpenSky has not published this day yet — its flights arrive in a nightly batch' });
+  const landed = [...landedMap].map(([k, n]) => { const [a, d, h] = k.split('|'); return { airport: a, d, h: Number(h), n }; });
+  /* Today's live watch: the confirmed shape of the same hour a day earlier,
+     at about seven in ten (what the receivers' coverage makes plausible). */
+  const live = []; const liveHours = [];
+  const clock = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dubai', hour: '2-digit', hourCycle: 'h23' }).format(new Date(nowMs));
+  for (let h = 4; h <= Number(clock); h++) {
+    liveHours.push({ d: today, h, polls: 30, polls_ok: h === 6 ? 9 : 30, last_error: h === 6 ? 'OpenSky answered HTTP 503' : null });
+    for (const ap of ['OMDB', 'OMDW']) {
+      const prev = landedMap.get(`${ap}|${apAddDays(today, -1)}|${h}`) || 0;
+      live.push({ airport: ap, d: today, h, n: Math.round(prev * 0.7) });
+    }
+  }
+  const lAt = (d, h) => (landedMap.get(`OMDB|${d}|${h}`) || 0) + (airport === 'OMDB' ? 0 : landedMap.get(`OMDW|${d}|${h}`) || 0);
+  const bookings = [];
+  for (let i = 0; i < days; i++) {
+    const d = apAddDays(from, i);
+    for (let h = 0; h < 24; h++) {
+      const prev = h ? lAt(d, h - 1) : lAt(apAddDays(d, -1), 23);
+      const pu = Math.floor(prev / 6);
+      if (pu) bookings.push({ d, h, platform: 'uber', pu: 'OMDB', dr: null, n: Math.ceil(pu * 0.6), done: Math.ceil(pu * 0.5), noaddr: 0 });
+      if (pu > 1) bookings.push({ d, h, platform: 'hotel', pu: 'OMDB', dr: null, n: Math.floor(pu * 0.4), done: Math.floor(pu * 0.4), noaddr: 0 });
+      bookings.push({ d, h, platform: 'bolt', pu: null, dr: 'OMDB', n: 1 + (h % 3 === 0 ? 1 : 0), done: 1, noaddr: 0 });
+      bookings.push({ d, h, platform: 'uber', pu: null, dr: h % 5 === 0 ? 'OMDW' : null, n: 18 + (h % 7), done: 15, noaddr: 0 });
+      bookings.push({ d, h, platform: 'yango', pu: null, dr: null, n: 3, done: 2, noaddr: 1 });
+    }
+  }
+  const rows = (m) => [...m].map(([origin, n]) => ({ origin, n }));
+  r.json(airportShape({ day, airport, days, fleet: req.query.fleet || null, nowMs, coverage, landed, live, liveHours, bookings,
+    originsDay: rows(origins.day), originsWindow: rows(origins.window),
+    runs: { arrivals: { status: 'ok', error: null, finished_at: new Date(nowMs - 3 * 3600e3).toISOString() },
+      live: { status: 'ok', error: null, finished_at: new Date(nowMs - 60e3).toISOString() } },
+    liveCheck: { checked: 1180, matched: 1032, confirmed_watched: 1490, caught: 1032 }, backfillDays: 30 }));
 });
 
 app.get(/^\/api\//, (_, r) => r.json([]));

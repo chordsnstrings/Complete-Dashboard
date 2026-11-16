@@ -9349,5 +9349,30 @@
   "fleetKey": "",
   "cap": null,
   "notes": "api/online_hours_routes.js. Day x hour from driver_online_hour only: days[] {day, drivers[24], online_h[24], total_h, peak, complete, absent_why}; avg_drivers_by_hour[24] over complete days; days_averaged; timeline_to; basis. No names."
+ },
+ {
+  "method": "GET",
+  "path": "/api/airport",
+  "subject": "BK",
+  "carries": [
+   "BK",
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "SYS",
+    "paths": [
+     "arrivals_run",
+     "live"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "param",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/airport_routes.js (2026-11-16, FIX-STATUS FLT). One Dubai day at OMDB, OMDW or both: landings[24] by Dubai hour from flight_landing (OpenSky nightly list) or flight_live_landing (live estimates, labelled), each hour absent with its reason when neither covers it; bookings[24] airport pickups and drop-offs by hour and by platform (api/airport_sql.js address rule, any outcome) and the day totals; origins (top departure airports, OpenSky estimate); impact over days=7..90: lags 0-3 h {r, pickups_per_10_landings, slope}, best lag, daily[] {landings, pickups, dropoffs, bookings, share_pct}, absent_why under 7 complete days, caveat. Landings are not fleet data and are the same for every reader; fleet= narrows the bookings only (handler honours it). No names, no plates, no addresses: counts only. SYS: arrivals_run and live carry the collector state and its error text."
  }
 ]
