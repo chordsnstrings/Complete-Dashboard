@@ -16,11 +16,14 @@
      §8  byArea and the counts;
      §9  a month read at once, sliced per night, says what a night read alone
          says (the driver pages and the fleet table agree);
-     §10 a night still running says so; the request's refusals; the cache rule.
+     §10 a night still running says so; the request's refusals; the cache rule
+         (open until the READ ends at 12:00, not the window — OVN9);
+     §11 a month of ten cars sorted once: the same answers, fast (OVN10).
+   §1 also holds OVN11: a stay's end is a bound unless a watched drive ends it.
 
    Each rule's reversion is recorded in docs/FIX-STATUS.md (OVN). Synthetic
    plates and places only. */
-import { carNight, overnightOf, byArea, countsOf, overnightNight, sliceNight, parseOvernightQuery,
+import { carNight, carNights, overnightOf, byArea, countsOf, overnightNight, sliceNight, parseOvernightQuery,
   overnightOpen, nightWindow } from '../api/overnight.js';
 import { whereaboutsDay } from '../api/whereabouts.js';
 
@@ -71,8 +74,12 @@ console.log('\n§1 a stay across midnight');
   check('parked at the stay that holds the window', r.status === 'parked' && r.area === 'Al Barsha 1', JSON.stringify(r));
   check('from 21:00 the evening before, and that is when it began (not a bound)',
     r.from === '21:00' && r.from_day === NIGHT && r.since_at_least === false, `${r.from} ${r.from_day} ${r.since_at_least}`);
-  check('until its last fix there in the morning (07:00; it left before the next, at 07:35)',
-    r.to === '07:00' && r.to_day === ON && r.to_at_least === false, `${r.to} ${r.to_day}`);
+  /* Review OVN11: the first draft asserted to_at_least false here. But the
+     next fix, at 07:35, is a kilometre off — 35 minutes nobody watched: the
+     car left somewhere between 07:00 and 07:35, so 07:00 is when it was
+     last seen there, and the page says "still there at 07:00". */
+  check('until its last fix there in the morning (07:00) — a bound: the next fix, 35 min later, is already away',
+    r.to === '07:00' && r.to_day === ON && r.to_at_least === true, `${r.to} ${r.to_day} ${r.to_at_least}`);
   check('seen: every window minute between two fixes inside CABMAN’s parked rhythm',
     r.basis === 'fixes' && r.minutes_in_window === 300 && r.watched_min === 300 && r.inferred_min === 0 && /^seen/.test(r.how),
     JSON.stringify([r.basis, r.minutes_in_window, r.watched_min, r.how]));
@@ -85,11 +92,20 @@ console.log('\n§1 a stay across midnight');
   check('…and one still there at the first fix after the read (12:20) is "until at least"',
     only.to === '12:20' && only.to_at_least === true, JSON.stringify([only.to, only.to_at_least]));
   /* A stay whose last fix is 04:20 with nothing after ends at 04:20: the
-     rest of the window is the silence after it, not more stay. */
+     rest of the window is the silence after it, not more stay. But 04:20 is
+     when it was last SEEN there, not when it left — nothing watched it go
+     (review OVN11; the first draft asserted "not a bound" here). */
   const ends = night(stay(NIGHT, 1100, 1440 + 300, 'A', 60));
-  check('…but a last fix at 04:20 with nothing after ends the stay there, not a bound',
-    ends.status === 'parked' && ends.to === '04:20' && ends.to_at_least === false && ends.minutes_in_window === 260,
+  check('…a last fix at 04:20 with nothing after ends the stay there (260 window minutes), and 04:20 is a bound — last seen, not left',
+    ends.status === 'parked' && ends.to === '04:20' && ends.to_at_least === true && ends.minutes_in_window === 260,
     JSON.stringify([ends.to, ends.to_at_least, ends.minutes_in_window]));
+  /* OVN11 on the morning it was found: CABMAN's hourly heartbeat, read at
+     06:30 — the 06:00 fix is the last so far, the 07:00 one not yet due. */
+  const hb = stay(NIGHT, 1260, 1440 + 360, 'A', 60);
+  const at = (iso) => carNight({ plate: 'L1', night: NIGHT, points: hb, nowMs: Date.parse(iso) });
+  const r630 = at(`${ON}T06:30:00+04:00`);
+  check('read at 06:30 between two heartbeats: "still there at 06:00", never "–06:00" as if it left',
+    r630.status === 'parked' && r630.to === '06:00' && r630.to_at_least === true, JSON.stringify([r630.to, r630.to_at_least]));
 }
 
 console.log('\n§2 an FMS unit quiet all night at one spot is inferred');
@@ -102,6 +118,9 @@ console.log('\n§2 an FMS unit quiet all night at one spot is inferred');
     r.basis === 'inferred' && r.inferred_min === 300 && r.watched_min === 0, JSON.stringify([r.basis, r.watched_min, r.inferred_min]));
   check('and it says so in words', /inferred/.test(r.how) && /nothing reported between/.test(r.how), r.how);
   check('the stay still says when it began and ended', r.from === '20:00' && r.to === '06:30', `${r.from}–${r.to}`);
+  /* OVN11's other side: the 06:30 fix is followed five minutes later by a
+     moving one — a watched drive — so 06:30 is when it left, not a bound. */
+  check('…and an end a watched drive follows is when it left, not a bound', r.to_at_least === false, String(r.to_at_least));
   check('the fleet count files it under inferred, not parked',
     countsOf([r]).inferred === 1 && countsOf([r]).parked === 0, JSON.stringify(countsOf([r])));
   /* The basis is the WINDOW's, not the stay's: quiet from 23:00 to 05:30,
@@ -275,12 +294,64 @@ console.log('\n§10 a running night, the refusals, the cache rule');
   check('31 nights is allowed', ok({ plates: 'L1', from: '2026-10-01', to: '2026-10-31' }).nights?.length === 31);
   check('last night is allowed while it is still running (03:00)', parseOvernightQuery({ night: '2026-11-15' }, Date.parse('2026-11-16T03:00:00+04:00')).nights?.[0] === '2026-11-15');
 
-  const before5 = Date.parse('2026-11-16T04:59:00+04:00'); const after5 = Date.parse('2026-11-16T05:00:00+04:00');
-  check('the cache rule: last night is open until its window closes at 05:00, then cacheable',
-    overnightOpen({}, before5) === true && overnightOpen({}, after5) === false);
-  check('…an older night is cacheable; a range is open while its last night is',
+  const before5 = Date.parse('2026-11-16T04:59:00+04:00');
+  const at630 = Date.parse('2026-11-16T06:30:00+04:00');
+  const before12 = Date.parse('2026-11-16T11:59:00+04:00'); const at12 = Date.parse('2026-11-16T12:00:00+04:00');
+  /* OVN9: the window closes at 05:00 but the read runs to 12:00, and the
+     answer moves until then — §3b's FMS unit at 06:30 says "not reported
+     since", and the next tick makes that false. */
+  check('the cache rule: last night is open until its READ ends at 12:00 (not the window, 05:00), then cacheable',
+    overnightOpen({}, before5) === true && overnightOpen({}, at630) === true && overnightOpen({}, before12) === true
+    && overnightOpen({}, at12) === false, JSON.stringify([before5, at630, before12, at12].map((t) => overnightOpen({}, t))));
+  /* Why: the same car-night, read at 06:30 and at 07:00, says two things. */
+  const quiet = [...stay(NIGHT, 1300, 1350, 'A', 10, 'fms')];
+  const woke = [...quiet, fix(ON, '06:40', 'A', 'fms'), ...drive(ON, 400, 440, 'A', 'B', 'fms')];
+  const s630 = carNight({ plate: 'L1', night: NIGHT, points: quiet, nowMs: Date.parse(`${ON}T06:30:00+04:00`) });
+  const s700 = carNight({ plate: 'L1', night: NIGHT, points: woke, nowMs: Date.parse(`${ON}T07:00:00+04:00`) });
+  check('…because after 05:00 the answer still moves: "not reported since" at 06:30, parked (inferred) once it reports at 06:40',
+    s630.status === 'unknown' && /has not reported since/.test(s630.reason) && s700.status === 'parked' && s700.basis === 'inferred',
+    JSON.stringify([s630.status, s700.status, s700.basis]));
+  check('…an older night is cacheable; a range is open while its last night is read',
     overnightOpen({ night: '2026-11-10' }, before5) === false && overnightOpen({ plates: 'L1', from: '2026-11-10', to: '2026-11-15' }, before5) === true
     && overnightOpen({ plates: 'L1', from: '2026-11-10', to: '2026-11-14' }, before5) === false);
+}
+
+console.log('\n§11 a month of ten cars: the same answers, and in a fraction of a second');
+{
+  /* OVN10. The route judges a car's whole range night by night. The first
+     draft re-sorted every car's month for every night (Date.parse in the
+     comparator) and re-built every point per night: ten FMS cars over 31
+     nights (240 fixes a car-day, as measured on production) took 4.6 s of
+     synchronous arithmetic on the review machine. carNights sorts once and
+     finds each night by binary search. Two checks: field-for-field the same
+     as each night sliced alone, and well under a second for the month. */
+  const nights = Array.from({ length: 31 }, (_, i) => new Date(Date.parse('2026-10-01T12:00:00Z') + i * 864e5).toISOString().slice(0, 10));
+  const lo = nightWindow(nights[0]).readFromMs; const hi = nightWindow(nights[30]).readToMs;
+  const cars = Array.from({ length: 10 }, (_, k) => {
+    const pts = [];
+    for (let t = lo; t < hi; t += 6 * 60_000) {
+      const h = new Date(t + 4 * 3600e3).getUTCHours();
+      const moving = h >= 7 && h < 22 && (k + h) % 4;
+      pts.push({ at: new Date(t).toISOString(), lat: 25.1 + (moving ? (t % 7_200_000) / 1e8 : k * 0.01), lng: 55.2,
+        source: k % 3 ? 'fms' : 'cabman', area: moving ? null : `Area ${k}`, area_votes: moving ? null : 20 });
+    }
+    return { plate: `L${k}`, pts };
+  });
+  const t0 = performance.now();
+  const fast = cars.map((c) => carNights({ plate: c.plate, nights, points: c.pts, nowMs: NOW }));
+  const ms = performance.now() - t0;
+  let same = 0;
+  for (const [k, c] of cars.entries()) {
+    for (const [i, n] of nights.entries()) {
+      if (k % 4 && i % 5) continue;                   // a sample: the naive path is the slow one
+      const a = JSON.stringify(fast[k][i]);
+      const b = JSON.stringify(carNight({ plate: c.plate, night: n, points: sliceNight(c.pts, n), nowMs: NOW }));
+      if (a === b) same += 1; else { same = -1e9; console.log(`      ${c.plate} ${n}: ${a.slice(0, 120)} ≠ ${b.slice(0, 120)}`); }
+    }
+  }
+  check('every sampled car-night is field for field what the night sliced alone says', same > 0, String(same));
+  check(`ten cars × 31 nights (${cars.reduce((t, c) => t + c.pts.length, 0)} fixes) judged in under a second (took ${Math.round(ms)} ms)`,
+    ms < 1000, `${Math.round(ms)} ms`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

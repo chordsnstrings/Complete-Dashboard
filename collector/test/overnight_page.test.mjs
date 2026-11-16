@@ -20,8 +20,10 @@
          car, the place and a link; today's night after has not begun;
      §4  a role without locations: the server's own refusal in each place —
          not an error, not a blank.
+   Review (OVN12, §2/§2b): "inferred" sits inside the visible Activity line
+   at every width; (§2c) twelve cars over 55 days are asked in pieces.
 
-   Port 8327, the one this work may use. Synthetic data only. */
+   Port 8327 unless PORT says otherwise. Synthetic data only. */
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
@@ -49,8 +51,10 @@ web.get('/api/overnight', async (req, res) => {
   res.status(r.status).set('cache-control', 'no-store').json(await r.json());
 });
 web.use(mock);
-const srv = web.listen(8327); await new Promise((r) => srv.once('listening', r));
-const base = 'http://127.0.0.1:8327';
+/* PORT overrides the default, so two sessions can run this side by side. */
+const PORT = Number(process.env.PORT || 8327);
+const srv = web.listen(PORT); await new Promise((r) => srv.once('listening', r));
+const base = `http://127.0.0.1:${PORT}`;
 
 const dubai = (back = 0) => new Date(Date.now() + 4 * 3600e3 - back * 864e5).toISOString().slice(0, 10);
 const TODAY = dubai(0); const YDAY = dubai(1); const DBY = dubai(2);
@@ -173,6 +177,17 @@ for (const skin of ['', 'classic']) {
         JSON.stringify(a.map((x) => x.line.slice(0, 60))));
       check(`${tag}: a night that was not a stay says why, as an absent value`, a.some((x) => /^Overnight: (not known|on the move|no reading) — /.test(x.line) && x.off),
         JSON.stringify(a.map((x) => x.line.slice(0, 60))));
+      /* OVN12: the line is cut with an ellipsis, so "inferred" must sit where
+         it is never cut — the first draft put it last, and at 390 in Classic
+         an inferred night read exactly like a watched one. */
+      const basisSeen = await page.evaluate(() => [...document.querySelectorAll('.shift[data-day] .sh-n')]
+        .filter((ln) => /inferred/.test(ln.textContent)).map((ln) => {
+          const t = ln.firstChild; const i = t.textContent.indexOf('inferred');
+          const rg = document.createRange(); rg.setStart(t, i); rg.setEnd(t, i + 8);
+          return { day: ln.closest('.shift').dataset.day, seen: rg.getBoundingClientRect().right <= ln.getBoundingClientRect().right + 0.5 };
+        }));
+      check(`${tag}: "inferred" is inside the visible line on every inferred night (${basisSeen.length} drawn)`,
+        basisSeen.every((x) => x.seen), JSON.stringify(basisSeen));
       const hs = a.map((x) => x.h);
       check(`${tag}: every row the same height — the line is one line, however long its reason`,
         Math.max(...hs) - Math.min(...hs) <= 1 && a.every((x) => x.lineH > 0 && x.lineH < 24), JSON.stringify([...new Set(hs)]) + JSON.stringify([...new Set(a.map((x) => x.lineH))]));
@@ -227,12 +242,53 @@ console.log('\n§2b two cars in one day');
   asked.length = 0;
   const { ctx, page, errors, ok } = await open('driver/drv-0/activity', { shift: SHIFT, until: actDone });
   const line = await page.evaluate((d) => document.querySelector(`.shift[data-day="${d}"] .sh-n`)?.textContent || '', YDAY);
-  check('the line follows the car driven last, names it, and says the night was inferred', ok && !errors.length
-    && /^Parked overnight at International City \(.*\) \(car L12615\) — inferred/.test(line) && asked.some((u) => /plates=L12615/.test(u))
+  check('the line follows the car driven last, names it, and says the night was inferred — first, where the ellipsis cannot cut it', ok && !errors.length
+    && /^Parked overnight \(inferred\) at International City \(.*\) \(car L12615\) — the tracker was quiet/.test(line) && asked.some((u) => /plates=L12615/.test(u))
     && !asked.some((u) => /L94178/.test(u)), `${line} ${asked.join(' ')} ${errors.join(' | ')}`);
   const todayLine = await page.evaluate((d) => document.querySelector(`.shift[data-day="${d}"] .sh-n`)?.textContent || '', TODAY);
   check('today’s night has not begun, says so, and is not asked for', todayLine === 'Overnight: the night after this day has not begun yet.'
     && asked.every((u) => !u.includes(`to=${TODAY}`)), `${todayLine} ${asked.join(' ')}`);
+  await ctx.close();
+  /* OVN12, held on a fixed fixture: L12615 is inferred every night. At 390
+     in Classic the first draft's line ended at "(…–07:55) (car L…" and the
+     word never showed. REVERSION: put the basis back at the end of
+     nightLine's text — this fails. */
+  for (const [skin, width] of [['classic', 390], ['', 390]]) {
+    const n = await open('driver/drv-0/activity', { shift: SHIFT, until: actDone, skin, width });
+    const seen = await n.page.evaluate((d) => {
+      const ln = document.querySelector(`.shift[data-day="${d}"] .sh-n`);
+      const t = ln?.firstChild; const i = t ? t.textContent.indexOf('inferred') : -1;
+      if (i < 0) return { i, text: ln?.textContent || '' };
+      const rg = document.createRange(); rg.setStart(t, i); rg.setEnd(t, i + 8);
+      return { i, right: rg.getBoundingClientRect().right, box: ln.getBoundingClientRect().right };
+    }, YDAY);
+    check(`${skin || 'arkiv'} ${width}: the inferred night says "inferred" inside the visible line`, !n.errors.length && seen.i >= 0
+      && seen.right <= seen.box + 0.5, JSON.stringify(seen));
+    await n.ctx.close();
+  }
+}
+
+console.log('\n§2c more cars than one read takes, over more nights than one read takes');
+{
+  /* The route takes at most 10 plates and 31 nights a call; a person who
+     drove twelve cars across 55 days is asked in pieces and every row is
+     answered. REVERSION: drop the plate chunking or the 31-night spans in
+     readCarNights — the route refuses with a 400 and the rows say "could
+     not be read". */
+  const job = (s, plate) => ({ s, e: s + 30, over: false, platform: 'uber', plate, outcome: 'completed' });
+  const days = Array.from({ length: 28 }, (_, i) => dubai(2 + 2 * i)).reverse();
+  const SHIFT2 = { basis: 'synthetic', unknown_end: 0, days: days.map((day, i) => ({ day, bookings: 1, on_job_min: 30, wait_min: 0,
+    longest_wait_min: 0, overlaps: 0, unknown_end: 0, first_min: 600, last_min: 630, span_min: 30, jobs: [job(600, `L${1000 + (i % 12)}`)] })) };
+  asked.length = 0;
+  const { ctx, page, errors, ok } = await open('driver/drv-0/activity', { shift: SHIFT2, until: actDone });
+  const lines = await page.evaluate(() => [...document.querySelectorAll('.shift[data-day] .sh-n')].map((n) => n.textContent));
+  const calls = asked.map((u) => new URL(u, base).searchParams);
+  const nightsIn = (c) => Math.round((Date.parse(`${c.get('to')}T12:00:00Z`) - Date.parse(`${c.get('from')}T12:00:00Z`)) / 864e5) + 1;
+  check('asked in pieces: every call within 10 plates and 31 nights, the twelve cars and 55 days all covered',
+    ok && !errors.length && calls.length >= 4 && calls.every((c) => c.get('plates').split(',').length <= 10 && nightsIn(c) <= 31)
+    && new Set(calls.flatMap((c) => c.get('plates').split(','))).size === 12, asked.join(' ') + errors.join(' | '));
+  check('every row answered — none "could not be read"', lines.length === 28
+    && lines.every((t) => /^(Parked overnight|Overnight: (not known|on the move|no reading|no tracker))/.test(t)), JSON.stringify(lines.slice(0, 4)));
   await ctx.close();
 }
 

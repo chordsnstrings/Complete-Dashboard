@@ -23,7 +23,7 @@ import { occCountsOnce, occSourceLabel, OCC_DEDUPE_RULE } from './occupancy_sql.
 /* Where the car was, every minute of a day (WHR, 2026-11-16) — the arithmetic
    is pure and lives beside the route that feeds it. */
 import { whereaboutsBody, dayStartMs, LOOK_AROUND_H, localStamp } from './whereabouts.js';
-import { parseOvernightQuery, nightWindow, sliceNight, carNight, overnightNight, overnightBody,
+import { parseOvernightQuery, nightWindow, carNights, overnightNight, overnightBody,
   POPULATION_DAYS } from './overnight.js';
 import { dubaiIso } from '../src/util.js';
 /* The alerts-per-distance rule, shared with the fleet headline, both economics
@@ -1602,7 +1602,8 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
      the fleet, against the ~300 a car-day /api/vehicle/whereabouts already
      reads per request. The arithmetic is whereaboutsDay once per car.
      Plates mode reads the plates' fixes over the whole range at once (one
-     query on telem_plate_time_idx) and slices it per night (sliceNight), so
+     query on telem_plate_time_idx) and slices it per night (carNights: each
+     car's fixes sorted once, each night found by binary search — OVN10), so
      a month of one car is one query and 31 judgements, and each car-night
      says exactly what the fleet-wide table says of it.
 
@@ -1610,8 +1611,10 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
      reads custody or bookings. 'mixed' in the manifest: the counts and the
      by-area tally are over every car of both fleets, and filtering the rows
      alone would leave the other fleet in the counts (api/access/one_fleet.js
-     says so to a one-fleet reader). Cached only once its last night's window
-     has closed (api/cache.js, overnightOpen). */
+     says so to a one-fleet reader). Cached only once its last night's READ
+     has ended at 12:00 on D+1 — not the window's 05:00, because when the car
+     left and whether a quiet unit has reported since move until noon
+     (api/cache.js, overnightOpen; review OVN9). */
   const OVN_FIX_COLS = (a = '') => `${a}plate, ${WHERE_FIX_COLS(a)}`;
   const ovnPoint = (f) => ({ at: new Date(f.at).toISOString(), lat: f.lat, lng: f.lng, speed: f.speed,
     source: f.source, area: f.place?.area || null, area_votes: f.place?.votes ?? null });
@@ -1668,10 +1671,13 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
       const prevBy = groupBy(edges.prev); const nextBy = groupBy(edges.next);
       const fleetOf = (p) => [...(byPlate.get(p) || []), ...(prevBy.get(p) || []), ...(nextBy.get(p) || [])]
         .find((f) => f.fleet_id)?.fleet_id || null;
-      const out = nights.map((night) => overnightNight({ night, nowMs: now,
-        cars: plates.map((plate) => carNight({ plate, fleetId: fleetOf(plate), night, nowMs: now,
-          points: sliceNight((byPlate.get(plate) || []).map(ovnPoint), night, {
-            before: (prevBy.get(plate) || []).map(ovnPoint), after: (nextBy.get(plate) || []).map(ovnPoint) }) })) }));
+      /* Each car's fixes converted and sorted ONCE, then judged night by
+         night (carNights, api/overnight.js — OVN10: per night, the first
+         draft re-built and re-sorted the whole month of every car). */
+      const perCar = plates.map((plate) => carNights({ plate, fleetId: fleetOf(plate), nights, nowMs: now,
+        points: (byPlate.get(plate) || []).map(ovnPoint),
+        before: (prevBy.get(plate) || []).map(ovnPoint), after: (nextBy.get(plate) || []).map(ovnPoint) }));
+      const out = nights.map((night, k) => overnightNight({ night, nowMs: now, cars: perCar.map((rows) => rows[k]) }));
       return res.json(overnightBody({ nights: out, roster: null,
         population: `The ${plates.length === 1 ? 'car' : `${plates.length} cars`} asked for (${plates.join(', ')}), `
           + `${nights.length === 1 ? `the night of ${nights[0]}` : `the nights of ${nights[0]} to ${nights[nights.length - 1]}`}.` }));
@@ -1698,9 +1704,9 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
     const prevBy = groupBy(edges.prev); const nextBy = groupBy(edges.next);
     const fleetOf = new Map();
     for (const r of pop) if (r.fleet_id && !fleetOf.has(r.plate)) fleetOf.set(r.plate, r.fleet_id);
-    const cars = popPlates.map((plate) => carNight({ plate, fleetId: fleetOf.get(plate) || null, night, nowMs: now,
-      points: sliceNight((byPlate.get(plate) || []).map(ovnPoint), night, {
-        before: (prevBy.get(plate) || []).map(ovnPoint), after: (nextBy.get(plate) || []).map(ovnPoint) }) }));
+    const cars = popPlates.map((plate) => carNights({ plate, fleetId: fleetOf.get(plate) || null, nights: [night], nowMs: now,
+      points: (byPlate.get(plate) || []).map(ovnPoint),
+      before: (prevBy.get(plate) || []).map(ovnPoint), after: (nextBy.get(plate) || []).map(ovnPoint) })[0]);
 
     /* The cars CABMAN still lists that sent nothing positioned this week are
        not in the table; counted, so "136 cars" is not read as the fleet. FMS

@@ -1070,6 +1070,19 @@ the builder's matcher on the review's vocabulary.
   a unit last heard at 22:56 on 15 Nov was told at 17:40 on the 16th that its day was still running, and a unit dark for
   23 hours could never become "silent". A caller that caps now must re-measure an after-last stretch against the real
   now (`overnightOf`, `nowMs`): past a day it is silent, short of one "has not reported since".
+* **An overnight answer moves until its READ ends at 12:00, not when its window closes at 05:00** (2026-11-16, review
+  FIX-STATUS OVN9). The night of D is judged on D+1 read to noon (when the car left; whether a quiet FMS unit has
+  reported since), so from 05:00 to 12:00 the same car-night changes with every CABMAN/FMS tick — neither advances the
+  data version. The first draft's cache rule closed at the window's end and cached an FMS car's "not known — no fix since
+  22:30: the tracker has not reported since" at 06:30, still served after the unit woke at 06:40 at the same spot (true
+  answer: parked, inferred). Any rule that says "never cache while it can still move" must key on the READ's end
+  (`nightWindow().readToMs`), in `api/cache.js` and in the browser's copy (`api/public/overnight.js readOpen`).
+* **A one-line, ellipsis-cut row loses what comes LAST — so the word the house rule requires goes first** (2026-11-16,
+  review FIX-STATUS OVN12). The Activity overnight line put the basis at the end ("Parked overnight at Dubai Marina
+  (22:10–07:55) — inferred: …"); at 390 px in Classic the line ended at the span, and an inferred night read exactly like
+  a watched one. Now "Parked overnight (inferred) at …". A text check cannot see this (the whole sentence is in the DOM
+  and in `title`); measure the word with a DOM Range: its `getBoundingClientRect().right` must be inside the line's box
+  (`test/overnight_page.test.mjs` §2, §2b).
 * **The Arkiv fold layer reads a line of FIGURES as an absence line if it says "No reading"** (2026-11-16, OVN). focus.js
   tests `ABSENT` (which matches "no reading", "unknown", "cannot say", "refused"…) BEFORE its "dense in numbers, keep"
   rule, so the overnight counts ("Parked, seen 10 · … · No reading 1 · On the move 4") were clamped to one line at 390
@@ -12255,12 +12268,34 @@ part of this measurement (the journey route returns none), and the journey sampl
 
 ~80 fixes a car in the 18-hour read (0–181 over 16 sampled cars), so the fleet-wide read is about 11,000 rows placed on
 `place_cell` by its primary key, plus one LATERAL probe each side per plate × tracker. Plates mode is one range query for
-up to 10 cars × 31 nights. Cached once the window has closed.
+up to 10 cars × 31 nights. Cached once the night's READ has ended at 12:00 on D+1 (not the window's 05:00 — trap above,
+review OVN9), so the default table (last night) is computed on every request until noon.
+
+Review, 2026-11-16 (GET only): a whole day is heavier than the night sample says — `/api/vehicle/whereabouts` gave
+229–241 FMS fixes a car-day for 9–15 Nov on one car (every 6 min, all day) and 129 CABMAN fixes by 21:55 on another. So
+the fleet-wide population step (7 days of `telemetry_snapshot` on `telemetry_captured_idx`, every source scanned, `uber`
+filtered after) reads on the order of 200,000+ rows; not timed on production (the route is not deployed). A month of
+plates mode at 240 a car-day is 7,400 fixes a car: the first draft re-sorted each car's month for every night and took
+4.6 s of synchronous arithmetic for 10 cars × 31 nights on the review machine (0.76 s for two); `carNights` sorts once
+and takes ~0.19 s (OVN10). `/api/vehicle/whereabouts` itself answered in 0.77–1.08 s end to end.
 
 ### Limits, stated
 
 * Not who parked it, and not more than the window: a car parked 00:00–03:00 and driven 03:00–05:00 is parked; the from–to
   says the rest.
 * "Since" and "until" are bounds where they are bounds: "by 17:05" when the stay began on the earliest fix read (WHR's
-  rule), "still there at 12:20" when it was still there at the first fix after the read.
-* A one-fleet reader is refused the route (`mixed`): the by-area line and the counts are over both fleets.
+  rule), "still there at 12:20" when it was still there at the first fix after the read — and "still there at 06:50"
+  whenever what follows the stay's last fix is a stretch the tracker did not watch (no fix since, moved while silent):
+  the last fix is then when it was last SEEN there, not when it left (review OVN11 — a CABMAN car read at 06:30 between
+  hourly heartbeats said "22:10–06:00" as if it left at 06:00). Only a watched drive after it makes the end a departure.
+  Not done for the start: a stay entered after a moved-while-silent gap began "by" its first fix, but is printed as
+  beginning there (the common case — arriving on a watched drive — is exact).
+* A one-fleet reader is refused the route (`mixed`): the by-area line and the counts are over both fleets, and the
+  driver pages read cars by plate whatever fleet their tracker reports under (the reason says both since review OVN13).
+* A shift that runs past midnight: `/api/driver/shift` files each booking under the Dubai day of its REQUEST, so "the car
+  driven last on D" is the last car of the evening, and its night is often "on the move" — the person drove on. True,
+  and said; measured on one production driver, 6 of 12 days in 4–15 Nov had a first booking between 00:05 and 00:58.
+* An Activity day with no plate on any booking says "no booking that day names a car"; the day page falls back to the
+  custody window. True on both, not yet the same (review, not fixed).
+* A plate outside `^[A-Z0-9]{2,12}$` refuses the whole call it rides in (up to 10 cars × 31 nights). Every plate on
+  production passes (136 of 136 on `/api/live`, 120 of 120 on `/api/vehicles` since August, 2026-11-16).

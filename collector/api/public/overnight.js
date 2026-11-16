@@ -39,9 +39,12 @@ const MAX_NIGHTS = 31;
    (test/timezone.test.mjs). */
 export const shiftDay = (d, n) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
 export const lastNight = () => shiftDay(dubaiDay(), -1);
-/* A night's window closes at 05:00 Dubai on D+1; until then its answer moves
-   with every tracker tick, so it is never painted from this browser's copy. */
-const windowOpen = (night) => Date.now() < Date.parse(`${shiftDay(night, 1)}T05:00:00+04:00`);
+/* A night is READ to 12:00 Dubai on D+1 (its window closes at 05:00, but
+   when the car left and whether a quiet tracker has reported since move
+   until then — api/overnight.js overnightOpen, OVN9); until then its answer
+   moves with every tracker tick, so it is never painted from this browser's
+   copy. */
+const readOpen = (night) => Date.now() < Date.parse(`${shiftDay(night, 1)}T12:00:00+04:00`);
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const dm = (d) => `${Number(d.slice(8, 10))} ${MON[Number(d.slice(5, 7)) - 1]}`;
@@ -74,16 +77,24 @@ export function spanWords(r, { days = false } = {}) {
   const to = r.to_at_least ? `still there at ${r.to}${toDay}` : `${r.to}${toDay}`;
   return `${from}–${to}`;
 }
-const basisNote = (r) => (r.basis === 'inferred' ? 'inferred: the tracker was quiet, a fix at this spot either side'
-  : r.basis === 'fixes and inferred' ? 'partly inferred: the tracker went quiet for part of the window' : '');
-/* One line for a car-night, as the driver pages say it. */
+const basisNote = (r) => (r.basis === 'inferred' ? 'the tracker was quiet, a fix at this spot either side'
+  : r.basis === 'fixes and inferred' ? 'the tracker went quiet for part of the window' : '');
+/* One line for a car-night, as the driver pages say it.
+   "INFERRED" COMES FIRST (independent review, 2026-11-16, FIX-STATUS OVN12).
+   The Activity row prints this on ONE line, cut with an ellipsis, and the
+   first draft put the basis last: "Parked overnight at Dubai Marina
+   (22:10–07:55) — inferred: …". At 390 px in the Classic skin the line ends
+   at the span, so an inferred night read exactly like a watched one — the
+   word the house rule says is always said was the word that was cut. The
+   basis now rides on "Parked overnight" itself; the why follows. */
 export function nightLine(r, { car = false, running = false } = {}) {
   const carWord = car ? ` (car ${r.plate})` : '';
   if (r.status === 'parked') {
     const span = spanWords(r);
     const b = basisNote(r);
+    const tag = r.basis === 'inferred' ? ' (inferred)' : r.basis === 'fixes and inferred' ? ' (partly inferred)' : '';
     return { off: false,
-      text: `Parked overnight ${r.area ? `at ${r.area}` : `on ${UNNAMED}`}${span ? ` (${span})` : ''}${carWord}`
+      text: `Parked overnight${tag} ${r.area ? `at ${r.area}` : `on ${UNNAMED}`}${span ? ` (${span})` : ''}${carWord}`
         + (b ? ` — ${b}` : '') + (r.area ? '' : ` — ${r.reason}`) + (running ? ' — so far: the night is still running' : '') };
   }
   return { off: true, text: `Overnight${carWord}: ${STATUS_WORD[r.status] || r.status} — ${r.reason}`
@@ -112,7 +123,7 @@ export async function fleetOvernight(host) {
     };
     out.innerHTML = '<p class="cap dim">Reading where each car stood overnight…</p>';
     const asked = night;
-    const res = await read({ night }, windowOpen(night));
+    const res = await read({ night }, readOpen(night));
     if (asked !== night || !out.isConnected) return;
     out.innerHTML = '';
     if (res.refused) { out.append(note(`Where cars spent the night is not shown to your role. ${res.refused}`)); return; }
@@ -215,7 +226,7 @@ async function readCarNights(plates, nights) {
   for (let i = 0; i < ps.length; i += MAX_PLATES) {
     for (const [from, to] of spans) calls.push({ plates: ps.slice(i, i + MAX_PLATES).join(','), from, to });
   }
-  const res = await Promise.all(calls.map((c) => read(c, windowOpen(c.to))));
+  const res = await Promise.all(calls.map((c) => read(c, readOpen(c.to))));
   const refused = res.find((x) => x.refused)?.refused || null;
   const failed = res.find((x) => x.failed)?.failed || null;
   for (const x of res) {
