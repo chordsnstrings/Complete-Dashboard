@@ -44,6 +44,12 @@ import { renderDriverRecord } from './driverrecord.js';
    profile page". Its own module, like record and day, because this file is
    already the longest view in the product. */
 import { renderDriverLedger } from './driverledger.js';
+/* The Earnings tab's Actual earnings tile (the operator, 2026-11-16: "another
+   modal for actual earning just after platform share"). Its own module so its
+   every branch can be tested in Node without a browser, and so it stays off
+   the first screen — see the block at the top of that file for what the
+   figure is, the alternatives refused, and the production measurements. */
+import { actualEarningsTile } from './actualearnings.js';
 
 /* Why a whole column is empty, in the words the page prints under it.
    ─────────────────────────────────────────────────────────────────────────
@@ -1995,7 +2001,10 @@ async function tabEarnings(root, id, prof) {
      sentence. Not reachable on the current production window — 0 of 136
      working drivers have empty `periods` with a non-null `fare` — which is
      exactly the kind of latency that ships. */
-  const moneyMeasured = k.revenue != null || k.reported_earnings != null
+  /* k.day_money joined 2026-11-16 with the Actual earnings tile, which prints
+     it: a figure this tab renders has to be in the test that decides whether
+     the tab may say none of its work carries one. */
+  const moneyMeasured = k.revenue != null || k.reported_earnings != null || k.day_money != null
     || k.statement_fares != null || k.cash_earnings != null || cashValue != null
     || e.tips != null || e.fare != null || e.statement_cash != null
     || e.statement_gross != null || (e.components || []).some((c) => c.amount != null)
@@ -2058,6 +2067,18 @@ async function tabEarnings(root, id, prof) {
             + 'a week divided by trips it does not count'
           : 'no booking of any kind in this window, so there is no fare to average' },
     { label: 'Platform earnings', value: money(k.reported_earnings), sub: 'as the platform reported it' },
+    /* WHAT ACTUALLY CAME IN, directly after the payout the operator reads as
+       "platform share" (2026-11-16). Platform earnings is driver_payout_day —
+       for Uber the bank transfer, after the cash the driver already took — so
+       it is one of the two places the money lands, not the money. This is
+       driver_day.money, the figure the Overview prints as Money in and the
+       Money tab as Income: statement net after commission, priced bookings
+       before it, cash in hand included, tips not. Absent with its reason
+       where nothing reached these dates; a floor only where a channel
+       reports no money for bookings at all. api/public/actualearnings.js
+       carries the definition, the four alternatives refused and why, and
+       the October 2026 production measurements. */
+    actualEarningsTile(k, { worked, bookingsN }),
     { label: 'Tips', value: money(e.tips), sub: e.tip_pct != null ? `${pct(e.tip_pct, 1)} of net fare` : 'no tip data yet',
       tone: e.tip_pct == null ? null : e.tip_pct >= 3 ? 'good' : e.tip_pct >= 1 ? 'warn' : null },
     /* AED 0 AND \u2014 ARE TWO DIFFERENT ANSWERS, AND THIS TILE PRINTED THE
