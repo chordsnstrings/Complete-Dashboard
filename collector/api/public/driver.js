@@ -1981,7 +1981,12 @@ async function tabTerritory(root, id) {
        table of 139 pickups across 25 areas, and the "no positioned trips" note
        fired only at exactly zero — so a driver with 138 unpositioned pickups
        and one positioned saw a map that looked like their whole territory. */
-    const areaTrips = (terr.areas || []).reduce((a, x) => a + (+x.n || 0), 0);
+    /* Over EVERY pickup, not the table's rows (2026-11-16, on production):
+       the table stops at 25 areas, so summing its rows gave "0 of 249 pickups"
+       for a driver with 310 — the caption under the table, from the same
+       answer's `placement.total`, said 310. A response from before PLC has no
+       placement and falls back to the rows. */
+    const areaTrips = Number(terr.placement?.total) || (terr.areas || []).reduce((a, x) => a + (+x.n || 0), 0);
     const plotted = terr.pickups.reduce((a, x) => a + (+x.n || 0), 0);
     mapP.body.append(el('div', 'legend', `
       <span><i style="background:var(${ak ? '--ink' : '--s1'})"></i>pickups</span>
