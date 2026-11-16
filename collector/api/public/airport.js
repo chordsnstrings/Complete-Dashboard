@@ -24,12 +24,27 @@
    arrives) they are LIVE ESTIMATES inferred from final approaches, drawn
    hatched and named "live" in every row they touch. An hour neither covers
    has no bar and says why. Airport trips are found by address text, and
-   "Airport Rd – Al Garhoud" is a road, not the airport. */
+   "Airport Rd – Al Garhoud" is a road, not the airport.
+
+   Three things the review of 2026-11-16 corrected (FIX-STATUS FLT-R3):
+     · WHOSE BOOKINGS. The head said "the airport trips are the fleet’s,
+       both fleets" whatever the answer held. The page sends no fleet (it is
+       in NO_FILTER), but the access gate writes a one-fleet reader's fleet
+       into ?fleet= (api/access/middleware.js), and the route then counts
+       that fleet's bookings only — so for that reader the sentence was
+       false. It now says whose bookings the answer counts, from `d.fleet`.
+     · THE LEAD. "Pickups follow landings … — r 0.12" claimed a relationship
+       r 0.12 does not show: the best lag is the highest r, however small.
+       The verb now carries the strength (closely / — / weakly / do not).
+     · empty() ESCAPES ITS MESSAGE (charts.js), so a reason passed through
+       esc() first was escaped twice: an error carrying "<!DOCTYPE" read
+       "&lt;!DOCTYPE". The reasons go to empty() as plain text. */
 import { el, esc, panel, tableFrom, kpiRow, pill, dayStr, timeStr, contract, glance, glanceBand, bandTiles,
   absenceBand, pageFoot, countOf, sourceLabel } from './ui.js';
 import { dubaiDay } from './tz.js';
 import { barChart, empty, fmt } from './charts.js';
 import { api, href } from './data.js';
+import { fleetLabel, allFleetsLabel } from './access.js';
 
 const HH = (h) => `${String(h).padStart(2, '0')}:00`;
 const AIRPORTS = [['dxb', 'OMDB', 'DXB — Dubai International'], ['dwc', 'OMDW', 'DWC — Al Maktoum'], ['both', 'both', 'DXB and DWC']];
@@ -49,7 +64,8 @@ export async function renderAirport(root, param, sub) {
   const ak = contract();
   const AKB = ak ? glanceBand(root, null) : null;
 
-  const head = panel('The day, the airport and the window', 'Landings are Dubai’s; the airport trips are the fleet’s, both fleets', 'ap-head');
+  const head = panel('The day, the airport and the window', 'Landings are Dubai’s, the same for every reader; the airport trips are the fleet’s bookings', 'ap-head');
+  const headCap = head.panel.querySelector('p.cap');
   root.append(head.panel);
   const controls = el('div', 'btnrow');
   controls.style.cssText = 'margin:10px 0;gap:10px;align-items:center;flex-wrap:wrap';
@@ -87,13 +103,17 @@ export async function renderAirport(root, param, sub) {
     try {
       d = await api(`/api/airport?day=${encodeURIComponent(day)}&airport=${pick[1]}&days=${days}`);
     } catch (e) {
-      [chartP, hoursP, impactP, originP, platP].forEach((p) => { p.body.innerHTML = ''; empty(p.body, `Could not load the airport: ${esc(String(e.message || e))}`); });
+      [chartP, hoursP, impactP, originP, platP].forEach((p) => { p.body.innerHTML = ''; empty(p.body, `Could not load the airport: ${String(e.message || e)}`); });
       return;
     }
     const Lg = d.landings || {};
     const Bk = d.bookings || {};
     const Im = d.impact || {};
     const where = d.label || pick[2];
+    if (headCap) {
+      headCap.textContent = `Landings are Dubai’s, the same for every reader; the airport trips are ${d.fleet
+        ? `${fleetLabel(d.fleet)}’s bookings only — the fleet your access covers` : `the bookings of ${allFleetsLabel().toLowerCase()}`}`;
+    }
 
     /* ── 00 ── */
     const liveNote = Lg.live_hours ? ` · ${countOf(Lg.live_hours, 'hour')} live estimate` : '';
@@ -123,7 +143,11 @@ export async function renderAirport(root, param, sub) {
     const lCap = el('p', 'cap'); const pCap = el('p', 'cap');
     chartP.body.append(el('h4', 'ap-sub', `Landings at ${esc(where)}`), lBox, lCap, el('h4', 'ap-sub', 'Airport pickups (the fleet’s bookings)'), pBox, pCap);
     if (!rows.some((r) => r.landings != null)) {
-      empty(lBox, `No hour of this day has a landing figure: ${esc(Lg.total_why || 'not measured')}.`);
+      /* total_why already opens with "no hour of this day has a landing
+         figure: …" (api/airport_routes.js), so it is printed as it stands —
+         prefixed, the sentence said its first half twice. */
+      const tw = Lg.total_why || 'no hour of this day has a landing figure';
+      empty(lBox, `${tw.charAt(0).toUpperCase()}${tw.slice(1)}.`);
     } else {
       barChart(lBox, rows, { x: 'h', y: 'landings', label: 'landings', color: '--mk-fill',
         colorFor: (r) => (r.live ? '--b300' : null), projected: (r) => r.live, aria: `Landings at ${where} in each Dubai hour of ${day}` });
@@ -173,7 +197,8 @@ export async function renderAirport(root, param, sub) {
       lead.textContent = `Not measured over ${Im.from} – ${Im.to}: ${Im.absent_why}.`;
     } else {
       const strength = Math.abs(Im.r) >= 0.7 ? 'strongly' : Math.abs(Im.r) >= 0.4 ? 'moderately' : 'weakly';
-      lead.textContent = `Pickups follow landings ${later} — r ${fmt(Im.r, 2)}, ${fmt(Im.pickups_per_10_landings, 1)} per 10 landings.`;
+      const verb = Im.r >= 0.7 ? 'closely follow' : Im.r >= 0.4 ? 'follow' : Im.r > 0 ? 'weakly follow' : 'do not follow';
+      lead.textContent = `Pickups ${verb} landings ${later} — r ${fmt(Im.r, 2)}, ${fmt(Im.pickups_per_10_landings, 1)} per 10 landings.`;
       detail.textContent = `Over ${countOf(Im.days_complete, 'complete day')}, the fleet’s airport pickups rose and fell ${Im.r >= 0 ? strength : 'inversely'} `
         + `with the landings ${later}: for every 10 landings OpenSky saw, the fleet took ${fmt(Im.pickups_per_10_landings, 1)} airport pickups`
         + `${Im.slope_per_10_landings != null ? `, and an hour with 10 more landings came with ${fmt(Im.slope_per_10_landings, 1)} more` : ''}.`;
@@ -208,7 +233,7 @@ export async function renderAirport(root, param, sub) {
     const og = d.origins?.day || d.origins?.window;
     const ogWhat = d.origins?.day ? 'this day' : `the ${Im.days} days to ${dayStr(`${day}T12:00:00`)}`;
     if (!og || !og.top?.length) {
-      empty(originP.body, d.origins?.day_why ? `No origin to show: ${esc(d.origins.day_why)}.` : 'No confirmed landing with an origin in this window.');
+      empty(originP.body, d.origins?.day_why ? `No origin to show: ${d.origins.day_why}.` : 'No confirmed landing with an origin in this window.');
     } else {
       if (!d.origins?.day && d.origins?.day_why) originP.body.append(el('p', 'cap', `Shown over ${esc(ogWhat)}: ${esc(d.origins.day_why)}.`));
       originP.body.append(tableFrom(og.top, [

@@ -174,7 +174,52 @@ console.log('\n4 · no client, nothing collected');
   await o.c.close();
 }
 
-console.log('\n5 · the phone shell');
+/* 5 · the review of 2026-11-16 (FIX-STATUS FLT-R3). Three sentences the
+   page wrote whatever the answer said:
+     · the head called the airport trips "both fleets" even when the gate had
+       written a one-fleet reader's fleet into ?fleet= and the route counted
+       that fleet's only;
+     · the lead said "Pickups follow landings … — r 0.12";
+     · a reason handed to empty() went through esc() first and was escaped
+       twice ("&lt;!DOCTYPE").
+   REVERSIONS (each made on 2026-11-16, each failed the check named): the old
+   static head caption → "a one-fleet answer says whose bookings…"; the old
+   verb → "a weak r is not called…"; esc() back around Lg.total_why → "a
+   reason reaches the page as written". */
+console.log('\n5 · whose bookings, how strong, and reasons as written');
+{
+  const real = await (await fetch(`${base}/api/airport?day=${yday}&airport=OMDB&days=28`)).json();
+  const weak = { ...real, fleet: 'egari', impact: { ...real.impact, r: 0.12, best_lag: 0,
+    lags: real.impact.lags.map((x) => ({ ...x, r: x.lag === 0 ? 0.12 : 0.05 })) } };
+  const o = await open(`airport/${yday}`, { stub: weak });
+  const x = await o.page.evaluate(READ);
+  const headCap = await o.page.evaluate(() => document.querySelector('[data-panel="ap-head"] p.cap')?.textContent || '');
+  check('a one-fleet answer says whose bookings it counts, and never “both fleets”', /Egari/.test(headCap) && !/both fleets/i.test(headCap), headCap);
+  check('a weak r is not called a relationship: “weakly follow”, never a bare “follow”', /^Pickups weakly follow landings in the same hour/.test(x.lead), x.lead);
+  check('nothing thrown', !o.errs.length, o.errs.join(' | '));
+  await o.c.close();
+  const both = await open(`airport/${yday}`);
+  const cap2 = await both.page.evaluate(() => document.querySelector('[data-panel="ap-head"] p.cap')?.textContent || '');
+  check('…and an answer for every fleet says so', /both fleets|every fleet/i.test(cap2), cap2);
+  await both.c.close();
+
+  const NOJSON = 'Unexpected token \'<\', "<!DOCTYPE "... is not valid JSON';
+  const nowMs = Date.parse('2026-11-16T10:30:00Z');
+  const broken = airportShape({ day: '2026-11-10', airport: 'OMDB', days: 28, nowMs, backfillDays: 30,
+    runs: { arrivals: { status: 'error', error: NOJSON, finished_at: '2026-11-16T10:00:00Z' }, live: { status: 'error', error: NOJSON } } });
+  const b = await open('airport/2026-11-10', { stub: broken });
+  const y = await b.page.evaluate(READ);
+  check('a reason reaches the page as written, escaped once', y.chartText.includes('"<!DOCTYPE "') && !/&lt;|&quot;|&amp;/.test(y.chartText), y.chartText.slice(0, 240));
+  /* The chart's empty state printed "No hour of this day has a landing
+     figure: no hour of this day has a landing figure: …" — the page's prefix
+     before the API's total_why, which already opens with it. REVERSION:
+     put the prefix back → this fails. */
+  check('…and says “no hour of this day has a landing figure” once, not twice',
+    (y.chartText.match(/no hour of this day has a landing figure/gi) || []).length === 1, y.chartText.slice(0, 240));
+  await b.c.close();
+}
+
+console.log('\n6 · the phone shell');
 {
   const o = await open(`airport/${yday}`, { ui: 'phone', width: 390 });
   check('the phone shell opens #airport without a script error', !o.errs.length, o.errs.join(' | '));
