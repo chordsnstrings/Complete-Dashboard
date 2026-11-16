@@ -3201,3 +3201,14 @@ To repeat: `SHOT_DIR=/tmp node test/airport_page.test.mjs` (screenshots of each 
 `PORT=8321 node mockapi.mjs &` then `ONLY='airport' node bin/focus-rows-audit.mjs
 http://127.0.0.1:8321 /tmp/fx.json`. Against production once the client is set: `node
 bin/prod-mirror.mjs &` and open `http://127.0.0.1:8200/#airport`.
+
+**Review pass, 2026-11-16 (independent review of `fix/flights`, FIX-STATUS FLT-R3).** After the
+page fixes (the head caption written from `d.fleet`; the lead's verb carrying the strength of r;
+reasons handed to `empty()` unescaped; the chart's empty state no longer doubling its first
+clause), `#airport` re-rendered against mockapi on :8321 with service workers blocked, Arkiv at 1280
+and 390 in light and dark and Classic at 1280: `scrollWidth` equal to the viewport at every width
+(the only boxes past the right edge at 390 are the off-canvas nav's links), no page error, no
+console error. `airport_page` 36/0 covers the same set plus Classic at 390 and the phone shell, and
+its new §5 drives the three stubbed cases (a one-fleet answer, a weak r, an error carrying
+`<!DOCTYPE`). `ONLY='airport' node bin/focus-rows-audit.mjs http://127.0.0.1:8321 …`: 0 marked
+layout elements, 0 errors.
