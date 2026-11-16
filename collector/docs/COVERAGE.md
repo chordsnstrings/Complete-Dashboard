@@ -11639,4 +11639,20 @@ there; `config.analystModel` falls back to it when `ANALYST_API_KEY` is unset).
 
 All well inside the 120-second limit. Well-formed is not the test, though: the analyst proposes and the
 measurement decides, so the model that works best is the one whose claims SURVIVE production's
-measurement — recorded below once each has run there.
+measurement.
+
+**On production (2026-11-16, deployment of `6418daec`, one pass each over the same 30 days, the model set
+by `ANALYST_MODEL` for the A/B):**
+
+| model | seconds | proposed → measured | confirmed | immaterial | refuted |
+|---|---|---|---|---|---|
+| `deepseek-v4-pro-ga-260813` (run `an-20261116060412`) | 34 | 12 → 9 (3 dropped before measuring) | 5 | 3 | 1 |
+| `seed-2-0-pro-260328` (run `an-20261116060707`) | 28 | 12 → 12 | **7** | 5 | 0 |
+| MiniMax-M3, the last pass that worked (2026-10-17) | — | 11 measured | 4 | 4 | 3 |
+
+Both ModelArk models confirmed the same four strong signals (night cancellations 17.1% against 9.9%;
+Hotel completing 99.8%; Bolt completing about half its trips; on-account fares AED 95.6 against 63.0).
+DeepSeek's extra claims went to hours and weekdays and came back refuted (15:00 pays more) or
+immaterial; Seed's extras were smaller but real (longer trips in the morning, on Uber, and from Hotel).
+**The default is Seed 2.0 Pro.** One pass per model is a small sample — the nightly passes will tell more;
+`ANALYST_MODEL` in DigitalOcean overrides the default without a code change.
