@@ -43,11 +43,19 @@
    HOW OFTEN. Once a Dubai day when it worked; again after six hours when it
    did not (a console switch flipped at 10:00 should not wait for tomorrow,
    and a refused call costs nothing — but a timeout may have been billed, so
-   failure is not retried every thirty minutes either). The operator's note
-   relayed with this task: the allowance is 4,000 credits a day and live usage
-   comes back in X-Rate-Limit-Remaining. One call a day is far inside that;
-   the header is recorded on every row when the response carries it, so the
-   first real run shows whether ModelArk sends it at all. */
+   failure is not retried every thirty minutes either). At most one billed
+   call a Dubai day on success, four on a day of failures.
+
+   NOT A MODELARK FACT (review, 2026-11-16). A note relayed with this task —
+   "4,000 credits per day … your daily allowance, not the number of credits
+   remaining … live usage is returned in the X-Rate-Limit-Remaining response
+   header" — was first written here as ModelArk's budget. It is OpenSky's:
+   that allowance and that header are what OpenSky documents for a registered
+   user's REST calls (the flights work, branch fix/flights), and nothing
+   measured on ModelArk shows a credit allowance or that header — it prices
+   by tokens and tool calls. The header is still read and kept in raw when a
+   response carries it, which costs nothing and settles the question on the
+   first real run; it is not a budget this tier enforces. */
 import { config, thinkingSwitch } from '../config.js';
 import { http } from '../http.js';
 import { pool, upsertMany, logRun } from '../db.js';
@@ -168,6 +176,23 @@ const urlKey = (u) => {
 const slug = (s) => String(s).normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
   .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
 const text = (v, n) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null);
+/* The code's title half. A title with no Latin letter or digit in it — an
+   Arabic one, say — slugs to nothing, and every such title used to share the
+   code 'event:<day>': the in-answer duplicate check below then refused the
+   second Arabic-titled event of a day as "a second entry for the same event"
+   when it was a different event (review, 2026-11-16). Such a title gets a
+   short FNV-1a hash of its whitespace-folded, lower-cased self instead:
+   stable across runs, distinct across titles. */
+const titleKey = (title) => {
+  const s = slug(title);
+  if (s) return s;
+  let h = 0x811c9dc5;
+  for (const ch of String(title).toLowerCase().replace(/\s+/g, ' ')) {
+    h ^= ch.codePointAt(0);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `t-${h.toString(16).padStart(8, '0')}`;
+};
 
 /* The model's array, validated into world_event rows.
    ─────────────────────────────────────────────────────────────────────────
@@ -194,8 +219,13 @@ const text = (v, n) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n)
      · confidence outside 0..1 is dropped rather than rescaled: 85 might be a
        percentage or might be noise, and the column is the model's own.
    Two entries for the same event in one answer keep the first. */
+/* An array of event objects, or the honest empty array. Anything else — a
+   citation marker such as [1], a list of numbers or of strings — is not the
+   answer, however late in the text it sits. */
+const eventArray = (v) => v.every((x) => x && typeof x === 'object' && !Array.isArray(x));
+
 export function parseWebEvents(answer, { from, to, citations = [], foundOn = from, call = null } = {}) {
-  const { arr, error } = lastJsonArray(answer);
+  const { arr, error } = lastJsonArray(answer, { accept: eventArray });
   if (!arr) return { rows: [], rejected: [], error, offered: 0 };
   const cited = new Map(citations.map((c) => [urlKey(c.url), c]).filter(([k]) => k));
   const rows = [], rejected = [], codes = new Set();
@@ -208,7 +238,7 @@ export function parseWebEvents(answer, { from, to, citations = [], foundOn = fro
     const ends = isDay(e.ends_on) && e.ends_on >= starts ? e.ends_on : starts;
     if (starts > to) { rejected.push({ raw: e, reason: `starts ${starts}, after the window ending ${to}` }); continue; }
     if (ends < from) { rejected.push({ raw: e, reason: `ended ${ends}, before the window starting ${from}` }); continue; }
-    const code = `${slug(title) || 'event'}:${starts}`;
+    const code = `${titleKey(title)}:${starts}`;
     if (codes.has(code)) { rejected.push({ raw: e, reason: 'a second entry for the same event' }); continue; }
     codes.add(code);
     const modelUrl = typeof e.url === 'string' ? e.url.trim() : null;
@@ -313,6 +343,23 @@ export async function collectWeb({ now = new Date(), m = config.analystModel, fo
       WHERE source = $1 AND mode = $2 ORDER BY finished_at DESC LIMIT 1`, [SRC, WEB_MODE]);
   if (!force && !webDue(last, now)) return { ran: false, written: 0, last };
   const out = await searchWeb({ now, m });
+  /* THE CODE IS THE ROW'S IDENTITY, NOT THE TITLE'S SPELLING.
+     ─────────────────────────────────────────────────────────────────────────
+     world_event's key is (source, code, starts_on, title), so a lead found
+     again tomorrow as "DP World Tour Championship." — the same slug, the same
+     start, the same code — missed yesterday's "DP World Tour Championship"
+     row and became a second one: the page listed the event twice, and #causes
+     would offer it twice as a candidate once its month closed (review,
+     2026-11-16, reproduced on PGlite: two rows for one code after two runs).
+     A re-found lead keeps the wording it was first stored under, so the
+     upsert lands on the row that is already there and only refreshes it. */
+  if (out.rows.length) {
+    const { rows: had } = await pool.query(
+      `SELECT DISTINCT ON (code) code, title FROM world_event
+        WHERE source = 'web' AND code = ANY($1::text[]) ORDER BY code, id`, [out.rows.map((r) => r.code)]);
+    const first = new Map(had.map((r) => [r.code, r.title]));
+    for (const r of out.rows) if (first.has(r.code)) r.title = first.get(r.code);
+  }
   const written = out.rows.length ? await upsertMany('world_event', out.rows, KEY) : 0;
   await logRun({ source: SRC, fleet_id: null, mode: WEB_MODE,
     window_start: out.from, window_end: out.to,

@@ -42,7 +42,18 @@
      · events.js classifyBody's thinking spread removed
        → §4 "ModelArk is sent thinking disabled" and "MiniMax too" fail
      · classifyNews back to txt.match(/\[[\s\S]*\]/)
-       → §4 "a revised answer is read by its last array" fails            */
+       → §4 "a revised answer is read by its last array" fails
+
+   REVIEW REVERSIONS (2026-11-16, FIX-STATUS "EVW review"):
+     · parseWebEvents without lastJsonArray's `accept`
+       → §1 "trailing citation markers" and "markers alone" fail       (R1)
+     · detectBreaks ORDER BY confidence alone
+       → §3 both candidate checks fail; source/url dropped from its
+         SELECT → the "says where it came from" check fails            (R2)
+     · collectWeb without the first-stored-title reuse
+       → §3 "re-found under another spelling" and two after it fail   (R3)
+     · code back to `${slug(title) || 'event'}:${starts}`
+       → §1 "two different non-Latin titles" fails                     (R4) */
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
@@ -167,6 +178,33 @@ console.log('\n1. parseWebEvents');
   check('a think block is ignored and a revised answer is read by its last array', rv.rows.length === 1 && rv.rows[0].title === 'Corrected',
     JSON.stringify(rv.rows.map((x) => x.title)));
   check('no array at all is an error, not an empty success', parseWebEvents('Sorry, nothing found.', win).error === 'no JSON array in the response');
+  /* REVIEW 2026-11-16. A search-grounded answer that ends with its citation
+     markers: the last array that parses is [2], and before the accept
+     predicate every lead was refused as "not an object" — the run reported
+     "all 1 events the model returned failed validation" for an answer whose
+     one event was valid. */
+  const marked = 'Here are the events:\n```json\n'
+    + arr([{ title: 'Dubai Run', starts_on: '2026-11-23', category: 'closure' }])
+    + '\n```\nSources: [1] dubairun.com [2] visitdubai.com';
+  const mk = parseWebEvents(marked, win);
+  check('trailing citation markers ([1] [2]) are not taken for the answer', mk.error === null && mk.rows.length === 1
+    && mk.rows[0].title === 'Dubai Run', JSON.stringify({ e: mk.error, n: mk.rows.length, rej: mk.rejected }));
+  check('…an honest [] followed by a marker is still "found nothing"', parseWebEvents('[] [1]', win).error === null
+    && parseWebEvents('[] [1]', win).rows.length === 0);
+  /* REVIEW 2026-11-16. Two Arabic-titled events on one day both slugged to
+     nothing and shared the code 'event:<day>', so the second was refused as a
+     duplicate of the first. */
+  const ar = parseWebEvents(arr([
+    { title: 'معرض دبي للكتاب', starts_on: '2026-11-25', category: 'exhibition' },
+    { title: 'مهرجان الأضواء', starts_on: '2026-11-25', category: 'festival' },
+  ]), win);
+  check('two different non-Latin titles on one day are two events, with distinct stable codes', ar.rows.length === 2
+    && ar.rows[0].code !== ar.rows[1].code && ar.rows.every((x) => /^t-[0-9a-f]{8}:2026-11-25$/.test(x.code))
+    && parseWebEvents(arr([{ title: 'معرض دبي للكتاب', starts_on: '2026-11-25' }]), win).rows[0].code === ar.rows[0].code,
+    JSON.stringify({ codes: ar.rows.map((x) => x.code), rej: ar.rejected.map((x) => x.reason) }));
+  check('…and markers alone are an error that says so, not an empty success',
+    parseWebEvents('No events found [1][2]', win).error === 'no JSON array of the expected shape in the response',
+    parseWebEvents('No events found [1][2]', win).error);
 }
 
 console.log('\n2. searchWeb against the fake Responses server');
@@ -272,8 +310,22 @@ console.log('\n3. collectWeb on PGlite: written, idempotent, once a day, the rea
   check('idempotent on the next day’s rerun: the same two rows, found_on moved on', second.ran && ev2.length === 2
     && ev2.every((x) => x.found_on === dubaiIso(NEXT)), JSON.stringify(ev2));
 
+  /* REVIEW 2026-11-16. The same lead re-found with another spelling of the
+     same title — same slug, same start, so the same code — must land on the
+     row already there, not beside it: the table's key carries the title. */
+  ANSWER = arr([
+    { title: 'DUBAI RUN.', starts_on: '2026-11-23', ends_on: '2026-11-23', category: 'closure', confidence: 0.8, url: CITED },
+    { title: 'Expo week', starts_on: '2026-12-01', ends_on: '2026-12-04', category: 'exhibition', confidence: 0.55 },
+  ]);
+  const THIRD = new Date(NEXT.getTime() + 864e5);
+  const respelled = await collectWeb({ now: THIRD });
+  const ev3 = await q(`SELECT code, title, confidence FROM world_event WHERE source = 'web' ORDER BY code`);
+  check('a lead re-found under another spelling of its title updates its row instead of adding one', respelled.ran
+    && ev3.length === 2 && ev3.find((x) => x.code === 'dubai-run:2026-11-23')?.title === 'Dubai Run'
+    && ev3.find((x) => x.code === 'dubai-run:2026-11-23')?.confidence === 0.8, JSON.stringify(ev3));
+
   MODE = 'denied';
-  const LATER = new Date(NEXT.getTime() + 864e5);
+  const LATER = new Date(THIRD.getTime() + 864e5);
   const refused = await collectWeb({ now: LATER });
   check('a refused search writes nothing and keeps what was found', refused.ran && refused.written === 0
     && (await q(`SELECT count(*)::int AS n FROM world_event WHERE source = 'web'`))[0].n === 2);
@@ -307,9 +359,43 @@ console.log('\n3. collectWeb on PGlite: written, idempotent, once a day, the rea
   const run = (fwd2.events || []).find((e) => e.title === 'Dubai Run');
   check('…and the leads, flattened: url only where cited, the citation count, found_on',
     fwd2.events?.length === 2 && run?.url === 'https://www.example.com/events/dubai-run/' && run?.citations_n === 2
-    && run?.found_on === dubaiIso(NEXT) && (fwd2.events || []).find((e) => e.title === 'Expo week')?.url === null,
+    && run?.found_on === dubaiIso(THIRD) && (fwd2.events || []).find((e) => e.title === 'Expo week')?.url === null,
     JSON.stringify(fwd2.events).slice(0, 400));
   api.close();
+
+  /* REVIEW 2026-11-16: a web lead inside a finished month is a break
+     candidate. detectBreaks ranked candidates on confidence alone and copied
+     no source, so a month of 0.95 leads pushed a derived 0.6 row out of the
+     eight slots and the card could not say which rows were leads. Months are
+     relative to the current Dubai month, as in break_month_grain. */
+  const nowD = new Date(Date.now() + 4 * 3600e3);
+  const MB = (back) => new Date(Date.UTC(nowD.getUTCFullYear(), nowD.getUTCMonth() - back, 1)).toISOString().slice(0, 7);
+  const [B1, B2] = [MB(1), MB(2)];
+  const seedTrips = async (month, count, tag) => {
+    const vals = [], ps = [];
+    for (let i = 0; i < count; i++) {
+      ps.push('webbrk', `${tag}${i}`, 'd1', `${month}-10T12:00:00+04:00`);
+      vals.push(`($${ps.length - 3},$${ps.length - 2},$${ps.length - 1},$${ps.length},'completed')`);
+    }
+    await db.query(`INSERT INTO trip (platform, external_id, driver_ext_id, requested_at, status) VALUES ${vals.join(',')}`, ps);
+  };
+  await seedTrips(B2, 200, 'a'); await seedTrips(B1, 40, 'b');
+  await db.query(`INSERT INTO world_event (source, code, title, category, scope, starts_on, ends_on, expected_effect, confidence)
+                  VALUES ('seasonal', 'reviewseason', 'A derived season', 'seasonal', 'dubai', $1, $2, 'demand_down', 0.6)`,
+  [`${B1}-01`, `${B1}-28`]);
+  for (let i = 0; i < 9; i++) {
+    await db.query(`INSERT INTO world_event (source, code, title, category, scope, starts_on, ends_on, expected_effect, confidence, url)
+                    VALUES ('web', $1, $2, 'concert', 'dubai', $3, $3, 'demand_up', $5, $4)`,
+    [`lead-${i}:${B1}-1${i}`, `Lead ${i}`, `${B1}-1${i}`, i === 0 ? 'https://example.com/lead-0' : null, i === 0 ? 0.96 : 0.95]);
+  }
+  const { detectBreaks } = await import('../src/sources/events.js');
+  await detectBreaks();
+  const [brk] = await q(`SELECT candidate_events FROM metric_break WHERE platform = 'webbrk'`);
+  const cands = brk ? (typeof brk.candidate_events === 'string' ? JSON.parse(brk.candidate_events) : brk.candidate_events) : [];
+  check('a month of web leads does not push a derived event out of a break’s candidates', cands.length === 8
+    && cands[0]?.title === 'A derived season', JSON.stringify(cands.map((c) => c.title)));
+  check('…and each candidate says where it came from, a lead with its cited url', cands.filter((c) => c.source === 'web').length === 7
+    && cands.find((c) => c.title === 'Lead 0')?.url === 'https://example.com/lead-0', JSON.stringify(cands.map((c) => c.source)));
 }
 
 console.log('\n4. classifyNews: the thinking switch, and a revised answer');

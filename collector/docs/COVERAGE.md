@@ -11671,7 +11671,7 @@ immaterial; Seed's extras were smaller but real (longer trips in the morning, on
 
 What the events layer's web tier (`src/sources/events_web.js`, FIX-STATUS EVW) depends on,
 measured on 2026-11-16 against `https://ark.ap-southeast.bytepluses.com/api/v3` with the ModelArk
-skill's key (an account other than production's, which may or may not differ):
+skill's key — not production's `ARK_API_KEY`, which may belong to another account:
 
 | request | answer |
 |---|---|
@@ -11684,14 +11684,25 @@ skill's key (an account other than production's, which may or may not differ):
 * **It is refused until it is switched on for the account in the BytePlus console.** The refusal
   names the tool ("built in tool"); an `AccessDenied` that does not name it is something else
   (an unactivated model reads the same code) and is reported verbatim, not as the switch.
-* **Whether production's key has it is unknown** until the first run: production's
-  `ARK_API_KEY` belongs to the account that holds it, not to the skill's.
+* **Whether production's key has it is unknown** until the first run: the switch is per
+  account, and the account behind production's `ARK_API_KEY` was not the one measured.
 * **Cost per call: not measurable yet** — no account tried has the tool. Each web row's
   `raw.call.usage` keeps the response's token counts, and the run log prints them, so the first
-  real run gives the figure. The operator's note relayed with the task: the allowance is 4,000
-  credits a day and live usage is returned in `X-Rate-Limit-Remaining`; the tier records that
-  header when a response carries it (unobserved on ModelArk so far) and asks once a Dubai day.
+  real run gives the figure. The tier asks once a Dubai day (four times on a day of failures).
+* **"4,000 credits per day" and `X-Rate-Limit-Remaining` are OpenSky's, not ModelArk's.** A note
+  relayed with this task ("your daily allowance, not the number of credits remaining; live usage
+  is returned in the X-Rate-Limit-Remaining response header") was first recorded here as
+  ModelArk's budget. That is OpenSky's documented REST allowance for a registered user and its
+  header (the flights work, `fix/flights`); nothing measured on ModelArk shows either. The tier
+  keeps the header in `raw.call` if a response ever carries one; it enforces no credit budget.
 * **Request shape is held to what was measured**: no `max_output_tokens`, no tool options
   (`limit`, `user_location`, …). A field never sent to that endpoint is a field that might 400.
 * Citations are read from `output[].content[].annotations[]` entries of type `url_citation`
   (the OpenAI Responses form). A lead's url is kept only when it is one of those pages.
+* **"The last JSON array that parses" is a citation marker in a search-grounded answer** (EVW
+  review, 2026-11-16). An answer ending "Sources: [1] … [2] …" hands `lastJsonArray` the array
+  `[2]`; the web tier passes `accept` (an array of objects, or `[]`) so the marker is skipped.
+  Any new caller that reads a search-grounded answer needs the same.
+* **A web lead is not the record's event.** `detectBreaks` copies `source` and `url` into each
+  break's candidates and ranks web leads after every other source, so a month of leads cannot
+  push Ramadan or a season out of the eight slots; the break card labels them "web search".

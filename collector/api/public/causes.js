@@ -227,7 +227,8 @@ function breakCard(b, { ak = false } = {}) {
     <p class="bk-fix"><b>What this implies</b> ${esc(copy.fix)}</p>
     ${events.length ? `<div class="bk-ev"><div class="bk-k">What else was happening</div>${
       events.map((e) => `<div class="bk-evrow">
-        <span class="bk-evt">${esc(e.title)}</span>
+        <span class="bk-evt">${esc(e.title)}</span>${e.source === 'web'
+          ? ` ${pill('web search', null, 'Found by web search — a direction, not a measurement')}${sourceLink(e)}` : ''}
         ${pill(String(e.expected_effect || '').replace(/_/g, ' ') || 'unknown',
           e.expected_effect === 'demand_up' ? 'ok' : e.expected_effect === 'demand_down' ? 'warn' : null)}
         <span class="cap">${e.confidence != null ? `confidence ${Math.round(e.confidence * 100)}%` : ''}</span>
@@ -672,12 +673,17 @@ function webLeadsPanel(host, w) {
     empty(host, !tier
       ? 'The web search has not run yet: it runs once a day with the events collection, and no run is on record.'
       : reason
-        ? `The web search did not run. ${reason}.${when ? ` Last attempt ${when}.` : ''}`
+        /* "gave no leads", not "did not run": half the reasons in the
+           error column are a search that DID run — a timeout (possibly
+           billed), an answer that could not be read, every lead refused — and
+           "did not run" in front of those is a preface that is not true
+           (EVW review, 2026-11-16). The reason after it says which. */
+        ? `The latest web search gave no leads. ${reason}.${when ? ` Last attempt ${when}.` : ''}`
         : `The search${when ? ` on ${when}` : ''} found no public event in Dubai between ${dayStr(tier.window_start)} `
           + `and ${dayStr(tier.window_end)} that it expects to move ride demand.`);
   } else {
     if (reason) {
-      host.append(note(`${reason} — so the latest search did not run${when ? ` (${when})` : ''}; `
+      host.append(note(`${reason} — so the latest attempt${when ? ` (${when})` : ''} added nothing; `
         + 'the leads below are from earlier searches, dated by the day each was last found.', 'warn'));
     }
     host.append(tableFrom(evs, [

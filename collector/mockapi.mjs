@@ -3260,7 +3260,13 @@ app.get('/api/breaks', (_, r) => r.json([
   { metric: 'trips', grain: 'month', platform: 'fms', period_from: '2026-02-01', period_to: '2026-03-01',
     value_from: 2164, value_to: 4449, change_pct: 1.056, drivers_from: null, drivers_to: null,
     driver_change_pct: null, productivity_change_pct: null, attribution: 'unattributable',
-    candidate_events: JSON.stringify([EV[0], EV[1]]) },
+    /* detectBreaks now copies each candidate's source and url (EVW review),
+       and a web-search lead sorts after the record's own rows; the card labels
+       it "web search" and links the page the search cited. */
+    candidate_events: JSON.stringify([{ source: 'calendar', ...EV[0] }, { source: 'calendar', ...EV[1] },
+      { source: 'web', title: 'Dubai Duty Free Tennis Championships', category: 'sports', scope: 'dubai',
+        starts_on: '2026-02-16', ends_on: '2026-02-28', expected_effect: 'demand_up', confidence: 0.55,
+        summary: 'Dubai Duty Free Tennis Stadium, Garhoud', url: 'https://example.com/ddf-tennis' }]) },
   { metric: 'trips', grain: 'month', platform: 'fms', period_from: '2026-04-01', period_to: '2026-05-01',
     value_from: 5638, value_to: 3576, change_pct: -0.366, drivers_from: null, drivers_to: null,
     driver_change_pct: null, productivity_change_pct: null, attribution: 'unattributable',

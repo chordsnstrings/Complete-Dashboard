@@ -344,11 +344,28 @@ export async function detectBreaks() {
          by the same arithmetic none of them dated after the 1st of the later
          month could ever have been a candidate either — that part is read off
          the code rather than measured against a stored break. */
+      /* A WEB-SEARCH LEAD IS A CANDIDATE ONLY BEHIND THE RECORD'S OWN, AND
+         SAYS WHAT IT IS (EVW review, 2026-11-16).
+         ───────────────────────────────────────────────────────────────────
+         The web tier (events_web.js) writes leads for the next 21 days into
+         this same table, and a month after it ships every one of them sits
+         inside a finished month — so this lookup, which read no source and
+         ranked on confidence alone, would have offered them as causes of a
+         break in place of the derived dates and the classified news: a model's
+         0.8 for "a concert that will move demand" outranks Dubai high season
+         (0.8 ties, 0.75 summer), and one daily search can write a dozen leads
+         for a month, re-worded day to day. Eight slots, and the copy the card
+         printed carried no source, so a lead read exactly like Ramadan.
+         Now `source` and `url` travel with each candidate, web leads sort
+         after every other source (then by confidence), and the break card
+         labels them "web search" the way the rest of #causes does. Reproduced
+         on PGlite in test/events_web.test.mjs: nine 0.95 leads in the later
+         month pushed a 0.6 seasonal row out of the candidates. */
       const events = await q(
-        `SELECT title, category, scope, starts_on, ends_on, expected_effect, confidence, summary
+        `SELECT source, title, category, scope, starts_on, ends_on, expected_effect, confidence, summary, url
          FROM world_event
          WHERE starts_on <= $2 AND coalesce(ends_on, starts_on) >= $1
-         ORDER BY confidence DESC NULLS LAST LIMIT 8`, [fromDate, lastDayOf(b.m)]);
+         ORDER BY (source = 'web'), confidence DESC NULLS LAST LIMIT 8`, [fromDate, lastDayOf(b.m)]);
 
       /* detected_at is passed rather than left to the column default because
          upsert() builds its DO UPDATE SET from the keys of this object, so a

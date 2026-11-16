@@ -7013,8 +7013,8 @@ did not cite stays in `raw.model_url` marked unverified and is never a link. Att
 placeholder (null); confidence outside 0..1 is dropped, not rescaled. `raw` keeps venue, area,
 attendance, `found_on`, the matched citation, up to 25 citations and the call (`response_id`,
 `usage`, number of `web_search_call` items, and `X-Rate-Limit-Remaining` when the response
-carries one — the operator's note relayed with this task: the allowance is 4,000 credits a day
-and live usage comes back in that header; one call a day is far inside it).
+carries one — kept, not enforced: the "4,000 credits a day" note relayed with this task is
+OpenSky's REST allowance and header, not ModelArk's; see the review below).
 
 **When it cannot run, the true reason** — recorded as its own `collection_run` row, source
 `events`, mode `web`, so `/api/status` carries it under the events source and it survives the
@@ -7075,3 +7075,29 @@ shape of a real answer (citations in `url_citation` annotations are the OpenAI R
 what the parser reads — a ModelArk answer that carries them elsewhere will show every lead as
 "source not cited by the search", visibly, rather than wrongly); the cost per call (see COVERAGE
 "Events by web search"); whether ModelArk sends `X-Rate-Limit-Remaining`.
+
+### EVW review (2026-11-16, independent reviewer, branch `fix/events`)
+
+Every builder claim re-run: `test/events_web.test.mjs` 52/52 at de82bd4 and the neighbours one at a
+time. Five defects found and fixed on the branch, each revert-proven (the reverted file fails the
+named check; restored and confirmed with `cmp`):
+
+| id | defect | proof | fix |
+|---|---|---|---|
+| EVW-R1 | **A search-grounded answer ending in citation markers parsed to nothing.** `lastJsonArray` kept the LAST array that parses, and in "a fenced `[ {…} ]`, then `Sources: [1] … [2] …`" that is `[2]`: the one valid event was refused as "not an object" and the run reported "all 1 events the model returned failed validation" — an error whose reason is not the true one | reproduced: `parseWebEvents` → rows 0, offered 1, rejected "not an object" | `lastJsonArray(text, {accept})` (default unchanged for the analyst and the classifier); the web tier accepts only an array of objects or `[]`. §1 "trailing citation markers" — reverted to no `accept`: 2 checks fail |
+| EVW-R2 | **Web leads became break candidates, unlabelled, ahead of the record's own events.** `detectBreaks` read `world_event` with no source and ranked on confidence, LIMIT 8; a month after shipping every lead sits in a finished month, a model's 0.95 outranks every derived date, and the copy on the card carried no source | reproduced on PGlite: nine 0.95 leads pushed a 0.6 seasonal row out of the eight | candidates carry `source` and `url`; `ORDER BY (source = 'web'), confidence DESC`; the break card labels a lead "web search" and links a cited source; mockapi `/api/breaks` carries one. §3 two checks — reverted ordering: both fail; reverted columns: the source check fails |
+| EVW-R3 | **"The code is stable" did not make it the row's identity.** The key is (source, code, starts_on, title), so the same lead re-found as "DUBAI RUN." (same slug, same start, same code) became a second row beside "Dubai Run" | reproduced on PGlite: two rows for `dubai-run:2026-11-23` | a re-found lead keeps the title it was first stored under, so the upsert lands on its row. §3 "re-found under another spelling" — reverted: 3 checks fail |
+| EVW-R4 | **Every title with no Latin letter shared the code `event:<day>`**, so a second Arabic-titled event on a day was refused as "a second entry for the same event" | reproduced: two titles → one row, one rejection | an FNV-1a hash of the folded title when the slug is empty. §1 "two different non-Latin titles" — reverted: fails |
+| EVW-R5 | **#causes prefaced every failure with "The web search did not run."** — false for a timeout (possibly billed), an unreadable answer or all leads refused, all of which ran | read off `webLeadsPanel` | "The latest web search gave no leads. <reason>." and, with earlier leads, "<reason> — so the latest attempt (…) added nothing". Render-checked |
+
+And one record corrected: the "4,000 credits per day … X-Rate-Limit-Remaining" note relayed with
+this task was written into the code, this section and COVERAGE as **ModelArk's** budget. It is
+what OpenSky documents for a registered user's REST calls (the flights work); nothing measured
+on ModelArk shows a credit allowance or that header. The tier still keeps the header in
+`raw.call` if one ever arrives; it enforces no credit budget, and the docs now say so.
+
+Render: Chromium against mockapi on :8322 (`serviceWorkers: 'block'`) — 1280 and 390, Arkiv and
+Classic, light and dark with the mock's leads, and refused-no-leads and timeout-with-earlier-leads
+by route fixture; the break card's web candidate labelled and linked, the calendar candidate not.
+Still not proven, unchanged from above: a real ModelArk answer, the cost per call, production's
+account switch.
