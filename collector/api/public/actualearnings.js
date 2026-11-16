@@ -139,10 +139,17 @@ export function actualEarningsTile(k, { worked = false, bookingsN = 0 } = {}) {
       ? 'all of it from the platform statements, after their commission'
       : 'all of it priced on the bookings themselves, before any commission — no platform '
         + 'statement covers these dates';
-  const dark = Number(k && k.dark_bookings) || 0;
+  /* The same floor as Money in, from the same count — the two tiles are one
+     figure, and "at least" on one beside a bare figure on the other would be
+     two answers to one question. /api/driver/kpis `unpriced_unstated`:
+     completed bookings with no fare that no statement covers (see moneyInTile
+     in ui.js). A response from before the field existed falls back to
+     dark_bookings, as this tile read first. */
+  const unstated = k && k.unpriced_unstated != null ? Number(k.unpriced_unstated) : NaN;
+  const dark = Number.isFinite(unstated) ? unstated : (Number(k && k.dark_bookings) || 0);
   const floor = dark
-    ? `${countOf(dark, 'booking')} on a channel that reports no money for `
-      + `${dark === 1 ? 'it' : 'them'} ${plural(dark, 'is', 'are')} not in it, so this is a floor. `
+    ? `${countOf(dark, 'completed booking')} with no fare that any statement or booking reports `
+      + `${plural(dark, 'is', 'are')} not in it, so this is a floor. `
     : '';
   const stmtDays = Number(k && k.day_stmt_days);
   const win = Number(k && k.window_days);

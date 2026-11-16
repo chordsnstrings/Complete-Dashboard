@@ -2167,14 +2167,35 @@ export function moneyInTile(k, { label = 'Money in' } = {}) {
      Only when bookings are genuinely missing a fare: a driver whose channels
      all filed statements has no unpriced remainder, and saying "17 of 17
      priced" on every other tile would be noise. */
-  const trips = Number(k && k.trips);
-  const pricedN = Number(k && k.priced_trips);
-  const unpriced = Number.isFinite(trips) && Number.isFinite(pricedN) && trips > pricedN
-    ? trips - pricedN : 0;
+  /* WHICH BOOKINGS MAKE IT A FLOOR (the operator, 2026-11-16: "fix the Money
+     in 'at least' bug"). This was `trips - priced_trips`, and that counted
+     two kinds of booking whose money is not missing: a ride nobody took,
+     which has no fare and never will, and an Uber booking on a day Uber's
+     statement covers — no fare on the trip row because Uber's export has no
+     fare column, its money already INSIDE the statement's net. Measured on
+     production for October: 30 unpriced of 502, 43 never completed, the
+     statement on 31 of 31 days, nothing actually missing — and the tile said
+     "at least … a floor rather than the total", a reason that was not true.
+
+     /api/driver/kpis now counts the bookings whose money genuinely is not in
+     this figure (`unpriced_unstated`: completed, no fare, and — for Uber — on
+     a day no statement reaches), and says how many of them wait on Uber's
+     weekly report. The case this floor was written for, nine Uber bookings
+     before the week's report landed, is exactly that count. A response from
+     before the field existed falls back to dark_bookings, the bookings on a
+     channel that reports no money for them, which is a floor by construction
+     and never a false one. */
+  const unstated = k && k.unpriced_unstated != null ? Number(k.unpriced_unstated) : NaN;
+  const unpriced = Number.isFinite(unstated) ? unstated : (Number(k && k.dark_bookings) || 0);
+  const waitUber = Number.isFinite(unstated) ? Math.min(unpriced, Number(k && k.unpriced_unstated_uber) || 0) : 0;
+  const elsewhere = unpriced - waitUber;
   const floorClause = unpriced
-    ? `${countOf(unpriced, 'booking')} here ${unpriced === 1 ? 'carries' : 'carry'} no fare yet, `
-      + 'so this is a floor rather than the total — Uber files its fares in a weekly payments '
-      + 'report, and those bookings are worth nothing here until it lands. '
+    ? `${countOf(unpriced, 'completed booking')} here ${unpriced === 1 ? 'carries' : 'carry'} no fare `
+      + 'that any statement or booking reports, so this is a floor rather than the total — '
+      + [waitUber ? `${fmt(waitUber)} on Uber, whose weekly payments report has not reached ${waitUber === 1 ? 'its day' : 'their days'} yet` : null,
+        elsewhere ? `${fmt(elsewhere)} on a channel that sent no fare for ${elsewhere === 1 ? 'it' : 'them'}` : null]
+        .filter(Boolean).join(', ')
+      + '. '
     : '';
   /* A NOUGHT THE PLATFORMS PUBLISHED, SAID AS ONE.
      ─────────────────────────────────────────────────────────────────────────

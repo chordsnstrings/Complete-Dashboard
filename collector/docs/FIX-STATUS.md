@@ -7269,3 +7269,22 @@ ONLY=driver/drv-0/earnings` 2, `signed` 14, `fare_reason_shared` 8, `interlinkin
 `trips > priced_trips` (COVERAGE trap above) — left alone here because it is a different tile in two
 shells; the phone shell (`api/public/m/`) has no Platform earnings tile, so it was not given this one.
 No HANDOFF row: nothing here is live, and the integrator adds one on deploy.
+
+## MIF – "at least" on Money in only where money is genuinely missing (2026-11-16)
+
+The operator: "fix the Money in 'at least' bug". `moneyInTile` (ui.js, the Overview and the phone) printed "at least …
+this is a floor rather than the total — Uber files its fares in a weekly payments report" whenever `trips >
+priced_trips`. That counted rides nobody took (no fare, ever) and Uber bookings on days Uber's statement covers (no
+fare column in Uber's export; the money is inside the statement's net, which `driver_day.money` takes that day). On the
+October driver ERN measured: 30 unpriced of 502, 43 never completed, the statement on 31 of 31 days, `dark_bookings` 0 —
+and "at least" with a reason that was not true. Found by the ERN agent (COVERAGE trap below).
+
+| row | what | written | on production | proven |
+|---|---|---|---|---|
+| MIF1 | `/api/driver/kpis` returns `unpriced_unstated` — completed bookings with no fare that no statement covers (an Uber booking on a day no statement reaches; any other channel's unpriced completed booking) — and `unpriced_unstated_uber`, the part waiting on Uber's weekly report | yes | with this PR | `test/money_in_floor.test.mjs` §1 on PGlite; reversions: the statement-day clause (4 fail), the completed filter (4) |
+| MIF2 | `moneyInTile` gates "at least" on that count and names the parts ("9 on Uber, whose weekly payments report has not reached their days yet", "1 on a channel that sent no fare for it"); a response without the field falls back to `dark_bookings`, never to trips minus priced | yes | with this PR | same file §2; reversion to trips − priced (5 fail) |
+| MIF3 | Actual earnings uses the same count, so the two tiles — one figure — agree on whether it is a floor | yes | with this PR | same file §3; `actual_earnings_tile` 26 (4 checks rewritten for the gate); reversion to dark_bookings alone (2 fail) |
+
+Classic `driver/drv-0` re-recorded: the diff against production's front end is the Money in tile alone — "at least … 172
+bookings here carry no fare yet" on a mock driver whose statement covers the window, now a plain figure.
+

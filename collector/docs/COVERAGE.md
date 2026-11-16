@@ -11934,4 +11934,5 @@ on 31 of 31 days (an unpriced Uber booking's money is INSIDE the statement's net
 `dark_bookings` **0**. So the Overview's Money in reads "at least" with a reason that is not the true one.
 The honest floor is `dark_bookings` — bookings on a channel that reports no money for them at all
 (`api/income_sql.js` darkOf) — which is what `api/public/actualearnings.js` gates on. The Overview tile
-itself is unchanged by ERN and is a separate fix.
+itself is unchanged by ERN and is a separate fix. **Fixed the same day (FIX-STATUS MIF):** both tiles gate on
+`/api/driver/kpis` `unpriced_unstated` — completed bookings with no fare that no statement covers.
