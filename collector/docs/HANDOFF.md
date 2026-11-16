@@ -410,6 +410,12 @@ the garage audit, plan and build."
   calendar?
 - **Hotel history.** Backfill it before 2026-07-07? What is production's
   `BACKFILL_MONTHS`? It is blanked to non-admin reads.
+- **Events by web search (EVW, 2026-11-16, branch `fix/events`).** Once
+  deployed, the first run says whether production's ModelArk account has the
+  built-in web search tool. If `/api/status` shows `events web error` with
+  "not enabled for this account", an account owner switches it on in the
+  BytePlus console; the next attempt follows within six hours. Cost per call
+  is unknown until then (COVERAGE "Events by web search").
 
 ### 6.5 Design rulings (Arkiv)
 

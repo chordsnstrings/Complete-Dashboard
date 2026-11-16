@@ -291,19 +291,36 @@ export function jsonArrays(text) {
   return out;
 }
 
-export function parseProposals(text) {
+/* The model's answer as ONE array: think blocks dropped, every top-level
+   array found by bracket matching, the LAST that parses kept. Shared, not
+   copied: the events layer's web tier (src/sources/events_web.js) and its
+   news classifier read model output the same way, and a second copy of this
+   loop is a second place for the greedy-regex bug above to come back. */
+/* `accept` narrows "the last array that parses" to the last one that is the
+   SHAPE the caller asked for. Without it a search-grounded answer that ends
+   "Sources: [1] … [2] …" is read as the array [2] — the citation marker, not
+   the answer — and every lead in it is refused as "not an object" (EVW
+   review, 2026-11-16: reproduced on parseWebEvents with a fenced array of one
+   event followed by two markers; 0 rows, offered 1). The default accepts any
+   array, so parseProposals and the classifier read exactly as before. */
+export function lastJsonArray(text, { accept = () => true } = {}) {
   /* Reasoning models may interleave a think block; it is not the answer. */
   const clean = String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '');
   const blocks = jsonArrays(clean);
-  if (!blocks.length) return { proposals: [], rejected: [{ reason: 'no JSON array in the response' }] };
-  let arr = null;
+  if (!blocks.length) return { arr: null, error: 'no JSON array in the response' };
+  let parsed = false;
   for (let i = blocks.length - 1; i >= 0; i--) {
     try {
       const v = JSON.parse(blocks[i]);
-      if (Array.isArray(v)) { arr = v; break; }
+      if (Array.isArray(v)) { parsed = true; if (accept(v)) return { arr: v, error: null }; }
     } catch { /* try the one before it */ }
   }
-  if (!arr) return { proposals: [], rejected: [{ reason: 'unparseable JSON' }] };
+  return { arr: null, error: parsed ? 'no JSON array of the expected shape in the response' : 'unparseable JSON' };
+}
+
+export function parseProposals(text) {
+  const { arr, error } = lastJsonArray(text);
+  if (!arr) return { proposals: [], rejected: [{ reason: error }] };
   const proposals = [], rejected = [];
   for (const p of arr) {
     const claim = String(p.claim || '').trim();

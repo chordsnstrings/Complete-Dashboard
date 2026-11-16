@@ -1004,6 +1004,15 @@ driver's 222 tracker fixes.
   a new collector. Only a list is an arrivals answer (an empty one is read as a 404); only a 200
   with a `states` field is a live one.
 
+* **ModelArk's built-in web search is a `/responses` tool, and 403s until the account enables
+  it** (2026-11-16, FIX-STATUS EVW; "Events by web search" at the end of this file). On
+  `/chat/completions` the same `tools: [{type: 'web_search'}]` is a 400 `MissingParameter
+  tools.function` — it reads as a malformed function tool, not as "unsupported", and sends you
+  debugging the request. On `/responses` it is 403 `AccessDenied` "you do not have access to the
+  built in tool" until an account owner switches it on in the BytePlus console — the key is fine.
+  And every caller of `config.analystModel` must send `thinkingSwitch`'s
+  `{thinking: {type: 'disabled'}}` to ModelArk, or the model reasons for minutes: the news
+  classifier was the caller that did not, until EVW.
 * **`innerText` reports CSS `text-transform`, so a case-sensitive match on it fails on visible
   text** (2026-11-12, twice in one day; FIX-STATUS INT5). Arkiv sets panel headings and the phone
   card's date-and-channel line in mono capitals; `innerText` returns "DATA RETENTION" and
@@ -11815,3 +11824,44 @@ Yango 0**) and 2 at DWC, and **1,314 drop-offs at DXB** (Uber 986, hotel 284, Bo
 and 26 at DWC. That is **13.0 DXB pickups a day (6 to 19)** — enough for a relationship over a
 week or more, and few enough per HOUR (about half a pickup) that an hourly correlation is noisy.
 Bolt and Yango drop passengers at the airport and pick none up there in this month.
+
+
+## Events by web search: ModelArk's built-in tool (2026-11-16)
+
+What the events layer's web tier (`src/sources/events_web.js`, FIX-STATUS EVW) depends on,
+measured on 2026-11-16 against `https://ark.ap-southeast.bytepluses.com/api/v3` with the ModelArk
+skill's key — not production's `ARK_API_KEY`, which may belong to another account:
+
+| request | answer |
+|---|---|
+| `POST /responses` `{"model":"seed-2-0-pro-260328","input":"…","tools":[{"type":"web_search"}],"thinking":{"type":"disabled"}}` | **HTTP 403** `{"error":{"code":"AccessDenied","message":"The request failed because you do not have access to the built in tool. Request id: …","type":"Forbidden"}}` |
+| `POST /chat/completions` with `tools: [{"type":"web_search"}]` | **HTTP 400** `MissingParameter` `tools.function` |
+
+* **The built-in web search exists on the Responses API only.** Chat completions treats any tool
+  as a function tool and asks for its `function` — so the web tier is the one caller in the
+  collector on `/responses`, and every other model call stays on `/chat/completions`.
+* **It is refused until it is switched on for the account in the BytePlus console.** The refusal
+  names the tool ("built in tool"); an `AccessDenied` that does not name it is something else
+  (an unactivated model reads the same code) and is reported verbatim, not as the switch.
+* **Whether production's key has it is unknown** until the first run: the switch is per
+  account, and the account behind production's `ARK_API_KEY` was not the one measured.
+* **Cost per call: not measurable yet** — no account tried has the tool. Each web row's
+  `raw.call.usage` keeps the response's token counts, and the run log prints them, so the first
+  real run gives the figure. The tier asks once a Dubai day (four times on a day of failures).
+* **"4,000 credits per day" and `X-Rate-Limit-Remaining` are OpenSky's, not ModelArk's.** A note
+  relayed with this task ("your daily allowance, not the number of credits remaining; live usage
+  is returned in the X-Rate-Limit-Remaining response header") was first recorded here as
+  ModelArk's budget. That is OpenSky's documented REST allowance for a registered user and its
+  header (the flights work, `fix/flights`); nothing measured on ModelArk shows either. The tier
+  keeps the header in `raw.call` if a response ever carries one; it enforces no credit budget.
+* **Request shape is held to what was measured**: no `max_output_tokens`, no tool options
+  (`limit`, `user_location`, …). A field never sent to that endpoint is a field that might 400.
+* Citations are read from `output[].content[].annotations[]` entries of type `url_citation`
+  (the OpenAI Responses form). A lead's url is kept only when it is one of those pages.
+* **"The last JSON array that parses" is a citation marker in a search-grounded answer** (EVW
+  review, 2026-11-16). An answer ending "Sources: [1] … [2] …" hands `lastJsonArray` the array
+  `[2]`; the web tier passes `accept` (an array of objects, or `[]`) so the marker is skipped.
+  Any new caller that reads a search-grounded answer needs the same.
+* **A web lead is not the record's event.** `detectBreaks` copies `source` and `url` into each
+  break's candidates and ranks web leads after every other source, so a month of leads cannot
+  push Ramadan or a season out of the eight slots; the break card labels them "web search".
