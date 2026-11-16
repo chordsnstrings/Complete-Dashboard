@@ -1,6 +1,7 @@
 import { internalHeaders, isInternal } from './access/internal.js';
 import { parseRlsCacheKey } from '../src/fleet_scope.js';
 import { dubaiIso } from '../src/util.js';
+import { overnightOpen } from './overnight.js';
 import { createHash } from 'node:crypto';
 /* Response cache for read endpoints.
    ─────────────────────────────────────────────────────────────────────────
@@ -204,7 +205,15 @@ const neverToday = (req, path) => (path === '/api/driver/day'
      missing ?day= with no ?to= IS today; a week that reaches today is today
      too. A past day moves only with a collection, and caches as before. */
   || (path === '/api/vehicle/whereabouts'
-    && (String(req.query?.day || '').slice(0, 10) || String(req.query?.to || '').slice(0, 10) || dubaiIso()) >= dubaiIso());
+    && (String(req.query?.day || '').slice(0, 10) || String(req.query?.to || '').slice(0, 10) || dubaiIso()) >= dubaiIso())
+  /* Where each car spent the night (api/overnight.js, OVN 2026-11-16): a
+     night whose window (00:00–05:00 Dubai on D+1) has not closed is read to
+     NOW — "parked so far", "still there at 03:10" — and the fixes behind it
+     arrive on CABMAN's five-minute realtime tick, which advances no version.
+     The night asked is the range's end, else ?night, else last night (the
+     default before 05:00 is a running night). Once the window has closed the
+     answer moves only with a collection, and caches as before. */
+  || (path === '/api/overnight' && overnightOpen(req.query || {}));
 
 /* AN ANSWER THAT ALSO MOVES WITH THE TARGET, KEYED ON IT (2026-10-20).
    ─────────────────────────────────────────────────────────────────────────

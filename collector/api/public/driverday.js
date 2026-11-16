@@ -289,6 +289,7 @@ export async function renderDriverDay(root, id, day) {
     quietDay(root, { d, day, status, online, mv, wh });
     drawBand(root, { d, trips, online, status, mv, wh });
     await renderMovement(root, { d, status, trips, wh });
+    overnightPanel(root, { day, trips, mv, wh });
     if (contract()) { dayAreas(root, fixes, wh); dayAbsence(root, { trips, fixes, day, mv, wh }); }
     unbookedP.then((res) => unbookedOnDay(root, { res, day, list: null }));
     return;
@@ -361,6 +362,7 @@ export async function renderDriverDay(root, id, day) {
   /* ── the day as one band, then where the car went ─────────────────────── */
   drawBand(root, { d, trips, online, status, mv, wh });
   await renderMovement(root, { d, status, trips, wh });
+  overnightPanel(root, { day, trips, mv, wh });
 
   /* ── the day as a list ─────────────────────────────────────────────────── */
   const listP = panel('Every job, and the gaps between them',
@@ -525,6 +527,38 @@ export async function renderDriverDay(root, id, day) {
 
    A failed answer says so and claims nothing. A role without ACCUSE is told
    its role does not see it. A day the seat sensor did not watch is said. */
+/* ── where the car stood overnight, either side of the day (OVN) ──────────
+   The operator asked for the overnight parking on the driver's day page.
+   Two nights: the one BEFORE the day (the car first driven — where it stood
+   when the day began) and the one AFTER (the car last driven — where it was
+   left), each 00:00–05:00 from that car's tracker (api/public/overnight.js,
+   /api/overnight). The car is read off the day's bookings that ran, else any
+   booking with a plate, else the custody windows the movement record holds;
+   when the bookings are withheld from this role and no window names a car,
+   the panel says THAT rather than "no car". Not awaited: the day is true
+   without it, and the list below does not wait. */
+function overnightPanel(root, { day, trips, mv = {}, wh = {} }) {
+  const p = panel('Overnight', 'Where the car stood from 00:00 to 05:00 before this day began, and after it ended — '
+    + 'from its tracker', 'dday-ovn');
+  root.append(p.panel);
+  loading(p.body);
+  const withPlate = (trips || []).filter((t) => t.plate && t.s != null).sort((a, b) => a.s - b.s);
+  const ran = withPlate.filter(jobCompleted);
+  const pool = ran.length ? ran : withPlate;
+  const wins = (mv.windows || []).filter((w) => w.plate);
+  const first = pool[0]?.plate || wins[0]?.plate || null;
+  const last = pool[pool.length - 1]?.plate || wins[wins.length - 1]?.plate || null;
+  const noCarWhy = !first && !last && (wh.trips || wh.veh)
+    ? `${withheldSentence(wh.trips ? 'BK' : 'VEH', { level: wh.trips && wh.bkLevel === 'A' ? 'A' : '' })} `
+      + 'So which car this person drove cannot be read here.'
+    : null;
+  import('./overnight.js').then((m) => m.dayOvernight(p.body, { day, first, last, noCarWhy })).catch((e) => {
+    if (!p.body.isConnected) return;
+    p.body.innerHTML = '';
+    p.body.append(note(`Where the car stood overnight could not be drawn: ${e?.message || e}`, 'warn'));
+  });
+}
+
 function unbookedOnDay(root, { res, day, list }) {
   if (!root.isConnected) return;
   const band = root.querySelector('.dday-rows');

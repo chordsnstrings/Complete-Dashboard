@@ -74,6 +74,12 @@ const WHY = {
   vehicle: 'This page is one car\'s whole record — its bookings, trackers, drivers and money are read '
     + 'by plate, whichever fleet\'s accounts they came through. Filtering every part of it by fleet is '
     + 'not built for this page yet.' + ASK,
+  /* OVN (2026-11-16): the fleet-wide night table counts every car of both
+     fleets in its by-area line and its counts; filtering its rows would leave
+     the other fleet inside those figures. */
+  overnight: 'Where cars spent the night is one table over every car both fleets\' trackers reported, and its '
+    + 'by-area line and counts are tallied over all of them, so filtering the rows alone would leave the other '
+    + 'fleet in the figures. A one-fleet table is not built yet.' + ASK,
   target: 'The revenue target is one figure set for the company — both fleets together, day by day — so '
     + 'there is no one-fleet target to measure your fleet against.' + ASK,
   settings: 'Settings and provider credentials are kept as one company-wide list: no setting belongs '
@@ -142,6 +148,7 @@ const BY_ROUTE = {
     'GET /api/vehicle/drivers', 'GET /api/vehicle/drivers-detail', 'GET /api/vehicle/earnings',
     'GET /api/vehicle/kpis', 'GET /api/vehicle/mix', 'GET /api/vehicle/movement', 'GET /api/vehicle/profile',
     'GET /api/vehicle/safety', 'GET /api/vehicle/trips', 'GET /api/vehicle/whereabouts'],
+  overnight: ['GET /api/overnight'],
   target: ['GET /api/target', 'GET /api/target/hours', 'GET /api/target/car', 'GET /api/export/today.xlsx',
     'GET /api/export/target-month.xlsx'],
   settings: ['GET /api/settings', 'PUT /api/settings', 'POST /api/settings/paste'],

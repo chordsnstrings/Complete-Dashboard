@@ -1063,6 +1063,23 @@ the builder's matcher on the review's vocabulary.
 
 ## Traps that have cost time more than once
 
+* **WHR's "the day is still running" is about the clock it was HANDED, not the real one** (2026-11-16, FIX-STATUS
+  OVN2). `whereaboutsDay()` words a stretch after the last fix on a day that has not ended as "No fix since … — the day
+  is still running", and measures the silence to the `nowMs` it is given. The overnight read hands it now held at 12:00
+  on D+1 (nothing after the first fix past 12:00 is read), so every night's D+1 "had not ended": measured on production,
+  a unit last heard at 22:56 on 15 Nov was told at 17:40 on the 16th that its day was still running, and a unit dark for
+  23 hours could never become "silent". A caller that caps now must re-measure an after-last stretch against the real
+  now (`overnightOf`, `nowMs`): past a day it is silent, short of one "has not reported since".
+* **The Arkiv fold layer reads a line of FIGURES as an absence line if it says "No reading"** (2026-11-16, OVN). focus.js
+  tests `ABSENT` (which matches "no reading", "unknown", "cannot say", "refused"…) BEFORE its "dense in numbers, keep"
+  rule, so the overnight counts ("Parked, seen 10 · … · No reading 1 · On the move 4") were clamped to one line at 390
+  px, and a day-page sentence holding a link was cut as a "lead". A data line that must stay whole is marked
+  `data-fx="keep"` (focus.js skips an element already judged; `answerline.js` does the same), and a browser test checks
+  it is not clipped — the text is still in the DOM when it is clamped, so a text check cannot see it.
+* **Chromium dies with SIGTRAP when TMPDIR is a long scratchpad path** (2026-11-16). `test/arkiv_classic_frozen.test.mjs`
+  launches Chromium with its profile under `$TMPDIR`; under `/tmp/claude-0/<long session path>/scratchpad/…` the
+  browser exits at launch ("process did exit: exitCode=null, signal=SIGTRAP") before any route is rendered. Use a short
+  directory (`TMPDIR=/tmp/ovn-mine`) for the base/working dumps.
 * **The tracker's gazetteer does not speak the bookings' language** (2026-11-16, FIX-STATUS PLC).
   `place_cell` is FMS's reverse geocoder (InfoTrack); the bookings are Google's. Where a booking had
   a dash-form address AND a tracker fix within 5 min (160 production driver-days, 9–15 Nov), the
@@ -12188,3 +12205,62 @@ alone (no bookings), and "after the last fix" and "silent" are both unknown. Wha
 `coverage_with_bookings`, which can now only move minutes from inferred to unknown (a booking breaking a parked
 inference), never from unknown to inferred.
 
+
+## Where each car spent the night — the definition and its limits (2026-11-16, FIX-STATUS OVN)
+
+The operator: "also add the overnight parking table on the fleet page also in drivers activity list and drivers day
+page". `GET /api/overnight` answers; `api/overnight.js` owns the definition and the words; the fleet page (#vehicles),
+the driver's Activity rows and the driver's day draw it (`api/public/overnight.js`).
+
+### The definition
+
+* The **night of D** is the evening of D into the morning of D+1; its **window** is 00:00–05:00 Dubai on D+1. A night is
+  named by the evening it begins on, so the Activity row for Monday carries the night of Monday.
+* The car's place is the **WHR stay** (`whereaboutsDay()` for D+1) with the most minutes inside the window — from the
+  **tracker alone** (no booking is read: a booking laid into a quiet stretch is BK detail and would change which stretches
+  are "moved" and which "parked"). The day is read from 18:00 on D to 12:00 on D+1 plus the nearest fix either side per
+  tracker, and judged with now held at 12:00 — so a car driven off at 07:30 says 07:30.
+* **parked**: that stay holds MORE than half the window's minutes (exactly half is not). Its basis is the window's own —
+  a stay watched all evening and quiet from 23:00 is, for the night, **inferred**, and the fleet table counts it so.
+* Otherwise the largest of **silent** (no reading for over a day), **unknown** (moved while the tracker was silent, before
+  its first fix, after its last) and **moving** (drives, plus stays at more than one place), ties to the less certain;
+  **no_tracker** when no position was ever recorded. Each carries `reason`, the WHR stretch's own sentence where one
+  stretch decides it. Unnamed ground (no `place_cell` name) is `area: null` with "ground the fleet has never driven near
+  has no name" — the position is kept, a name is never guessed.
+* Fleet-wide, the **population** is every plate × tracker with a positioned fix (never `uber`, never 0,0) in the seven
+  days to the window's end; CABMAN's listed cars that sent nothing that week are counted in the population sentence. FMS
+  keeps no list here, so an FMS car silent all week is simply not in the table, and the sentence says so.
+* The driver pages ask about the car the person drove LAST that day (Activity, the night after; the day page's night
+  after) and FIRST (the day page's night before) — the latest booking that ran, else the latest booking with a plate,
+  else (day page) the custody window. The car's night is the car's: nobody is said to have parked it.
+
+### Measured on production fixes, the night of 15 Nov (GET only)
+
+40 cars of `/api/live`'s 136 (20 CABMAN, 20 FMS, evenly spaced), fixes from `/api/map/journey` for 15 and 16 Nov, run
+through the module itself (`carNight` via `sliceNight`). 7 of the 40 had no fix on either day (on production the route
+reads their last fix ever: silent, or not in the week's population). Of the 33 with fixes:
+
+| | cars | parked, seen | parked, inferred | unknown | moving |
+|---|---|---|---|---|---|
+| CABMAN | 15 | 11 | 1 | 1 | 2 |
+| FMS | 18 | 10 | 1 | 5 | 2 |
+| all | 33 | **21** | **2** | 6 | 4 |
+
+So 23 of 33 (70%) are placed for the night; the median parked car's stay covered all 300 window minutes. FMS's unknowns
+are the night's real gaps: an FMS unit quiet overnight whose fixes either side are 500 m apart is "moved", not parked
+(WHR's 150 m rule), and a unit whose first fix of the 16th came at 08:27 is "before the first fix". The area names were not
+part of this measurement (the journey route returns none), and the journey sample cannot see a fix before the 15th.
+
+### Cost
+
+~80 fixes a car in the 18-hour read (0–181 over 16 sampled cars), so the fleet-wide read is about 11,000 rows placed on
+`place_cell` by its primary key, plus one LATERAL probe each side per plate × tracker. Plates mode is one range query for
+up to 10 cars × 31 nights. Cached once the window has closed.
+
+### Limits, stated
+
+* Not who parked it, and not more than the window: a car parked 00:00–03:00 and driven 03:00–05:00 is parked; the from–to
+  says the rest.
+* "Since" and "until" are bounds where they are bounds: "by 17:05" when the stay began on the earliest fix read (WHR's
+  rule), "still there at 12:20" when it was still there at the first fix after the read.
+* A one-fleet reader is refused the route (`mixed`): the by-area line and the counts are over both fleets.

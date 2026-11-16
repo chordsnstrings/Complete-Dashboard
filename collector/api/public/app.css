@@ -2640,6 +2640,25 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 .whr-ruler>span:first-child{transform:none}
 .whr-ruler>span:last-child{transform:translateX(-100%)}
 .whr-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:var(--t2);color:var(--grey-strong)}
+
+/* Where each car spent the night (OVN, 2026-11-16; api/public/overnight.js).
+   The Activity row's overnight line spans the track and the figures, ONE
+   line in every row (ellipsis, the whole sentence in its title) — so a day
+   with a long reason is not drawn taller than a day without
+   (test/activity_cancellations.test.mjs holds the rows uniform). */
+.sh-n{grid-column:2 / -1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-size:var(--t3);line-height:1.35;color:var(--grey-strong);margin-top:-6px}
+.sh-n.ent-off{color:var(--grey)}
+.ovn-nav{flex-wrap:wrap;gap:8px;align-items:center}
+.ovn-nav .ovn-when{flex:1 1 220px;min-width:0}
+.ovn-areas{margin:0;line-height:1.5;overflow-wrap:anywhere}
+.ovn-counts{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0;font-size:var(--t4);color:var(--grey-strong)}
+.ovn-chip b{color:var(--ink);font-weight:600}
+.ovn-why{display:inline-block;max-width:46ch;white-space:normal;line-height:1.35}
+.ovn-pop{overflow-wrap:anywhere}
+.ovn-day-row{display:flex;flex-direction:column;gap:2px;padding:8px 0;border-bottom:1px solid var(--hair, var(--surface-2))}
+.ovn-day-row:last-of-type{border-bottom:0}
+.ovn-day-row>div{overflow-wrap:anywhere}
 .sw.noseat{background-image:repeating-linear-gradient(90deg,transparent 0 3px,var(--surface) 3px 5px)}
 .sw.nopos{background:var(--surface-2);border:1px solid var(--rule)}
 /* An OPEN-ENDED online span: the last ONLINE Uber sent, with no closing event
