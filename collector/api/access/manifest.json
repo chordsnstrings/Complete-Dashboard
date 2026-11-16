@@ -3223,6 +3223,22 @@
  },
  {
   "method": "GET",
+  "path": "/api/events/web",
+  "subject": "SYS",
+  "carries": [
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [],
+  "whole": [],
+  "fleet": "global",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/server.js, beside GET /api/events. Body {today, tier, events}. tier is the newest collection_run row with source 'events' and mode 'web' ({status, error, finished_at, rows_written, window_start, window_end}) or null when the web search tier has never run; error is the true reason it could not search (src/sources/events_web.js REASON). events are world_event rows with source 'web' that have not yet ended in Dubai (at most 100): {code, title, category, starts_on, ends_on, expected_effect, confidence, url, summary, venue, area, expected_attendance, found_on, source_title, url_unverified, citations_n}. Leads a model found by ModelArk's built-in web search, not fleet data; the route ignores ?fleet. url is set only when the search's own citations carry it."
+ },
+ {
+  "method": "GET",
   "path": "/api/export/money.xlsx",
   "subject": "CASH",
   "carries": [

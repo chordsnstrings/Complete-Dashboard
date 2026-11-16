@@ -6724,6 +6724,52 @@ app.get('/api/events', wrap(async (req, res) => {
      ORDER BY starts_on DESC LIMIT 300`, [from, to]));
 }));
 
+/* What is coming up, found by web search — and, when nothing was found, why.
+   ─────────────────────────────────────────────────────────────────────────
+   The web tier (src/sources/events_web.js, EVW 2026-11-16) asks ModelArk's
+   built-in web search for Dubai events in the next 21 days. Its rows are in
+   the FUTURE, and /api/events is asked by #causes over the record — whose
+   last day is the end of the current month — so a concert on the 5th of next
+   month could never reach the page through it. This route is the forward
+   view: every web row that has not ended yet in Dubai, soonest first.
+
+   It also carries the tier's newest run (collection_run, source 'events',
+   mode 'web'), because an empty list means two different things — "searched
+   and found nothing" and "could not search" — and only the run says which.
+   `error` there is the true reason (the console switch, no key, a timeout
+   verbatim); the page prints it rather than an empty table.
+
+   Fields from raw are flattened so the page reads no JSON: venue, area,
+   attendance, the day the search last found it, and whether the model's own
+   url was dropped for not being one of the pages the search cited. The
+   citation list stays in the database; the page gets its length. The Dubai
+   day is taken in SQL so no clock in this process decides it. */
+app.get('/api/events/web', wrap(async (req, res) => {
+  const [{ today }] = await q(`SELECT to_char((now() AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS today`);
+  const [tier] = await q(
+    `SELECT status, error, finished_at, rows_written,
+            to_char(window_start, 'YYYY-MM-DD') AS window_start, to_char(window_end, 'YYYY-MM-DD') AS window_end
+       FROM collection_run WHERE source = 'events' AND mode = 'web'
+      ORDER BY finished_at DESC LIMIT 1`);
+  const events = await q(
+    `SELECT code, title, category, to_char(starts_on, 'YYYY-MM-DD') AS starts_on,
+            to_char(coalesce(ends_on, starts_on), 'YYYY-MM-DD') AS ends_on,
+            expected_effect, confidence, url, summary,
+            raw->>'venue' AS venue, raw->>'area' AS area,
+            (raw->>'expected_attendance')::numeric AS expected_attendance,
+            raw->>'found_on' AS found_on, raw->'citation'->>'title' AS source_title,
+            coalesce((raw->>'model_url_unverified')::boolean, false) AS url_unverified,
+            coalesce(jsonb_array_length(CASE WHEN jsonb_typeof(raw->'citations') = 'array'
+                                             THEN raw->'citations' END), 0) AS citations_n
+       FROM world_event
+      WHERE source = 'web' AND coalesce(ends_on, starts_on) >= $1::date
+      ORDER BY starts_on, title LIMIT 100`, [today]);
+  res.json({ today, tier: tier || null,
+    events: events.map((e) => ({ ...e,
+      expected_attendance: e.expected_attendance == null ? null : Number(e.expected_attendance),
+      citations_n: Number(e.citations_n) })) });
+}));
+
 // operator-added context — the people who run the fleet know things the APIs never will
 app.post('/api/events', requireAdmin, wrap(async (req, res) => {
   const b = req.body || {};

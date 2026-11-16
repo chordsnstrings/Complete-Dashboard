@@ -3213,8 +3213,40 @@ const EV = [
     summary: 'Reduced inbound travel and cautious discretionary spend; effect on ride demand is indirect.' },
   { title: 'UAE fuel price revision', category: 'economic', scope: 'uae', starts_on: '2026-08-01', ends_on: '2026-08-01',
     expected_effect: 'cost_up', confidence: 0.5, summary: 'Affects the ICE portion of the fleet only; the EV fleet is unaffected.' },
+  /* A web-search lead (src/sources/events_web.js) inside the record, so the
+     events table's "found by web search" marking has a row to draw. */
+  { source: 'web', code: 'dubai-run:2026-11-23', title: 'Dubai Run on Sheikh Zayed Road', category: 'closure', scope: 'dubai',
+    starts_on: '2026-11-23', ends_on: '2026-11-23', expected_effect: 'demand_down', confidence: 0.7,
+    url: 'https://example.com/dubai-run', summary: 'Sheikh Zayed Road, Downtown — about 300,000 expected' },
 ];
 app.get('/api/events', (_, r) => r.json(EV));
+
+/* The forward view (api/server.js /api/events/web): the web tier's newest run
+   and the leads that have not ended. One lead carries a verified url, one had
+   its model-written url dropped (url_unverified), one has no url at all — the
+   three ways a row reaches the page. Dates are relative so the rows stay in
+   the future whenever the mock is run. */
+app.get('/api/events/web', (_, r) => r.json({
+  today: dayISO(0),
+  tier: { status: 'ok', error: null, finished_at: new Date(Date.now() - 3 * 3600e3).toISOString(),
+    rows_written: 3, window_start: dayISO(0), window_end: dayISO(-20) },
+  events: [
+    { code: `dp-world-tour-championship:${dayISO(-2)}`, title: 'DP World Tour Championship', category: 'sports',
+      starts_on: dayISO(-2), ends_on: dayISO(-5), expected_effect: 'demand_up', confidence: 0.6,
+      url: 'https://example.com/dp-world-tour', summary: 'Jumeirah Golf Estates, Dubailand — about 60,000 expected',
+      venue: 'Jumeirah Golf Estates', area: 'Dubailand', expected_attendance: 60000, found_on: dayISO(0),
+      source_title: 'DP World Tour Championship 2026 — tickets', url_unverified: false, citations_n: 9 },
+    { code: `arena-concert:${dayISO(-6)}`, title: 'Headline concert at Coca-Cola Arena', category: 'concert',
+      starts_on: dayISO(-6), ends_on: dayISO(-6), expected_effect: 'demand_up', confidence: 0.75,
+      url: null, summary: 'Coca-Cola Arena, City Walk — about 17,000 expected',
+      venue: 'Coca-Cola Arena', area: 'City Walk', expected_attendance: 17000, found_on: dayISO(1),
+      source_title: null, url_unverified: true, citations_n: 9 },
+    { code: `uae-national-day:${dayISO(-15)}`, title: 'UAE National Day holiday', category: 'holiday',
+      starts_on: dayISO(-15), ends_on: dayISO(-16), expected_effect: 'unknown', confidence: null,
+      url: null, summary: null, venue: null, area: null, expected_attendance: null, found_on: dayISO(0),
+      source_title: null, url_unverified: false, citations_n: 9 },
+  ],
+}));
 
 app.get('/api/breaks', (_, r) => r.json([
   { metric: 'trips', grain: 'month', platform: 'uber', period_from: '2025-09-01', period_to: '2025-10-01',

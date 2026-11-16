@@ -981,6 +981,15 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **ModelArk's built-in web search is a `/responses` tool, and 403s until the account enables
+  it** (2026-11-16, FIX-STATUS EVW; "Events by web search" at the end of this file). On
+  `/chat/completions` the same `tools: [{type: 'web_search'}]` is a 400 `MissingParameter
+  tools.function` — it reads as a malformed function tool, not as "unsupported", and sends you
+  debugging the request. On `/responses` it is 403 `AccessDenied` "you do not have access to the
+  built in tool" until an account owner switches it on in the BytePlus console — the key is fine.
+  And every caller of `config.analystModel` must send `thinkingSwitch`'s
+  `{thinking: {type: 'disabled'}}` to ModelArk, or the model reasons for minutes: the news
+  classifier was the caller that did not, until EVW.
 * **`innerText` reports CSS `text-transform`, so a case-sensitive match on it fails on visible
   text** (2026-11-12, twice in one day; FIX-STATUS INT5). Arkiv sets panel headings and the phone
   card's date-and-channel line in mono capitals; `innerText` returns "DATA RETENTION" and
@@ -11656,3 +11665,33 @@ DeepSeek's extra claims went to hours and weekdays and came back refuted (15:00 
 immaterial; Seed's extras were smaller but real (longer trips in the morning, on Uber, and from Hotel).
 **The default is Seed 2.0 Pro.** One pass per model is a small sample — the nightly passes will tell more;
 `ANALYST_MODEL` in DigitalOcean overrides the default without a code change.
+
+
+## Events by web search: ModelArk's built-in tool (2026-11-16)
+
+What the events layer's web tier (`src/sources/events_web.js`, FIX-STATUS EVW) depends on,
+measured on 2026-11-16 against `https://ark.ap-southeast.bytepluses.com/api/v3` with the ModelArk
+skill's key (an account other than production's, which may or may not differ):
+
+| request | answer |
+|---|---|
+| `POST /responses` `{"model":"seed-2-0-pro-260328","input":"…","tools":[{"type":"web_search"}],"thinking":{"type":"disabled"}}` | **HTTP 403** `{"error":{"code":"AccessDenied","message":"The request failed because you do not have access to the built in tool. Request id: …","type":"Forbidden"}}` |
+| `POST /chat/completions` with `tools: [{"type":"web_search"}]` | **HTTP 400** `MissingParameter` `tools.function` |
+
+* **The built-in web search exists on the Responses API only.** Chat completions treats any tool
+  as a function tool and asks for its `function` — so the web tier is the one caller in the
+  collector on `/responses`, and every other model call stays on `/chat/completions`.
+* **It is refused until it is switched on for the account in the BytePlus console.** The refusal
+  names the tool ("built in tool"); an `AccessDenied` that does not name it is something else
+  (an unactivated model reads the same code) and is reported verbatim, not as the switch.
+* **Whether production's key has it is unknown** until the first run: production's
+  `ARK_API_KEY` belongs to the account that holds it, not to the skill's.
+* **Cost per call: not measurable yet** — no account tried has the tool. Each web row's
+  `raw.call.usage` keeps the response's token counts, and the run log prints them, so the first
+  real run gives the figure. The operator's note relayed with the task: the allowance is 4,000
+  credits a day and live usage is returned in `X-Rate-Limit-Remaining`; the tier records that
+  header when a response carries it (unobserved on ModelArk so far) and asks once a Dubai day.
+* **Request shape is held to what was measured**: no `max_output_tokens`, no tool options
+  (`limit`, `user_location`, …). A field never sent to that endpoint is a field that might 400.
+* Citations are read from `output[].content[].annotations[]` entries of type `url_citation`
+  (the OpenAI Responses form). A lead's url is kept only when it is one of those pages.

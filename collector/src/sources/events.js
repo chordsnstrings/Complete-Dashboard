@@ -1,18 +1,22 @@
 // World-event layer: what was happening when the numbers moved.
 //
-// Three tiers, cheapest and most reliable first:
+// Four tiers, cheapest and most reliable first:
 //   1. seasonal  — computed from the calendar (Dubai summer, school terms). Zero API risk.
 //   2. calendar  — Ramadan/Eid, computed from the Hijri calendar (these reshape demand every year).
 //   3. news      — GDELT headlines, classified by an LLM into "does this move a Dubai fleet?".
+//   4. web       — upcoming Dubai events found by ModelArk's built-in web search
+//                  (events_web.js): leads for the next 21 days, once a day.
 //
 // Nothing here claims causation. It supplies candidates so a human can judge, and it
 // quantifies the coincidence so the judgement is informed.
-import { config } from '../config.js';
+import { config, thinkingSwitch } from '../config.js';
 import { http } from '../http.js';
 import { gregorianOfHijri } from './external.js';
 import { upsert, upsertMany, logRun, pool } from '../db.js';
 import { dubaiMonth } from '../util.js';
 import { log } from '../log.js';
+import { lastJsonArray } from '../analyst.js';
+import { collectWeb } from './events_web.js';
 
 const SRC = 'events';
 const q = (t, p = []) => pool.query(t, p).then((r) => r.rows);
@@ -130,25 +134,57 @@ async function fetchNews(failed = []) {
 
 // Ask an LLM whether a headline plausibly affects Dubai ride demand, and how.
 // Conservative by design: default to "unknown / low confidence" rather than inventing a story.
-async function classifyNews(articles, failed = []) {
-  if (!articles.length || !config.analystModel?.apiKey) return [];
+export function classifyPrompt(articles) {
   const list = articles.slice(0, 30).map((a, i) => `${i}. ${a.title}`).join('\n');
-  const prompt = `You assess whether news affects a taxi/ride-hailing fleet operating in Dubai, UAE.
+  return `You assess whether news affects a taxi/ride-hailing fleet operating in Dubai, UAE.
 For each headline return: index, effect (demand_up|demand_down|supply_down|risk_up|none), confidence 0-1, and one short reason.
 Be strict: most headlines have no measurable effect on a Dubai fleet — use "none" with low confidence unless the link is direct and material.
 Return ONLY a JSON array like [{"i":0,"effect":"none","confidence":0.1,"reason":"..."}].
 
 ${list}`;
+}
+
+/* The classifier's request, on its own so a test reads it without a network.
+   ─────────────────────────────────────────────────────────────────────────
+   THE THINKING SWITCH WAS MISSING HERE. The analyst moved to ModelArk on
+   2026-11-16 and src/analyst.js proposeBody and src/credmodel.js both send
+   {thinking: {type: 'disabled'}} through src/config.js thinkingSwitch —
+   because ModelArk's hybrid models (Seed 2.0 Pro is the default) reason
+   before they answer unless told not to, and the analyst's first tenure on
+   ModelArk ended with every pass timing out (242 s: 120 s, twice). This
+   caller reads the same config.analystModel and sent the bare body, so the
+   classifier was the one ModelArk caller left thinking: 90 seconds and one
+   retry for thirty headlines on a model that spends minutes before its first
+   token. Sent where the endpoint understands it (ModelArk, MiniMax) and
+   nowhere else — an unknown field is a 400 on a stricter server. */
+export function classifyBody(prompt, m = config.analystModel) {
+  return {
+    model: m.model, messages: [{ role: 'user', content: prompt }], max_tokens: 1600,
+    ...(thinkingSwitch(m.baseUrl) ? { thinking: { type: 'disabled' } } : {}),
+  };
+}
+
+export async function classifyNews(articles, failed = []) {
+  if (!articles.length || !config.analystModel?.apiKey) return [];
+  const prompt = classifyPrompt(articles);
   try {
     const { data } = await http(`${config.analystModel.baseUrl}/chat/completions`, {
       method: 'POST', timeoutMs: 90000, retries: 1,
       headers: { authorization: `Bearer ${config.analystModel.apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: config.analystModel.model, messages: [{ role: 'user', content: prompt }], max_tokens: 1600 }),
+      body: JSON.stringify(classifyBody(prompt)),
     });
     const txt = data?.choices?.[0]?.message?.content || '';
-    const m = txt.match(/\[[\s\S]*\]/);
-    if (!m) return [];
-    return JSON.parse(m[0]);
+    /* The analyst's bracket matcher, not `txt.match(/\[[\s\S]*\]/)`. The
+       greedy regex spans the first [ to the last ], so a model that answers,
+       reconsiders in prose and answers again — which MiniMax-M3 did to the
+       analyst (src/analyst.js jsonArrays) — parsed to a thrown SyntaxError
+       here, and every headline of the run was lost to one revision. An
+       answer with no readable array is still reported — it used to throw
+       into the catch below, and a classifier that said nothing usable is not
+       a quiet news week. */
+    const { arr, error } = lastJsonArray(txt);
+    if (!arr) failed.push(`classifier: ${error}`);
+    return arr || [];
   } catch (e) {
     log.warn(SRC, 'llm classify failed', { err: String(e).slice(0, 100) });
     failed.push(`classifier: ${String(e).slice(0, 110)}`);
@@ -529,14 +565,30 @@ export async function collect({ mode = 'incremental' } = {}) {
       failed.push(`news tier: ${String(e).slice(0, 110)}`);
     }
 
+    /* The web tier (events_web.js). It decides for itself whether a search
+       is due (once a Dubai day; six hours after a failure), writes its own
+       rows and records its outcome as its own run — source 'events', mode
+       'web' — so the reason it could not search stays on /api/status between
+       the incremental runs that do not ask. Only a fault in the tier's own
+       machinery (reading collection_run, writing world_event) lands here, and
+       then it is this run's failure too. */
+    let web = { ran: false, written: 0 };
+    try {
+      web = await collectWeb();
+    } catch (e) {
+      log.warn(SRC, 'web search tier failed', { err: String(e).slice(0, 120) });
+      failed.push(`web search tier: ${String(e).slice(0, 110)}`);
+    }
+
     rows = [...rows, ...newsRows];
-    const written = rows.length ? await upsertMany('world_event', rows, ['source', 'code', 'starts_on', 'title']) : 0;
+    const written = (rows.length ? await upsertMany('world_event', rows, ['source', 'code', 'starts_on', 'title']) : 0)
+      + (web.written || 0);
     const breaks = await detectBreaks();
     await logRun({ source: SRC, fleet_id: null, mode, rows_written: written + breaks,
       status: !failed.length ? 'ok' : (written + breaks > 0 ? 'partial' : 'error'),
       error: failed.length ? failed.slice(0, 4).join('; ').slice(0, 400) : null });
     log.info(SRC, 'done', { seasonal: seasonal.length, ramadan: ramadan.length,
-      news: newsRows.length, breaks, failed: failed.length });
+      news: newsRows.length, web: web.ran ? (web.written || 0) : 'not due', breaks, failed: failed.length });
   } catch (e) {
     await logRun({ source: SRC, fleet_id: null, mode, status: 'error', error: String(e) });
     log.error(SRC, 'failed', { err: String(e) });

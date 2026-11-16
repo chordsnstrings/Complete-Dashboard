@@ -6982,3 +6982,96 @@ and screenshots through `bin/prod-mirror.mjs`):
 (they run only once sign-in is required); PKY and SSO (off until the Owner turns them on); RLS for
 a one-fleet reader (none exists).
 
+
+
+## EVW – Dubai events by ModelArk web search (2026-11-16)
+
+The operator: "for events maybe we could use modelark to search on google and use that as a
+direction". Branch `fix/events`. **Written and tested; not deployed; never run against ModelArk with
+the tool enabled** — the only account it was tried on refuses the tool (below), so not one real
+answer has been parsed.
+
+**What it is.** A fourth tier in the events layer, `src/sources/events_web.js`, called from
+`events.collect()` in its own try. Once a Dubai day it asks BytePlus ModelArk's **Responses API**
+(`POST {ANALYST_BASE_URL}/responses`, the analyst's model and key — `seed-2-0-pro-260328`,
+`ARK_API_KEY` by fallback) with the built-in `web_search` tool for public events in Dubai over the
+next 21 days (today .. today+20) that move taxi and ride-hailing demand, as a strict JSON array:
+title, starts_on, ends_on, venue, area, category, expected_attendance, expected_effect
+(demand_up | demand_down | unknown), confidence, url. The request is exactly the measured shape —
+model, input, `tools: [{type: 'web_search'}]`, `thinking: {type: 'disabled'}` — and nothing else.
+Rows go to `world_event` with source `web`, code `<normalised title>:<starts_on>`, upserted on
+the table's existing key. No migration (v126 not used): `url`, `summary` and `raw` already hold
+everything.
+
+**What it believes, and what it does not.** Parsed with `src/analyst.js` `lastJsonArray` (the
+bracket matcher factored out of `parseProposals`, now shared — think blocks dropped, the last
+array that parses wins). Refused: no title, no start date, a date that is not a calendar day, an
+event wholly outside the window, a second entry for the same event. A url is kept **only when it is
+one of the pages the search's own `url_citation` annotations carry** (matched ignoring scheme,
+`www.` and a trailing slash, stored as the search spelled it); a model-written address the search
+did not cite stays in `raw.model_url` marked unverified and is never a link. Attendance 0 is a
+placeholder (null); confidence outside 0..1 is dropped, not rescaled. `raw` keeps venue, area,
+attendance, `found_on`, the matched citation, up to 25 citations and the call (`response_id`,
+`usage`, number of `web_search_call` items, and `X-Rate-Limit-Remaining` when the response
+carries one — the operator's note relayed with this task: the allowance is 4,000 credits a day
+and live usage comes back in that header; one call a day is far inside it).
+
+**When it cannot run, the true reason** — recorded as its own `collection_run` row, source
+`events`, mode `web`, so `/api/status` carries it under the events source and it survives the
+thirty-minute incremental runs that do not search:
+
+| condition | reason written |
+|---|---|
+| 403 `AccessDenied` whose message names the built-in tool | "ModelArk's built-in web search is not enabled for this account — an account owner switches it on in the BytePlus console" |
+| 403 that does not name the tool (e.g. a model not activated) | `ModelArk answered HTTP 403 AccessDenied: <message, verbatim>` — not blamed on the switch |
+| no `ANALYST_API_KEY` / `ARK_API_KEY` | "no model configured — neither ANALYST_API_KEY nor ARK_API_KEY is set for the collector, …" |
+| analyst endpoint not ModelArk (e.g. MiniMax) | "the analyst model's endpoint is <host>, not BytePlus ModelArk — …" |
+| timeout (150 s, no retry: a retried search is a second bill) | `the web search call timed out after 150 s (<runtime message>)` |
+| any other HTTP status / network error | verbatim |
+| 200, no array / every lead refused | the parse error with the first 160 characters, or "all N events … failed validation (first: …)" |
+
+Cadence: once a Dubai day after a success; six hours after a failure (a console switch flipped
+mid-morning should not wait for tomorrow, and a refused call is not retried every half hour).
+
+**`GET /api/events/web`** (new; manifest entry; called by `#causes`; mockapi fixture):
+`{today, tier, events}` — the newest web run (status, error, finished_at, rows_written, window)
+or null, and every web row not yet ended in Dubai, soonest first, with venue/area/attendance/
+found_on/source_title/url_unverified/citations_n flattened from `raw`. A separate route because
+`#causes` asks `/api/events` over the record, which ends with the current month, so a lead for
+next month could never reach the page through it.
+
+**`#causes`.** A new panel, "Coming up in Dubai — found by web search, a direction, not a
+measurement": the leads with a `web search` label, a `source` link only where the search cited the
+page ("source not cited by the search" where the model named one it did not), the model's
+confidence, the crowd figure, the day each was last found; cards at phone width. With no leads the
+panel is the house empty state carrying the reason (never folded by the Arkiv focus pass); with
+earlier leads in hand and a failed latest attempt, the reason heads them as a warning, cause first.
+The record's events table marks web rows the same way. Render-checked in Chromium against mockapi
+(`serviceWorkers: 'block'`) at 1280 and 390, Arkiv and Classic, light and dark, in five states —
+leads, refused, never run, searched-and-found-nothing, refused-with-earlier-leads — 69 checks, no
+page error, no horizontal page scroll.
+
+**classifyNews (the news tier) sent no thinking switch** to ModelArk, the one caller of
+`config.analystModel` that did not — it now posts `classifyBody()`, which adds
+`{thinking: {type: 'disabled'}}` for ModelArk and MiniMax only (src/config.js `thinkingSwitch`).
+It also reads the answer with `lastJsonArray` instead of `txt.match(/\[[\s\S]*\]/)` (a revised
+answer threw), and an answer with no readable array is reported in the run's error instead of
+returning nothing silently.
+
+**Proof.** `test/events_web.test.mjs`, 52 checks: a fake Responses server behind ModelArk's real
+host (200 with an output message and `url_citation` annotations; 403 naming the tool; 403 not
+naming it; malformed text; a timeout), parsing and validation, the PGlite upsert (idempotent on the
+next day's rerun), the cadence, the reason on the real mounted `/api/status` and
+`/api/events/web`, and the classifier's request over the socket. Each of eight reversions fails
+the file as its header names (url kept uncited; window checks removed; the console-switch match
+forced off; cadence always due; the code carrying found_on; the run's error dropped; the thinking
+spread removed; the greedy regex restored). Neighbours green, one at a time: analyst,
+analyst_model, run_honesty, break_month_grain, hijri_offline, access_manifest, endpoint_coverage,
+timezone, mockapi, route_smoke.
+
+**Not proven, and what it waits on.** That production's `ARK_API_KEY` account has the built-in
+tool enabled (if not, the first run writes the console-switch reason, which is the point); the
+shape of a real answer (citations in `url_citation` annotations are the OpenAI Responses form and
+what the parser reads — a ModelArk answer that carries them elsewhere will show every lead as
+"source not cited by the search", visibly, rather than wrongly); the cost per call (see COVERAGE
+"Events by web search"); whether ModelArk sends `X-Rate-Limit-Remaining`.
