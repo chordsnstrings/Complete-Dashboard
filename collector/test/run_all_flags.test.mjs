@@ -57,8 +57,13 @@ check('access_pages and arkiv_classic_frozen (known failures) are browser files 
 check('API and unit suites are kept',
   ['route_smoke', 'truncation', 'ops_health_budget', 'deploy_scripts', 'run_all_flags', 'access_manifest', 'assets']
     .every((f) => !browser.has(`${f}.test.mjs`)), [...browser.keys()].filter((f) => /route_smoke|truncation|ops_health|deploy_scripts|run_all|access_manifest|^assets/.test(f)).join(','));
-check('the count is what the runner\'s header says was measured (within a few files of 88)',
-  browser.size >= 80 && browser.size <= 100, String(browser.size));
+/* 88 when the runner was written; 101 on 2026-11-16, after the drawn tests of
+   CXA, ERN, PLC (territory_render) and WHR (whereabouts_page) — each a real
+   Chromium file. The band is a sanity bound on the detector (a bug that left
+   out every file, or none, lands far outside it), not a quota: widened to the
+   measured count with room either side, and the runner's header says the same. */
+check('the count is what the runner\'s header says was measured (within a few files of 101)',
+  browser.size >= 90 && browser.size <= 115, String(browser.size));
 
 /* ── shards ─────────────────────────────────────────────────────────────── */
 console.log('\nshards are disjoint and together complete');

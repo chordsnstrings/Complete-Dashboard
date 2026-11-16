@@ -1844,6 +1844,39 @@ function activityAbsence(root, shift, kept) {
 }
 
 /* ── tab: territory ──────────────────────────────────────────────────────── */
+/* One table for both ends of a trip (FIX-STATUS PLC). A row the ladder could
+   not place is named by its REASON, never "(unparsed)"; a placed row whose
+   trips did not all come from the address says so on hover, and the caption
+   under the table says how every trip in the window was placed — the words
+   come from the API, which has them from src/place_resolve.js, so one wording
+   serves every surface. `end` is 'pickup' or 'dropoff'. */
+function areaTable(body, rows, placement, end) {
+  const word = end === 'dropoff' ? 'drop-off' : 'pickup';
+  const basisTip = (r) => Object.entries(r.by_basis || {})
+    .map(([b, n]) => `${fmt(n)} ${(placement?.by_basis || []).find((x) => x.basis === b)?.label || b}`).join(' · ');
+  body.append(tableFrom(rows.slice(0, 12), [
+    { label: 'Area', key: 'area',
+      render: (r) => (r.unplaced ? `<span class="ent-off">${esc(r.label || 'Not placed')}</span>`
+        : r.by_basis && Object.keys(r.by_basis).some((b) => b !== 'address')
+          ? `<span title="${esc(basisTip(r))}">${esc(r.area)}</span>` : esc(r.area)) },
+    { label: end === 'dropoff' ? 'Drop-offs' : 'Pickups', key: 'n', num: true },
+    { label: 'Avg trip', key: 'avg_km', num: true, render: (r) => (r.avg_km ? `${fmt(r.avg_km, 1)} km` : '—') },
+    { label: 'Avg fare', key: 'avg_fare', num: true, absent: UBER_FARE,
+      render: (r) => (r.avg_fare ? money(r.avg_fare)
+        : `<span class="ent-off" title="no ${word} in this area carries a fare — ${UBER_FARE_WHY}">—</span>`) },
+  ], { compact: true, sortable: true, sortId: end === 'dropoff' ? 'dropoff-areas' : 'areas', defaultSort: { key: 'n', dir: 'desc' } }));
+  if (rows.length > 12) {
+    body.append(el('p', 'cap',
+      `The 12 busiest of ${countOf(rows.length, 'area')} this driver ${end === 'dropoff' ? 'dropped off' : 'picked up'} in.`));
+  }
+  const pl = placement;
+  if (pl && pl.total) {
+    const parts = (pl.by_basis || []).map((b) => `${fmt(b.n)} ${b.label}`)
+      .concat((pl.unplaced || []).map((u) => `${fmt(u.n)} not placed: ${u.label}`));
+    body.append(el('p', 'cap', `How the ${countOf(pl.total, end === 'dropoff' ? 'completed drop-off' : 'pickup')} were placed: ${esc(parts.join(', '))}.`));
+  }
+}
+
 async function tabTerritory(root, id) {
   // Map beside the area list rather than above it: a full-width map is roughly
   // 2.4:1, and a driver's working area is roughly square, so a full-width panel
@@ -1861,9 +1894,19 @@ async function tabTerritory(root, id) {
     : 'Circles are pickup clusters, sized by trips. Hollow markers are places the vehicle sat still between jobs.');
   mapP.panel.classList.add('mapwrap'); g.append(mapP.panel);
   const node = el('div', 'mapnode'); mapP.body.append(node);
-  const areas = panel('Busiest pickup areas', 'From the address the platform recorded'); g.append(areas.panel);
-  const dmix = panel('Trip distance mix', 'Short hops or long runs'); root.append(dmix.panel);
-  [areas.body, dmix.body].forEach(loading);
+  /* Not "from the address" any more (FIX-STATUS PLC): where the address names
+     no area, a name in its text, a plus code, the booking's coordinates or the
+     car's own tracker places the pickup, and the caption under the table says
+     how many came from which. */
+  const areas = panel('Busiest pickup areas', 'From the address the platform recorded, or the car\'s tracker where it named no area'); g.append(areas.panel);
+  /* Drop-offs the same way (the operator, 2026-11-16: "also show dropoff
+     areas the same way"). Beside the distance mix rather than under the map:
+     the pickup table answers "where does this driver start", this one "where
+     do they end up", and the two read best one above the other. */
+  const g2 = el('div', 'grid g2'); root.append(g2);
+  const drops = panel('Busiest drop-off areas', 'Completed trips, from the address the platform recorded, or the car\'s tracker where it named no area'); g2.append(drops.panel);
+  const dmix = panel('Trip distance mix', 'Short hops or long runs'); g2.append(dmix.panel);
+  [areas.body, drops.body, dmix.body].forEach(loading);
 
   const [terr, mix] = await Promise.all([qAll('/api/driver/territory', { id }), qAll('/api/driver/mix', { id })]);
 
@@ -1914,11 +1957,14 @@ async function tabTerritory(root, id) {
       ${ak ? '<span><i class="terr-still-key" style="background:var(--grey);border-radius:50%"></i>waiting spots</span>'
         : '<span><i style="border:1.5px dashed var(--s5);background:none"></i>waiting spots</span>'}
       ${pts.length ? `<span>${terr.pickups.length} pickup clusters · ${terr.idle.length} waiting spots</span>` : ''}`));
+    /* "The other N have an address and no position" stopped being true when
+       the table took in the pickups with NO address (PLC): the tracker places
+       most of those, and the rest are counted by reason. */
     if (pts.length && areaTrips > plotted) {
       mapP.body.append(el('p', 'cap',
         `${fmt(plotted)} of ${fmt(areaTrips)} pickups carry coordinates and are on this map. The other `
-        + `${fmt(areaTrips - plotted)} have an address and no position — the table beside this is over `
-        + 'all of them, so it will name areas the map does not show.'));
+        + `${fmt(areaTrips - plotted)} have no position here — the table beside this is over all of them, `
+        + 'placed by their address or the car\'s tracker, so it will name areas the map does not show.'));
     }
   }
 
@@ -1936,18 +1982,22 @@ async function tabTerritory(root, id) {
         + 'Uber records the pickup address; the FMS telematics feed records neither address nor '
         + 'position, so a window with only telematics journeys in it has nothing here.'));
   } else {
-    areas.body.append(tableFrom(terr.areas.slice(0, 12), [
-      { label: 'Area', key: 'area' },
-      { label: 'Pickups', key: 'n', num: true },
-      { label: 'Avg trip', key: 'avg_km', num: true, render: (r) => (r.avg_km ? `${fmt(r.avg_km, 1)} km` : '—') },
-      { label: 'Avg fare', key: 'avg_fare', num: true, absent: UBER_FARE,
-        render: (r) => (r.avg_fare ? money(r.avg_fare)
-          : `<span class="ent-off" title="no pickup in this area carries a fare — ${UBER_FARE_WHY}">—</span>`) },
-    ], { compact: true, sortable: true, sortId: 'areas', defaultSort: { key: 'n', dir: 'desc' } }));
-    if ((terr.areas || []).length > 12) {
-      areas.body.append(el('p', 'cap',
-        `The 12 busiest of ${countOf(terr.areas.length, 'area')} this driver picked up in.`));
-    }
+    areaTable(areas.body, terr.areas, terr.placement, 'pickup');
+  }
+
+  /* The drop-off table is the pickup table's reader over the other end, over
+     completed bookings only — a booking nobody rode has no drop-off, and a row
+     saying so would be true and tell the reader nothing about where this
+     driver ends up. Absent with its reason when there is nothing to name. */
+  drops.body.innerHTML = '';
+  if (!(terr.dropoff_areas || []).length) {
+    drops.body.append(note(terr.dropoff_areas
+      ? 'No completed trip of this driver\'s in this window has a drop-off to place — no address, no '
+        + 'position, and no tracker fix near the drop-off time — so there is no area to name.'
+      : 'The drop-off areas are not in this answer: the server that sent it predates them. Reload once it '
+        + 'has been redeployed.'));
+  } else {
+    areaTable(drops.body, terr.dropoff_areas, terr.dropoff_placement, 'dropoff');
   }
 
   dmix.body.innerHTML = '';

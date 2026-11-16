@@ -1,0 +1,3259 @@
+{
+ "note": "Real address strings read off production (GET /api/trips/list, 9–15 Nov 2026) and the area names the fleet uses (place_area over that sample, plus place_cell names seen on GET /api/driver/day fixes and GET /api/geo/corridors). Places only: no person, plate, id or time. Built by the PLC work, 2026-11-16. Private residences (villa numbers) and house-numbered names were left out.",
+ "addresses": [
+  {
+   "platform": "uber",
+   "addr": "Jumeirah 1 99 Street Pearl Jumeirah Island AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Ahad Residences Marasi Drive Business Bay AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Al Khatib Building 12a Street Al Bada'a AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Serviced Accomodation Unnamed Road Dubai Production City AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "tower one 43 Street Zaabeel 2 AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Food Court Me'Aisem First Me'Aisem First AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Glits3 Studio City glitz 3 AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Ciel Dubai Marina King Salman Bin Abdulaziz Al Saud Street Dubai Marina AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Uptown Tower First Al Khail Street Uptown AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Index Tower Zabeel Zabeel AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Building 76 Lilac St The Gardens AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Matina Matina narina AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Al bafta grand building Al Moraqabat Deira AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Adaire 2 19th street Al satwa AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Mercure Gold Hotel Al Mina Road Dubai 149 Al Mina Road Al Hudaiba AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Ideal Diagnostic Centre Umm Hurair First Umm Hurair First AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "UMM SUQUIEM 2 Al Soon Street Dubai AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Al Majara Tower 3 Al Hubob Street Dubai Marina AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Grand Xpress For Express Shopping Mankhool Mankhool AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "36 Avenue Arabian ranches Mirador la collecion AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Old Souk Deira AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Jumeirah 1 46 Street Pearl Jumeirah Island AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "21st Century Tower Sheikh zayed road Trade Centre AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Duja Tower شارع 6 Sheikh Zayed Road AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Al  Shoula(Baqer Mohebi) شارع الرولة AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Address Fountain Views Residence 1 شارع الشيخ محمد بن راشد Downtown Dubai AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Avenue Hotel 26c شارع AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Block F, The Emirates Academy of Hospitality Management شارع الصاقول Umm Suqeim 3 AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Manazel building Al barsha شارع 8 AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "East South Ridge Tower 6 شارع المدرسة Downtown Dubai AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "The St.Regis Dubai The Palm The Palm Island - Jumeirah - Dubai - United Arab Emirates The Palm Island - جميرا - دبي AE"
+  },
+  {
+   "platform": "uber",
+   "addr": "Donatello Hotel Al Barsha Dubai شارع 19 Dubai AE"
+  },
+  {
+   "platform": "bolt",
+   "addr": "Blue Bay Tower, Marasi Drive Level 8, No 807, Dubai"
+  },
+  {
+   "platform": "bolt",
+   "addr": "Sheikh Rashid Road 137, Dubai"
+  },
+  {
+   "platform": "bolt",
+   "addr": "52B Street 46, Dubai"
+  },
+  {
+   "platform": "bolt",
+   "addr": "Helipad, Festival City Mall"
+  },
+  {
+   "platform": "bolt",
+   "addr": "LG Floor Du/Waitrose, Dubai Mall"
+  },
+  {
+   "platform": "bolt",
+   "addr": "Marsa Boulevard, Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "bolt",
+   "addr": "40b Street 76, Dubai"
+  },
+  {
+   "platform": "bolt",
+   "addr": "DAMAC Hills, Dubai"
+  },
+  {
+   "platform": "bolt",
+   "addr": "27B Street 8, Dubai"
+  },
+  {
+   "platform": "bolt",
+   "addr": "32B Street 7, Dubai"
+  },
+  {
+   "platform": "bolt",
+   "addr": "Kahraba North West 201, Dubai"
+  },
+  {
+   "platform": "bolt",
+   "addr": "Terminal 1, Dubai Airport (DXB)"
+  },
+  {
+   "platform": "bolt",
+   "addr": "Palm Jumeirah Rd 7, Dubai"
+  },
+  {
+   "platform": "bolt",
+   "addr": "Loop Restaurant, Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "bolt",
+   "addr": "Al Merkadh, Dubai"
+  },
+  {
+   "platform": "bolt",
+   "addr": "Jumeirah Park, Dubai"
+  },
+  {
+   "platform": "bolt",
+   "addr": "Al Khaleej Street 18, Dubai"
+  },
+  {
+   "platform": "bolt",
+   "addr": "86 Street 12, Sharjah"
+  },
+  {
+   "platform": "bolt",
+   "addr": "Bay Avenue Mall, Mezzanine Floor Block B, Dubai"
+  },
+  {
+   "platform": "bolt",
+   "addr": "The Flagship Three, Dubai - Verenigde Arabische Emiraten"
+  },
+  {
+   "platform": "bolt",
+   "addr": "Jumeirah Golf Estates, Dubai"
+  },
+  {
+   "platform": "bolt",
+   "addr": "The Grand, Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "bolt",
+   "addr": "Marsa Al Khor, Dubai"
+  },
+  {
+   "platform": "yango",
+   "addr": "Shemara Tower, Jumeirah Beach Residence, Dubai Marina, Jumeirah, Dubai"
+  },
+  {
+   "platform": "yango",
+   "addr": "Beach Isle Tower 2, Beach Isle Towers, Beachfront Residential Complex, Dubai Harbour, Dubai Marina, Jumeirah, Dubai"
+  },
+  {
+   "platform": "yango",
+   "addr": "One Central Building 3, Trade Center Second, Dubai"
+  },
+  {
+   "platform": "yango",
+   "addr": "Sharjah Intl. Airport, Al Ruqa Al Hamra, Sharjah"
+  },
+  {
+   "platform": "yango",
+   "addr": "Sector 3, Waldorf Astoria Dubai Palm Jumeirah, Palm Jumeirah, Jumeirah, Dubai"
+  },
+  {
+   "platform": "yango",
+   "addr": "Sector 3, Dubai Mall, Du at Lower-Ground Level"
+  },
+  {
+   "platform": "yango",
+   "addr": "29 Boulevard, Downtown Dubai, Dubai"
+  },
+  {
+   "platform": "yango",
+   "addr": "Dubai International Airport, Terminal 3 (Emirates)"
+  },
+  {
+   "platform": "yango",
+   "addr": "Burj Royale, Downtown Dubai, Dubai"
+  },
+  {
+   "platform": "yango",
+   "addr": "Dubai, 158b, Tilal Al Ghaf"
+  },
+  {
+   "platform": "yango",
+   "addr": "Nojoum Hotel Apartments, Al Muraqqabat, Deira, Dubai"
+  },
+  {
+   "platform": "yango",
+   "addr": "Hilton Garden Inn Dubai Deira, Al Muraqqabat, Deira, Dubai"
+  },
+  {
+   "platform": "yango",
+   "addr": "Mall of the Emirates, Al Barsha 1, Al Barsha, Hadaeq Mohammed Bin Rashid, Dubai"
+  },
+  {
+   "platform": "yango",
+   "addr": "Crescent Road, The Palm Jumeirah Island, Jumeirah, Dubai"
+  },
+  {
+   "platform": "yango",
+   "addr": "Address Beach Resort, Jumeirah Beach Residence, The Walk, Dubai Marina, Jumeirah, Dubai"
+  },
+  {
+   "platform": "hotel",
+   "addr": "67JH+FQH - Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "35J6+VH - Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "hotel",
+   "addr": "798M+F6H - Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "阿拉伯联合酋长国迪拜酋长国"
+  },
+  {
+   "platform": "uber",
+   "addr": "阿拉伯联合酋长国 Dubai, R07"
+  },
+  {
+   "platform": "uber",
+   "addr": "阿拉伯联合酋长国迪拜酋长国杜拜"
+  },
+  {
+   "platform": "uber",
+   "addr": "阿拉伯聯合大公國杜拜"
+  },
+  {
+   "platform": "uber",
+   "addr": "Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "Nation Towers - Corniche St - Al Bateen - W44 - Abu Dhabi - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "Al Rawdah - W54 - Abu Dhabi - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "B3 under the Rosewood Hotel, The Galleria - Al Maryah Island - MI1 - Abu Dhabi - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "Khor Al Maqta,Qaryat al Beri - Rabdan - RB2 - Abu Dhabi - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "58G7+HJ4 - Nadd Al Shiba First - Nad Al Sheba - Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "57RF+GPP - Burj Khalifa - Downtown Dubai - Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "68WX+X2P - Al Garhoud - Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "57RR+GCJ The Bay - 65 Marasi Dr - Business Bay - Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "57V9+6X6 Dubai Opera District - Burj Khalifa - Downtown Dubai - Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "68XV+37H - Casablanca St - Al Garhoud - Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "685V+HCW - Al Kheeran First - Dubai Creek Harbour - Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "57FX+8H6 - Al Merkadh - Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "369J+9H8 - Al Barsha South Second - Al Barsha South - Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "5742+JQF - Al Qouz Fourth - Al Quoz - Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "774P+26G - 23 Kuwait St - Bur Dubai - Port Rashid - Dubai - United Arab Emirates"
+  },
+  {
+   "platform": "uber",
+   "addr": "34WQ+JP9 Emaar Beachfront - Address The Bay - near le meridien - Marsa Dubai - Dubai Harbour - Dubai - United Arab Emirates"
+  }
+ ],
+ "vocabulary": [
+  {
+   "name": "+++ +++",
+   "n": 1
+  },
+  {
+   "name": "++++ +++++",
+   "n": 2
+  },
+  {
+   "name": "10th St",
+   "n": 3
+  },
+  {
+   "name": "16th St",
+   "n": 22
+  },
+  {
+   "name": "30th St",
+   "n": 1
+  },
+  {
+   "name": "7th Floor,  API Trio Tower",
+   "n": 67
+  },
+  {
+   "name": "8th Street",
+   "n": 1
+  },
+  {
+   "name": "AL Maktoum International Airport (DWC)",
+   "n": 2
+  },
+  {
+   "name": "AL SAFA",
+   "n": 3
+  },
+  {
+   "name": "ALDEA 6",
+   "n": 1
+  },
+  {
+   "name": "Abdullah Omran Taryam St",
+   "n": 30
+  },
+  {
+   "name": "Abu Dhabi-Dubai Rd",
+   "n": 4
+  },
+  {
+   "name": "Abu Hail",
+   "n": 1
+  },
+  {
+   "name": "Academic City",
+   "n": 26
+  },
+  {
+   "name": "Academic Street",
+   "n": 6
+  },
+  {
+   "name": "Address The Bay",
+   "n": 2
+  },
+  {
+   "name": "Aerospace Supply Chain",
+   "n": 1
+  },
+  {
+   "name": "Airport Rd",
+   "n": 17
+  },
+  {
+   "name": "Al A'amal St",
+   "n": 51
+  },
+  {
+   "name": "Al Ain Rd",
+   "n": 1
+  },
+  {
+   "name": "Al Aweer",
+   "n": 1
+  },
+  {
+   "name": "Al Awir First",
+   "n": 2
+  },
+  {
+   "name": "Al Awir Rd",
+   "n": 3
+  },
+  {
+   "name": "Al Bada'",
+   "n": 949
+  },
+  {
+   "name": "Al Bada'a",
+   "n": 132
+  },
+  {
+   "name": "Al Barari",
+   "n": 22
+  },
+  {
+   "name": "Al Barsha",
+   "n": 8115
+  },
+  {
+   "name": "Al Barsha 1",
+   "n": 312
+  },
+  {
+   "name": "Al Barsha 1, Al Barsha 1",
+   "n": 1
+  },
+  {
+   "name": "Al Barsha 2",
+   "n": 63
+  },
+  {
+   "name": "Al Barsha 3",
+   "n": 37
+  },
+  {
+   "name": "Al Barsha First",
+   "n": 2
+  },
+  {
+   "name": "Al Barsha Residences",
+   "n": 1
+  },
+  {
+   "name": "Al Barsha Second",
+   "n": 1
+  },
+  {
+   "name": "Al Barsha South",
+   "n": 2070
+  },
+  {
+   "name": "Al Barsha South Fifth",
+   "n": 4
+  },
+  {
+   "name": "Al Barsha South Fourth",
+   "n": 1
+  },
+  {
+   "name": "Al Barsha South Second",
+   "n": 15
+  },
+  {
+   "name": "Al Barsha Third, Dubai",
+   "n": 1
+  },
+  {
+   "name": "Al Barsha,  Mawakeb School 1",
+   "n": 59
+  },
+  {
+   "name": "Al Dhagaya",
+   "n": 2
+  },
+  {
+   "name": "Al Dhait",
+   "n": 1
+  },
+  {
+   "name": "Al Fahidi",
+   "n": 1053
+  },
+  {
+   "name": "Al Fay Rd",
+   "n": 1
+  },
+  {
+   "name": "Al Furjan",
+   "n": 19
+  },
+  {
+   "name": "Al Garhoud",
+   "n": 35904
+  },
+  {
+   "name": "Al Garhoud Bridge",
+   "n": 72
+  },
+  {
+   "name": "Al Habtoor Business Tower, King Salman Bin Abdulaziz Al Saud Street",
+   "n": 1
+  },
+  {
+   "name": "Al Habtoor City",
+   "n": 2
+  },
+  {
+   "name": "Al Habtoor Residence",
+   "n": 1
+  },
+  {
+   "name": "Al Hamriya",
+   "n": 8
+  },
+  {
+   "name": "Al Hebiah First",
+   "n": 1
+  },
+  {
+   "name": "Al Hebiah Fourth",
+   "n": 3
+  },
+  {
+   "name": "Al Hebiah Second",
+   "n": 1
+  },
+  {
+   "name": "Al Hebiah Sixth",
+   "n": 2
+  },
+  {
+   "name": "Al Hebiah Third",
+   "n": 2
+  },
+  {
+   "name": "Al Hudaiba",
+   "n": 27
+  },
+  {
+   "name": "Al Jadaf",
+   "n": 1104
+  },
+  {
+   "name": "Al Jaddaf",
+   "n": 76
+  },
+  {
+   "name": "Al Jaddaf Metro Station A1",
+   "n": 33
+  },
+  {
+   "name": "Al Jaffiliya",
+   "n": 88
+  },
+  {
+   "name": "Al Jafiliya",
+   "n": 37
+  },
+  {
+   "name": "Al Jerf 2",
+   "n": 1
+  },
+  {
+   "name": "Al Jerf Industrial 1",
+   "n": 1
+  },
+  {
+   "name": "Al Juraina 1",
+   "n": 2
+  },
+  {
+   "name": "Al Karama",
+   "n": 2053
+  },
+  {
+   "name": "Al Karama, 10B Street",
+   "n": 1
+  },
+  {
+   "name": "Al Khabaisi",
+   "n": 49
+  },
+  {
+   "name": "Al Khail Rd",
+   "n": 646
+  },
+  {
+   "name": "Al Khaleej Rd",
+   "n": 27
+  },
+  {
+   "name": "Al Khan",
+   "n": 1
+  },
+  {
+   "name": "Al Khan St",
+   "n": 1
+  },
+  {
+   "name": "Al Khawaneej",
+   "n": 4
+  },
+  {
+   "name": "Al Khawaneej 1",
+   "n": 12
+  },
+  {
+   "name": "Al Khawaneej Rd",
+   "n": 9
+  },
+  {
+   "name": "Al Kifaf",
+   "n": 70
+  },
+  {
+   "name": "Al Mahra",
+   "n": 1
+  },
+  {
+   "name": "Al Majaz",
+   "n": 2
+  },
+  {
+   "name": "Al Mamzar",
+   "n": 7
+  },
+  {
+   "name": "Al Manara",
+   "n": 94
+  },
+  {
+   "name": "Al Mankhool",
+   "n": 30
+  },
+  {
+   "name": "Al Maqta Area",
+   "n": 1
+  },
+  {
+   "name": "Al Markaziyah West",
+   "n": 1
+  },
+  {
+   "name": "Al Marmoom",
+   "n": 3
+  },
+  {
+   "name": "Al Mawakeb Al Garhoud, Al Garhoud",
+   "n": 1
+  },
+  {
+   "name": "Al Merkadh",
+   "n": 630
+  },
+  {
+   "name": "Al Mina",
+   "n": 22
+  },
+  {
+   "name": "Al Mizhar",
+   "n": 8
+  },
+  {
+   "name": "Al Mizhar 2",
+   "n": 10
+  },
+  {
+   "name": "Al Murar",
+   "n": 19
+  },
+  {
+   "name": "Al Mustaqbal Street",
+   "n": 1
+  },
+  {
+   "name": "Al Nahda",
+   "n": 23
+  },
+  {
+   "name": "Al Nahda 1",
+   "n": 32
+  },
+  {
+   "name": "Al Nahda 2",
+   "n": 1
+  },
+  {
+   "name": "Al Nahda First",
+   "n": 7
+  },
+  {
+   "name": "Al Ohood St",
+   "n": 1
+  },
+  {
+   "name": "Al Qasr, King Salman Bin Abdulaziz Al Saud Street",
+   "n": 1
+  },
+  {
+   "name": "Al Qouz Ind.first",
+   "n": 1
+  },
+  {
+   "name": "Al Qudra Rd",
+   "n": 1
+  },
+  {
+   "name": "Al Quoz",
+   "n": 5674
+  },
+  {
+   "name": "Al Quoz 1",
+   "n": 238
+  },
+  {
+   "name": "Al Quoz 3",
+   "n": 58
+  },
+  {
+   "name": "Al Quoz 4",
+   "n": 26
+  },
+  {
+   "name": "Al Quoz Industrial Area 2",
+   "n": 60
+  },
+  {
+   "name": "Al Quoz Industrial Area 3",
+   "n": 66
+  },
+  {
+   "name": "Al Quoz Industrial Area 4",
+   "n": 2
+  },
+  {
+   "name": "Al Qusais",
+   "n": 10
+  },
+  {
+   "name": "Al Qusais 1",
+   "n": 7
+  },
+  {
+   "name": "Al Qusais Ind. Second",
+   "n": 1
+  },
+  {
+   "name": "Al Qusais Industrial Area",
+   "n": 2
+  },
+  {
+   "name": "Al Qusais Industrial Area 2",
+   "n": 1
+  },
+  {
+   "name": "Al Qusais Industrial Area 3",
+   "n": 3
+  },
+  {
+   "name": "Al Raffa",
+   "n": 797
+  },
+  {
+   "name": "Al Ras",
+   "n": 22
+  },
+  {
+   "name": "Al Ras Al Akhdar",
+   "n": 1
+  },
+  {
+   "name": "Al Rasheed Road",
+   "n": 75
+  },
+  {
+   "name": "Al Rashidiya",
+   "n": 55
+  },
+  {
+   "name": "Al Rashidiya 2",
+   "n": 1
+  },
+  {
+   "name": "Al Rawdah",
+   "n": 1
+  },
+  {
+   "name": "Al Reem 1",
+   "n": 4
+  },
+  {
+   "name": "Al Reem 2",
+   "n": 6
+  },
+  {
+   "name": "Al Riffa",
+   "n": 1
+  },
+  {
+   "name": "Al Rigga",
+   "n": 44
+  },
+  {
+   "name": "Al Riqa Suburb",
+   "n": 2
+  },
+  {
+   "name": "Al Rowaiyah Second",
+   "n": 1
+  },
+  {
+   "name": "Al Rowaiyah Third",
+   "n": 3
+  },
+  {
+   "name": "Al Ruqa Al Hamra",
+   "n": 10
+  },
+  {
+   "name": "Al Saadiyat Island",
+   "n": 1
+  },
+  {
+   "name": "Al Sabkha",
+   "n": 575
+  },
+  {
+   "name": "Al Safa",
+   "n": 959
+  },
+  {
+   "name": "Al Safa 1",
+   "n": 39
+  },
+  {
+   "name": "Al Safa 2",
+   "n": 101
+  },
+  {
+   "name": "Al Safa First",
+   "n": 6
+  },
+  {
+   "name": "Al Safouh Second",
+   "n": 1
+  },
+  {
+   "name": "Al Sajaa",
+   "n": 1
+  },
+  {
+   "name": "Al Samha",
+   "n": 1
+  },
+  {
+   "name": "Al Satwa",
+   "n": 2476
+  },
+  {
+   "name": "Al Seef St",
+   "n": 3
+  },
+  {
+   "name": "Al Shahama Old",
+   "n": 1
+  },
+  {
+   "name": "Al Sheba 2",
+   "n": 4
+  },
+  {
+   "name": "Al Shindagha",
+   "n": 2
+  },
+  {
+   "name": "Al Souq Al Kabeer",
+   "n": 9
+  },
+  {
+   "name": "Al Sufouh",
+   "n": 749
+  },
+  {
+   "name": "Al Sufouh 1",
+   "n": 28
+  },
+  {
+   "name": "Al Thammam",
+   "n": 2
+  },
+  {
+   "name": "Al Thanyah Fifth",
+   "n": 37
+  },
+  {
+   "name": "Al Thanyah Fourth",
+   "n": 21
+  },
+  {
+   "name": "Al Thanyah Second",
+   "n": 1
+  },
+  {
+   "name": "Al Thanyah Third",
+   "n": 25
+  },
+  {
+   "name": "Al Twar",
+   "n": 4
+  },
+  {
+   "name": "Al Twar 1",
+   "n": 8
+  },
+  {
+   "name": "Al Twar 2",
+   "n": 1
+  },
+  {
+   "name": "Al Twar 5",
+   "n": 4
+  },
+  {
+   "name": "Al Waha",
+   "n": 8
+  },
+  {
+   "name": "Al Waha, Al Waha",
+   "n": 2
+  },
+  {
+   "name": "Al Wahda St",
+   "n": 2
+  },
+  {
+   "name": "Al Warqa",
+   "n": 27
+  },
+  {
+   "name": "Al Warqa 1",
+   "n": 27
+  },
+  {
+   "name": "Al WarqaAl Warqa 3",
+   "n": 4
+  },
+  {
+   "name": "Al Wasl",
+   "n": 3625
+  },
+  {
+   "name": "Al Wasl Rd",
+   "n": 72
+  },
+  {
+   "name": "Al Yalayis 1",
+   "n": 7
+  },
+  {
+   "name": "Al Yalayis 2",
+   "n": 43
+  },
+  {
+   "name": "Al Yufrah 1",
+   "n": 3
+  },
+  {
+   "name": "Al Yufrah 2",
+   "n": 2
+  },
+  {
+   "name": "Al Zahia",
+   "n": 2
+  },
+  {
+   "name": "Al Zahra'a St",
+   "n": 2
+  },
+  {
+   "name": "Al-Barsh 3",
+   "n": 1
+  },
+  {
+   "name": "Alma",
+   "n": 49
+  },
+  {
+   "name": "Alvorada",
+   "n": 5
+  },
+  {
+   "name": "Amity University",
+   "n": 3
+  },
+  {
+   "name": "And",
+   "n": 3
+  },
+  {
+   "name": "Arabian Ranches",
+   "n": 32
+  },
+  {
+   "name": "Arabian Ranches 2",
+   "n": 6
+  },
+  {
+   "name": "Arabian Ranches 2,  Main Entrance",
+   "n": 70
+  },
+  {
+   "name": "Arabian Ranches,  Saheel Gate 3",
+   "n": 17
+  },
+  {
+   "name": "Area",
+   "n": 1
+  },
+  {
+   "name": "Arjan",
+   "n": 5
+  },
+  {
+   "name": "Aseel Restaurant (رستوران‌ اصیل), 4th Street",
+   "n": 1
+  },
+  {
+   "name": "AstraUTM, DWC",
+   "n": 1
+  },
+  {
+   "name": "Awir,  CMC Road 1-2",
+   "n": 2
+  },
+  {
+   "name": "Awir,  Sewage Treatment Plant 1",
+   "n": 10
+  },
+  {
+   "name": "BUR DUBAI",
+   "n": 2
+  },
+  {
+   "name": "Baghdad Street",
+   "n": 8
+  },
+  {
+   "name": "Barsha",
+   "n": 1
+  },
+  {
+   "name": "Barsha Heights",
+   "n": 1629
+  },
+  {
+   "name": "Barsha Road Saleh Bin Lahej Building Shop #5",
+   "n": 20
+  },
+  {
+   "name": "Bay Square",
+   "n": 77
+  },
+  {
+   "name": "Beirut St",
+   "n": 1
+  },
+  {
+   "name": "Binghatti Canal, Marasi Drive",
+   "n": 1
+  },
+  {
+   "name": "Binghatti Onyx Binghatti Onyx",
+   "n": 1
+  },
+  {
+   "name": "Bluewaters Island",
+   "n": 86
+  },
+  {
+   "name": "Bluewaters Residences 8, Bluewaters Island",
+   "n": 1
+  },
+  {
+   "name": "Boeing International Corporation, Al Quds Street",
+   "n": 1
+  },
+  {
+   "name": "Borodach Barbershop Gents Salon, Al Barsha Road",
+   "n": 1
+  },
+  {
+   "name": "Brass Monkey",
+   "n": 3
+  },
+  {
+   "name": "Bu Kadra",
+   "n": 1
+  },
+  {
+   "name": "Building J5",
+   "n": 1
+  },
+  {
+   "name": "Bur Dubai",
+   "n": 17
+  },
+  {
+   "name": "Bur-Dubai",
+   "n": 1
+  },
+  {
+   "name": "Burj Area",
+   "n": 2
+  },
+  {
+   "name": "Burj Khalifa",
+   "n": 1222
+  },
+  {
+   "name": "Burj Residence Phase I & II",
+   "n": 7
+  },
+  {
+   "name": "Burj Royale, Burj Khalifa Boulevard",
+   "n": 1
+  },
+  {
+   "name": "Business Bay",
+   "n": 35372
+  },
+  {
+   "name": "Business Centre",
+   "n": 1
+  },
+  {
+   "name": "Business Dubai",
+   "n": 1
+  },
+  {
+   "name": "Business Park",
+   "n": 1
+  },
+  {
+   "name": "Business Park Motor City",
+   "n": 8
+  },
+  {
+   "name": "C Central Hotel & Resort The Palm Dubai, Crescent Road",
+   "n": 19
+  },
+  {
+   "name": "Cairo Gourmet Restaurant and cafe, Sheikh Zayed Road",
+   "n": 1
+  },
+  {
+   "name": "Camelia 1   Arabian Ranches II, Arabian Ranches",
+   "n": 1
+  },
+  {
+   "name": "Car Maintenance Dubai, Latifa Bint Hamdan Street",
+   "n": 1
+  },
+  {
+   "name": "Celia Residence, Hessa Street",
+   "n": 3
+  },
+  {
+   "name": "Centro Dubái",
+   "n": 2
+  },
+  {
+   "name": "Centrul Dubaiului",
+   "n": 1
+  },
+  {
+   "name": "Chalet Berezka restaurant, west rooftop",
+   "n": 1
+  },
+  {
+   "name": "China Cluster",
+   "n": 37
+  },
+  {
+   "name": "City Centre Meaisem",
+   "n": 3
+  },
+  {
+   "name": "City of Arabia",
+   "n": 2
+  },
+  {
+   "name": "Coffee Lounge & Bar, 9A Street",
+   "n": 1
+  },
+  {
+   "name": "Corniche Deira",
+   "n": 35
+  },
+  {
+   "name": "Crescent Rd",
+   "n": 7
+  },
+  {
+   "name": "CÉ LA VI Dubai, Sheikh Mohammed bin Rashid Boulevard",
+   "n": 1
+  },
+  {
+   "name": "DAMAC Hills",
+   "n": 96
+  },
+  {
+   "name": "DAMAC Maison Canal Views, Marasi Drive",
+   "n": 1
+  },
+  {
+   "name": "DAMAC Majestine, Marasi Dr",
+   "n": 1
+  },
+  {
+   "name": "DAMAC Upper Crest, Al Asayel Street",
+   "n": 1
+  },
+  {
+   "name": "DIFC",
+   "n": 11589
+  },
+  {
+   "name": "DRAGON MART 1 BA GATE, Al Awir Road",
+   "n": 1
+  },
+  {
+   "name": "Damac Hills",
+   "n": 23
+  },
+  {
+   "name": "Damac Hills 2 Hotel",
+   "n": 1
+  },
+  {
+   "name": "Damascus Road 1 1",
+   "n": 1
+  },
+  {
+   "name": "Danish Consulate, 22nd Street",
+   "n": 1
+  },
+  {
+   "name": "Dawn by Binghatti, Street 7",
+   "n": 19
+  },
+  {
+   "name": "Deema",
+   "n": 1
+  },
+  {
+   "name": "Deira",
+   "n": 14076
+  },
+  {
+   "name": "Discovery Gardens",
+   "n": 13
+  },
+  {
+   "name": "District",
+   "n": 8
+  },
+  {
+   "name": "District 1",
+   "n": 1
+  },
+  {
+   "name": "District 2",
+   "n": 7
+  },
+  {
+   "name": "District 3",
+   "n": 1
+  },
+  {
+   "name": "Dorchester Collection, Marasi Drive",
+   "n": 17
+  },
+  {
+   "name": "Downtown Burj Khalifa",
+   "n": 10
+  },
+  {
+   "name": "Downtown Dubai",
+   "n": 29833
+  },
+  {
+   "name": "Dubai",
+   "n": 4
+  },
+  {
+   "name": "Dubai (IMT Dubai), Academic City",
+   "n": 2
+  },
+  {
+   "name": "Dubai 25",
+   "n": 1
+  },
+  {
+   "name": "Dubai Airport Free Zone",
+   "n": 8
+  },
+  {
+   "name": "Dubai CommerCity",
+   "n": 1
+  },
+  {
+   "name": "Dubai Country Club",
+   "n": 8
+  },
+  {
+   "name": "Dubai Creek Harbour",
+   "n": 1474
+  },
+  {
+   "name": "Dubai Design District",
+   "n": 49
+  },
+  {
+   "name": "Dubai Exhibition Centre, Boulevard 2020",
+   "n": 1
+  },
+  {
+   "name": "Dubai Festival City",
+   "n": 1202
+  },
+  {
+   "name": "Dubai Harbour",
+   "n": 806
+  },
+  {
+   "name": "Dubai Healthcare City",
+   "n": 745
+  },
+  {
+   "name": "Dubai Hills",
+   "n": 10
+  },
+  {
+   "name": "Dubai Hills Mall",
+   "n": 6
+  },
+  {
+   "name": "Dubai Hills mall",
+   "n": 1
+  },
+  {
+   "name": "Dubai Int'l Airport",
+   "n": 9504
+  },
+  {
+   "name": "Dubai International City",
+   "n": 1950
+  },
+  {
+   "name": "Dubai International Marine Club",
+   "n": 11
+  },
+  {
+   "name": "Dubai Internet City",
+   "n": 1072
+  },
+  {
+   "name": "Dubai Investment Park",
+   "n": 5
+  },
+  {
+   "name": "Dubai Investment Park First",
+   "n": 3
+  },
+  {
+   "name": "Dubai Investment Park Second",
+   "n": 5
+  },
+  {
+   "name": "Dubai Investments Park",
+   "n": 10
+  },
+  {
+   "name": "Dubai Islands",
+   "n": 5
+  },
+  {
+   "name": "Dubai Knowledge Park",
+   "n": 6
+  },
+  {
+   "name": "Dubai Land Residence Complex",
+   "n": 2
+  },
+  {
+   "name": "Dubai Logistics City",
+   "n": 2
+  },
+  {
+   "name": "Dubai Mall",
+   "n": 1
+  },
+  {
+   "name": "Dubai Marina",
+   "n": 8301
+  },
+  {
+   "name": "Dubai Media City",
+   "n": 61
+  },
+  {
+   "name": "Dubai Motor City",
+   "n": 28
+  },
+  {
+   "name": "Dubai Outlet Mall",
+   "n": 9
+  },
+  {
+   "name": "Dubai Polo Club",
+   "n": 16
+  },
+  {
+   "name": "Dubai Production City",
+   "n": 5749
+  },
+  {
+   "name": "Dubai Silicon Oasis",
+   "n": 725
+  },
+  {
+   "name": "Dubai South",
+   "n": 17
+  },
+  {
+   "name": "Dubai South Residential District",
+   "n": 3
+  },
+  {
+   "name": "Dubai Sports City",
+   "n": 1210
+  },
+  {
+   "name": "Dubai Studio City",
+   "n": 39
+  },
+  {
+   "name": "Dubai Textile City",
+   "n": 2
+  },
+  {
+   "name": "Dubai Waterfront",
+   "n": 1
+  },
+  {
+   "name": "Dubaï Marina",
+   "n": 5
+  },
+  {
+   "name": "ECOS Dubai Hotel at Al Furjan, Al Furjan",
+   "n": 1
+  },
+  {
+   "name": "Elite Byblos Hotel,  beside Mall of the Emirates",
+   "n": 9
+  },
+  {
+   "name": "Emaar, Sheikh Mohammed bin Rashid Boulevard",
+   "n": 1
+  },
+  {
+   "name": "Emirates Group Headquarters, opposite to Airport Terminal 3",
+   "n": 1
+  },
+  {
+   "name": "Emirates Hills",
+   "n": 51
+  },
+  {
+   "name": "Emirates Hills 2",
+   "n": 15
+  },
+  {
+   "name": "Emirates Rd",
+   "n": 149
+  },
+  {
+   "name": "England Cluster",
+   "n": 2
+  },
+  {
+   "name": "Enterance 8",
+   "n": 1
+  },
+  {
+   "name": "Exit",
+   "n": 4
+  },
+  {
+   "name": "Expo City Dubai",
+   "n": 36
+  },
+  {
+   "name": "Expo Rd",
+   "n": 14
+  },
+  {
+   "name": "Fairways Vistas",
+   "n": 2
+  },
+  {
+   "name": "Falconcity of Wonders",
+   "n": 7
+  },
+  {
+   "name": "Farah Tower 2, Liwan",
+   "n": 1
+  },
+  {
+   "name": "Feels Kite Beach, Al Nessnass Street",
+   "n": 1
+  },
+  {
+   "name": "Festival Blvd",
+   "n": 13
+  },
+  {
+   "name": "Festival City, Al Badia Boulevard",
+   "n": 1
+  },
+  {
+   "name": "First Al Khail St",
+   "n": 1
+  },
+  {
+   "name": "France Cluster",
+   "n": 5
+  },
+  {
+   "name": "Freij Murar of Jalabiyah, 37a St",
+   "n": 1
+  },
+  {
+   "name": "GULF STAR HOTEL, Al Nakhal Road",
+   "n": 1
+  },
+  {
+   "name": "Garn Al Sabkha St",
+   "n": 50
+  },
+  {
+   "name": "Gemz by Danube, Al Asayel Street",
+   "n": 2
+  },
+  {
+   "name": "Ghadeer Al Tair",
+   "n": 7
+  },
+  {
+   "name": "Ghadeer Community",
+   "n": 1
+  },
+  {
+   "name": "Ghantout",
+   "n": 1
+  },
+  {
+   "name": "Ghoroob",
+   "n": 17
+  },
+  {
+   "name": "Ghweifat International Hwy",
+   "n": 51
+  },
+  {
+   "name": "Gigi Rigolatto Dubai, J1 Beach",
+   "n": 1
+  },
+  {
+   "name": "Golf City",
+   "n": 9
+  },
+  {
+   "name": "Green Community",
+   "n": 1
+  },
+  {
+   "name": "Green Community East",
+   "n": 1
+  },
+  {
+   "name": "Green Community Motor City",
+   "n": 5
+  },
+  {
+   "name": "Green Community West",
+   "n": 7
+  },
+  {
+   "name": "Gulf Inn Hotel Deira, Salah Al Din Street",
+   "n": 1
+  },
+  {
+   "name": "HSBC Bank Middle East Limited",
+   "n": 1
+  },
+  {
+   "name": "Hadaeq Sheikh Mohammed Bin Rashid",
+   "n": 3233
+  },
+  {
+   "name": "Harmony II",
+   "n": 2
+  },
+  {
+   "name": "Hattan 1",
+   "n": 1
+  },
+  {
+   "name": "Hattan 3",
+   "n": 1
+  },
+  {
+   "name": "Hay Al Gharb",
+   "n": 1
+  },
+  {
+   "name": "Hay Al Nahda",
+   "n": 4
+  },
+  {
+   "name": "Hay Al Qasimiah",
+   "n": 2
+  },
+  {
+   "name": "Hay Hoshi",
+   "n": 2
+  },
+  {
+   "name": "Helio 2",
+   "n": 1
+  },
+  {
+   "name": "Holiday Inn & Suites Dubai Festival City, an IHG Hotel, Gateway Avenue",
+   "n": 2
+  },
+  {
+   "name": "Hor Al Anz",
+   "n": 32
+  },
+  {
+   "name": "Hor Al Anz East",
+   "n": 5
+  },
+  {
+   "name": "Hotel & Residence, Cluster T",
+   "n": 1
+  },
+  {
+   "name": "Hyatt Place Dubai Jumeirah, Al Mina Street",
+   "n": 6
+  },
+  {
+   "name": "IMPZ Zone,  F-104",
+   "n": 90
+  },
+  {
+   "name": "Ibn Battuta",
+   "n": 12
+  },
+  {
+   "name": "Icon Delux Hotel Apartments, 49725",
+   "n": 1
+  },
+  {
+   "name": "Industrial Area",
+   "n": 14
+  },
+  {
+   "name": "International City Phase(2)",
+   "n": 3
+  },
+  {
+   "name": "JLT",
+   "n": 2
+  },
+  {
+   "name": "JLT Cluster J",
+   "n": 14
+  },
+  {
+   "name": "JLT Cluster K",
+   "n": 2
+  },
+  {
+   "name": "JLT, Cluster I",
+   "n": 1
+  },
+  {
+   "name": "JUMEIRAH",
+   "n": 1
+  },
+  {
+   "name": "JVC",
+   "n": 134
+  },
+  {
+   "name": "Jabal Ali First",
+   "n": 761
+  },
+  {
+   "name": "Jabal Ali Industrial First",
+   "n": 7
+  },
+  {
+   "name": "Jabal Ali Industrial Second",
+   "n": 4
+  },
+  {
+   "name": "Jabal Ali Second",
+   "n": 1
+  },
+  {
+   "name": "Jaddaf Heights",
+   "n": 1
+  },
+  {
+   "name": "Jaddaf Waterfront",
+   "n": 20
+  },
+  {
+   "name": "Jamavar Dubai, Address Residences Opera District",
+   "n": 1
+  },
+  {
+   "name": "Jebel Ali Free Zone,  Lease Office 5 2",
+   "n": 1
+  },
+  {
+   "name": "Jebel Ali Freezone",
+   "n": 8
+  },
+  {
+   "name": "Jebel Ali Industrial Area",
+   "n": 3
+  },
+  {
+   "name": "Jebel Ali Industrial Area,  Four Season Staff Housi",
+   "n": 7
+  },
+  {
+   "name": "Jumeira First",
+   "n": 1
+  },
+  {
+   "name": "Jumeirah",
+   "n": 4885
+  },
+  {
+   "name": "Jumeirah 1",
+   "n": 1009
+  },
+  {
+   "name": "Jumeirah 2",
+   "n": 100
+  },
+  {
+   "name": "Jumeirah 3",
+   "n": 71
+  },
+  {
+   "name": "Jumeirah Beach",
+   "n": 1
+  },
+  {
+   "name": "Jumeirah Beach Residence",
+   "n": 3344
+  },
+  {
+   "name": "Jumeirah College, 19th Street",
+   "n": 1
+  },
+  {
+   "name": "Jumeirah Golf Estates",
+   "n": 80
+  },
+  {
+   "name": "Jumeirah Heights",
+   "n": 1
+  },
+  {
+   "name": "Jumeirah Islands",
+   "n": 14
+  },
+  {
+   "name": "Jumeirah Islands, Cluster 43, Fayha Circle",
+   "n": 1
+  },
+  {
+   "name": "Jumeirah Lake Towers",
+   "n": 436
+  },
+  {
+   "name": "Jumeirah Lakes Towers",
+   "n": 3572
+  },
+  {
+   "name": "Jumeirah Park",
+   "n": 773
+  },
+  {
+   "name": "JumeirahJumeirah 1",
+   "n": 5
+  },
+  {
+   "name": "JumeirahJumeirah 3",
+   "n": 1
+  },
+  {
+   "name": "KHIA 9",
+   "n": 1
+  },
+  {
+   "name": "KOBEYa",
+   "n": 1
+  },
+  {
+   "name": "Kempinski The Boulevard, Sheikh Mohammed bin Rashid Boulevard",
+   "n": 1
+  },
+  {
+   "name": "King Abdul Aziz St",
+   "n": 1
+  },
+  {
+   "name": "Kite beach",
+   "n": 11
+  },
+  {
+   "name": "Kuwait Street",
+   "n": 1
+  },
+  {
+   "name": "La Coleccion",
+   "n": 4
+  },
+  {
+   "name": "Lake Central Tower",
+   "n": 93
+  },
+  {
+   "name": "Latifa Hospital",
+   "n": 16
+  },
+  {
+   "name": "Layan",
+   "n": 17
+  },
+  {
+   "name": "Le Méridien Dubai Hotel & Conference Centre, Airport Road",
+   "n": 2
+  },
+  {
+   "name": "Legends",
+   "n": 2
+  },
+  {
+   "name": "Level 10",
+   "n": 1
+  },
+  {
+   "name": "Liwan",
+   "n": 14
+  },
+  {
+   "name": "M RESIDENCE, Al Mankhool Road",
+   "n": 1
+  },
+  {
+   "name": "Madinat Hind 1",
+   "n": 21
+  },
+  {
+   "name": "Madinat Hind 2",
+   "n": 7
+  },
+  {
+   "name": "Madinat Hind 3",
+   "n": 11
+  },
+  {
+   "name": "Madinat Jumeirah",
+   "n": 22
+  },
+  {
+   "name": "Mahfel Restaurant & Cafe, Hessa Street",
+   "n": 11
+  },
+  {
+   "name": "Majan",
+   "n": 43
+  },
+  {
+   "name": "Maliha Rd",
+   "n": 2
+  },
+  {
+   "name": "Manama Road 6 1",
+   "n": 14
+  },
+  {
+   "name": "Manama St",
+   "n": 12
+  },
+  {
+   "name": "Mandarin Oriental Jumeira, Dubai, Jumeirah Beach Road",
+   "n": 1
+  },
+  {
+   "name": "Mankhool",
+   "n": 2472
+  },
+  {
+   "name": "Margham",
+   "n": 1
+  },
+  {
+   "name": "Marina Gate, King Salman Bin Abdulaziz Al Saud Street",
+   "n": 1
+  },
+  {
+   "name": "Marina de Dubái",
+   "n": 2
+  },
+  {
+   "name": "Marriott Marquis Dubai Creek, Deira",
+   "n": 4
+  },
+  {
+   "name": "Marsa Al Khor",
+   "n": 26
+  },
+  {
+   "name": "Marsa Dubai",
+   "n": 7975
+  },
+  {
+   "name": "Max Metro Bus Stop Seaside",
+   "n": 22
+  },
+  {
+   "name": "Me'aisem First",
+   "n": 20
+  },
+  {
+   "name": "Meadows 2",
+   "n": 2
+  },
+  {
+   "name": "Mediclinic Parkview Hospital, Umm Suqeim Street",
+   "n": 7
+  },
+  {
+   "name": "Meena Bazar Burdubai, 43c St",
+   "n": 1
+  },
+  {
+   "name": "Meena St",
+   "n": 1
+  },
+  {
+   "name": "Mehathab Suburb",
+   "n": 1
+  },
+  {
+   "name": "Meshairef",
+   "n": 1
+  },
+  {
+   "name": "Meydan14(Hotel )",
+   "n": 12
+  },
+  {
+   "name": "Millennium Executive Apartments Mont Rose, Dubai Science Park",
+   "n": 10
+  },
+  {
+   "name": "Millennium Place Marina, Al Marsa Street",
+   "n": 1
+  },
+  {
+   "name": "Millennium Plaza Downtown Hotel, Dubai, Sheikh Zayed Road",
+   "n": 1
+  },
+  {
+   "name": "Miracle Garden, Street 3",
+   "n": 7
+  },
+  {
+   "name": "Mirdif",
+   "n": 627
+  },
+  {
+   "name": "Montreal Barsha Hotel, 23rd Street",
+   "n": 1
+  },
+  {
+   "name": "Morocco Cluster",
+   "n": 92
+  },
+  {
+   "name": "Moscow Hotel, Al Maktoum Road",
+   "n": 1
+  },
+  {
+   "name": "Mudon",
+   "n": 657
+  },
+  {
+   "name": "Mugatrah",
+   "n": 3
+  },
+  {
+   "name": "Mughaidir Suburb",
+   "n": 1
+  },
+  {
+   "name": "Muhaisanah 2",
+   "n": 15
+  },
+  {
+   "name": "Muhaisnah",
+   "n": 3
+  },
+  {
+   "name": "Muhaisnah 1",
+   "n": 2
+  },
+  {
+   "name": "Muhaisnah 3",
+   "n": 3
+  },
+  {
+   "name": "Muhaisnah 4",
+   "n": 3
+  },
+  {
+   "name": "Murooj Al Furjan East 1",
+   "n": 1
+  },
+  {
+   "name": "Murooj Al Furjan East 2",
+   "n": 1
+  },
+  {
+   "name": "Muteena",
+   "n": 22
+  },
+  {
+   "name": "Nad Al Sheba",
+   "n": 64
+  },
+  {
+   "name": "Nad Al Sheba 1",
+   "n": 82
+  },
+  {
+   "name": "Nad Al Sheba 2",
+   "n": 9
+  },
+  {
+   "name": "Nad Al Sheba 3",
+   "n": 23
+  },
+  {
+   "name": "Nad Al Sheba 4",
+   "n": 1
+  },
+  {
+   "name": "Nadd Al Hamar",
+   "n": 24
+  },
+  {
+   "name": "Nadd Al Hamar Rd",
+   "n": 3
+  },
+  {
+   "name": "Nadd Al Shiba First",
+   "n": 10
+  },
+  {
+   "name": "Nadd Shamma",
+   "n": 2
+  },
+  {
+   "name": "Naif",
+   "n": 1
+  },
+  {
+   "name": "Nakhlat Jumeira",
+   "n": 11938
+  },
+  {
+   "name": "Near to Kappa Acca Building Residential city",
+   "n": 1
+  },
+  {
+   "name": "Neera Dubai, Sheikh Zayed Road",
+   "n": 1
+  },
+  {
+   "name": "Nikki Beach Resort & Spa, Pearl Jumeirah",
+   "n": 1
+  },
+  {
+   "name": "Number One Tower Suites Dubai, Sheikh Zayed Road",
+   "n": 2
+  },
+  {
+   "name": "Office M-225,  2020 Building",
+   "n": 15
+  },
+  {
+   "name": "Old Textile Market",
+   "n": 1
+  },
+  {
+   "name": "Onpassive Metro Station",
+   "n": 9
+  },
+  {
+   "name": "Orra The Embankment, First Al Khail Street",
+   "n": 1
+  },
+  {
+   "name": "Oud Metha",
+   "n": 569
+  },
+  {
+   "name": "Palm Aura Beauty Salon, Shop4",
+   "n": 1
+  },
+  {
+   "name": "Palm Jumeirah",
+   "n": 37
+  },
+  {
+   "name": "Palmera",
+   "n": 2
+  },
+  {
+   "name": "Panoramic Tower",
+   "n": 2
+  },
+  {
+   "name": "Paramount Hotel Midtown, Al Mustaqbal Street",
+   "n": 1
+  },
+  {
+   "name": "Park Regis Business Bay, Al A'amal Street",
+   "n": 1
+  },
+  {
+   "name": "Persia",
+   "n": 17
+  },
+  {
+   "name": "Port Rashid",
+   "n": 7
+  },
+  {
+   "name": "Production city,  Plot C23",
+   "n": 713
+  },
+  {
+   "name": "Public Beach",
+   "n": 1
+  },
+  {
+   "name": "RAK Bank Headquarters",
+   "n": 28
+  },
+  {
+   "name": "Rais Center",
+   "n": 15
+  },
+  {
+   "name": "Ramee Rose Hotel,  Second Floor,  Al Hessa Road",
+   "n": 28
+  },
+  {
+   "name": "Ras Al Khor",
+   "n": 12
+  },
+  {
+   "name": "Ras Al Khor 4 1",
+   "n": 6
+  },
+  {
+   "name": "Ras Al Khor Ind. Second",
+   "n": 2
+  },
+  {
+   "name": "Ras Al Khor Ind. Third",
+   "n": 5
+  },
+  {
+   "name": "Ras Al Khor Industrial Area",
+   "n": 24
+  },
+  {
+   "name": "Ras Al Khor Industrial Area 1",
+   "n": 2
+  },
+  {
+   "name": "Ras Al Khor Industrial Area 2",
+   "n": 1
+  },
+  {
+   "name": "Ras Al Khor Industrial Area 3",
+   "n": 2
+  },
+  {
+   "name": "Ras Al Khor Rd",
+   "n": 110
+  },
+  {
+   "name": "Refada 2",
+   "n": 1
+  },
+  {
+   "name": "Remraam",
+   "n": 2
+  },
+  {
+   "name": "Riggat Al Buteen",
+   "n": 20
+  },
+  {
+   "name": "Riyadh St",
+   "n": 16
+  },
+  {
+   "name": "Rostamani Tower",
+   "n": 278
+  },
+  {
+   "name": "Russia V10",
+   "n": 3
+  },
+  {
+   "name": "Résidences de Jumeirah Beach",
+   "n": 2
+  },
+  {
+   "name": "S-02,  Mayfair Residence Tower Opp. Empower",
+   "n": 103
+  },
+  {
+   "name": "SAIC Dubai, 52nd Street",
+   "n": 1
+  },
+  {
+   "name": "SLS Dubai Hotel & Residences, Marasi Drive",
+   "n": 1
+  },
+  {
+   "name": "Saheel",
+   "n": 12
+  },
+  {
+   "name": "Saih Shuaib 1",
+   "n": 4
+  },
+  {
+   "name": "Savannah",
+   "n": 3
+  },
+  {
+   "name": "Seasons Community",
+   "n": 1
+  },
+  {
+   "name": "Seekh Kabab Restaurant, Al Amardi Street",
+   "n": 1
+  },
+  {
+   "name": "Seville Building Al Fay road Al Andalus",
+   "n": 1
+  },
+  {
+   "name": "Shaghrafa 4",
+   "n": 1
+  },
+  {
+   "name": "Shams 2, JBR",
+   "n": 1
+  },
+  {
+   "name": "Shams Abu Dhabi",
+   "n": 1
+  },
+  {
+   "name": "Sharjah,  Al Wahda Rd,  Al Wahda Center 2 2",
+   "n": 2
+  },
+  {
+   "name": "Sheikh Khalifa Bin Zayed Hwy",
+   "n": 4
+  },
+  {
+   "name": "Sheikh Maktoum Bin Rashid Rd",
+   "n": 14
+  },
+  {
+   "name": "Sheikh Mohammed Bin Zayed Rd",
+   "n": 451
+  },
+  {
+   "name": "Sheikh Mohammed bin Rashid Boulevard",
+   "n": 1
+  },
+  {
+   "name": "Sheikh Muhammad Bin Saled Road,  Al Riffa",
+   "n": 1
+  },
+  {
+   "name": "Sheikh Zayed Bin Sultan St",
+   "n": 1
+  },
+  {
+   "name": "Sheikh Zayed Rd",
+   "n": 172
+  },
+  {
+   "name": "Sheikh Zayed Road",
+   "n": 1
+  },
+  {
+   "name": "Shorooq",
+   "n": 2
+  },
+  {
+   "name": "Smacks Dubai, Al Hebiah First",
+   "n": 6
+  },
+  {
+   "name": "Sofitel Dubai Jumeirah Beach, The Walk",
+   "n": 1
+  },
+  {
+   "name": "South Ridge",
+   "n": 7
+  },
+  {
+   "name": "Spain Cluster",
+   "n": 33
+  },
+  {
+   "name": "Spinneys, Al Meydan Road",
+   "n": 1
+  },
+  {
+   "name": "Springs 1",
+   "n": 16
+  },
+  {
+   "name": "Springs 10",
+   "n": 1
+  },
+  {
+   "name": "Springs 11",
+   "n": 1
+  },
+  {
+   "name": "Springs 14",
+   "n": 5
+  },
+  {
+   "name": "Springs 15",
+   "n": 2
+  },
+  {
+   "name": "Springs 2",
+   "n": 37
+  },
+  {
+   "name": "Springs 7",
+   "n": 8
+  },
+  {
+   "name": "Springs 8",
+   "n": 3
+  },
+  {
+   "name": "Springs 9",
+   "n": 1
+  },
+  {
+   "name": "Star by Azizi, Al Asayel Street",
+   "n": 1
+  },
+  {
+   "name": "Street 1",
+   "n": 3
+  },
+  {
+   "name": "Street 22B",
+   "n": 1
+  },
+  {
+   "name": "Street 3",
+   "n": 26
+  },
+  {
+   "name": "Street 47C",
+   "n": 1
+  },
+  {
+   "name": "Street 5",
+   "n": 9
+  },
+  {
+   "name": "Street 75A",
+   "n": 1
+  },
+  {
+   "name": "Summersalt Beach Club, Jumeira Street",
+   "n": 1
+  },
+  {
+   "name": "Terra Nova",
+   "n": 1
+  },
+  {
+   "name": "The Club Palm Jumeirah",
+   "n": 3
+  },
+  {
+   "name": "The Els Club, شارع الشيخ محمد بن زايد",
+   "n": 1
+  },
+  {
+   "name": "The Galleries 2",
+   "n": 3
+  },
+  {
+   "name": "The Gardens",
+   "n": 14
+  },
+  {
+   "name": "The Grand, Dubai Creek Harbour",
+   "n": 1
+  },
+  {
+   "name": "The Greens",
+   "n": 169
+  },
+  {
+   "name": "The Lagoons",
+   "n": 2
+  },
+  {
+   "name": "The Lakes",
+   "n": 14
+  },
+  {
+   "name": "The Pad by OMNIYAT, Marasi Drive",
+   "n": 1
+  },
+  {
+   "name": "The Palm Jumeira",
+   "n": 72
+  },
+  {
+   "name": "The Palm Jumeirah",
+   "n": 600
+  },
+  {
+   "name": "The Residence IV Building 14th Street District",
+   "n": 1
+  },
+  {
+   "name": "The Royal Grammar School Tilal Al Ghaf",
+   "n": 1
+  },
+  {
+   "name": "The Springs Community",
+   "n": 1
+  },
+  {
+   "name": "The Square ذا سكوار, Al Mamzar",
+   "n": 1
+  },
+  {
+   "name": "The St. Regis Downtown Dubai, Marasi Drive",
+   "n": 1
+  },
+  {
+   "name": "The Sterling East Tower, Al Asayel Street",
+   "n": 1
+  },
+  {
+   "name": "The Sustainable City",
+   "n": 3
+  },
+  {
+   "name": "The Views",
+   "n": 4
+  },
+  {
+   "name": "Tilal Al Ghaf",
+   "n": 79
+  },
+  {
+   "name": "Trade Center First",
+   "n": 6794
+  },
+  {
+   "name": "Trade Center Second",
+   "n": 3677
+  },
+  {
+   "name": "Trade Centre",
+   "n": 219
+  },
+  {
+   "name": "Trade Centre 1",
+   "n": 278
+  },
+  {
+   "name": "Trade Centre District",
+   "n": 6
+  },
+  {
+   "name": "Trade CentreDIFC",
+   "n": 3
+  },
+  {
+   "name": "Tripoli St",
+   "n": 1
+  },
+  {
+   "name": "Um Ramool",
+   "n": 1
+  },
+  {
+   "name": "Umm Al Sheaf",
+   "n": 1
+  },
+  {
+   "name": "Umm Al Sheif",
+   "n": 35
+  },
+  {
+   "name": "Umm Hurair 1",
+   "n": 17
+  },
+  {
+   "name": "Umm Hurair 2",
+   "n": 93
+  },
+  {
+   "name": "Umm Hurair Second",
+   "n": 716
+  },
+  {
+   "name": "Umm Nahad",
+   "n": 1
+  },
+  {
+   "name": "Umm Ramool",
+   "n": 17
+  },
+  {
+   "name": "Umm Suqeim",
+   "n": 16
+  },
+  {
+   "name": "Umm Suqeim 1",
+   "n": 870
+  },
+  {
+   "name": "Umm Suqeim 2",
+   "n": 780
+  },
+  {
+   "name": "Umm Suqeim 3",
+   "n": 1761
+  },
+  {
+   "name": "Umm Suqeim St",
+   "n": 47
+  },
+  {
+   "name": "United Arab Emirates The Palm Island",
+   "n": 1
+  },
+  {
+   "name": "United Arab Emirates Tilal Al Ghaf",
+   "n": 1
+  },
+  {
+   "name": "University City",
+   "n": 1
+  },
+  {
+   "name": "Unnamed Road",
+   "n": 161
+  },
+  {
+   "name": "Up Town Motor City",
+   "n": 15
+  },
+  {
+   "name": "VAVAS FASHION LLC (BR), near PURAN MAAL RESTAURANT MEENA BAZAR",
+   "n": 1
+  },
+  {
+   "name": "Vegetable Market 1",
+   "n": 2
+  },
+  {
+   "name": "Vernus International School, مدرسة فيرنوس الدولية",
+   "n": 5
+  },
+  {
+   "name": "W 24 Julnar St",
+   "n": 12
+  },
+  {
+   "name": "W G01 Office",
+   "n": 2
+  },
+  {
+   "name": "Wadi AL Safa 3, opposite to IMG world adventures",
+   "n": 1
+  },
+  {
+   "name": "Wadi Al Amardi",
+   "n": 9
+  },
+  {
+   "name": "Wadi Al Safa 3",
+   "n": 3
+  },
+  {
+   "name": "Wadi Al Safa 4",
+   "n": 21
+  },
+  {
+   "name": "Wadi Al Safa 5",
+   "n": 34
+  },
+  {
+   "name": "Wadi Al Safa 6",
+   "n": 3
+  },
+  {
+   "name": "Wadi Al Safa 7",
+   "n": 1
+  },
+  {
+   "name": "Wadi Alamardi",
+   "n": 3
+  },
+  {
+   "name": "Wadi Alamardi equestrian club, D54",
+   "n": 1
+  },
+  {
+   "name": "Warisan",
+   "n": 1
+  },
+  {
+   "name": "Warsan 2",
+   "n": 9
+  },
+  {
+   "name": "Warsan 3",
+   "n": 3
+  },
+  {
+   "name": "Warsan Fourth",
+   "n": 4
+  },
+  {
+   "name": "Warsan Third",
+   "n": 2
+  },
+  {
+   "name": "Wasl Oasis (R500), 4th St",
+   "n": 2
+  },
+  {
+   "name": "West Beach",
+   "n": 1
+  },
+  {
+   "name": "XFV2XX 'Ud al Bayda'",
+   "n": 3
+  },
+  {
+   "name": "YABA Arzaz, Gate",
+   "n": 1
+  },
+  {
+   "name": "Yansoon",
+   "n": 5
+  },
+  {
+   "name": "Za'abeel",
+   "n": 2525
+  },
+  {
+   "name": "Za'abeel 1",
+   "n": 47
+  },
+  {
+   "name": "Za'abeel 2",
+   "n": 398
+  },
+  {
+   "name": "Za'beel",
+   "n": 2
+  },
+  {
+   "name": "Zaa'beel Second",
+   "n": 5
+  },
+  {
+   "name": "Zayed International Airport",
+   "n": 1
+  },
+  {
+   "name": "Zone 1",
+   "n": 4
+  },
+  {
+   "name": "Zone 2",
+   "n": 1
+  },
+  {
+   "name": "jumeirah",
+   "n": 2
+  },
+  {
+   "name": "near Millennium Airport Hotel",
+   "n": 1
+  },
+  {
+   "name": "near to Novotel hotel",
+   "n": 52
+  },
+  {
+   "name": "next to 7477",
+   "n": 6
+  },
+  {
+   "name": "off Al Asayel St",
+   "n": 1
+  },
+  {
+   "name": "opp. FA Bank",
+   "n": 1
+  },
+  {
+   "name": "opp. Naif",
+   "n": 1
+  },
+  {
+   "name": "opposite Innovation Hub",
+   "n": 1
+  },
+  {
+   "name": "sector,dubai",
+   "n": 1
+  },
+  {
+   "name": "¦º¦¦ ºä¦è« àâ¬êà ¿å ¦º¦»",
+   "n": 2
+  },
+  {
+   "name": "İş Körfezi",
+   "n": 3
+  },
+  {
+   "name": "Аль Барша",
+   "n": 3
+  },
+  {
+   "name": "Бизнес-Бэй",
+   "n": 4
+  },
+  {
+   "name": "Даунтаун Дубай",
+   "n": 10
+  },
+  {
+   "name": "Джумейра Лейк Тауэрс",
+   "n": 2
+  },
+  {
+   "name": "Дубай Марина",
+   "n": 3
+  },
+  {
+   "name": "أبراج بحيرات الجميرا",
+   "n": 7
+  },
+  {
+   "name": "أم رمول",
+   "n": 2
+  },
+  {
+   "name": "أم هرير الثانية",
+   "n": 6
+  },
+  {
+   "name": "البدع",
+   "n": 3
+  },
+  {
+   "name": "البرشاء",
+   "n": 11
+  },
+  {
+   "name": "البرشاء 1",
+   "n": 1
+  },
+  {
+   "name": "الثنيه الثالثة",
+   "n": 9
+  },
+  {
+   "name": "الثنيه الرابعة",
+   "n": 2
+  },
+  {
+   "name": "الجافلية",
+   "n": 2
+  },
+  {
+   "name": "الجداف",
+   "n": 3
+  },
+  {
+   "name": "الخليج التجاري",
+   "n": 2123
+  },
+  {
+   "name": "الراس‎",
+   "n": 1
+  },
+  {
+   "name": "الراشدية",
+   "n": 1
+  },
+  {
+   "name": "الرفاعة",
+   "n": 31
+  },
+  {
+   "name": "السبخة",
+   "n": 4
+  },
+  {
+   "name": "السطوة",
+   "n": 9
+  },
+  {
+   "name": "السعديات شمال 1",
+   "n": 1
+  },
+  {
+   "name": "السوق الكبير",
+   "n": 1
+  },
+  {
+   "name": "الصفا",
+   "n": 2
+  },
+  {
+   "name": "الصفوح",
+   "n": 4
+  },
+  {
+   "name": "القرهود",
+   "n": 1020
+  },
+  {
+   "name": "القوز",
+   "n": 19
+  },
+  {
+   "name": "الكرامة",
+   "n": 5
+  },
+  {
+   "name": "الكفاف",
+   "n": 2
+  },
+  {
+   "name": "المدينة الأكاديمية",
+   "n": 2
+  },
+  {
+   "name": "المرابع العربية",
+   "n": 3
+  },
+  {
+   "name": "المركاض",
+   "n": 1
+  },
+  {
+   "name": "المركز التجاري",
+   "n": 5
+  },
+  {
+   "name": "المركز التجاري الأولي",
+   "n": 7
+  },
+  {
+   "name": "المركز التجاري الثانية",
+   "n": 13
+  },
+  {
+   "name": "المنارة",
+   "n": 2
+  },
+  {
+   "name": "المنخول",
+   "n": 7
+  },
+  {
+   "name": "الميناء",
+   "n": 2
+  },
+  {
+   "name": "النعيمية 3",
+   "n": 1
+  },
+  {
+   "name": "النهدة",
+   "n": 1
+  },
+  {
+   "name": "النهدة الأولى",
+   "n": 1
+  },
+  {
+   "name": "الورقاء",
+   "n": 2
+  },
+  {
+   "name": "الوصل",
+   "n": 17
+  },
+  {
+   "name": "اليلايس 2",
+   "n": 2
+  },
+  {
+   "name": "ام الشيف",
+   "n": 4
+  },
+  {
+   "name": "ام سقيم 1",
+   "n": 2
+  },
+  {
+   "name": "ام سقيم ٢",
+   "n": 4
+  },
+  {
+   "name": "ام سقيم ٣",
+   "n": 2
+  },
+  {
+   "name": "برج خليفة",
+   "n": 3
+  },
+  {
+   "name": "تجارية مويلح",
+   "n": 1
+  },
+  {
+   "name": "تلال الإمارات",
+   "n": 3
+  },
+  {
+   "name": "تلال الإمارات ٢",
+   "n": 2
+  },
+  {
+   "name": "جبل علي الأولى",
+   "n": 2
+  },
+  {
+   "name": "جبل علي الصناعية الثانية",
+   "n": 1
+  },
+  {
+   "name": "جزيرة بلوواترز",
+   "n": 3
+  },
+  {
+   "name": "جميرا",
+   "n": 24
+  },
+  {
+   "name": "جميرا ١",
+   "n": 1
+  },
+  {
+   "name": "جنوب البرشاء",
+   "n": 16
+  },
+  {
+   "name": "حدائق الشيخ محمد بن راشد",
+   "n": 16
+  },
+  {
+   "name": "حي الغرب",
+   "n": 1
+  },
+  {
+   "name": "داماك هيلز",
+   "n": 4
+  },
+  {
+   "name": "داماك هيلز 2",
+   "n": 1
+  },
+  {
+   "name": "دبي فستيفال سيتي",
+   "n": 2
+  },
+  {
+   "name": "دبي مارينا",
+   "n": 628
+  },
+  {
+   "name": "دبي موتور سيتي",
+   "n": 1
+  },
+  {
+   "name": "دبي هاربر",
+   "n": 3
+  },
+  {
+   "name": "ديرة",
+   "n": 1607
+  },
+  {
+   "name": "ديسكفري جاردنز",
+   "n": 1
+  },
+  {
+   "name": "زعبيل",
+   "n": 1
+  },
+  {
+   "name": "سٹی واک",
+   "n": 2
+  },
+  {
+   "name": "عود ميثاء",
+   "n": 4
+  },
+  {
+   "name": "غوروب",
+   "n": 1
+  },
+  {
+   "name": "قرية المجتمع الخضراء",
+   "n": 4
+  },
+  {
+   "name": "قرية المعرفة",
+   "n": 3
+  },
+  {
+   "name": "قرية جميرا الدائرية",
+   "n": 720
+  },
+  {
+   "name": "ليوارة 1",
+   "n": 1
+  },
+  {
+   "name": "مجمع دبي للاستثمار الأول",
+   "n": 3
+  },
+  {
+   "name": "مجمع دبي للاستثمار الثاني",
+   "n": 1
+  },
+  {
+   "name": "مدينة الإمارات الصناعية",
+   "n": 1
+  },
+  {
+   "name": "مدينة دبي الرياضية",
+   "n": 3
+  },
+  {
+   "name": "مدينة دبي العالمية",
+   "n": 9
+  },
+  {
+   "name": "مدينة دبي للإنترنت",
+   "n": 4
+  },
+  {
+   "name": "مدينة دبي للاستوديوهات",
+   "n": 3
+  },
+  {
+   "name": "مدينة مهرجان دبي",
+   "n": 7
+  },
+  {
+   "name": "مدينة هند 1",
+   "n": 1
+  },
+  {
+   "name": "مردف",
+   "n": 1
+  },
+  {
+   "name": "مساكن شاطئ جميرا",
+   "n": 21
+  },
+  {
+   "name": "مسجد دامك هيلز, Mudon",
+   "n": 2
+  },
+  {
+   "name": "معيصم الأولى",
+   "n": 3
+  },
+  {
+   "name": "منطقة جبل علي الحرة",
+   "n": 1
+  },
+  {
+   "name": "منطقة رأس الخور الصناعية-١",
+   "n": 1
+  },
+  {
+   "name": "نخلة جميرا",
+   "n": 29
+  },
+  {
+   "name": "ند الحمر",
+   "n": 1
+  },
+  {
+   "name": "ند الشبا",
+   "n": 5
+  },
+  {
+   "name": "ند الشبا 1",
+   "n": 1
+  },
+  {
+   "name": "واحة دبي للسيليكون",
+   "n": 2
+  },
+  {
+   "name": "وادي الصفا 4",
+   "n": 1
+  },
+  {
+   "name": "وادي الصفا 5",
+   "n": 1
+  },
+  {
+   "name": "وسط مدينة دبي",
+   "n": 821
+  },
+  {
+   "name": "ياس جنوب 2",
+   "n": 1
+  }
+ ]
+}

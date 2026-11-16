@@ -32,7 +32,7 @@ import { fleetIncome, COMPLETED_SQL } from './income_sql.js';
    to it. See api/alert_coverage_sql.js for the rule and its assumption. */
 import { alertCoverage, alertRate, alertRateReason, drivingCount,
   deviceCount, isDeviceFault, DEVICE_FAULT_SQL } from './alert_coverage_sql.js';
-import { areaOf } from './analytics_routes.js';
+import { placeJoin, placedArea, placedBasis, placedReason, placementSummary, unplacedLabel } from './trip_place_sql.js';
 /* A pg DATE, as the day it holds. Imported rather than re-typed: it is not a
    cycle (src/sources/ledger.js reaches only src/db.js and src/log.js, and
    nothing under src/ imports this file), api/day_routes.js and
@@ -3519,15 +3519,80 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        "01 Cluster E - Al Thanyah Fifth - Dubai - UAE" is a house number. So
        the list read "12 Cluster E", "9 Marasi Dr", "Atlantis" — one row per
        building rather than per area, with trailing " &" fragments and
-       non-Latin strings of their own. The second segment is the community, and
-       it is the same expression #corridors and #slot use, imported rather than
-       copied so all three name a place the same way. */
-    const areas = await q(
-      `SELECT coalesce(${areaOf('pickup_addr')}, '(unparsed)') area, count(*)::int n,
-              round(avg(distance_km) FILTER (WHERE distance_km > 0 AND distance_km < 500)::numeric,1) avg_km,
-              round(avg(price)::numeric,2) avg_fare
-       FROM trip WHERE ${TW} AND pickup_addr IS NOT NULL AND pickup_addr <> ''
-       GROUP BY 1 ORDER BY n DESC LIMIT 25`, p);
+       non-Latin strings of their own. The community is place_area()'s third
+       segment from the end — and since PLC (below) the area is read from the
+       resolved layer, whose first rung is exactly that rule. */
+    /* Every pickup placed, or named by the reason it could not be (FIX-STATUS
+       PLC, 2026-11-16).
+       ─────────────────────────────────────────────────────────────────────
+       This grouped by place_area(pickup_addr) over the pickups that HAD an
+       address, and filed every one the dash rule could not read under
+       "(unparsed)" — the second-largest row on the page the operator was
+       reading, 35 of ~230 pickups, with "we need to find a way to find the
+       actual location". Measured on production (6,000 bookings, 9–15 Nov):
+       18% of Uber pickups unread — 456 in Uber's one-line form, 401 with no
+       address at all (which this list did not even count), 111 mostly Arabic
+       — and 88% of Bolt's, 100% of Yango's, both in a comma form.
+
+       Now the area is trip_place's (src/trip_places.js): the address where the
+       dash rule reads it, as before; a known area name in the one-line or
+       comma text; a plus code; the booking's coordinates; or the car's own
+       tracker fix within five minutes of the request. Each row of the list
+       says how many of its pickups came from which, and what is left is a
+       row per REASON — "no address, and no tracker fix within 5 minutes" —
+       never "(unparsed)". Empty-address pickups are in the list now: the
+       tracker places most of them, and the rest are counted where the reader
+       can see them rather than silently dropped from the denominator.
+
+       Read through a subquery so trip and trip_place's shared columns
+       (fleet_id among them) cannot make TW's unqualified names ambiguous. */
+    /* One reader for both ends (FIX-STATUS PLC, drop-offs 2026-11-16).
+       ─────────────────────────────────────────────────────────────────────
+       The operator, on seeing the pickup table placed: "also show dropoff
+       areas the same way". The same ladder already resolved every drop-off
+       (trip_place.dropoff_*: the address, a name in its text, a plus code, the
+       booking's coordinates, the car's tracker at the DROP-OFF time), so the
+       drop-off table is this query with the other end's columns.
+
+       The one difference is the population. A pickup table over every booking
+       is right — a cancelled booking was still a request at that pickup. A
+       drop-off table is not: a booking nobody rode has no drop-off, and over
+       every booking the table would carry a row "Not placed — the booking was
+       cancelled before any drop-off" that is true and says nothing about where
+       this driver ends up (on the sample of 6,000, 83 of Uber's 97 unplaced
+       drop-offs and 29 of Bolt's 44 were exactly that). So drop-offs are taken
+       over COMPLETED bookings, COMPLETED_SQL the same rule income uses, and
+       the caption says so. */
+    const placedAt = async (end, extra = '') => {
+      const PLACED = `
+      SELECT t.distance_km, t.price,
+             ${placedArea(end)} AS area, ${placedBasis(end)} AS basis, ${placedReason(end)} AS reason
+        FROM (SELECT platform, external_id, ${end}_addr, distance_km, price FROM trip WHERE ${TW}${extra}) t
+        ${placeJoin()}`;
+      const rows = await q(
+        `SELECT area, CASE WHEN area IS NULL THEN reason END AS reason, count(*)::int n,
+                count(*) FILTER (WHERE basis = 'address')::int AS n_address,
+                count(*) FILTER (WHERE basis = 'address_name')::int AS n_address_name,
+                count(*) FILTER (WHERE basis = 'plus_code')::int AS n_plus_code,
+                count(*) FILTER (WHERE basis = 'coordinates')::int AS n_coordinates,
+                count(*) FILTER (WHERE basis = 'tracker')::int AS n_tracker,
+                round(avg(distance_km) FILTER (WHERE distance_km > 0 AND distance_km < 500)::numeric,1) avg_km,
+                round(avg(price)::numeric,2) avg_fare
+         FROM (${PLACED}) r
+         GROUP BY 1, 2 ORDER BY n DESC, area NULLS LAST LIMIT 25`, p);
+      const list = rows.map(({ n_address, n_address_name, n_plus_code, n_coordinates, n_tracker, ...r }) => (r.area
+        ? { ...r, by_basis: Object.fromEntries(Object.entries({ address: n_address, address_name: n_address_name,
+          plus_code: n_plus_code, coordinates: n_coordinates, tracker: n_tracker }).filter(([, v]) => v)) }
+        : { ...r, unplaced: true, label: unplacedLabel(r.reason) }));
+      /* The caption's counts, over EVERY booking in the population rather than
+         the 25 rows above, so "14 placed by the car's tracker" is the whole truth. */
+      const summary = placementSummary(await q(
+        `SELECT basis, CASE WHEN basis IS NULL THEN reason END AS reason, count(*)::int n
+           FROM (${PLACED}) r GROUP BY 1, 2`, p), end);
+      return [list, summary];
+    };
+    const [areas, placement] = await placedAt('pickup');
+    const [dropoff_areas, dropoff_placement] = await placedAt('dropoff', ` AND ${COMPLETED_SQL()}`);
     // Where the vehicle sat still between jobs — telemetry, not trips, so it is
     // only available for plates this driver held on days we have GPS for.
     const idle = await q(
@@ -3551,7 +3616,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                 FILTER (WHERE pickup_lat IS NULL OR pickup_lat = 0), NULL) AS unpositioned_platforms
        FROM trip_norm WHERE ${TW} AND is_booking`, p);
     res.json({
-      pickups, dropoffs, areas, idle,
+      pickups, dropoffs, areas, idle, placement, dropoff_areas, dropoff_placement,
       coverage: {
         bookings: cover?.bookings ?? 0,
         positioned: cover?.positioned ?? 0,

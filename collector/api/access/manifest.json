@@ -7510,6 +7510,32 @@
  },
  {
   "method": "GET",
+  "path": "/api/vehicle/whereabouts",
+  "subject": "LOC",
+  "carries": [
+   "BK",
+   "LOC",
+   "VEH"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "days[].with_bookings",
+     "coverage_with_bookings"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/vehicle_routes.js (WHR, 2026-11-16; arithmetic api/whereabouts.js). One car, by ?plate, on ?day (today by default) or ?from&to (at most 7 days); a day still to come is refused. Body {plate, fleet_id, days[{day, from, to, running, minutes, tracker{source, fixes, second, every_min, parked_cadence_min, moving_cadence_min, first_fix, last_fix}, segments[{kind stay|drive|quiet, start_min, end_min, from, to, minutes, basis fixes|inferred|unknown, say; stay: area, area_votes, lat, lng, since, until, every_min, fixes, how; drive: from_area, to_area, km, km_basis, km_fixes, km_journey, fixes, booking (always null here); quiet: quiet parked|moved|before_first|after_last|silent|no_tracker, last_fix, next_fix, area (parked), from_area/to_area/apart_km (moved)}], stays[{area, from, to, minutes, watched_min, inferred_min, basis, how, since, until, carried_in, carried_on}], coverage{minutes, positioned_min, inferred_min, unknown_min, *_pct}, with_bookings{bookings, segments, stays, anchors[{at, minute, time, area, end pickup|dropoff, platform, basis}], coverage}}], coverage, coverage_with_bookings, rules, area_why}. Subject LOC like /api/where and /api/vehicle/movement: a role without locations is refused the route. BK: with_bookings is the same day with the car's completed bookings laid into its quiet stretches (channel, job times, drop-off area) and its drives marked on a job, and coverage_with_bookings is its sum: booking detail, so a role holding bookings as totals only (Fleet technician) is handed the tracker's own account and not the jobs. No driver is named anywhere in the body. 'mixed' like every per-vehicle route: the plate is the key and the handler does not filter by fleet, so a one-fleet reader is refused with that reason (api/access/one_fleet.js, vehicle group)."
+ },
+ {
+  "method": "GET",
   "path": "/api/vehicle/profile",
   "subject": "VEH",
   "carries": [

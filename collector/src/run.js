@@ -29,6 +29,7 @@ import { refreshIdentityLinks } from './identity_link.js';
 import { refreshPersons } from './persons.js';
 import { refreshNameProposals } from './name_proposals.js';
 import { refreshPlaceCells } from './places.js';
+import { resolveTripPlaces } from './trip_places.js';
 import { refreshRollups } from './rollup.js';
 import { config, loadSettings } from './config.js';
 /* Each unit of work reads one snapshot of settings, values and versions
@@ -305,6 +306,19 @@ async function runWindowInner(mode, from, to, onProgress, fleet = null, jobId = 
   try {
     await refreshPlaceCells();
   } catch (e) { log.error('run', 'place cells', { err: String(e) }); }
+  /* Every booking's pickup and drop-off placed (FIX-STATUS PLC): the address,
+     a name in the address text, a plus code, the booking's coordinates or the
+     car's own tracker — or the true reason none of them could. AFTER the
+     gazetteer, because three of those rungs name a position through it, and
+     after the pulls, because a tracker fix that landed this pass is what
+     places a booking that had none. Time-bounded (src/trip_places.js
+     BUDGET_MS) so a backlog — the first passes are the whole history — is
+     spread over passes rather than holding this one. Its own try/catch: a
+     pass that cannot place is a caption that says "not placed yet", not a
+     run that stops. */
+  try {
+    await resolveTripPlaces();
+  } catch (e) { log.error('run', 'trip places', { err: String(e) }); }
   /* Precompute the aggregates that have no window. /api/trend/monthly,
      /api/forecast and /api/retention each group the ENTIRE trip history, so
      nothing about a request can narrow them — but the answer is the same for

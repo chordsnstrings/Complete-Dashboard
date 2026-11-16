@@ -979,8 +979,147 @@ Measured on production 2026-09-07, the first build under the v67 rule:
 **4,855 cells, 709 distinct names, 410,627 observations**, naming 221 of one
 driver's 222 tracker fixes.
 
+### Every pickup and drop-off placed — the address forms, measured 2026-11-16 (FIX-STATUS PLC)
+
+The operator, on a driver's Territory tab where "(unparsed)" was the second-largest row (35 of ~230
+pickups): "let's try figuring out how we can get as many data as possible so that unparsed doesn't
+exist." `place_area()` reads one shape — Google's dash form — and each channel writes others.
+Measured on production (GET `/api/trips/list`, 6,000 bookings, 9–15 Nov 2026):
+
+| channel | pickups | read by `place_area()` | the forms it does not read |
+|---|---:|---:|---|
+| Uber | 5,550 | 4,547 (81.9%) | 456 Uber's ONE-LINE form, no dashes ("Al Zarouni Block A Al Muraqqabat Deira AE" — the dash form with dashes, city and country removed, "AE" appended); **401 with an EMPTY address** (~7% every day, evenly: 346 completed, 52 rider-cancelled; 124 of them have no drop-off address either); 111 mostly Arabic ("Duja Tower شارع 6 Sheikh Zayed Road AE"); 31 "Dubai - United Arab Emirates" alone; Chinese-locale strings ("阿拉伯联合酋长国迪拜酋长国", sometimes with a plus code run straight on); 2 bare plus codes ("35J6+VH - Dubai - United Arab Emirates") |
+| Bolt | 199 | 23 (11.6%) | the COMMA form, "<place or street> <number>, <city>" ("Sheikh Rashid Road 137, Dubai", "Blue Bay Tower, Marasi Drive Level 8, No 807, Dubai"), a few in Arabic or Cyrillic |
+| Yango | 23 | 0 | Yandex's comma hierarchy ("Shemara Tower, Jumeirah Beach Residence, Dubai Marina, Jumeirah, Dubai") |
+| hotel | 228 | 227 | one bare plus code |
+| (Abu Dhabi, any channel) | — | — | 14 of 11,100 endpoints: the dash form carries a zone code where Dubai carries the community ("… - Al Bateen - W44 - Abu Dhabi - …"), which `place_area()` refuses as a code |
+
+**What each basis means** (`trip_place.<end>_basis`, src/place_resolve.js, most direct first):
+
+* `address` — `place_area()`, exactly as before. Unchanged wherever it already worked.
+* `address_name` — a name the fleet's own history already uses (place_area's answers in trip_place,
+  plus every place_cell name; seen at least twice), found in the one-line or comma text: Latin script
+  only, never the city/emirate/country, nearest the end, longest at the same end, "Jumeirah" only as
+  a fallback. Or (rule `zone_code`) the Abu Dhabi community before the zone code. **Since the
+  independent review (2026-11-16) it never returns** a road ("Sheikh Zayed Rd", "Airport Rd" — a
+  name whose last word is a road word is not an area), an area's name used as a road's ("Al Safa
+  Street", "Palm Jumeirah Rd 9"), a kind of place ("District", "Zone 1", "Industrial Area", "Business
+  Centre"), a building or business ("Latifa Hospital", "Lake Central Tower", "… Metro Station", a
+  mall), a name glued to another by a comma ("Al Mawakeb Al Garhoud, Al Garhoud"), a fragment of a
+  longer known name ("Al Safa" inside "Wadi Al Safa 7"), a hotel's name ("Jumeirah Beach Hotel"), or
+  the weak "Jumeirah" unless it stands alone in its part or as "Jumeirah 1/2/3" — see the trap
+  "place_cell's vocabulary names roads".
+* `plus_code` — an Open Location Code in the text, short codes recovered against the emirate the
+  address names (Dubai otherwise), then named by a gazetteer.
+* `coordinates` — the booking's own lat/lng (hotel ~69%, Yango ~22%, Bolt orders), named by a gazetteer.
+* `tracker` — the car's own FMS/CABMAN fix within **5 minutes** of the request time (pickup) or the
+  drop-off time (drop-off), FMS first, named by a gazetteer. Where the CAR was, not what the platform
+  wrote — every surface says "placed by the car's tracker at the request time". Not asked for the
+  pickup of a booking made in advance (`is_scheduled`) on a channel whose request time is when the
+  booking was made — every channel but the hotel's, whose requested_at is the trip's start (review
+  2026-11-16; trap "A scheduled booking's request time is not near its pickup").
+* absent — `<text failure>+<position failure>`: `no_address` / `city_only` / `other_script` /
+  `unknown_name`, and `no_plate` / `no_time` / `cancelled` / `scheduled` / `no_fix` / `unnamed_cell`;
+  in words by `reasonText()`, e.g. "no address, and no tracker fix within 5 minutes".
+
+**The window, measured** (GET `/api/track`, 89 plates, 8–16 Nov): FMS reports every 6.2 min at the
+median (p75 7.0, p90 10.0), CABMAN every 5.0 (p90 52.7 — a parked car reports about hourly). Of the
+401 empty-address Uber pickups, the car's nearest fix was within 3 min for 358, within **5 for 373
+(93.0%)**, within 10 for 379; 12 were in cars with no tracker that week.
+
+**The gazetteer that names a position** — see the trap below: `booking_cell` (the bookings' own words,
+from drop-off votes) first, `place_cell` (FMS's words) second, recorded per endpoint in `named_by`.
+
+**After, on the same sample** (the text rungs exact; the position rungs named by a booking_cell built
+from the sample's own week of drop-offs plus the place_cell names production printed on 160 driver-days
+— a SMALLER gazetteer than production's, so these are upper bounds on what stays unplaced):
+
+| channel | pickups | address | address_name | plus_code | tracker | fix, cell unnamed here | not placed |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Uber | 5,550 | 4,547 | 436 | 5 | 499 | 21 | 42 (28 no address + no fix, 7 unknown name + no fix, 4 city only + no plate, 3 other script + no fix) |
+| Bolt | 199 | 23 | 40 | 0 | 119 | 3 | 14 |
+| Yango | 23 | 0 | 21 | 0 | 2 | 0 | 0 |
+| hotel | 228 | 227 | 0 | 1 | 0 | 0 | 0 |
+
+Expected still unplaced: **Uber 0.8–1.1% (from 18.1%), Bolt 7.0–8.5% (from 88.4%), Yango 0% (from 100%),
+hotel 0%.** Drop-offs: Uber 97 of 5,550 not placed, 83 of them cancelled bookings that never had a
+drop-off ("…, and the booking was cancelled before any drop-off"); Bolt 44 of 199, 29 cancelled.
+
+**Revised by the independent review (2026-11-16).** The table above was measured with the matcher as
+first written, which named about one in seven of its `address_name` pickups wrongly. Re-measured on
+the same sample with the same vocabulary the review could rebuild (the fixture's names —
+place_area over the sample plus the place_cell names — and the sample's own place_area answers),
+pickups named from the address text went **Uber 440 → 392, Bolt 47 → 27, Yango 21 → 21**: 70 names
+taken away (49 roads — "Sheikh Zayed Rd" 15, "Airport Rd" 13, "Sheikh Mohammed bin Rashid Boulevard"
+3, "Palm Jumeirah" from "Palm Jumeirah Rd" 4, "Dubai Sports City" from "Dubai Sports City Street" 3,
+and single cases; 10 "District"; 4 brand or fragment "Jumeirah"; 2 "Jumeirah Beach" from the hotel;
+4 malls; 1 "Business Centre") and 4 given ("Gate 4, Dubai Hills Mall" → Dubai Hills, "DIFC District
+building 5" → DIFC, "One JLT First Al Khail Street …" → JLT, "Jumeirah Beach Road Jumeirah AE" →
+Jumeirah). The pickups taken away go on to the tracker rung, which had a fix within 5 minutes for
+93% of the empty-address Uber pickups, so the expected unplaced share moves by about 0.1 point for
+Uber (≈ 4 of 5,550) and 0.7 for Bolt (≈ 1–2 of 199) — the figures above stay the right order. The
+builder's 436 / 40 used a vocabulary the review could not exactly rebuild; the 440 / 47 baseline is
+the builder's matcher on the review's vocabulary.
+
 ## Traps that have cost time more than once
 
+* **The tracker's gazetteer does not speak the bookings' language** (2026-11-16, FIX-STATUS PLC).
+  `place_cell` is FMS's reverse geocoder (InfoTrack); the bookings are Google's. Where a booking had
+  a dash-form address AND a tracker fix within 5 min (160 production driver-days, 9–15 Nov), the
+  place_cell name equalled the address's area on **29.8% of pickups and 24.6% of drop-offs** — the
+  positions are right, the words differ: "Al Barsha 1" / "Al Barsha", "Za'abeel 2" / "Trade Center
+  Second", "Al Garhoud" / "Dubai Int'l Airport", "260 Sheikh Zayed Rd" / "Business Bay". Naming a
+  tracker position through place_cell would put a second row on every area list. `booking_cell`
+  (votes: the drop-off address's area at the car's position at the drop-off time) named the pickup's
+  own area on **70.3%** (2,594 of 3,691) from one week of votes; and a plus code decoded through it
+  named the address's own area on **84.5%** (729 of 863 dash-form addresses that start with a code),
+  0 when the position was moved 5 km. Name positions with booking_cell first.
+* **Google's own dash form already splits one place under two names** (2026-11-16). On the 6,000-booking
+  sample `place_area()` returns "Nakhlat Jumeira" 338 times and "Palm Jumeirah" 37 ("The Palm Jumeirah"
+  5); "Marsa Dubai" 523 and "Dubai Marina" 14; "Hadaeq Sheikh Mohammed Bin Rashid" 156 and "Dubai Hills"
+  10. The name matcher returns the spelling the text uses, so a one-line "… Palm Jumeirah AE" lands under
+  "Palm Jumeirah", beside the dash form's "Nakhlat Jumeira". That split predates PLC and is not a matcher
+  error; folding synonyms is a separate, reviewed list nobody has written yet.
+* **Uber's request time is not its pickup time** (2026-11-16). TRIP_ACTIVITY carries "Trip request time"
+  and "Trip drop-off time" and no pickup time, so the tracker rung reads the car at the REQUEST — on its
+  way to the rider, typically a few minutes out — and says so ("at the request time"). Shifting the
+  read by +2 min moved agreement with the address from 29.8% to 30.1% (place_cell names), so the
+  vocabulary, not the clock, was the gap. The drop-off is read at the drop-off time, when the car is there.
+* **place_cell's vocabulary names roads, buildings and fragments — a name matcher over it names them
+  too** (independent review, 2026-11-16). FMS's reverse geocoder names a fix by the road it is on, and
+  place_area() over 425,000 addresses has produced "District", "Zone 1", "Industrial Area", hotels,
+  malls and comma-glued pairs, each seen more than twice. The PLC name matcher took every one of them
+  as an area: on the 6,000-booking sample 59 of the 508 pickups it named came back as roads (49:
+  "Duja Tower شارع 6 Sheikh Zayed Road AE" → "Sheikh Zayed Rd"; "Le Meridien Hotel Airport Road
+  Garhoud AE" → "Airport Rd") or as "District" (10: "District 1 Al Worood 1 Street Al Thanyah AE"),
+  and a handful as a fragment of a longer place ("… Wadi Al Safa 7 …" → "Al Safa", twenty kilometres away)
+  or the hotel brand ("Jumeirah Emirates Towers Hotel …" → "Jumeirah"). A wrong area is worse than an
+  absent one: absent goes on to the tracker, wrong stops there. A vocabulary drawn from the fleet's
+  own names is not a list of areas until roads, place kinds, buildings and glued pairs are filtered
+  out of it, and a match has to be checked against its neighbours (a road word after it, a longer
+  known name around it). src/place_resolve.js `vocabularyName` and `matchName` hold the rules, each
+  pinned on its real string in test/place_resolve.test.mjs.
+* **A scheduled booking's request time is not near its pickup** (independent review, 2026-11-16).
+  Bolt's requested_at is the order's `created` (src/sources/bolt_orders.js); for an on-demand ride the
+  pickup follows within minutes (the sample's 27 Bolt rides with a pickup moment, ended_at −
+  duration_s: median 2.3 min, max 14.8), but `is_scheduled` rides are booked hours ahead, and the car's
+  tracker at the request time is wherever the car was then. The tracker rung is not asked for those
+  pickups (reason `scheduled`). The hotel channel is the exception — its requested_at is the trip's
+  startTime (src/sources/hotel.js), so its scheduled rides are at the pickup at that instant. Uber
+  Reserve and Yango's advance orders carry no flag we store, so they cannot be told apart yet.
+* **Compare a database timestamp with the database's clock** (independent review, 2026-11-16). The
+  trip_places retry step skipped rows the pass had already touched by `resolved_at < <pass start>`,
+  with resolved_at written by Postgres's now() and the pass start read off the worker's clock. The
+  worker (an App Platform container) and the database (managed Postgres) are two machines; with the
+  worker even slightly ahead, rows just re-resolved looked untouched and were picked again until the
+  budget ran out — on PGlite with the worker clock an hour fast, 325 re-resolutions of 18 rows in 1.5 s.
+  Take the start from `SELECT now()`.
+* **The same silence means different things on the two trackers** (2026-11-16, FIX-STATUS WHR; COVERAGE "Where the car
+  was, all day"). CABMAN reports about hourly while parked (97.9% of its same-spot gaps are under 67 minutes, the
+  heartbeat at 65–67); FMS kept reporting every ~6–13 minutes parked (99.3% under 30). So an hour between two fixes at one
+  spot is CABMAN's own rhythm — watched — and past FMS's — inferred. One "quiet after N minutes" for both would call every
+  parked CABMAN hour a silence or every FMS gap normal. Use `PARKED_CADENCE_MIN` (`api/whereabouts.js`), and never call a
+  gap over a day parked, whatever its two ends say: past a day a parked car and a dead unit look the same.
 * **"Airport" in a booking's address is mostly NOT the airport** (2026-11-16, FIX-STATUS FLT9).
   No booking carries a coordinate, so an airport trip is found by its address text, and the
   commonest "airport" address on production is "Airport Rd - Al Garhoud - Dubai" — a road of
@@ -11956,4 +12095,96 @@ Measured with the operator's key: "Dubai events concerts exhibitions November De
 (Time Out Dubai 9 Nov, Gulf News 1 Nov, What's On, The National, few.ae on National Day, Travel and Tour World). The
 tier's seven searches for 16 Nov – 6 Dec returned 57 distinct pages, among them the Government of Dubai Media Office on
 DWTC's 20 November exhibitions and Dubai Week's sports calendar.
+
+## Where the car was, all day — measured 2026-11-16 (FIX-STATUS WHR)
+
+The operator: "whether pick up or drop off, we should ideally know where the car was at all times. currently we just
+focus on trips, but if we can figure out where the car is at all time that would be great too."
+`GET /api/vehicle/whereabouts?plate=&day=` (or `from`/`to`, a week at most) accounts for every minute of a Dubai day of
+one car; the arithmetic is `api/whereabouts.js`, the page is the vehicle's **Where it was** tab.
+
+### What each segment kind means
+
+Every interval between two consecutive fixes of ONE tracker is judged by its two ends — how far apart, how long apart:
+
+| kind | when | basis |
+|---|---|---|
+| **stay** | two fixes within 150 m, inside the tracker's parked rhythm (CABMAN 70 min, FMS 30 min); a run of them lasting 10 min or more | watched (`fixes`) |
+| **drive** | two fixes at different spots within 20 min (`GAP_MIN`, the journey map's step); a same-spot pause under 10 min stays inside the drive. km from the fixes, or FMS's own journey distance where a journey lies inside the drive (±10 min) | watched |
+| **quiet: parked** | two fixes within 150 m with a gap past the rhythm: "parked, tracker quiet" | **inferred** |
+| **quiet: booking** | a completed booking's span inside a quiet stretch; its drop-off (and its pickup, where `ended_at − duration_s` places it) anchors the car's area AT THAT MINUTE, "from a booking, not a tracker fix". The minutes between the two pins are not placed: the job says what the car was doing, not where it was at 12:40 (independent review, 2026-11-16 — it was counted inferred, which moved a whole job from unknown to inferred on the headline). A booking inside a parked-and-quiet stretch breaks the inference: the rest becomes "moved" | unknown (its two ends pinned) |
+| **quiet: moved** | different spots, gap over 20 min: "moved while the tracker was silent — route not known", with both ends and how far apart they are in a straight line | unknown |
+| **quiet: before_first / after_last** | no fix of the tracker before (after) the stretch at all; after the last fix only while the silence, measured to NOW, is under a day — past that it is **silent** (review, 2026-11-16) | unknown |
+| **quiet: silent** | any gap over 24 h, whatever its two ends say: "no reading since …" | unknown |
+| **quiet: no_tracker** | the car has never sent a position | unknown |
+
+The trackers file on movement, so two fixes at one spot with nothing between, inside the tracker's own parked rhythm, are
+the tracker saying the car stood there. Past the rhythm the report that should have come did not, so whether the unit was
+alive in between is not known: that is why parked-and-quiet is inferred and counted apart. The two trackers on one car
+are never mixed (the one with more fixes that day is read; the other is named in `tracker.second`). Bookings are laid in
+only in `with_bookings` (manifest class BK), so a role that sees bookings as totals gets the tracker's own account.
+
+### The thresholds, measured
+
+40 cars drawn at random from `/api/live`'s roster (20 listed FMS, 20 CABMAN), 9 days each (8–16 Nov), fixes from
+`/api/map/journey` (GET), 42,168 consecutive-fix intervals:
+
+| | CABMAN | FMS |
+|---|---|---|
+| same-spot (≤ 150 m) gaps ≤ 20 min | 52.8% | 97.7% |
+| ≤ 30 min | 54.9% | 99.3% |
+| ≤ 60 min | 62.0% | 99.7% |
+| ≤ 67 min | 97.9% (the heartbeat sits at 65–67 min) | 99.8% |
+| ≤ 70 min | 98.2% | 99.8% |
+| over 6 h | 0.12% | 0.08% |
+| different-spot gaps ≤ 20 min | 95.4% | 99.4% |
+| parked pairs within 50 m / 150 m / 250 m | 91.8% / 94.6% / 95.6% (pairs 55–70 min apart) | 99.3% / 99.65% / 99.78% (stopped pairs 8–30 min apart) |
+
+So the parked rhythm is 70 min for CABMAN and 30 min for FMS, and the stay radius is 150 m: widening it to 250 m (the
+radius `/api/where`'s stop rule uses) gains one point on CABMAN and a tenth on FMS, and makes a car crawling through a jam
+"one place". FMS in November kept reporting every ~6–13 minutes while parked, unlike the September measurement above
+("can go quiet most of a night parked"); its long silences are still there, just rare.
+
+### Coverage per tracker, measured on production
+
+The same sample, 9–15 Nov (7 whole days, each read with its neighbours' fixes), grouped by the tracker actually read:
+
+| | cars | car-days | positioned | inferred | unknown |
+|---|---|---|---|---|---|
+| FMS, every car-day | 19 | 133 | **81.4%** | 5.6% | 13.0% |
+| FMS, car-days with at least one fix | | 121 | **89.5%** | 6.1% | 4.4% |
+| CABMAN, every car-day (all had a fix) | 15 | 105 | **82.8%** | 5.1% | 12.1% |
+| no fix at all 8–16 Nov | 6 | 42 | 0% | 0% | 100% |
+
+The median car-day was 95.7% positioned on FMS and 87.1% on CABMAN (10th percentile 57.3% and 58.6%). The unknown minutes
+are different in kind: FMS's are mostly whole days a unit was silent (7,711 of 24,991 minutes silent, 12,129 before a
+unit's first fix of the week) — on days it reported, only 4.4% is unknown; CABMAN's are almost all "moved while the
+tracker was silent" (18,353 of 18,353 minutes): 372 stretches, 347 of them (93%) lasting 20–70 min and 307 (83%) with
+ends under 2 km apart — short hops CABMAN did not report, between two places it did. 6 of the 40 sampled cars (15%) sent no fix in the nine days; on production the route reads their last fix ever and
+says "no reading since …" (the journey sample cannot tell that from never). Measured with the module itself on the
+fetched fixes; the area names were not part of this measurement (the journey route returns none).
+
+### Traps this added to the list
+
+* The same gap means different things per tracker: an hour at one spot is CABMAN's parked heartbeat (watched) and past
+  FMS's rhythm (inferred). A single "quiet after N minutes" for both would call every parked CABMAN hour inferred or every
+  parked FMS hour watched.
+* A gap over a day is never "parked", even when both ends are the same spot: past a day a parked car and a dead unit look
+  the same until the car moves.
+* **A stay's "since" is only as early as the earliest fix the day was read with** (independent review, 2026-11-16). The
+  route reads six hours before midnight and the one fix before that, so a CABMAN car parked since 10:00 reaches the
+  segmenter from its 17:05 heartbeat. A run that begins on that earliest fix says "since at least" (`since_at_least`); a
+  run that begins after a drive or a silence began where it says.
+* **A silence with no fix after it is measured to now, not to the end of the day** (same review). The interval rule calls
+  a gap over a day "silent" as soon as a next fix closes it; measured to 24:00, a unit dark for six days drew its last day
+  as "after the last fix of the day" and the † band said "Silent over a day: No".
+
+### Independent review, 2026-11-16 — what changed and what did not
+
+Three corrections, each revert-proven (FIX-STATUS WHR-R1–R3): a booking's minutes in a silence are unknown with two
+pinned ends, not inferred; "since" is "since at least" when the stay begins on the earliest fix read; a silence after the
+last fix is measured to now. None of them moves the coverage measured above: that measurement ran on the trackers' fixes
+alone (no bookings), and "after the last fix" and "silent" are both unknown. What the first changes is
+`coverage_with_bookings`, which can now only move minutes from inferred to unknown (a booking breaking a parked
+inference), never from unknown to inferred.
 

@@ -2606,6 +2606,40 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 .dday-car{height:12px}
 .dday-car>i{height:12px;border-radius:2px;opacity:1}
 .dday-car>i.noseat{background-image:repeating-linear-gradient(90deg,transparent 0 3px,var(--surface) 3px 5px)}
+/* #vehicle/…/whereabouts (WHR, 2026-11-16): one strip, midnight to midnight.
+   Solid is watched by the tracker, hatched is inferred, outlined is not
+   known — the three coverage figures, drawn. Tokens only, so both skins and
+   both themes carry it. */
+.whr-nav{flex-wrap:wrap;gap:8px;align-items:center}
+.whr-strip{position:relative;height:28px;background:var(--surface-2);border-radius:4px;overflow:hidden}
+.whr-strip>.whr-seg{position:absolute;top:0;bottom:0;min-width:1px;box-sizing:border-box}
+.whr-seg{display:inline-block}
+.whr-legend .whr-seg{width:18px;height:10px;margin-right:6px;vertical-align:middle;border-radius:2px}
+.whr-stay{background:var(--s1)}
+.whr-drive{background:var(--s3)}
+.whr-parked{background:repeating-linear-gradient(45deg,var(--s1) 0 3px,transparent 3px 7px)}
+/* On a booking while the tracker was silent: its two ends are pinned by the
+   job, the route between is not known — so it is OUTLINED like every unknown
+   stretch (independent review, 2026-11-16: hatched, it read as inferred),
+   dashed in the drive's colour to tell it from a silence nobody explains. */
+.whr-booking{border:2px dashed var(--s3)}
+.whr-moved{border:1.5px dashed var(--rule-strong)}
+.whr-before_first,.whr-after_last,.whr-silent,.whr-no_tracker{border:1px dotted var(--rule-strong)}
+.whr-strip>.whr-future{position:absolute;top:0;bottom:0;background:var(--surface)}
+.whr-pins{position:relative;height:9px;margin-bottom:2px}
+.whr-anchor{position:absolute;top:0;width:0;height:0;margin-left:-5px;
+  border-left:5px solid transparent;border-right:5px solid transparent;border-top:8px solid var(--ink)}
+.whr-legend .whr-anchor{position:relative;display:inline-block;margin:0 6px 0 0;vertical-align:middle}
+.whr-basis{margin-top:4px}
+.whr-labels{position:relative;height:16px;margin-top:3px}
+.whr-labels>span{position:absolute;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+  font-size:var(--t2);color:var(--grey-strong);box-sizing:border-box;padding-right:4px}
+.whr-ruler{position:relative;height:16px;margin-top:2px}
+.whr-ruler>span{position:absolute;transform:translateX(-50%);font-family:"IBM Plex Mono",monospace;
+  font-size:var(--t2);color:var(--grey)}
+.whr-ruler>span:first-child{transform:none}
+.whr-ruler>span:last-child{transform:translateX(-100%)}
+.whr-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:var(--t2);color:var(--grey-strong)}
 .sw.noseat{background-image:repeating-linear-gradient(90deg,transparent 0 3px,var(--surface) 3px 5px)}
 .sw.nopos{background:var(--surface-2);border:1px solid var(--rule)}
 /* An OPEN-ENDED online span: the last ONLINE Uber sent, with no closing event

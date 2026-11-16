@@ -411,4 +411,10 @@ export const SCHEMA_FILES = [
      labelled estimates, and how many live polls ran each hour. Read by
      GET /api/airport (api/airport_routes.js). No fleet_id: not fleet data. */
   'schema_v125.sql',
+  /* v126: every pickup and drop-off placed (FIX-STATUS PLC) — trip_place, the
+     resolved area per booking endpoint with its basis or its true reason;
+     place_vote and booking_cell, the gazetteer in the bookings' own words
+     that names a tracker or plus-code position. Filled by src/trip_places.js;
+     place_area() is untouched. */
+  'schema_v126.sql',
 ];

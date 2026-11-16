@@ -20,6 +20,10 @@ import { winDays, dubaiSpanSql } from './window.js';
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 import { fleetIncome, COMPLETED_SQL } from './income_sql.js';
 import { occCountsOnce, occSourceLabel, OCC_DEDUPE_RULE } from './occupancy_sql.js';
+/* Where the car was, every minute of a day (WHR, 2026-11-16) — the arithmetic
+   is pure and lives beside the route that feeds it. */
+import { whereaboutsBody, dayStartMs, LOOK_AROUND_H } from './whereabouts.js';
+import { dubaiIso } from '../src/util.js';
 /* The alerts-per-distance rule, shared with the fleet headline, both economics
    ledgers and the driver page. See api/alert_coverage_sql.js. */
 import { alertCoverage, alertRate, alertRateReason, drivingCount,
@@ -1463,6 +1467,109 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          FROM (${PARKED_SPOTS_SQL('$3', TS('captured_at'))}) s
         ORDER BY s.hours DESC, s.fixes DESC`, p);
     res.json({ segments, by_verdict: byVerdict, days, parked, dedupe_rule: OCC_DEDUPE_RULE });
+  }));
+
+  /* ── where it was, every minute of a day ─────────────────────────────────
+     The operator, 2026-11-16: "whether pick up or drop off, we should ideally
+     know where the car was at all times." GET /api/vehicle/whereabouts
+     ?plate=&day=YYYY-MM-DD (today by default), or ?from=&to= for up to a
+     week, one entry per day. api/whereabouts.js says what each segment means
+     and how each number was measured; this gathers what it reads:
+
+       · the car's positioned fixes (REAL_FIX: never a 0,0 lost lock) from
+         LOOK_AROUND_H before the first day to as long after the last, so a
+         stay that began the evening before is a stay, and says since when;
+       · the newest fix before that and the first after it, per tracker,
+         through telem_plate_time_idx — two index probes each — so a quiet
+         morning knows whether the car stood where it stood last night, and a
+         dead tracker says since when it has been silent;
+       · the completed bookings made in the car (trip_plate_requested_idx),
+         each end placed on an area the way the product already places
+         one: the gazetteer at the trip's own coordinates where the channel
+         sent them, else the community in its address (place_area,
+         sql/schema_v68.sql). Only what production holds today — the
+         resolver on fix/places will place more ends when it lands;
+       · FMS's own journeys (trip rows on platform 'fms'), whose odometer
+         distance a drive takes where a journey lies inside it.
+
+     No booking driver is named: the car's whereabouts are the question, and
+     the Trips and Drivers tabs already say who held it. 'mixed' in the
+     manifest like every per-vehicle route: the plate is the key and nothing
+     here filters by fleet. */
+  const WHERE_DAYS_MAX = 7;
+  const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+  const okDay = (d) => ISO_DAY.test(d) && !Number.isNaN(Date.parse(`${d}T00:00:00Z`));
+  const addDays = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
+  const WHERE_FIX_COLS = (a = '') => `${a}captured_at AS at, ${a}lat, ${a}lng, ${a}speed, ${a}source, ${a}fleet_id,
+         ${placeAt(`${a}lat`, `${a}lng`)} AS place`;
+  const placeEnd = (lat, lng, addr) => `coalesce(${placeAt(lat, lng)}->>'area', place_area(${addr}))`;
+  app.get('/api/vehicle/whereabouts', withVehicle(async (req, res, plate) => {
+    const today = dubaiIso();
+    const one = String(req.query.day ?? '').trim();
+    const from = String(req.query.from ?? '').trim();
+    const to = String(req.query.to ?? '').trim();
+    let days;
+    if (one) {
+      if (!okDay(one)) return res.status(400).json({ error: 'day must be YYYY-MM-DD' });
+      days = [one];
+    } else if (from || to) {
+      if (!okDay(from) || !okDay(to) || to < from) {
+        return res.status(400).json({ error: 'from and to must both be YYYY-MM-DD, with to on or after from' });
+      }
+      days = [];
+      for (let d = from; d <= to && days.length <= WHERE_DAYS_MAX; d = addDays(d, 1)) days.push(d);
+      if (days.length > WHERE_DAYS_MAX) {
+        return res.status(400).json({ error: `at most ${WHERE_DAYS_MAX} days at a time`,
+          detail: 'each day is read fix by fix; ask for a week, then the next' });
+      }
+    } else days = [today];
+    /* A day that has not begun has no minutes to account for — refused rather
+       than drawn as 1,440 unknown minutes, which would read as a tracker
+       that failed. */
+    if (days.some((d) => d > today)) {
+      return res.status(400).json({ error: 'a day still to come has no whereabouts yet',
+        detail: `today in Dubai is ${today}` });
+    }
+    const lo = new Date(dayStartMs(days[0]) - LOOK_AROUND_H * 3600e3).toISOString();
+    const hi = new Date(dayStartMs(days[days.length - 1]) + (24 + LOOK_AROUND_H) * 3600e3).toISOString();
+    const [near, prev, next, bookings, journeys] = await Promise.all([
+      q(`SELECT ${WHERE_FIX_COLS()} FROM telemetry_snapshot
+          WHERE plate = $1 AND source <> 'uber' AND ${REAL_FIX()}
+            AND captured_at >= $2::timestamptz AND captured_at < $3::timestamptz
+          ORDER BY captured_at`, [plate, lo, hi]),
+      q(`SELECT f.* FROM (VALUES ('cabman'), ('fms')) v(src)
+         CROSS JOIN LATERAL (
+           SELECT ${WHERE_FIX_COLS('t.')} FROM telemetry_snapshot t
+            WHERE t.plate = $1 AND t.source = v.src AND ${REAL_FIX('t.')} AND t.captured_at < $2::timestamptz
+            ORDER BY t.captured_at DESC LIMIT 1) f`, [plate, lo]),
+      q(`SELECT f.* FROM (VALUES ('cabman'), ('fms')) v(src)
+         CROSS JOIN LATERAL (
+           SELECT ${WHERE_FIX_COLS('t.')} FROM telemetry_snapshot t
+            WHERE t.plate = $1 AND t.source = v.src AND ${REAL_FIX('t.')} AND t.captured_at >= $2::timestamptz
+            ORDER BY t.captured_at LIMIT 1) f`, [plate, hi]),
+      /* Completed bookings only: a cancelled request put the car nowhere.
+         The house predicate (income_sql.js), never a LIKE — "not_completed"
+         contains "completed" (COVERAGE). Three hours before the window, so a
+         long job that began the evening before still reaches the morning. */
+      q(`SELECT platform, requested_at, ended_at, duration_s,
+                ${placeEnd('pickup_lat', 'pickup_lng', 'pickup_addr')} AS pickup_area,
+                ${placeEnd('dropoff_lat', 'dropoff_lng', 'dropoff_addr')} AS dropoff_area
+           FROM trip
+          WHERE plate = $1 AND platform <> 'fms'
+            AND requested_at >= $2::timestamptz - interval '3 hours' AND requested_at < $3::timestamptz
+            AND ended_at IS NOT NULL AND ${COMPLETED_SQL('status')}
+          ORDER BY requested_at`, [plate, lo, hi]),
+      q(`SELECT requested_at AS started_at, ended_at, distance_km
+           FROM trip
+          WHERE plate = $1 AND platform = 'fms'
+            AND requested_at >= $2::timestamptz - interval '3 hours' AND requested_at < $3::timestamptz
+            AND ended_at IS NOT NULL
+          ORDER BY requested_at`, [plate, lo, hi]),
+    ]);
+    const points = [...prev, ...near, ...next].map((f) => ({ at: new Date(f.at).toISOString(), lat: f.lat, lng: f.lng,
+      speed: f.speed, source: f.source, area: f.place?.area || null, area_votes: f.place?.votes ?? null }));
+    const fleetId = [...near, ...prev, ...next].find((f) => f.fleet_id)?.fleet_id || null;
+    res.json(whereaboutsBody({ plate, fleetId, days, points, bookings, journeys, nowMs: Date.now() }));
   }));
 
   /* ── safety ───────────────────────────────────────────────────────────── */
