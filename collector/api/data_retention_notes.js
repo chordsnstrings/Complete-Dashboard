@@ -110,6 +110,9 @@ export const READERS = Object.freeze({
   '/api/vehicle/kpis': { tables: [T, A], span: WIN },
   '/api/vehicle/daily': { tables: [T, A], span: WIN },
   '/api/vehicle/movement': { tables: [T], span: WIN },
+  /* Where the car was, all day (WHR): one ?day (today by default) or a
+     ?from/?to week — DAY's reading when no week is named, WIN's when one is. */
+  '/api/vehicle/whereabouts': { tables: [T], span: (req) => (req.query.from || req.query.to) && !req.query.day ? WIN(req) : DAY(req) },
   '/api/vehicle/safety': { tables: [A], span: WIN },
   '/api/economics/assets': { tables: [T, A], span: WIN },
   '/api/economics/drivers': { tables: [A], span: WIN },

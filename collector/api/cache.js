@@ -197,7 +197,14 @@ const neverToday = (req, path) => (path === '/api/driver/day'
      hour in progress until the next collection. A missing ?day= IS today.
      A past day moves only with a collection, and caches like any other. */
   || (path === '/api/airport'
-    && (String(req.query?.day || '').slice(0, 10) || dubaiIso()) === dubaiIso());
+    && (String(req.query?.day || '').slice(0, 10) || dubaiIso()) === dubaiIso())
+  /* Where the car was, all day (api/vehicle_routes.js, WHR 2026-11-16):
+     today's segments grow with every CABMAN tick (every five minutes, mode
+     'realtime', no version) and its last stretch is "no fix since …". A
+     missing ?day= with no ?to= IS today; a week that reaches today is today
+     too. A past day moves only with a collection, and caches as before. */
+  || (path === '/api/vehicle/whereabouts'
+    && (String(req.query?.day || '').slice(0, 10) || String(req.query?.to || '').slice(0, 10) || dubaiIso()) >= dubaiIso());
 
 /* AN ANSWER THAT ALSO MOVES WITH THE TARGET, KEYED ON IT (2026-10-20).
    ─────────────────────────────────────────────────────────────────────────

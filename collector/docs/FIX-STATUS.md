@@ -7344,3 +7344,63 @@ within 5 minutes (93.0%), 28 do not. FMS cadence 6.2 min median. place_cell vs a
 a pass; meanwhile the Territory tab reads "Not placed yet" only for one-line/comma/empty pickups the pass has not
 reached, and dash-form addresses read as before. Read the first `trip_places pass` log lines (batches, ms) before
 trusting the estimate.
+
+## WHR – where the car was, all day (2026-11-16)
+
+The operator: "whether pick up or drop off, we should ideally know where the car was at all times. currently we just
+focus on trips, but if we can figure out where the car is at all time that would be great too." Nothing accounted for a
+car's whole day: `/api/where` names one moment or lists stops, `/api/map/journey` draws the fixes, `/api/driver/day`
+follows one driver's hours. None said which minutes were watched, which inferred and which nobody knows. Written on
+`fix/whereabouts` (from `claude/ecosine-egari-tracking-apis-rf9ong` at `72584d9`); **not deployed** — the brief said
+not to. No migration. The parallel `fix/places` resolver is not used or edited; booking ends are placed only by what
+production holds today (`place_cell` at the trip's coordinates, else `place_area(addr)`), and integrating the
+resolver's better placements is left for after both land. Measurements and segment meanings: COVERAGE "Where the car
+was, all day"; the trap: COVERAGE "The same silence means different things on the two trackers".
+
+| row | what | written | on production | proven |
+|---|---|---|---|---|
+| WHR1 | `api/whereabouts.js` — every interval between two fixes of ONE tracker judged by its ends: stay (≤ 150 m inside the tracker's parked rhythm, CABMAN 70 / FMS 30 min; runs of 10 min or more), drive (different spots ≤ 20 min; km from fixes, or the FMS journey's distance where one lies inside it), quiet parked (INFERRED), quiet moved / before the first fix / after the last (unknown), silent over 24 h (unknown, never "parked"), no tracker; cut to the Dubai day after judging, so a stay across midnight ends at 24:00 and resumes at 00:00 saying since when; minutes whole, segments tiling exactly 1,440 (or to now, today); the stays table joins watched and parked-quiet stretches of one stay; coverage as three figures | yes | no (not deployed) | `test/whereabouts_segmenter.test.mjs` 63/63; 22 reversions each caught (radius 250 m; no parked-quiet; no moved-unseen; no 24 h rule; no before-first edge; no "since"; no clamp at the day's edges; bookings never splitting; a booking keeping a stretch parked; anchors outside the quiet stretch; booking minutes as positioned; two trackers mixed; FMS journey ignored; a run-on journey counted; today to 24:00; pickup at the request time; 0,0 as a position; stays not joined; a short pause as a stay; "first fix of the day" said of a fix on another day; one booking over two quiet stretches drawn as two, its pickup anchored twice). An "after the last fix of the day" wording for a fix on an earlier day was written and removed: off a running day that case is always over a day of silence, so the branch could not run |
+| WHR2 | A booking in a quiet stretch: its span is "on a booking — route not known; its ends from a booking, not a tracker fix" (unknown since WHR-R1; written as inferred), its drop-off and its pickup (`ended_at − duration_s`) anchor the car's area at that minute; a booking inside a parked-and-quiet stretch breaks the inference and the rest becomes "moved — route not known"; only completed bookings (`COMPLETED_SQL`, never a LIKE) | yes | no | segmenter §6; route §2 (a "not_completed" and a cancellation in the same silence are not used) |
+| WHR3 | `GET /api/vehicle/whereabouts?plate=&day=` or `from`/`to` (≤ 7 days): reads the day ± 6 h of fixes (`REAL_FIX`, never an `uber` status row) and the nearest fix beyond each end per tracker (index probes), the car's completed bookings with each end placed, FMS's journeys; refuses a bad day, a day still to come, more than a week, an unknown plate. `whereaboutsBody` returns each day TWICE: the tracker's own account, and `with_bookings` | yes | no | `test/whereabouts_route.test.mjs` 30/30 on PGlite through `test/mount.mjs`; reversions caught: no fix before the window (a dead tracker loses "since"), every booking status, ends named only from coordinates, a future day drawn, journeys not read, bookings in the tracker's account, look-around 0 h. Not caught alone: the route's own `REAL_FIX` on the fixes — the segmenter drops a 0,0 too (proved there) |
+| WHR4 | `with_bookings` and `coverage_with_bookings` classed BK in `api/access/manifest.json`: a Fleet technician (bookings as totals) is handed the tracker's day and not the jobs, and the page says so; subject LOC; `mixed` with the vehicle group's true reason (`api/access/one_fleet.js`); `READERS` entry for the retention note; no driver named anywhere in the body | yes | no | route §2 through the real shaper and real role levels (TEC withheld, DSP full); reversion of the manifest paths caught; `access_manifest` 17/17, `access_one_fleet` 115/115, `data_retention_notes` 54/54 |
+| WHR5 | Today never cached (`api/cache.js` neverToday): a missing `day` with no `to`, today's date, or a week ending today; a past day caches as before | yes | no | `test/cache.test.mjs` 63/63; reversion caught |
+| WHR6 | The vehicle page's **Where it was** tab (`api/public/whereabouts.js`, imported by `vehicle.js` only when the tab opens): day picker on `?day=`; 00 with the three figures in the verdict and the tiles (a tracker with no fix that day is absent with its silence, never "0 fixes"); the strip (solid watched, hatched inferred, outlined unknown; booking ends as pins above it; one area label a stay); the stays table; every stretch with its sentence; the † band (position between fixes, parked-and-quiet inferred, silent over a day, areas as the fleet's own 0.5 km names); `mockapi.mjs` runs synthetic fixes through the real `whereaboutsBody` | yes | no | `test/whereabouts_page.test.mjs` 32/32 in Chromium against the mock at 1280 and 390 (phone shell and desktop shell), `serviceWorkers: 'block'`; reversions caught listed in the render pass (AUDIT "Where it was"); `lazy_pages` 27/27, `routes` 65/65, `endpoint_coverage` 4/4, `mockapi` 10/10 |
+| WHR7 | The old skin's tab bar gains the tab on the seven `vehicle/L45235…` routes of `test/arkiv_classic_frozen.test.mjs`: re-recorded only after the normalised HTML from production's front end (`72584d9` = deployed `4a95cd8`) and from the tree differed by exactly the one new tab link on each (AUDIT "Where it was") | yes | no | `ONLY=vehicle` 12/0 after; 7 lines of the fixture changed |
+
+Measured on production for the brief (GET only, `/api/map/journey` of 40 random tracked cars, 8–16 Nov, run through
+`whereaboutsDay`; COVERAGE "Where the car was, all day"): FMS 81.4% positioned, 5.6% inferred, 13.0% unknown over every
+car-day (89.5 / 6.1 / 4.4 on the 121 days a unit reported); CABMAN 82.8 / 5.1 / 12.1; 6 of the 40 cars sent no fix in
+nine days. The route itself is not on production, so it was not called there.
+
+### Independent review of `fix/whereabouts` (2026-11-16)
+
+Read against `claude/ecosine-egari-tracking-apis-rf9ong`, realistic fix sequences traced through the segmenter
+(scratch probes, not committed), the tab rendered in Chromium against mockapi on :8325 at 1280 and 390, light and dark.
+Held: every day tiles to 1,440 (or to now); Dubai midnight cuts after judging; one tracker, plate normalised by the
+route's `normPlate`; areas are the exact `place_cell` of a fix, never the nearest; anchors never drawn as fixes; three
+figures; one-fleet `mixed` with the vehicle group's reason; manifest, mockapi, endpoint coverage, lazy import; no
+driver name, no credential; `src/places.js`, `place_area`, `areaOf` and the Territory panels untouched (`place_area` is
+called, not edited). The seven classic re-records were re-checked: base public (`git archive FETCH_HEAD`) against the
+tree, normalised HTML diffed, the only difference on each is the tab link. One thing that diff also showed: at the base,
+`vehicle/L45235/movement` already rendered `570df66a…` against a recorded `73dbff4c…` (base mock and base public, twice),
+so that fixture line was stale before this branch and its re-record absorbed it — the tree's rendering is the base's
+plus the tab link, so the new hash is right; the stale line is older than this work.
+
+| row | what | written | on production | proven |
+|---|---|---|---|---|
+| WHR-R1 | A booking in a silence counted **unknown**, not inferred: a job pins its pickup and drop-off (the anchors, unchanged), not the road between — the module's own rule calls two fixes 21 min apart at different places "moved — route not known". As inferred it moved a whole job from unknown to inferred on the headline. `BASIS.booking`, the sentence ("route not known; its ends are from a booking"), `rules`, the Inferred/Unknown tiles, the † "Position between fixes" figure (now moved + booking minutes), the strip draws it outlined (dashed, the drive's colour) instead of hatched | yes | no | reverted `BASIS.booking` to 'inferred': segmenter 2 fail (§6), route 2 fail (§2); `.whr-booking` hatched again: page 1 fail; the band figure from moved alone: page 1 fail |
+| WHR-R2 | "Since" is `since_at_least` when a stay begins on the earliest fix the day was read with (the route reads 6 h back plus one fix): a CABMAN car parked from 10:00 was "there since 17:05 the day before". The sentence says "since at least … (the earliest fix read for this day)"; the stays table's From column now shows the time, with "at least" where it applies | yes | no | `since_at_least` forced false: segmenter 1 fail (§5); the time dropped from the From column: page 1 fail |
+| WHR-R3 | A silence after the last fix measured to **now**: over a day it is "silent — no reading since", the interval rule's answer once a next fix arrives; measured to 24:00 a unit dark for six days drew its last day as "after the last fix of the day" with "Silent over a day: No" | yes | no | `end - last.t` restored: segmenter 1 fail (§4) |
+| WHR-R4 | Page wording: the † band's empty figure is "None", not "None today" (the tab draws any day); the bookings caption counts quiet stretches on a booking, not bookings (one job across quiet–watched–quiet is two stretches, and was said as "2") | yes | no | not revert-tested (wording only) |
+
+Seen and left, with the reason: two fixes ≤ 10 min apart at one spot flanked by silences or the day's edges are drawn
+as a 0 km "drive" (`markRuns` demotes every short same-spot run; a stay rule under 10 min would contradict the stated
+stay definition); a GPS jump inside a stay reads as a drive out and back (speed is read by the route but not used; an
+18 km/h step cannot be told from driving); the two cars carrying both trackers (L44251, L45243) infer "parked" from the
+tracker read even where the other unit's fixes show movement; a booking's span runs from `requested_at`, so the
+minutes driving to the pickup are inside it (unknown either way).
+
+Not built (optional in the brief): a fleet-level "Where cars spent the night" table. Neighbours run one at a time, all
+green: `indexes` 12, `imports_resolve` 4, `tokens` 150, `assets` 40, `route_smoke` 60, `vehicle_routes` 89,
+`vehicle_place` 11, `driver_day_movement` 33, `page_contract` 96, `sql_module_names` 15, `query_params` 12, `cache` 63,
+`lazy_pages` 27. The full suite was not run (the brief).

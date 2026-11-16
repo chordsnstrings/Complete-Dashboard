@@ -1,6 +1,7 @@
 // Local stand-in API so the UI can be reviewed without the production database.
 // Not shipped — used only to render and screenshot the dashboard during development.
 import { custodyWindows, carRuns, movementSegments, movementTotals } from './api/day_movement.js';
+import { whereaboutsBody } from './api/whereabouts.js';
 import express from 'express';
 import { retentionSettings, telemetryCutoff, alertCutoff } from './src/data_retention.js';
 import { RETENTION_SCHEDULE } from './api/data_retention_routes.js';
@@ -2922,6 +2923,74 @@ app.get('/api/vehicle/drivers-detail', (req, r) => {
       first_day: mine[mine.length - 1]?.day, last_day: mine[0]?.day, primary_days: mine.length };
   }).sort((a, b) => b.trips - a.trips);
   r.json({ days, totals });
+});
+
+/* Where the car was, all day (WHR, 2026-11-16). Synthetic fixes, bookings and
+   one FMS journey, run through the REAL arithmetic and the real answer
+   builder (api/whereabouts.js) — so the page draws exactly what the route
+   would hand it for such a day, every segment kind included: a night at home
+   with the tracker quiet (inferred), a drive with its FMS journey, a stay at
+   work, a silence the car moved through with a booking inside it, an evening
+   drive home, and — on the fourth plate — a tracker dead for days. Plates at
+   an even index carry FMS, odd ones CABMAN; L40971 is the dead one. */
+const WB_AREA = [['Al Barsha 1', 0, 0], ['Business Bay', 9000, 6000], ['Dubai Marina', -4000, -14000],
+  ['Deira', 14000, 12000]];
+const wbFix = (day, hm, place, source, jitter = 0) => {
+  const [area, n, e] = WB_AREA[place];
+  const lat = 25.1 + (n + jitter) / 111000;
+  return { at: new Date(Date.parse(`${day}T${hm}:00+04:00`)).toISOString(), lat,
+    lng: 55.2 + e / (111000 * Math.cos(lat * Math.PI / 180)), source, area, area_votes: 40 + place * 17 };
+};
+const wbAdd = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
+function wbDay(day, source) {
+  const pts = [];
+  const step = source === 'cabman' ? 60 : 10;
+  const at = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const stay = (from, to, place, every = step) => { for (let m = from; m <= to; m += every) pts.push(wbFix(day, at(m), place, source, (m % 3) * 8)); };
+  const drive = (from, to, a, b) => {
+    const [, n0, e0] = WB_AREA[a]; const [, n1, e1] = WB_AREA[b];
+    for (let m = from + 5, k = 1; m < to; m += 5, k += 1) {
+      const f = (m - from) / (to - from);
+      const lat = 25.1 + (n0 + (n1 - n0) * f) / 111000;
+      pts.push({ at: new Date(Date.parse(`${day}T${at(m)}:00+04:00`)).toISOString(), lat,
+        lng: 55.2 + (e0 + (e1 - e0) * f) / (111000 * Math.cos(lat * Math.PI / 180)), source, area: null, area_votes: null });
+    }
+  };
+  stay(0, 90, 0);                               // at home after midnight…
+  stay(330, 420, 0);                            // …quiet 01:30–05:30 (FMS: past its cadence → inferred)
+  drive(420, 460, 0, 1);                        // to work
+  stay(460, 720, 1, Math.min(step, 30));        // at work
+  stay(790, 1050, 2, Math.min(step, 30));       // 12:00–13:10 silent, then across town
+  drive(1050, 1095, 2, 0);                      // home
+  stay(1095, 1435, 0);
+  return pts;
+}
+app.get('/api/vehicle/whereabouts', (req, r) => {
+  const i = pIndex(req.query.plate);
+  const plate = plates[i];
+  const today = dubaiDayOf(new Date());
+  const one = String(req.query.day || '').slice(0, 10);
+  const from = String(req.query.from || '').slice(0, 10);
+  const to = String(req.query.to || '').slice(0, 10);
+  const days = [];
+  if (one) days.push(one);
+  else if (from && to) for (let d = from; d <= to && days.length < 7; d = wbAdd(d, 1)) days.push(d);
+  else days.push(today);
+  if (days.some((d) => d > today)) return r.status(400).json({ error: 'a day still to come has no whereabouts yet', detail: `today in Dubai is ${today}` });
+  const source = i % 2 === 0 ? 'fms' : 'cabman';
+  const all = [wbAdd(days[0], -1), ...days, wbAdd(days[days.length - 1], 1)];
+  const points = i === 3
+    ? [wbFix(wbAdd(today, -4), '14:20', 3, 'cabman')]
+    : all.flatMap((d) => wbDay(d, source));
+  /* The dead tracker's car took no booking either: its day is silence alone. */
+  const bookings = i === 3 ? [] : all.flatMap((d) => [
+    { platform: 'bolt', requested_at: `${d}T12:20:00+04:00`, ended_at: `${d}T12:55:00+04:00`, duration_s: 1500,
+      pickup_area: 'Al Quoz 3', dropoff_area: 'Jumeirah 1' },
+    { platform: 'uber', requested_at: `${d}T17:32:00+04:00`, ended_at: `${d}T18:10:00+04:00`, duration_s: 1800,
+      pickup_area: 'Dubai Marina', dropoff_area: 'Al Barsha 1' },
+  ]);
+  const journeys = source === 'fms' ? all.map((d) => ({ started_at: `${d}T07:01:00+04:00`, ended_at: `${d}T07:39:00+04:00`, distance_km: 13.4 })) : [];
+  r.json(whereaboutsBody({ plate, fleetId: i % 3 === 0 ? 'egari' : 'ecosine', days, points, bookings, journeys }));
 });
 
 app.get('/api/vehicle/movement', (req, r) => {

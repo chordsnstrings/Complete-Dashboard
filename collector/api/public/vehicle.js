@@ -1446,7 +1446,11 @@ async function tabTrips(root, plate) {
   };
 }
 
-const TABS = { overview: tabOverview, drivers: tabDrivers, movement: tabMovement,
+/* "Where it was" (WHR, 2026-11-16): every minute of one day, as stays, drives
+   and quiet stretches. Its own module, fetched only when the tab opens, so
+   the other six tabs do not carry it (test/lazy_pages.test.mjs). */
+const tabWhereabouts = async (root, plate, prof) => (await import('./whereabouts.js')).tabWhereabouts(root, plate, prof);
+const TABS = { overview: tabOverview, drivers: tabDrivers, movement: tabMovement, whereabouts: tabWhereabouts,
   earnings: tabEarnings, safety: tabSafety, compliance: tabCompliance, trips: tabTrips };
 
 /* ── page shell ──────────────────────────────────────────────────────────── */
