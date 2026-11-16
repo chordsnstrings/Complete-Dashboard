@@ -401,11 +401,23 @@ async function noteHour(db, nowMs, { ok, seen = 0, error = null }) {
 }
 
 /* The poller writes a collection_run when its outcome changes or every 30
-   minutes — not 720 rows a day of "ok". */
+   minutes — not 720 rows a day of "ok".
+   MODE 'realtime', and the reason is the response cache (review of
+   2026-11-16, FIX-STATUS FLT-R6). api/cache.js moves every cached answer's
+   version on the latest finish of any collection_run EXCEPT mode 'realtime',
+   and each move restarts the warmer's 89 aggregates (519–1,050 s a pass,
+   measured 2026-09-29 when CABMAN's tick did it). As 'live' this poller
+   moved it at least every half hour and, on a flaky feed flipping between ok
+   and an error, every two minutes. The flight tables are read by one route,
+   /api/airport, which reads today uncached (api/cache.js neverToday), so
+   nothing needs this tick to invalidate anything. src/sources/
+   uber_transactions.js MODE makes the same choice for the same reason.
+   /api/status still shows it, as source opensky, mode realtime. */
+export const LIVE_MODE = 'realtime';
 async function noteLiveRun(db, nowMs, run) {
   if (lastLive && lastLive.status === run.status && lastLive.error === (run.error || null) && nowMs - lastLive.at < 30 * 60e3) return;
   lastLive = { status: run.status, error: run.error || null, at: nowMs };
-  await logRun({ source: SOURCE, fleet_id: null, mode: 'live', ...run }, db);
+  await logRun({ source: SOURCE, fleet_id: null, mode: LIVE_MODE, ...run }, db);
 }
 
 /** Store a detected landing, one row per aircraft and airport within 20

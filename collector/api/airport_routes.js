@@ -408,9 +408,14 @@ export function airportRoutes(app, { q, wrap }) {
                                   AND h.polls_ok >= 20
           WHERE f.airport = ANY($3::text[]) AND ${between('f.landed_at')}`, [from, day, aps]),
     ]);
+    /* The live watch logs mode 'realtime' (src/sources/flights.js LIVE_MODE:
+       a two-minute tick must not move the response cache's version), the
+       arrivals run mode 'arrivals'. Written out rather than imported: that
+       module brings the collector's pool with it. */
     const byMode = Object.fromEntries(runs.map((r) => [r.mode, r]));
     res.json(airportShape({ day, airport, days, fleet, nowMs, coverage, landed, live, liveHours, bookings,
-      originsDay, originsWindow, runs: byMode, liveCheck: { ...(check1[0] || {}), ...(check2[0] || {}) },
+      originsDay, originsWindow, runs: { arrivals: byMode.arrivals, live: byMode.realtime },
+      liveCheck: { ...(check1[0] || {}), ...(check2[0] || {}) },
       backfillDays: Math.max(1, getInt('OPENSKY_BACKFILL_DAYS', 30)) }));
   }));
 }

@@ -174,6 +174,13 @@ console.log('\nA · the route, on PGlite');
     old.landings.hours.every((x) => x.n == null && x.basis === 'absent' && /no OpenSky client configured/.test(x.why)), J(old.landings.hours[5]));
   check('…the day’s total absent with the reason, never 0', old.landings.total == null && /no OpenSky client configured/.test(old.landings.total_why || ''), String(old.landings.total_why));
   check('…and the origins say why there are none', old.origins.day == null && /no confirmed landing/.test(old.origins.day_why || ''));
+  /* The live watch logs mode 'realtime' (src/sources/flights.js LIVE_MODE,
+     FIX-STATUS FLT-R6: a two-minute tick must not move the cache's version),
+     and the route must read that run as the live watch's state. REVERSION:
+     pass `runs: byMode` again (it looks for mode 'live') — this fails. */
+  await logRun({ source: 'opensky', fleet_id: null, mode: 'realtime', status: 'error', rows_written: 0, error: 'OpenSky answered HTTP 503' }, db);
+  const lv = (await get(`/api/airport?day=${addDays(today, -20)}&days=7`)).body;
+  check('the live watch’s realtime run is read as its state', lv.live?.status === 'error' && lv.live.error === 'OpenSky answered HTTP 503', J(lv.live));
   const bad = (await get('/api/airport?day=2026-13-45&airport=XXXX&days=abc')).body;
   check('a malformed day, airport and window fall back to today, OMDB and 28 days', bad.day === today && bad.airport === 'OMDB' && bad.impact.days === 28);
 }

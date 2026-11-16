@@ -188,6 +188,15 @@ const neverToday = (req, path) => (path === '/api/driver/day'
      minutes and advances no version. A missing ?day= IS today. Past days are
      the stored record and cache like any other page. */
   || (path === '/api/online/hours'
+    && (String(req.query?.day || '').slice(0, 10) || dubaiIso()) === dubaiIso())
+  /* Flights landing and the fleet's airport trips (api/airport_routes.js,
+     review of 2026-11-16, FIX-STATUS FLT-R6): today's hours are OpenSky's
+     live final-approach estimates, written every two minutes by a tick that
+     logs mode 'realtime' and so advances no version — and the answer's own
+     clock decides which hours are past. Cached, it froze "so far" and the
+     hour in progress until the next collection. A missing ?day= IS today.
+     A past day moves only with a collection, and caches like any other. */
+  || (path === '/api/airport'
     && (String(req.query?.day || '').slice(0, 10) || dubaiIso()) === dubaiIso());
 
 /* AN ANSWER THAT ALSO MOVES WITH THE TARGET, KEYED ON IT (2026-10-20).

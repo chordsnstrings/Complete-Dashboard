@@ -11758,9 +11758,13 @@ saved snapshot holds one: ABY739 (Air Arabia, based at Sharjah), 267 m, descendi
 OMSJ's 30.
 
 **When it runs.** Arrivals `41 1,4,7,10,13,16,19,22 * * *` UTC and 12 minutes after the worker
-starts; live every two minutes. Status rows under source `opensky` (modes `arrivals`, `live`) on
-`/api/status`. No `credential_state` row is written: OpenSky is not one of the fleet's channels,
-and the banner and the ntfy alerts should not page anyone about a flight feed.
+starts; live every two minutes. Status rows under source `opensky` (modes `arrivals`, `realtime`)
+on `/api/status`. The live watch is `realtime` ON PURPOSE (review of 2026-11-16, FIX-STATUS
+FLT-R6): the response cache's version moves on any other mode, each move restarts the warmer, and a
+two-minute tick that wrote `live` moved it at least every half hour and on every ok↔error flip.
+Today's `/api/airport` is read uncached instead (`api/cache.js` neverToday). No `credential_state`
+row is written: OpenSky is not one of the fleet's channels, and the banner and the ntfy alerts
+should not page anyone about a flight feed.
 
 **The fleet's airport trips, measured against it** (production `/api/trips/list`, 17 Oct – 15 Nov
 2026, every booking whose address mentions airport, terminal, Maktoum, DWC, DXB or مطار — 2,995

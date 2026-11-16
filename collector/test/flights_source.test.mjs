@@ -52,6 +52,7 @@ import { gunzipSync } from 'node:zlib';
 import { applySchema } from './schema.mjs';
 import { approachOf, APPROACH_AIRPORTS, APPROACH_RULE, makeClient, forgetToken, OpenSkyError, planDays,
   storeLandings, collectArrivals, pollLive, resetLive, NO_CLIENT, LIVE_BOX } from '../src/sources/flights.js';
+import { VERSION_SQL } from '../api/cache.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -328,6 +329,22 @@ console.log('\n4 · the live poll');
   fake.mode.statesEmpty = false;
   const he = (await rows('SELECT polls_ok FROM flight_live_hour WHERE hour_start = $1', [hourOf(te)]))[0];
   check('…while OpenSky’s own empty answer (states: null) is an answered poll that saw nothing', qe.seen === 0 && !qe.error && he?.polls_ok === 1, JSON.stringify({ qe, he }));
+  /* The live watch must not move the response cache's version. Review of
+     2026-11-16 (FIX-STATUS FLT-R6): it logged mode 'live', which
+     api/cache.js VERSION_SQL counts — so every thirty minutes, and on every
+     ok↔error flip of a flaky feed (each two minutes at worst), every cached
+     answer went stale and the warmer restarted its 89 aggregates: the CABMAN
+     load of 2026-09-29 that 'realtime' exists to prevent (src/sources/
+     uber_transactions.js MODE). REVERSION: log the live run as mode 'live'
+     again — this fails. */
+  const ver = async () => { const c = (await rows(VERSION_SQL))[0].c; return c instanceof Date ? c.toISOString() : String(c); };
+  await new Promise((r) => setTimeout(r, 20));
+  const v0 = await ver();
+  resetLive();
+  await pollLive({ db, cfg: CFG, nowMs: t0 + 6 * 3600e3 });
+  const lastRun = (await rows(`SELECT mode FROM collection_run WHERE source = 'opensky' ORDER BY id DESC LIMIT 1`))[0];
+  check('a live poll is a realtime run and does not move the response cache’s version', lastRun?.mode === 'realtime' && (await ver()) === v0,
+    `${JSON.stringify(lastRun)} ${v0} → ${await ver()}`);
   const pn = await pollLive({ db, cfg: null, nowMs: t0 + 7200_000 });
   const hn = (await rows(`SELECT polls_ok, last_error FROM flight_live_hour WHERE hour_start = $1`, [new Date(Math.floor((t0 + 7200_000) / 3600e3) * 3600e3).toISOString()]))[0];
   check('no client: the live hour records the reason, and no poll counts as answered', pn.skipped === NO_CLIENT && hn?.polls_ok === 0 && hn.last_error === NO_CLIENT, JSON.stringify(hn));
