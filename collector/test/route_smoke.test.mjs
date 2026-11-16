@@ -123,6 +123,10 @@ check('the section markers the harness slices between still exist in server.js',
 /* Every GET route the server declares, with a parameter set that resolves. A
    route not listed here is called with the window alone. */
 const ARGS = {
+  /* Where each car spent the night (OVN): with the window alone the route
+     refuses (a range of nights is for named plates), which is a 400 and
+     executes nothing past the parse; a plate runs the month's 31 nights. */
+  '/api/overnight': 'plates=L100',
   '/api/track': 'plate=L100',
   '/api/map/journey': 'plate=L100&day=2026-08-05',
   '/api/vehicle/drivers': 'plate=L100',

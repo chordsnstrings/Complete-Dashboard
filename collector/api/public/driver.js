@@ -373,6 +373,36 @@ async function unbookedOnBars(barsHost, host, id, prof) {
   host.dataset.marked = String(marked);
 }
 
+/* WHERE THE CAR SPENT THE NIGHT AFTER EACH DAY (OVN, 2026-11-16).
+   The operator asked for the overnight parking "in drivers activity list".
+   Each drawn day's row carries one more line, `.sh-n` (drawn by shiftBars,
+   in EVERY row, so the rows stay one height from the first paint — the CXA
+   fix made them uniform and test/activity_cancellations.test.mjs holds it):
+   where the car this person drove LAST that day stood from 00:00 to 05:00
+   the next morning, from that car's tracker. The last car is the one on the
+   day's latest booking that ran; a day whose only bookings were cancelled
+   falls back to the latest booking at all (the person was in that car), and
+   a day with no plate on any booking says so. "(car L…)" when they drove
+   more than one. One read for all the rows (api/public/overnight.js), not
+   awaited: the bars are true without it. */
+function overnightOnBars(barsHost, days) {
+  const byDay = new Map((days || []).map((d) => [String(d.day).slice(0, 10), d]));
+  const drawn = [...barsHost.querySelectorAll('.shift[data-day]')].map((r) => r.dataset.day);
+  const perDay = drawn.map((day) => {
+    const jobs = (byDay.get(day)?.jobs || []).filter((j) => j.plate);
+    const ran = jobs.filter((j) => !cancelOf(j));
+    const pool = ran.length ? ran : jobs;
+    const lastJob = [...pool].sort((a, b) => a.s - b.s).pop();
+    return { day, plate: lastJob?.plate || null, plates: new Set(pool.map((j) => j.plate)).size };
+  });
+  import('./overnight.js').then((m) => m.activityNights(barsHost, perDay)).catch((e) => {
+    barsHost.querySelectorAll('.sh-n[data-state="wait"]').forEach((n) => {
+      n.textContent = `Overnight: could not be drawn — ${e?.message || e}`;
+      n.classList.add('ent-off');
+    });
+  });
+}
+
 /* WHO ENDED A BOOKING THAT DID NOT RUN, said the way an operator says it
    (the operator, 2026-11-16: "the specific rider cancelled or driver
    cancelled on the activity doesn't show properly … give users better
@@ -529,7 +559,8 @@ function shiftBars(host, days, meta = {}, shiftId = null) {
       <div class="sh-w num">${d.wait_min ? `${fmt(d.wait_min / 60, 1)}h${
         share != null ? ` <span class="dim">${share}%</span>` : ''}` : '<span class="dim">—</span>'}</div>
       <div class="sh-t num">${d.bookings - dayCx.total}${dayCx.total
-        ? ` <span class="dim" title="${esc(`${dayCx.total} cancelled: ${dayCx.words}`)}">+${dayCx.total}✕</span>` : ''}</div>`;
+        ? ` <span class="dim" title="${esc(`${dayCx.total} cancelled: ${dayCx.words}`)}">+${dayCx.total}✕</span>` : ''}</div>
+      <div class="sh-n dim" data-state="wait" data-fx="keep">Overnight: reading…</div>`;
     r.title = `${dayStr(d.day)} · ${d.bookings} bookings`
       + (dayCx.total ? ` — ${d.bookings - dayCx.total} jobs and ${dayCx.total} cancelled (${dayCx.words})` : '')
       + ` · on job ${fmt(d.on_job_min / 60, 1)} h`
@@ -1470,6 +1501,7 @@ async function tabActivity(root, id, prof) {
   if (ak) activityGlance(AKB, shift);
   if ((shift.days || []).some((d) => d.first_min != null)) {
     shiftBars(sh.body, shift.days, shift, addressOf(prof, id));
+    overnightOnBars(sh.body, shift.days);
   } else {
     sh.body.innerHTML = '';
     sh.body.append(note((shift.days || []).length

@@ -80,6 +80,13 @@ const AT = (req) => {
   return Number.isFinite(t) ? [dubaiDayOf(t), dubaiDayOf(t)] : null;
 };
 const ALL = () => ['0000-01-01', '9999-12-31'];
+const prevDay = (d) => new Date(Date.parse(`${d}T12:00:00Z`) - 864e5).toISOString().slice(0, 10);
+const NIGHTS = (req) => {
+  const pick = (k) => { const v = String(req.query[k] || '').slice(0, 10); return ISO_DAY.test(v) ? v : null; };
+  const first = pick('from') || pick('night') || prevDay(dubaiDayOf(Date.now()));
+  const last = pick('to') || first;
+  return [first, nextDay(last)];
+};
 /* /api/trip names a journey, not a time: its track is read around the
    journey's own start, which only the database knows. Asked only when a
    claim exists at all, so it costs nothing until the pass has removed rows. */
@@ -113,6 +120,10 @@ export const READERS = Object.freeze({
   /* Where the car was, all day (WHR): one ?day (today by default) or a
      ?from/?to week — DAY's reading when no week is named, WIN's when one is. */
   '/api/vehicle/whereabouts': { tables: [T], span: (req) => (req.query.from || req.query.to) && !req.query.day ? WIN(req) : DAY(req) },
+  /* Where each car spent the night (OVN): night D reads the evening of D
+     and the morning of D+1, so a range of nights depends on [from, to + 1];
+     the default is last night, read on yesterday and today. */
+  '/api/overnight': { tables: [T], span: NIGHTS },
   '/api/vehicle/safety': { tables: [A], span: WIN },
   '/api/economics/assets': { tables: [T, A], span: WIN },
   '/api/economics/drivers': { tables: [A], span: WIN },

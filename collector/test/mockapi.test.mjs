@@ -59,6 +59,9 @@ const ARGS = {
   '/api/vehicle/trips': `plate=${PLATES[0]}`, '/api/vehicle/mix': `plate=${PLATES[0]}`,
   '/api/vehicle/drivers': `plate=${PLATES[0]}`, '/api/track': `plate=${PLATES[0]}`,
   '/api/map/journey': `plate=${PLATES[0]}&day=2026-08-05`,
+  /* Where each car spent the night (OVN): the window is read as a range of
+     nights, which is for named plates — August's 31 nights of one car. */
+  '/api/overnight': `plates=${PLATES[0]}`,
   /* A booking is addressed by the provider's own id; the seeded ids are
      `<platform>-<day>-<n>`. Without this the route 404s for want of an id
      and is skipped, which is exactly how a shape check reports on a route
