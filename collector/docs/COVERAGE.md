@@ -981,6 +981,12 @@ driver's 222 tracker fixes.
 
 ## Traps that have cost time more than once
 
+* **The same silence means different things on the two trackers** (2026-11-16, FIX-STATUS WHR; COVERAGE "Where the car
+  was, all day"). CABMAN reports about hourly while parked (97.9% of its same-spot gaps are under 67 minutes, the
+  heartbeat at 65–67); FMS kept reporting every ~6–13 minutes parked (99.3% under 30). So an hour between two fixes at one
+  spot is CABMAN's own rhythm — watched — and past FMS's — inferred. One "quiet after N minutes" for both would call every
+  parked CABMAN hour a silence or every FMS gap normal. Use `PARKED_CADENCE_MIN` (`api/whereabouts.js`), and never call a
+  gap over a day parked, whatever its two ends say: past a day a parked car and a dead unit look the same.
 * **"Airport" in a booking's address is mostly NOT the airport** (2026-11-16, FIX-STATUS FLT9).
   No booking carries a coordinate, so an airport trip is found by its address text, and the
   commonest "airport" address on production is "Airport Rd - Al Garhoud - Dubai" — a road of
@@ -11956,4 +11962,80 @@ Measured with the operator's key: "Dubai events concerts exhibitions November De
 (Time Out Dubai 9 Nov, Gulf News 1 Nov, What's On, The National, few.ae on National Day, Travel and Tour World). The
 tier's seven searches for 16 Nov – 6 Dec returned 57 distinct pages, among them the Government of Dubai Media Office on
 DWTC's 20 November exhibitions and Dubai Week's sports calendar.
+
+## Where the car was, all day — measured 2026-11-16 (FIX-STATUS WHR)
+
+The operator: "whether pick up or drop off, we should ideally know where the car was at all times. currently we just
+focus on trips, but if we can figure out where the car is at all time that would be great too."
+`GET /api/vehicle/whereabouts?plate=&day=` (or `from`/`to`, a week at most) accounts for every minute of a Dubai day of
+one car; the arithmetic is `api/whereabouts.js`, the page is the vehicle's **Where it was** tab.
+
+### What each segment kind means
+
+Every interval between two consecutive fixes of ONE tracker is judged by its two ends — how far apart, how long apart:
+
+| kind | when | basis |
+|---|---|---|
+| **stay** | two fixes within 150 m, inside the tracker's parked rhythm (CABMAN 70 min, FMS 30 min); a run of them lasting 10 min or more | watched (`fixes`) |
+| **drive** | two fixes at different spots within 20 min (`GAP_MIN`, the journey map's step); a same-spot pause under 10 min stays inside the drive. km from the fixes, or FMS's own journey distance where a journey lies inside the drive (±10 min) | watched |
+| **quiet: parked** | two fixes within 150 m with a gap past the rhythm: "parked, tracker quiet" | **inferred** |
+| **quiet: booking** | a completed booking's span inside a quiet stretch; its drop-off (and its pickup, where `ended_at − duration_s` places it) anchors the car's area at that minute, "from a booking, not a tracker fix". A booking inside a parked-and-quiet stretch breaks the inference: the rest becomes "moved" | **inferred** |
+| **quiet: moved** | different spots, gap over 20 min: "moved while the tracker was silent — route not known", with both ends and how far apart they are in a straight line | unknown |
+| **quiet: before_first / after_last** | no fix of the tracker before (after) the stretch at all | unknown |
+| **quiet: silent** | any gap over 24 h, whatever its two ends say: "no reading since …" | unknown |
+| **quiet: no_tracker** | the car has never sent a position | unknown |
+
+The trackers file on movement, so two fixes at one spot with nothing between, inside the tracker's own parked rhythm, are
+the tracker saying the car stood there. Past the rhythm the report that should have come did not, so whether the unit was
+alive in between is not known: that is why parked-and-quiet is inferred and counted apart. The two trackers on one car
+are never mixed (the one with more fixes that day is read; the other is named in `tracker.second`). Bookings are laid in
+only in `with_bookings` (manifest class BK), so a role that sees bookings as totals gets the tracker's own account.
+
+### The thresholds, measured
+
+40 cars drawn at random from `/api/live`'s roster (20 listed FMS, 20 CABMAN), 9 days each (8–16 Nov), fixes from
+`/api/map/journey` (GET), 42,168 consecutive-fix intervals:
+
+| | CABMAN | FMS |
+|---|---|---|
+| same-spot (≤ 150 m) gaps ≤ 20 min | 52.8% | 97.7% |
+| ≤ 30 min | 54.9% | 99.3% |
+| ≤ 60 min | 62.0% | 99.7% |
+| ≤ 67 min | 97.9% (the heartbeat sits at 65–67 min) | 99.8% |
+| ≤ 70 min | 98.2% | 99.8% |
+| over 6 h | 0.12% | 0.08% |
+| different-spot gaps ≤ 20 min | 95.4% | 99.4% |
+| parked pairs within 50 m / 150 m / 250 m | 91.8% / 94.6% / 95.6% (pairs 55–70 min apart) | 99.3% / 99.65% / 99.78% (stopped pairs 8–30 min apart) |
+
+So the parked rhythm is 70 min for CABMAN and 30 min for FMS, and the stay radius is 150 m: widening it to 250 m (the
+radius `/api/where`'s stop rule uses) gains one point on CABMAN and a tenth on FMS, and makes a car crawling through a jam
+"one place". FMS in November kept reporting every ~6–13 minutes while parked, unlike the September measurement above
+("can go quiet most of a night parked"); its long silences are still there, just rare.
+
+### Coverage per tracker, measured on production
+
+The same sample, 9–15 Nov (7 whole days, each read with its neighbours' fixes), grouped by the tracker actually read:
+
+| | cars | car-days | positioned | inferred | unknown |
+|---|---|---|---|---|---|
+| FMS, every car-day | 19 | 133 | **81.4%** | 5.6% | 13.0% |
+| FMS, car-days with at least one fix | | 121 | **89.5%** | 6.1% | 4.4% |
+| CABMAN, every car-day (all had a fix) | 15 | 105 | **82.8%** | 5.1% | 12.1% |
+| no fix at all 8–16 Nov | 6 | 42 | 0% | 0% | 100% |
+
+The median car-day was 95.7% positioned on FMS and 87.1% on CABMAN (10th percentile 57.3% and 58.6%). The unknown minutes
+are different in kind: FMS's are mostly whole days a unit was silent (7,711 of 24,991 minutes silent, 12,129 before a
+unit's first fix of the week) — on days it reported, only 4.4% is unknown; CABMAN's are almost all "moved while the
+tracker was silent" (18,353 of 18,353 minutes): 372 stretches, 347 of them (93%) lasting 20–70 min and 307 (83%) with
+ends under 2 km apart — short hops CABMAN did not report, between two places it did. 6 of the 40 sampled cars (15%) sent no fix in the nine days; on production the route reads their last fix ever and
+says "no reading since …" (the journey sample cannot tell that from never). Measured with the module itself on the
+fetched fixes; the area names were not part of this measurement (the journey route returns none).
+
+### Traps this added to the list
+
+* The same gap means different things per tracker: an hour at one spot is CABMAN's parked heartbeat (watched) and past
+  FMS's rhythm (inferred). A single "quiet after N minutes" for both would call every parked CABMAN hour inferred or every
+  parked FMS hour watched.
+* A gap over a day is never "parked", even when both ends are the same spot: past a day a parked car and a dead unit look
+  the same until the car moves.
 

@@ -141,7 +141,7 @@ const BY_ROUTE = {
   vehicle: ['GET /api/map/journey', 'GET /api/track', 'GET /api/where', 'GET /api/vehicle/daily',
     'GET /api/vehicle/drivers', 'GET /api/vehicle/drivers-detail', 'GET /api/vehicle/earnings',
     'GET /api/vehicle/kpis', 'GET /api/vehicle/mix', 'GET /api/vehicle/movement', 'GET /api/vehicle/profile',
-    'GET /api/vehicle/safety', 'GET /api/vehicle/trips'],
+    'GET /api/vehicle/safety', 'GET /api/vehicle/trips', 'GET /api/vehicle/whereabouts'],
   target: ['GET /api/target', 'GET /api/target/hours', 'GET /api/target/car', 'GET /api/export/today.xlsx',
     'GET /api/export/target-month.xlsx'],
   settings: ['GET /api/settings', 'PUT /api/settings', 'POST /api/settings/paste'],

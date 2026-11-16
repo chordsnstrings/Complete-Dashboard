@@ -3223,3 +3223,52 @@ the phone shell shows the house "Built for a bigger screen" card for both pages.
 in Dubai" with the true reason the web search gave nothing (the tool is not enabled for the account). A probe that
 waits a fixed five seconds photographs #airport still "Loading…" — wait on a figure, not a clock.
 
+## #vehicle/…/whereabouts — "Where it was", rendered (2026-11-16, FIX-STATUS WHR)
+
+A new tab on the vehicle page (`api/public/whereabouts.js`, fetched only when the tab opens), rendered in Chromium
+against mockapi.mjs, whose `/api/vehicle/whereabouts` runs synthetic fixes, bookings and an FMS journey through the
+REAL `whereaboutsBody` (api/whereabouts.js): a night at home with the tracker quiet, a drive with its journey, a stay at
+work, a silence the car moved through with a Bolt booking inside it, an evening drive on an Uber booking, and a tracker
+dead for days on L40971. Port 8325, `serviceWorkers: 'block'`, `reducedMotion: 'reduce'`, Dubai time zone.
+
+| width · theme · skin | drawn | overflow | errors |
+|---|---|---|---|
+| 1280 · light · Arkiv | 00 (verdict with the three figures, 4 tiles, positioned hero), the strip (11 stretches), 2 booking pins, 4 area labels, ruler, legend, the stays table (4), the log (11), † band (4 cells), colophon | 0 | none |
+| 1280 · dark · Arkiv | the same; stays read light on the dark paper, drives grey, both hatches and the dashed outline visible | 0 | none |
+| 390 · light · Arkiv (desktop shell) | the same; tiles one per row, the day picker wraps, one area label ("Dubai Marina") ellipsed to its stay's width | 0 | none |
+| 390 · dark · Arkiv | the same | 0 | none |
+| 390 · phone shell (`?ui=phone`, touch) | the desktop tab inside m/screens.js's fallback, every section | 0 | none |
+| 1280 · Classic | the same content: tile row, plain panels, the † reasons as a panel | 0 | none |
+| L40971, a past day | one stretch, "No reading since …"; the tracker tile absent with that sentence; "Silent over a day: Yes" | 0 | none |
+| today | "so far today", the day to now, the rest of the strip left empty | 0 | none |
+| L12615 (CABMAN) | hourly stays watched, the 06:30–07:05 and noon silences "moved unseen" | 0 | none |
+
+- **The three figures are never one:** the verdict states positioned, inferred and unknown; the hero is the positioned
+  share and the two others are tiles beside it.
+- **Hatched is inferred, outlined is not known, solid is watched** — the strip draws the coverage. A booking in a quiet
+  stretch is the drive's colour hatched the other way (movement known from the job, not the tracker); its pickup and
+  drop-off are pins above the strip, never marks inside it.
+- **Found and fixed in this pass:** (1) the area labels repeated "Al Barsha 1" three times over one stay (a label per
+  stretch); now one label per stay, from the stays table. (2) A tracker silent for days read "CABMAN · 0 fixes that day" —
+  a tracker that worked and found nothing; now absent with its silence. (3) Booking pins drawn inside the strip were
+  invisible on the hatch; now pins above it. (4) `--ink-2` (Arkiv emphasis) on the labels failed `tokens.test.mjs`; the
+  old skin's secondary text is `--grey-strong`.
+- **Focus layer.** `bin/focus-rows-audit.mjs` on `vehicle/L45235/whereabouts?day=…` and the CABMAN car (mock on :8325,
+  SETTLE 2500): 2 pages, 0 marked layout elements, 0 errors; `PHONE=1`: 0 faults (13 marks, none on a row or a layout).
+- **The classic skin.** Adding the tab changes the old skin's tab bar on the seven `vehicle/L45235…` routes of
+  `test/arkiv_classic_frozen.test.mjs`. Each was captured from production's front end (`git archive` of
+  `collector/api/public` at `72584d9`, equal to the deployed `4a95cd8`) and from the working tree, and the normalised HTML
+  diffed: on all seven the difference is exactly four pieces — `<a href="#vehicle/L45235/whereabouts?period=month">`,
+  `<span class="ic">◷`, `</span>Where it was`, `</a>`. The other vehicle routes (`vehicles`, `safety/vehicles`,
+  `action/idle_vehicle/L45235`, `cohort/vehicles-moved-no-booking`) are identical. Those seven hashes were re-recorded
+  (7 lines of the fixture); `ONLY=vehicle` then passes 12/0.
+
+**Reversions, each caught by `test/whereabouts_page.test.mjs`:** no tab in the bar (2 fail); the module imported
+statically (1); the verdict with one figure (2); a label per stretch (1); the withheld-bookings sentence dropped (2);
+the dead tracker's tile as "0 fixes" (1); anchors not drawn (1); the strip from the tracker's account when bookings may
+be seen (1); parked-quiet drawn solid (1); the strip 1,200 px wide (1).
+
+To repeat: `node test/whereabouts_page.test.mjs` (port 8325); `PORT=8325 node mockapi.mjs &` then
+`ONLY='vehicle/L45235/whereabouts?day=<yesterday>' SETTLE=2500 node bin/focus-rows-audit.mjs http://127.0.0.1:8325
+/tmp/fx.json`. Against production once deployed: `node bin/prod-mirror.mjs &` and open
+`http://127.0.0.1:8200/#vehicle/<plate>/whereabouts`.

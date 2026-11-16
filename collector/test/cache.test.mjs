@@ -44,6 +44,8 @@ app.get('/api/driver/day', (_q, res) => { calls++; res.json({ n: calls }); });
 app.get('/api/online/hours', (_q, res) => { calls++; res.json({ n: calls }); });
 /* Flights and airport trips: today's landings are live estimates. */
 app.get('/api/airport', (_q, res) => { calls++; res.json({ n: calls }); });
+/* Where the car was, all day: today's segments grow with every CABMAN tick. */
+app.get('/api/vehicle/whereabouts', (_q, res) => { calls++; res.json({ n: calls }); });
 const server = app.listen(0);
 const port = server.address().port;
 // The cache re-requests stale keys on itself, so it needs the real port.
@@ -401,6 +403,22 @@ check('and the hit rate is visible, so a cache that stopped working can be seen'
   const y1 = await get('/api/airport?day=2026-10-01&airport=OMDB&days=28');
   const y2 = await get('/api/airport?day=2026-10-01&airport=OMDB&days=28');
   check('…and a past day of it is served from the cache', y2.body.n === y1.body.n && y2.cache === 'hit', JSON.stringify([y1, y2]));
+  /* Where the car was, all day (WHR, 2026-11-16): today's segments grow with
+     every five-minute CABMAN tick, which moves no version; a week reaching
+     today is today. REVERSION: drop the /api/vehicle/whereabouts clause from
+     neverToday — the first check fails (the second call is a hit). */
+  const w1 = await get(`/api/vehicle/whereabouts?plate=L1&day=${todayIso}`);
+  const w2 = await get(`/api/vehicle/whereabouts?plate=L1&day=${todayIso}`);
+  const wd1 = await get('/api/vehicle/whereabouts?plate=L1');
+  const wd2 = await get('/api/vehicle/whereabouts?plate=L1');
+  const ww1 = await get(`/api/vehicle/whereabouts?plate=L1&from=2026-01-01&to=${todayIso}`);
+  const ww2 = await get(`/api/vehicle/whereabouts?plate=L1&from=2026-01-01&to=${todayIso}`);
+  check("today's whereabouts reach the route every time — by date, by default, and in a week that ends today",
+    w2.body.n === w1.body.n + 1 && w2.cache !== 'hit' && wd2.body.n === wd1.body.n + 1 && wd2.cache !== 'hit'
+    && ww2.body.n === ww1.body.n + 1 && ww2.cache !== 'hit', JSON.stringify([w1, w2, wd1, wd2, ww1, ww2]));
+  const wp1 = await get('/api/vehicle/whereabouts?plate=L1&day=2026-10-01');
+  const wp2 = await get('/api/vehicle/whereabouts?plate=L1&day=2026-10-01');
+  check('…and a past day of them is served from the cache', wp2.body.n === wp1.body.n && wp2.cache === 'hit', JSON.stringify([wp1, wp2]));
 }
 
 console.log('\ncache: the low performers — keyed on the target as well as the data');

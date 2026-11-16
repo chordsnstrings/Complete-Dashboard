@@ -50,6 +50,7 @@ export const VEHICLE_TABS = [
   { id: 'overview', label: 'Overview', ic: '◱' },
   { id: 'drivers', label: 'Drivers', ic: '◧' },
   { id: 'movement', label: 'Movement', ic: '◍' },
+  { id: 'whereabouts', label: 'Where it was', ic: '◷' },
   { id: 'earnings', label: 'Earnings', ic: '◈' },
   { id: 'safety', label: 'Safety', ic: '△' },
   { id: 'compliance', label: 'Compliance', ic: '❑' },
