@@ -3157,3 +3157,47 @@ and `PORT=8308 node test/preview.mjs &` then `PHONE=1 node bin/focus-rows-audit.
 http://127.0.0.1:8308 /tmp/fx-phone.json`, with `WINDOW=from=2026-08-01&to=2026-08-31` for the
 seeded month. Against production data: `node bin/prod-mirror.mjs &` and the same with
 `http://127.0.0.1:8200`, within that run's read budget.
+
+## #airport — flights landing and the fleet's airport trips, rendered (2026-11-16, FIX-STATUS FLT)
+
+A new page (Today › Airport, `api/public/airport.js`), rendered in Chromium against mockapi.mjs,
+whose `/api/airport` is the route's own `airportShape` over the REAL OpenSky arrivals of
+2026-11-15 shifted a day at a time; the states a clock decides (today's live hours, an hour the
+watch half-missed, no client at all) are served by `page.route()` with `airportShape` at a fixed
+clock (14:30 Dubai), so the pass does not depend on the hour it runs. `serviceWorkers: 'block'`,
+`reducedMotion: 'reduce'` (the Arkiv motion layer raises bars and counts the hero up on arrival:
+the first screenshots, taken mid-rise, showed half a chart and a hero reading "0 of 24").
+
+**What was checked, every one passing** (`node test/airport_page.test.mjs`, 30/0):
+
+| width · theme · skin | drawn | overflow | errors |
+|---|---|---|---|
+| 1280 · light · Arkiv | 00 band (5 tiles, landings hero), both charts, 24-hour table, impact (lead line, caveat, 4 lags, 28 days), 15 origins, 4 platforms, † band (4 cells) | 0 | none |
+| 1280 · dark · Arkiv | the same | 0 | none |
+| 390 · light · Arkiv | the same; tiles stack one per row, the controls wrap | 0 | none |
+| 390 · dark · Arkiv | the same | 0 | none |
+| 1280 · Classic | kpiRow tiles in the head panel, both charts, every table | 0 | none |
+| 390 · Classic | the same | 0 | none |
+| 390 · phone shell (`?ui=phone`, touch) | its fallback, "Built for a bigger screen … open it on the desktop version", headed **Airport** (m/screens.js names it; it read "airport", the router's word, before) | — | none |
+
+- **Live estimates are labelled in all three places:** hatched bars (the projected mark, under
+  Arkiv), "live estimate" pills in the hours table, and the hero's "N hours live estimate" with
+  "so far" while the day runs.
+- **An absent hour is a dash with its reason on hover** — for the half-watched hour, both halves
+  ("not published yet — …; the live watch answered 9 of 30 polls"); with no client, all 24 say "no
+  OpenSky client configured — set …", the chart says it in place of bars, and the hero says "No hour
+  of this day has a landing figure: …" (words first: a leading number is counted up by the motion
+  layer and read as a figure).
+- **Focus layer.** `bin/focus-rows-audit.mjs` on `airport/<yesterday>` and `airport` (mock on
+  :8321, SETTLE 2500): 0 marked layout elements. The impact's finding and the caveat were folded
+  under ⓘ on the first draw (both over 15 words); they are now one short line each and stay on the
+  face of the page (the test asserts both are rendered), the long sentence folding as explanation.
+
+**Found on the way, not changed:** under the Classic skin the two charts are the same blue
+(`--mk-fill` and `--b400` resolve alike there); they are two charts with their own titles, so
+nothing reads as one series, and the Classic skin is held frozen.
+
+To repeat: `SHOT_DIR=/tmp node test/airport_page.test.mjs` (screenshots of each pass to SHOT_DIR);
+`PORT=8321 node mockapi.mjs &` then `ONLY='airport' node bin/focus-rows-audit.mjs
+http://127.0.0.1:8321 /tmp/fx.json`. Against production once the client is set: `node
+bin/prod-mirror.mjs &` and open `http://127.0.0.1:8200/#airport`.

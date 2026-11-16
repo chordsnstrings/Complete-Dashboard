@@ -193,6 +193,9 @@ export const VIEW_SUBJECT = Object.freeze({
   watchlist: 'EARN', trips: 'BK', unauthorized: 'COND', unit: 'REV', 'unit/assets': 'VEH',
   'unit/drivers': 'ID', vehicle: 'VEH', 'vehicle/drivers': 'ID', 'vehicle/earnings': 'REV',
   'vehicle/movement': 'LOC', 'vehicle/safety': 'COND', 'vehicle/trips': 'BK', vehicles: 'VEH',
+  /* Flights landing and the fleet's airport trips (2026-11-16): bookings
+     counted by hour — /api/airport answers totals only, no names. */
+  airport: 'BK',
   /* The account and access pages decide for themselves. */
   account: null, access: null, approvals: null, 'fleet-names': null,
 });
@@ -242,7 +245,7 @@ export const VIEW_CAP_WHY = Object.freeze({
    refusing it is the defect this closes. */
 export const VIEW_AGGREGATE = Object.freeze(new Set(['capacity', 'causes', 'demand', 'forecast', 'optimise',
   'overview', 'platforms', 'platforms/tiers', 'supply', 'corridors', 'corporate/approach', 'analyst', 'corporate', 'finance',
-  'provenance', 'revenue', 'settlement', 'receipts', 'reconcile']));
+  'provenance', 'revenue', 'settlement', 'receipts', 'reconcile', 'airport']));
 export const PHONE_AGGREGATE = Object.freeze(new Set(['today', 'overview', 'money', 'finance', 'settlement',
   'revenue', 'corporate', 'analyst', 'optimise']));
 function viewKey(view, sub, param, phone) {

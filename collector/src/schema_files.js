@@ -404,4 +404,11 @@ export const SCHEMA_FILES = [
      migrations, one object per statement (src/fleet_scope.js). Every
      statement guarded: without CREATEROLE it creates nothing and is inert. */
   'schema_v124.sql',
+  /* v125: flights landing at DXB and DWC from the OpenSky Network
+     (src/sources/flights.js) — the nightly confirmed list per UTC day, what
+     happened when each day was asked (collected / not published yet / failed
+     / none returned), landings inferred live from the final approach as
+     labelled estimates, and how many live polls ran each hour. Read by
+     GET /api/airport (api/airport_routes.js). No fleet_id: not fleet data. */
+  'schema_v125.sql',
 ];

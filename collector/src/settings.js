@@ -62,6 +62,22 @@ export const SETTING_DEFAULTS = {
   /* PowerDrive's names for our fleets there (measured 2026-11-03: ecofleet
      104 customers, egari 47, ecofleet investor fleet 5). */
   YOCHARGE_FLEET_GROUPS: 'ecofleet,egari,ecofleet investor fleet',
+  /* FLIGHTS from the OpenSky Network (src/sources/flights.js, 2026-11-16).
+     Two hosts: the token comes from OpenSky's Keycloak realm (OAuth2 client
+     credentials — Basic auth on the REST API was switched off by OpenSky on
+     2026-03-18), the data from the REST API. Both end in _URL, so both are
+     environment-only (ENV_ONLY_KEYS below): the client secret is POSTed to
+     the first of them. */
+  OPENSKY_API_URL: 'https://opensky-network.org/api',
+  OPENSKY_TOKEN_URL: 'https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token',
+  /* How many UTC days back the first run fills (and any later run re-asks
+     where a day is missing). 30 days × 2 airports × 30 credits = 1,800 of the
+     free account's 4,000 a day (measured: one one-day arrivals query costs 30). */
+  OPENSKY_BACKFILL_DAYS: '30',
+  /* Stop asking for arrivals once OpenSky says fewer than this many credits
+     remain today (its X-Rate-Limit-Remaining header), so a backfill can never
+     spend the whole day's allowance. */
+  OPENSKY_CREDIT_FLOOR: '600',
   /* Uber's fares, hourly at five past — src/run.js fareRefresh says why. Five
      past so it queues behind the :00 incremental and lands before the :15
      rollup; hourly because Uber publishes a ride's fare hours after it and
@@ -392,6 +408,24 @@ export const SETTING_DEFS = [
     hint: 'A full read of PowerDrive\u2019s customers takes ~20 minutes at its pace; every six hours is the default.' },
   { key: 'YOCHARGE_WALLETS_CRON', group: 'Collector', label: 'Charging wallets refresh (cron)', secret: false,
     hint: 'Our own drivers\u2019 wallets only, between the full reads: 03:17, 09:17, 15:17 and 21:17 Dubai by default.' },
+  /* FLIGHTS — the OpenSky Network (src/sources/flights.js). A free account's
+     API client (opensky-network.org → Account → API client): a client id and
+     a client secret, exchanged for a 30-minute token. 4,000 credits a day;
+     one day's arrivals at one airport costs 30, a live poll of the Dubai box 1
+     (from a separate allowance). Without both, every run records "no OpenSky
+     client configured" and the Airport page says so — never a zero. */
+  { key: 'OPENSKY_CLIENT_ID', group: 'Flights (OpenSky)', label: 'API client id', secret: false,
+    hint: 'From opensky-network.org, Account \u2192 API client. Not a password on its own; it travels with the secret below.' },
+  { key: 'OPENSKY_CLIENT_SECRET', group: 'Flights (OpenSky)', label: 'API client secret', secret: true,
+    hint: 'Exchanged for a 30-minute token at OpenSky\u2019s sign-in host. Read-only use: arrivals at DXB and DWC, and live positions over Dubai.' },
+  { key: 'OPENSKY_API_URL', group: 'Flights (OpenSky)', label: 'API host', secret: false,
+    hint: 'OpenSky\u2019s REST API. Set in DigitalOcean, not here: the token is sent to it.' },
+  { key: 'OPENSKY_TOKEN_URL', group: 'Flights (OpenSky)', label: 'Token endpoint', secret: false,
+    hint: 'OpenSky\u2019s OAuth2 token endpoint. Set in DigitalOcean, not here: the client secret is sent to it.' },
+  { key: 'OPENSKY_BACKFILL_DAYS', group: 'Flights (OpenSky)', label: 'Days of arrivals to fill', secret: false,
+    hint: 'UTC days back the arrivals collector fills where a day is missing. 30 days costs about 1,800 of the 4,000 daily credits, once.' },
+  { key: 'OPENSKY_CREDIT_FLOOR', group: 'Flights (OpenSky)', label: 'Credits to leave unspent', secret: false,
+    hint: 'The arrivals collector stops for the day once OpenSky reports fewer credits left than this.' },
   { key: 'TESLA_REGION', group: 'Tesla', label: 'Fleet API region', secret: false,
     hint: 'eu for the Middle East, na for the Americas and Asia-Pacific, cn for China' },
   { key: 'TESLA_CRON', group: 'Collector', label: 'Tesla schedule (cron)', secret: false,
