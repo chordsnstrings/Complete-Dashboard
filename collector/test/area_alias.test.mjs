@@ -16,11 +16,12 @@
      · placedArea back without canonAreaSql → §3 "one row" fails
      · the prefix rule removed → §1 "JLT Cluster" fails (the twin agrees either way:
        both sides lose the rule together)
-     · 'jumeirah 1' folded into 'Jumeirah' → §1 "sub-areas" fails */
+     · 'jumeirah 1' folded into 'Jumeirah' → §1 "sub-areas" fails
+     · booking_cell tallied on the raw name → §4 fails (الرفاعة wins 5 to 4) */
 import { PGlite } from '@electric-sql/pglite';
 import express from 'express';
 import { applySchema } from './schema.mjs';
-import { AREA_ALIAS, canonArea, canonAreaSql } from '../src/area_alias.js';
+import { AREA_ALIAS, GROUPS, canonArea, canonAreaSql } from '../src/area_alias.js';
 import { driverRoutes } from '../api/driver_routes.js';
 
 let pass = 0, fail = 0;
@@ -45,6 +46,14 @@ console.log('\n1. the list');
   check('an unknown name passes through untouched (trimmed), NULL stays NULL',
     canonArea('  Al Quoz Industrial Area 4 ') === 'Al Quoz Industrial Area 4' && canonArea(null) === null);
   check('case and spacing do not matter', canonArea('  marsa   DUBAI ') === 'Dubai Marina');
+  const owner = new Map(); const twice = [];
+  for (const [canon, names] of GROUPS) for (const n of names) {
+    if (owner.has(n) && owner.get(n) !== canon) twice.push(`${n}: ${owner.get(n)} / ${canon}`);
+    owner.set(n, canon);
+  }
+  check('no alias belongs to two areas (a later group would silently win)', twice.length === 0, twice.join(' | '));
+  check('the Arabic community names booking_cell carries fold to the English the bookings use',
+    canonArea('الرفاعة') === 'Al Raffa' && canonArea('السطوة') === 'Al Satwa' && canonArea('مطار دبي الدولي') === 'Dubai International Airport');
 }
 
 console.log('\n2. the SQL twin answers as the JS does');
@@ -90,6 +99,32 @@ console.log('\n3. the Territory groups one area as one row');
   check('"Marsa Dubai" ×2, "Dubai Marina" and "دبي مارينا" are ONE row of 4, named Dubai Marina',
     marina.length === 1 && marina[0].area === 'Dubai Marina' && marina[0].n === 4, JSON.stringify(t.areas));
   check('…its by_basis summed (4 from the address)', marina[0]?.by_basis?.address === 4, JSON.stringify(marina[0]?.by_basis));
+}
+
+console.log('\n4. booking_cell tallies the folded name');
+{
+  /* A cell voted "Al Raffa" ×4 and "الرفاعة" ×5: one area, nine votes, in
+     English — not the Arabic name winning by one vote, which is what the
+     overnight lines on production read. */
+  const { refreshBookingCells } = await import('../src/trip_places.js');
+  let k = 0;
+  const vote = async (area, la = 5040, lo = 11054) => {
+    const id = `v${k++}`;
+    await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, requested_at, status)
+             VALUES ('uber', $1, 'ecosine', 'L47009', '2026-11-12T10:00:00+04:00', 'completed')`, [id]);
+    await q(`INSERT INTO place_vote (platform, external_id, fleet_id, cell_lat, cell_lng, area) VALUES ('uber', $1, 'ecosine', $2, $3, $4)`,
+      [id, la, lo, area]);
+  };
+  for (let i = 0; i < 4; i++) await vote('Al Raffa');
+  for (let i = 0; i < 5; i++) await vote('الرفاعة');
+  for (let i = 0; i < 2; i++) await vote('Business Bay', 5041, 11055);
+  for (let i = 0; i < 2; i++) await vote('الخليج التجاري', 5041, 11055);
+  await refreshBookingCells(db, { force: true });
+  const rows = await q('SELECT cell_lat, cell_lng, area, n FROM booking_cell ORDER BY cell_lat');
+  const raffa = rows.find((r) => r.cell_lat === 5040), bay = rows.find((r) => r.cell_lat === 5041);
+  check('"Al Raffa" ×4 + "الرفاعة" ×5 → one name, Al Raffa, nine votes', raffa?.area === 'Al Raffa' && raffa.n === 9, JSON.stringify(rows));
+  check('…and two spellings of Business Bay, two votes each, are four votes for Business Bay', bay?.area === 'Business Bay' && bay.n === 4,
+    JSON.stringify(rows));
 }
 
 await db.close();

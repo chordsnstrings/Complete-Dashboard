@@ -107,8 +107,12 @@ for (const [id, plate] of [['b1', 'PCAR'], ['b2', 'QCAR']]) {
   [id, plate, ts(N, '21:10'), ts(N, '21:40')]);
 }
 // CABMAN's own list of cars: it still lists PCAR, SCAR, WILDCAR and OLD.
+/* GONE: a CABMAN plate the roster says departed, still sending fixes into
+   telemetry_snapshot — the 108 plates that made the first production answer
+   read 215 cars where /api/live lists 136. It must be set aside. */
+await every('GONE', ON, '00:00', '05:00', 60, HOME, 'cabman');
 await q(`INSERT INTO source_state (source, fleet_id, key, value) VALUES ('cabman', 'ecosine', 'roster', $1)`,
-  [JSON.stringify({ polls: 400, plates: {}, listed: ['PCAR', 'SCAR', 'WILDCAR', 'OLD'], departed: [], pending: [] })]);
+  [JSON.stringify({ polls: 400, plates: {}, listed: ['PCAR', 'SCAR', 'WILDCAR', 'OLD'], departed: ['GONE'], pending: [] })]);
 clearRosterCache();
 
 const { get } = await mountAll(db);
@@ -124,6 +128,9 @@ check('the population is the week’s positioned tracker plates: six cars — no
 check('…said in a sentence, with the listed car that sent nothing counted',
   /7 days to 2026-10-11 05:00 Dubai: 6 cars/.test(r.body.population) && /1 of the 4 plates CABMAN still lists sent no positioned fix/.test(r.body.population)
   && r.body.roster.silent_week === 1 && JSON.stringify(r.body.roster.silent_plates) === '["OLD"]', r.body.population);
+check('a CABMAN plate the roster set aside (GONE, departed) is not in the table, and the sentence counts it',
+  !n0.cars.some((c) => c.plate === 'GONE') && r.body.roster.set_aside === 1
+  && /1 plate CABMAN has stopped listing .* is set aside, as on every fleet page/.test(r.body.population), r.body.population);
 const P = car('PCAR');
 check('PCAR: parked at Home Quarter, seen, on its own fleet', P.status === 'parked' && P.area === 'Home Quarter' && P.basis === 'fixes'
   && P.fleet_id === 'egari' && P.source === 'cabman' && P.minutes_in_window === 300, JSON.stringify(P));

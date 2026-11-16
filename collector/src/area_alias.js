@@ -33,7 +33,7 @@
    stored area stays what the evidence said. A name not in the list passes
    through untouched — nothing is guessed. */
 
-const GROUPS = [
+export const GROUPS = [
   ['Dubai Marina', ['marsa dubai', 'dubai marina', 'دبي مارينا', 'дубай марина']],
   ['Palm Jumeirah', ['nakhlat jumeira', 'nakhlat jumeirah', 'palm jumeirah', 'the palm jumeirah', 'the palm', 'نخلة جميرا']],
   ['Jumeirah Lakes Towers', ['jumeirah lakes towers', 'jumeirah lake towers', 'jlt', 'أبراج بحيرات جميرا']],
@@ -49,14 +49,61 @@ const GROUPS = [
   ['Jumeirah', ['jumeirah', 'جميرا']],
   ['Jumeirah 1', ['jumeirah 1', 'jumeirahjumeirah 1']],
   ['Trade Center First', ['trade center first', 'المركز التجاري الأولي']],
-  ['Dubai Hills Estate', ['dubai hills estate', 'dubai hills', 'hadaeq sheikh mohammed bin rashid', 'حدائق الشيخ محمد بن راشد']],
+  ['Dubai Hills Estate', ['dubai hills estate', 'dubai hills', 'hadaeq sheikh mohammed bin rashid', 'حدائق الشيخ محمد بن راشد', 'دبي هيلز']],
   ['Jumeirah Beach Residence', ['jumeirah beach residence', 'jbr', 'مساكن شاطئ جميرا']],
   ['Dubai International City', ['dubai international city', 'international city', 'china cluster', 'مدينة دبي العالمية']],
   ['Green Community Village', ['green community village', 'قرية المجتمع الخضراء']],
   ['Dubai Festival City', ['dubai festival city', 'مدينة مهرجان دبي']],
   ["Za'abeel 2", ["za'abeel 2", "zaa'beel second", "za'abeel second"]],
   ['DAMAC Hills', ['damac hills']],
-  ['Dubai International Airport', ['dubai international airport', "dubai int'l airport", 'dxb']],
+  ['Dubai International Airport', ['dubai international airport', "dubai int'l airport", 'dxb', 'مطار دبي الدولي']],
+  /* Arabic names of Dubai communities (2026-11-16): booking_cell names a cell
+     by the modal drop-off address, and where riders' apps are in Arabic that
+     name is Arabic — the overnight lines on production read "الرفاعة" for Al
+     Raffa. Each maps to the English name the bookings already use for the same
+     community; standard transliterations only, one community each. */
+  ['Al Raffa', ['al raffa', "al rifa'a", 'al rifaa', 'الرفاعة']],
+  ['Al Satwa', ['al satwa', 'satwa', 'السطوة']],
+  ['Al Karama', ['al karama', 'karama', 'الكرامة']],
+  ['Mankhool', ['mankhool', 'al mankhool', 'المنخول']],
+  ['Al Jafiliya', ['al jafiliya', 'al jafilia', 'jafiliya', 'الجافلية']],
+  ["Al Bada'", ["al bada'", 'al bada', 'البدع']],
+  ['Al Safa', ['al safa', 'الصفا']],
+  ['Umm Suqeim', ['umm suqeim', 'أم سقيم']],
+  ['Al Mamzar', ['al mamzar', 'الممزر']],
+  ['Al Qusais', ['al qusais', 'القصيص']],
+  ['Al Nahda', ['al nahda', 'النهدة']],
+  ['Al Mizhar', ['al mizhar', 'المزهر']],
+  ['Mirdif', ['mirdif', 'mirdiff', 'مردف']],
+  ['Al Rashidiya', ['al rashidiya', 'الراشدية']],
+  ['Al Twar', ['al twar', 'الطوار']],
+  ['Al Warqa', ['al warqa', "al warqa'a", 'الورقاء']],
+  ['Al Jadaf', ['al jadaf', 'al jaddaf', 'الجداف']],
+  ['Oud Metha', ['oud metha', 'عود ميثاء']],
+  ['Al Kifaf', ['al kifaf', 'الكفاف']],
+  ["Za'abeel", ["za'abeel", 'zabeel', 'زعبيل']],
+  ['Al Hamriya', ['al hamriya', 'الحمرية']],
+  ['Al Rigga', ['al rigga', 'الرقة']],
+  ['Al Ras', ['al ras', 'الرأس']],
+  ['Al Sabkha', ['al sabkha', 'الصبخة']],
+  ['Bur Dubai', ['bur dubai', 'بر دبي']],
+  ['Al Sufouh', ['al sufouh', 'الصفوح']],
+  ['Al Muraqqabat', ['al muraqqabat', 'المرقبات']],
+  ['Port Saeed', ['port saeed', 'بورسعيد']],
+  ['Hor Al Anz', ['hor al anz', 'هور العنز']],
+  ['Abu Hail', ['abu hail', 'أبو هيل']],
+  ['Al Muteena', ['al muteena', 'المطينة']],
+  ['Al Waheda', ['al waheda', 'الوحيدة']],
+  ['Nad Al Sheba', ['nad al sheba', 'ند الشبا']],
+  ['Meydan', ['meydan', 'الميدان']],
+  ['Al Khawaneej', ['al khawaneej', 'الخوانيج']],
+  ['Al Furjan', ['al furjan', 'الفرجان']],
+  ['Barsha Heights', ['barsha heights', 'tecom', 'برشاء هايتس']],
+  ['DIFC', ['difc', 'dubai international financial centre', 'مركز دبي المالي العالمي']],
+  ['Dubai Production City', ['dubai production city', 'مدينة دبي للإنتاج']],
+  ['Dubai Sports City', ['dubai sports city', 'مدينة دبي الرياضية']],
+  ['Dubai Internet City', ['dubai internet city', 'مدينة دبي للإنترنت']],
+  ['Dubai Media City', ['dubai media city', 'مدينة دبي للإعلام']],
 ];
 
 /* Prefix rules: every "JLT Cluster X" is in JLT. Kept separate from the

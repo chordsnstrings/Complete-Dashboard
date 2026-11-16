@@ -40,6 +40,7 @@
    conditions above holds; a second pass over unchanged data writes nothing
    new except resolved_at on the rows it retried. Votes are one per booking,
    keyed on the booking, and replaced with it. */
+import { canonAreaSql } from './area_alias.js';
 import { pool } from './db.js';
 import { log } from './log.js';
 import { CELL, cellOf } from './places.js';
@@ -118,9 +119,14 @@ async function setState(db, key, value) {
    The same statement shape as src/places.js BUILD and for the same reasons:
    DISTINCT ON for the mode, the name as tie-break so a split cell does not
    flap between rebuilds, and the vote counts kept beside the name. */
+/* Votes are tallied on the FOLDED name (src/area_alias.js, 2026-11-16): a
+   cell voted "Al Raffa" ×4 and "الرفاعة" ×5 is one area with nine votes, named
+   in English, not an Arabic name that won by a single vote — which is how the
+   overnight lines on production came to read "الرفاعة". On a tie the Latin
+   spelling wins, for the same reader. */
 const BOOKING_CELL_BUILD = `
   WITH tally AS (
-    SELECT cell_lat, cell_lng, area, count(*)::int AS n FROM place_vote GROUP BY 1, 2, 3
+    SELECT cell_lat, cell_lng, ${canonAreaSql('area')} AS area, count(*)::int AS n FROM place_vote GROUP BY 1, 2, 3
   ), totals AS (
     SELECT cell_lat, cell_lng, sum(n)::int AS observations, count(*)::int AS distinct_names
       FROM tally GROUP BY 1, 2
@@ -128,7 +134,7 @@ const BOOKING_CELL_BUILD = `
   SELECT DISTINCT ON (t.cell_lat, t.cell_lng) t.cell_lat, t.cell_lng, t.area, t.n,
          z.distinct_names, z.observations
     FROM tally t JOIN totals z USING (cell_lat, cell_lng)
-   ORDER BY t.cell_lat, t.cell_lng, t.n DESC, t.area`;
+   ORDER BY t.cell_lat, t.cell_lng, t.n DESC, (t.area ~ '[A-Za-z]') DESC, t.area`;
 
 export async function refreshBookingCells(db = pool, { force = false } = {}) {
   if (!force) {
