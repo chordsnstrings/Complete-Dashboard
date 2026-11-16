@@ -1063,6 +1063,13 @@ the builder's matcher on the review's vocabulary.
 
 ## Traps that have cost time more than once
 
+* **One area arrives under four names** (2026-11-16, FIX-STATUS PLC12). Google's dash-form address names a community
+  officially ("Marsa Dubai", "Nakhlat Jumeira", "Hadaeq Sheikh Mohammed Bin Rashid") where riders say "Dubai Marina",
+  "Palm Jumeirah", "Dubai Hills"; and Uber writes the address in the RIDER's app language, so Business Bay also
+  arrives as "الخليج التجاري", "Бизнес-Бэй" and "İş Körfezi". Grouping by the raw area splits one place across rows.
+  Group through `canonAreaSql()` (`src/area_alias.js`), which folds exact equivalents only — never a sub-area into its
+  parent — and lower-case through it on both sides: JavaScript lower-cases "İ" to "i" plus a combining dot, the
+  database by its collation, so the two would key "İş Körfezi" differently.
 * **WHR's "the day is still running" is about the clock it was HANDED, not the real one** (2026-11-16, FIX-STATUS
   OVN2). `whereaboutsDay()` words a stretch after the last fix on a day that has not ended as "No fix since … — the day
   is still running", and measures the silence to the `nowMs` it is given. The overnight read hands it now held at 12:00
