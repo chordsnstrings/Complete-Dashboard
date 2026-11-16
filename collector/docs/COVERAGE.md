@@ -995,7 +995,14 @@ driver's 222 tracker fixes.
   "OpenSky Network"). Flights are published in a nightly batch after the UTC day ends, so the
   current day 404s, and a 404 is also "no flights in that interval". Read yesterday's as "not
   published yet" and retry; read an older day's as "none returned". Today's landings exist only as
-  live estimates from the final approach.
+  live estimates from the final approach. **The other half of the trap** (review of 2026-11-16,
+  FIX-STATUS FLT-R4, FLT-R5): because the client resolves a 404, every caller must decide what
+  else is NOT an answer. The live poll took a 404 as an empty sky (an unmeasured hour drawn as "0
+  landings, live estimate"), and the arrivals run took a 200 that was not a list — the sign-in page
+  a silent redirect lands on is text — as a day collected with 0 landings, never asked again. That
+  is the FMS hole `src/http.js` already records ("asked and answered with nothing"), arriving in
+  a new collector. Only a list is an arrivals answer (an empty one is read as a 404); only a 200
+  with a `states` field is a live one.
 
 * **`innerText` reports CSS `text-transform`, so a case-sensitive match on it fails on visible
   text** (2026-11-12, twice in one day; FIX-STATUS INT5). Arkiv sets panel headings and the phone

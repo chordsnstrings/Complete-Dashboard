@@ -128,6 +128,8 @@ const srv = createServer((req, res) => {
     const day = new Date(Number(u.searchParams.get('begin')) * 1000).toISOString().slice(0, 10);
     fake.asks.push(`${airport}|${day}`);
     const h = { 'X-Rate-Limit-Remaining': String((fake.credits -= 30)) };
+    if (fake.mode.arrivalsHtml) { res.writeHead(200, { 'content-type': 'text/html', ...h }); res.end('<!DOCTYPE html><html><body>Sign in</body></html>'); return; }
+    if (fake.mode.arrivalsEmpty) return send(200, [], h);
     if (day === '2026-11-15') return send(200, airport === 'OMDB' ? OMDB : OMDW, h);
     if (day === '2026-11-13') return send(500, { error: 'boom' }, h);
     return send(404, null, h);
@@ -250,6 +252,29 @@ const rows = async (t, p = []) => (await db.query(t, p)).rows;
   const rf = await collectArrivals({ db, cfg: CFG, nowMs: Date.parse('2026-11-20T09:30:00Z'), days: 10, floor: 620 });
   const spent = fake.asks.length - before;
   check('the credit floor stops the run (670, 640, 610 left — then it stops, under 620)', rf.stopped && spent === 3, `${spent} ${rf.stopped}`);
+
+  /* A 200 that is not a list is not a day on which nothing landed. Review of
+     2026-11-16 (FIX-STATUS FLT-R5): storeLandings keeps array rows only, so
+     a sign-in page behind a silent redirect (text) was stored as nothing and
+     the day written 'collected' with 0 landings — never asked again, and a
+     complete day of zeros to /api/airport. An empty list is read as OpenSky's
+     404 is. REVERSION: drop the not-a-list throw and the empty-list test in
+     collectArrivals — both checks fail ('collected', 0). */
+  fake.credits = 3970;
+  fake.mode.arrivalsHtml = true;
+  await collectArrivals({ db, cfg: CFG, nowMs: Date.parse('2026-11-25T09:30:00Z'), days: 1, floor: 0 });
+  fake.mode.arrivalsHtml = false;
+  const html = (await rows(`SELECT status, landings, reason FROM flight_day_coverage WHERE airport = 'OMDB' AND utc_day = '2026-11-24'`))[0];
+  check('a 200 that is a page of text is “failed” with the reason, never a collected zero',
+    html?.status === 'failed' && html.landings == null && /without a list of arrivals/.test(html.reason || ''), JSON.stringify(html));
+  fake.mode.arrivalsEmpty = true;
+  await collectArrivals({ db, cfg: CFG, nowMs: Date.parse('2026-11-27T09:30:00Z'), days: 2, floor: 0 });
+  fake.mode.arrivalsEmpty = false;
+  const emp = Object.fromEntries((await rows(`SELECT utc_day::text d, status, landings, reason FROM flight_day_coverage
+    WHERE airport = 'OMDB' AND utc_day IN ('2026-11-25', '2026-11-26')`)).map((r) => [r.d, r]));
+  check('an empty list is read as a 404 is: yesterday not published, an older day none returned — never collected',
+    emp['2026-11-26']?.status === 'not_published' && emp['2026-11-25']?.status === 'none_returned'
+      && /an empty list/.test(emp['2026-11-25'].reason || '') && emp['2026-11-25'].landings == null, JSON.stringify(emp));
 }
 
 console.log('\n4 · the live poll');

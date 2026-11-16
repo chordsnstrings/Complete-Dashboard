@@ -324,14 +324,31 @@ export async function collectArrivals({ db = pool, cfg = clientConfig(), client 
       const begin = dayStartSec(day);
       const r = await c.getJson('/flights/arrival', { airport, begin, end: begin + 86400 - 1 });
       if (r.credits != null) credits = r.credits;
-      if (r.status === 404) {
+      /* A 200 is an answer only when it carries a LIST. storeLandings keeps
+         array rows only, so a 200 holding anything else — the login page a
+         redirect lands on (http() follows redirects silently and leaves a
+         non-JSON body as text), or an error object — stored nothing and the
+         day was written 'collected' with 0 landings: never asked again, and
+         counted by /api/airport as a complete day on which nothing landed.
+         This is the FMS trap src/http.js's header records ("a window that
+         was asked and answered with nothing"), and the review of 2026-11-16
+         found it here (FIX-STATUS FLT-R5). Such a day is now 'failed' with
+         the reason and retried. An EMPTY list is OpenSky's "none" said
+         another way — its documented answer for no flights is a 404 — so
+         it is read exactly as a 404 is: not published yet for yesterday,
+         none returned for an older day, never a collected zero. */
+      if (r.status === 200 && !Array.isArray(r.data)) {
+        throw new OpenSkyError('http', `OpenSky answered HTTP 200 without a list of arrivals (${typeof r.data === 'string'
+          ? 'a page of text — a redirect to a sign-in page, perhaps' : `a${r.data === null ? ' null' : 'n object'}`})`, { status: 200, credits: r.credits });
+      }
+      if (r.status === 404 || r.data.length === 0) {
         /* A 404 means "no flights for that interval". For yesterday that is
            the nightly batch not having run yet — measured: today 404'd while
            yesterday held 438. For an older day it is a day OpenSky does not
            hold or saw nothing on; asked at most three times. */
         const fresh = day >= yesterday;
         const reason = fresh ? 'OpenSky has not published this day yet — its flights arrive in a nightly batch'
-          : 'OpenSky answered that it holds no arrivals for this day (HTTP 404)';
+          : `OpenSky answered that it holds no arrivals for this day (${r.status === 404 ? 'HTTP 404' : 'an empty list'})`;
         await noteDay(db, { airport, day, status: fresh ? 'not_published' : 'none_returned', reason, credits });
         chunks.push({ from: day, to: day, rows: 0, kind: airport, note: reason });
         continue;
