@@ -1660,11 +1660,22 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
       const srcs = ['cabman', 'fms'];
       const pairPlates = plates.flatMap((p) => srcs.map(() => p));
       const pairSrcs = plates.flatMap(() => srcs);
+      /* ONE INDEX PROBE PER CAR (2026-11-16, measured on production). Written
+         as `plate = ANY($1) AND captured_at BETWEEN …` this took 2.5 s for one
+         car over 15 nights and 5.3 s for two (0.42 s of each is the network) —
+         against 1.7 s for the whole fleet's single night: over a long range
+         the planner may walk telemetry_captured_idx through every car's fixes
+         and filter the plate afterwards. A LATERAL per plate pins each read to
+         telem_plate_time_idx (plate, captured_at DESC), so the cost is that
+         car's own fixes and nothing else. Same rows, same order. */
       const [fixes, edges] = await Promise.all([
-        q(`SELECT ${OVN_FIX_COLS()} FROM telemetry_snapshot
-            WHERE plate = ANY($1::text[]) AND source <> 'uber' AND ${REAL_FIX()}
-              AND captured_at >= $2::timestamptz AND captured_at < $3::timestamptz
-            ORDER BY plate, captured_at`, [plates, lo, hi]),
+        q(`SELECT f.* FROM unnest($1::text[]) AS v(plate)
+           CROSS JOIN LATERAL (
+             SELECT ${OVN_FIX_COLS('t.')} FROM telemetry_snapshot t
+              WHERE t.plate = v.plate AND t.source <> 'uber' AND ${REAL_FIX('t.')}
+                AND t.captured_at >= $2::timestamptz AND t.captured_at < $3::timestamptz
+              ORDER BY t.captured_at) f
+           ORDER BY f.plate, f.at`, [plates, lo, hi]),
         ovnEdges(pairPlates, pairSrcs, lo, hi),
       ]);
       const byPlate = groupBy(fixes);
