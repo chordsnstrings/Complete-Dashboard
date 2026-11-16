@@ -3212,3 +3212,14 @@ console error. `airport_page` 36/0 covers the same set plus Classic at 390 and t
 its new §5 drives the three stubbed cases (a one-fleet answer, a weak r, an error carrying
 `<!DOCTYPE`). `ONLY='airport' node bin/focus-rows-audit.mjs http://127.0.0.1:8321 …`: 0 marked
 layout elements, 0 errors.
+
+### #airport and #causes on production (2026-11-16, deploy of `6ad5d00`)
+
+Through `bin/prod-mirror.mjs` (:8200), Arkiv, service workers blocked, after the backfill: `#airport` at 1280 light
+and dark renders every section (00 At a glance "63 so far · 4 of 16 hours measured", the two hour charts, the hours
+table with each absent hour's reason, the relationship over 28 complete days, day by day, origins, platforms, the
+† band), no horizontal overflow, no script errors; the first paint waits on `/api/airport` (7–13 s uncached). At 390
+the phone shell shows the house "Built for a bigger screen" card for both pages. `#causes` at 1280 carries "Coming up
+in Dubai" with the true reason the web search gave nothing (the tool is not enabled for the account). A probe that
+waits a fixed five seconds photographs #airport still "Loading…" — wait on a figure, not a clock.
+

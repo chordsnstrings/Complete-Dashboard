@@ -11834,6 +11834,18 @@ week or more, and few enough per HOUR (about half a pickup) that an hourly corre
 Bolt and Yango drop passengers at the airport and pick none up there in this month.
 
 
+**Measured on production, 2026-11-16 (deploy of `6ad5d00`, 11:25Z).** The OpenSky client was set on the
+collector as two SECRET variables at about 11:00Z. The first arrivals run (11:36Z, twelve minutes after the worker
+started) collected 30 UTC days at both airports and stored **16,248 landings**, about 60 airport-days at 30 credits
+each — roughly 1,800 of the 4,000-credit flights allowance. The live watch's first poll answered at 11:26Z. For the
+Dubai day of 15 Nov `/api/airport` gives 428 landings at DXB (the UTC day held 438); over 19 Oct – 15 Nov, 28 complete
+days, airport pickups follow landings most closely **2 hours later, and weakly: r 0.19, 0.3 pickups per 10 landings**,
+and airport pickups are **1.4%** of the fleet's bookings (361 of 25,859). The 28-day answer takes 7–13 s uncached.
+
+**Reading a live hour that started mid-hour.** "the live watch answered 13 of 27 polls" is answered polls against the
+polls the hour should have had SO FAR (one every two minutes since the hour began) — not failures. The watch began at
+15:26 Dubai, so 15:00 could not be watched for two thirds of its polls and stays "not measured"; full hours count.
+
 ## Events by web search: ModelArk's built-in tool (2026-11-16)
 
 What the events layer's web tier (`src/sources/events_web.js`, FIX-STATUS EVW) depends on,
@@ -11873,3 +11885,9 @@ skill's key — not production's `ARK_API_KEY`, which may belong to another acco
 * **A web lead is not the record's event.** `detectBreaks` copies `source` and `url` into each
   break's candidates and ranks web leads after every other source, so a month of leads cannot
   push Ramadan or a season out of the eight slots; the break card labels them "web search".
+
+**Measured on production, 2026-11-16 11:28Z (deploy of `6ad5d00`).** Production's `ARK_API_KEY` account refuses the
+built-in tool too: `POST /responses` with `tools:[{type:"web_search"}]` answered **403 AccessDenied** ("you do not have
+access to the built in tool"). The tier recorded "ModelArk's built-in web search is not enabled for this account — an
+account owner switches it on in the BytePlus console" on `/api/status` (events / web) and on #causes, and retries every
+six hours. Nothing about the answer's shape, its citations or its cost is measured until the tool is on.
