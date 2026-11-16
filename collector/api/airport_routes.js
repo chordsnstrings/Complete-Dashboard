@@ -35,6 +35,7 @@
 import { airportOfSql, AIRPORT_NAMES, AIRPORT_RULE } from './airport_sql.js';
 import { dubaiDay } from './window.js';
 import { getInt } from '../src/settings.js';
+import { outsideFleetScope } from '../src/fleet_scope.js';
 
 export const AIRPORT_WINDOW = { dflt: 28, min: 7, max: 90 };
 export const MIN_DAYS = 7;
@@ -120,6 +121,9 @@ export function airportShape({ day, airport, days, fleet = null, nowMs, coverage
   const utcDayOfHour = (d, h) => (h < 4 ? addDays(d, -1) : d);
   const isFuture = (d, h) => d > today || (d === today && h > clock.hour);
   const oldestFilled = addDays(dubaiDay(new Date(nowMs)), -backfillDays);
+  /* OpenSky's own unit: the UTC day this instant falls in (src/sources/
+     flights.js utcDayOf) — the day it has not published yet. */
+  const utcToday = new Date(nowMs).toISOString().slice(0, 10);
 
   /* Why an hour at one airport has no confirmed figure. */
   const confirmedWhy = (a, ud) => {
@@ -127,7 +131,16 @@ export function airportShape({ day, airport, days, fleet = null, nowMs, coverage
     if (c) return `${STATUS_WORD[c.status] || c.status}${c.reason ? ` — ${c.reason}` : ''}`;
     if (arrRun?.status === 'error' && arrRun.error) return arrRun.error;
     if (ud < oldestFilled) return `not collected — older than the ${backfillDays} days the collector fills`;
-    if (ud >= today) return 'not published yet — OpenSky publishes a UTC day’s flights in a nightly batch once the day is over';
+    /* `ud` is a UTC day, so it is compared with the UTC day now — never with
+       `today`, the DUBAI day. They differ every night from 00:00 to 03:59
+       Dubai (20:00–23:59 UTC), when the Dubai day has turned and the UTC day
+       has not: compared with the Dubai day, the UTC day still in progress
+       (today's 00:00–03:59 Dubai, and yesterday's 04:00–23:59) read "not
+       asked yet — the arrivals collector has not reached this day", which is
+       not the reason: the collector never asks for a UTC day before it is
+       over, because OpenSky has nothing to give for it (review of
+       2026-11-16; test/airport_api.test.mjs section B pins both hours). */
+    if (ud >= utcToday) return 'not published yet — OpenSky publishes a UTC day’s flights in a nightly batch once the day is over';
     return 'not asked yet — the arrivals collector has not reached this day';
   };
   const watched = (d, h) => {
@@ -371,8 +384,18 @@ export function airportRoutes(app, { q, wrap }) {
           WHERE airport = ANY($3::text[]) AND ${between('landed_at')} GROUP BY 1`, [day, day, aps]),
       q(`SELECT origin, count(*)::int AS n FROM flight_landing
           WHERE airport = ANY($3::text[]) AND ${between('landed_at')} GROUP BY 1`, [from, day, aps]),
-      q(`SELECT DISTINCT ON (mode) mode, status, error, finished_at FROM collection_run
-          WHERE source = 'opensky' ORDER BY mode, finished_at DESC NULLS LAST`),
+      /* OUTSIDE the reader's fleet scope, on purpose. The OpenSky collector
+         files its runs with fleet_id NULL (the sky is not a fleet's), and
+         v124's policy shows a one-fleet reader no NULL-fleet row — so for
+         that reader this read came back empty, arrivals_run was null, and
+         every hour nothing covered was given a reason that was not the true
+         one ("not asked yet", "older than the 30 days") where an unrestricted
+         reader was told "no OpenSky client configured". Measured in the
+         review of 2026-11-16 (test/rls_routes.test.mjs section 3). These two
+         rows are the collector's state, the same for every reader, and carry
+         no fleet's data; the bookings above stay inside the scope. */
+      outsideFleetScope(() => q(`SELECT DISTINCT ON (mode) mode, status, error, finished_at FROM collection_run
+          WHERE source = 'opensky' ORDER BY mode, finished_at DESC NULLS LAST`)),
       /* How good the live estimate has been, where the nightly list has since
          arrived: of the estimates checked, how many were real landings; and
          of the confirmed landings in watched hours, how many it caught. */

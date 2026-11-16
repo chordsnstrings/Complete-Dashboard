@@ -7024,3 +7024,14 @@ removed).
 `OPENSKY_CLIENT_SECRET` on the Settings page (or as app secrets on the **collector** component —
 the API reads only what the collector stored). The first arrivals run fills 30 days (about 1,800
 of the day's 4,000 credits) and the live watch starts within two minutes.
+
+### FLT — the independent review of 2026-11-16 (branch `fix/flights`)
+
+Read the whole diff from `e40a8c7`, traced realistic inputs through it, re-ran every touched test one
+at a time and revert-proved the builder's key claims (the 401 retry and the OMSJ decoy in
+`flights_source`). What it found, each fixed on the branch in its own commit and each revert-proved:
+
+| # | what was wrong | measured | fix | test | state |
+|---|---|---|---|---|---|
+| FLT-R1 | **A one-fleet reader was given false reasons.** The OpenSky collector files its runs with `fleet_id` NULL; v124's policy shows a scoped reader no NULL-fleet row, so inside the scope `/api/airport` read no run: `arrivals_run` was null and an hour nothing covered read "not collected — older than the 30 days the collector fills" (or "not asked yet") where an unrestricted reader, on the same data, read "no OpenSky client configured". `rls_routes` could not see it: its fixture holds no OpenSky run | `rls_routes` §3 on the unchanged route: unscoped `{"status":"error","error":"no OpenSky client configured …"}`, scoped `null` | the runs query reads outside the scope (`outsideFleetScope`, as `api/target_weights.js` does); the bookings stay inside it | `rls_routes` §3 (6/0; 5/1 with the fix reverted) | written, not deployed |
+| FLT-R2 | **The UTC day in progress was "not asked yet" every night 00:00–03:59 Dubai.** `confirmedWhy` compared a UTC day with `today`, the DUBAI day; from 20:00 to 23:59 UTC they differ, so today's 00:00–03:59 and yesterday's 04:00–23:59 (UTC days the collector never asks for, because OpenSky has not published them) read "not asked yet — the arrivals collector has not reached this day" instead of "not published yet" | `airportShape` at 21:00Z on 16 Nov: both hours "not asked yet …" | compare with the UTC day of `nowMs` | `airport_api` §B (34/0; 33/1 with the fix reverted) | written, not deployed |

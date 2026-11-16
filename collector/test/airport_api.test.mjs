@@ -199,6 +199,20 @@ console.log('\nB · airportShape at a fixed clock');
   check('the day’s total is absent while any past hour is', s.landings.total == null && s.landings.total_so_far === 12 && s.landings.live_hours === 2, J(s.landings));
   const both = airportShape({ ...base, airport: 'both' });
   check('DXB and DWC together are absent where DWC is, naming it', both.landings.hours[1].n == null && /DWC:/.test(both.landings.hours[1].why || ''), both.landings.hours[1].why);
+  /* 01:00 Dubai on 17 Nov is 21:00 UTC on 16 Nov: the Dubai day has turned,
+     the UTC day has not. Today's 00:00 Dubai and yesterday's 10:00 Dubai both
+     fall in UTC 16 Nov, the day still in progress, which OpenSky cannot have
+     published. Review of 2026-11-16: compared with the Dubai day, both read
+     "not asked yet — the arrivals collector has not reached this day".
+     REVERSION: compare `ud` with `today` again in confirmedWhy — this fails. */
+  const night = { airport: 'OMDB', days: 7, nowMs: Date.parse('2026-11-16T21:00:00Z'), backfillDays: 30,
+    coverage: [{ airport: 'OMDB', utc_day: '2026-11-15', status: 'collected' }],
+    runs: { arrivals: { status: 'ok' }, live: { status: 'ok' } } };
+  const t0 = airportShape({ ...night, day: '2026-11-17' }).landings.hours[0];
+  const y10 = airportShape({ ...night, day: '2026-11-16' }).landings.hours[10];
+  check('between 00:00 and 03:59 Dubai, the UTC day in progress is “not published yet”, never “not asked yet”',
+    /^not published yet/.test(t0.why || '') && /^not published yet/.test(y10.why || '') && !/not asked/.test(`${t0.why} ${y10.why}`),
+    `${t0.why} | ${y10.why}`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
