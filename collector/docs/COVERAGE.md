@@ -11936,3 +11936,24 @@ The honest floor is `dark_bookings` — bookings on a channel that reports no mo
 (`api/income_sql.js` darkOf) — which is what `api/public/actualearnings.js` gates on. The Overview tile
 itself is unchanged by ERN and is a separate fix. **Fixed the same day (FIX-STATUS MIF):** both tiles gate on
 `/api/driver/kpis` `unpriced_unstated` — completed bookings with no fare that no statement covers.
+
+## SearchInfinity — BytePlus's web search API (measured 2026-11-16, FIX-STATUS EVW2)
+
+The operator said "Searchinfinity is already active in modelark". It is not ModelArk's Responses-API `web_search` tool
+(still 403 AccessDenied on production's `ARK_API_KEY` account) but a separate API on another host:
+
+| | |
+|---|---|
+| endpoint | `POST https://torchlight.byteintlapi.com/search_api/web_search` |
+| auth | `Authorization: Bearer <API key>` — the key alone; the console's numeric "API key ID" is not sent |
+| body | `{"Query": "...", "Count": 10, "TimeRange": "OneMonth"}` (also `Filter: {Sites, BlockHosts}`; TimeRange OneDay/OneWeek/OneMonth/OneYear) |
+| answer | `{ResponseMetadata: {RequestId, …}, Result: {ResultCount, WebResults[], SearchContext, TimeCost, LogId, Choices, Usage}}`; each result `{Id, Title, Url, Snippet, Summary, SiteName, LogoUrl, PublishTime, PublishTimeUnix, SortId}` |
+| refusal | HTTP 200 with `ResponseMetadata.Error {Code, CodeN, Message}`: 700901 invalid key, 700429 rate, 10403 forbidden or quota, 10400 bad request, 10500 server |
+| speed | 1.3–2.8 s a search, measured; no rate-limit header was returned. Third-party integrations cite 5 QPS and a monthly free quota (unverified here) |
+| where the key lives | DigitalOcean, collector component, `SEARCHINFINITY_API_KEY` (SECRET). Never in the repository |
+
+Measured with the operator's key: "Dubai events concerts exhibitions November December 2026", OneMonth → 10 current pages
+(Time Out Dubai 9 Nov, Gulf News 1 Nov, What's On, The National, few.ae on National Day, Travel and Tour World). The
+tier's seven searches for 16 Nov – 6 Dec returned 57 distinct pages, among them the Government of Dubai Media Office on
+DWTC's 20 November exhibitions and Dubai Week's sports calendar.
+

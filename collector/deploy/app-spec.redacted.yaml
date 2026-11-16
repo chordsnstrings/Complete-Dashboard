@@ -296,6 +296,11 @@ workers:
       - key: OPENSKY_CLIENT_SECRET
         type: SECRET
         value: "<set in DigitalOcean>"
+      # BytePlus SearchInfinity, the web search behind "Coming up in Dubai" (EVW2,
+      # 2026-11-16): the collector alone searches.
+      - key: SEARCHINFINITY_API_KEY
+        type: SECRET
+        value: "<set in DigitalOcean>"
 databases:
   # The managed cluster both components reach through DATABASE_URL.
   - name: db

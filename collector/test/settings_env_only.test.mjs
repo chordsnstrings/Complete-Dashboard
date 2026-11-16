@@ -37,10 +37,12 @@ console.log('\n1. the rule');
   /* + OPENSKY_API_URL and OPENSKY_TOKEN_URL (2026-11-16, FIX-STATUS FLT):
      the flights collector POSTs its client secret to the second and sends
      the token to the first, so both are destinations by the same rule —
-     covered by the _URL suffix the day they arrived, nothing listed by hand. */
+     covered by the _URL suffix the day they arrived, nothing listed by hand.
+     + SEARCHINFINITY_URL the same day (FIX-STATUS EVW2): the events tier sends
+     its SearchInfinity API key there. */
   const want = ['AGENT_BASE_URL', 'HOTEL_BASE', 'HOTEL_EGARI_BASE', 'NTFY_URL', 'OPENSKY_API_URL', 'OPENSKY_TOKEN_URL',
-    'REPORT_MODEL_BASE_URL', 'SMSALA_BASE', 'TESLA_TOKEN_HOST', 'UBER_ORGS_URL', 'UBER_TOKEN_URL', 'YOCHARGE_HOST'];
-  check('the ten destinations of 2026-11-12, the two of 2026-11-16, and nothing else', [...ENV_ONLY_KEYS].sort().join() === want.join(),
+    'REPORT_MODEL_BASE_URL', 'SEARCHINFINITY_URL', 'SMSALA_BASE', 'TESLA_TOKEN_HOST', 'UBER_ORGS_URL', 'UBER_TOKEN_URL', 'YOCHARGE_HOST'];
+  check('the ten destinations of 2026-11-12, the three of 2026-11-16, and nothing else', [...ENV_ONLY_KEYS].sort().join() === want.join(),
     [...ENV_ONLY_KEYS].sort().join());
   check('a credential is not a destination', !ENV_ONLY_KEYS.has('UBER_WEB_COOKIE') && !ENV_ONLY_KEYS.has('BOLT_REFRESH_TOKEN'));
   check('the reason names the key and says where it is set',
