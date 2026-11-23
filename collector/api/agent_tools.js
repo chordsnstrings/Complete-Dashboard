@@ -264,7 +264,9 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
   const qs = (o) => new URLSearchParams(Object.entries(o).filter(([, v]) => v != null && v !== '')).toString();
   /* PHONE NUMBERS, PER PERSON (2026-11-23: the operator — "let chat access
      phone numbers of drivers as well, so that if needed, for charging wallet,
-     we can get the numbers as well"). Read from /api/compliance/drivers, the
+     we can get the numbers as well"). driver_contacts reads them here; the
+     wallet answers read the wallet routes' own since AG-17 (walletPhoneAccess
+     below), where the asker's wallet access decides. Read from /api/compliance/drivers, the
      Compliance page's own list: one row per PERSON (person_id, the id the
      charging wallets hang on), their main phone and email, and each platform
      account's. Contact fields are class CT, and the gate shapes them by key
@@ -314,6 +316,26 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
   }
   const BY_NAME = 'a phone was matched by the driver\'s name (this person\'s role does not see person ids; a name two people share is left without a number)';
   const PHONE_RULE = 'quote a phone number exactly as given, or by its placeholder — never shorten, regroup or complete it';
+  /* PHONES ON A WALLET (AG-17, 2026-11-23: the operator — "give everyone
+     asking about powerdrive wallet access to phone number"). Until then the
+     wallet answers read phones from the Compliance list, where contact
+     details follow the asker's own contact access: the Cash desk — the role
+     that works these balances, holding driver cash and no contact details —
+     got 39 debts and no number to chase one with, and the Auditor got them
+     masked. The two wallet routes now carry each person's `phones`
+     themselves (api/charging_routes.js), and the gate shows them to every
+     reader at the level that reader sees the wallet (manifest `lift`,
+     api/access/shape.js liftLevels). So no second fetch and no matching by
+     name: a wallet row IS a person. Masked only where the balance beside it
+     is masked; withheld only if the gate says so — never "no number". */
+  const walletPhoneAccess = (g, lists) => {
+    if (lists.some((l) => (Array.isArray(l) ? l : []).some((x) => /[•*]/.test(String(x))))) {
+      return 'phone numbers are shown masked (their last digits only) for this person\'s role, as the balances are — say so, and never guess the hidden digits';
+    }
+    if (g.blanked?.has('CT')) return 'phone numbers are withheld from this person\'s role — say so; never call a driver\'s number missing';
+    return null;
+  };
+  const phonesOf = (v) => (Array.isArray(v) ? v.filter(Boolean) : []);
   /* A person whose access covers one fleet: the gate narrows every fleet-
      filtered call to it whether or not the call says so, and a result labelled
      "both fleets" over one fleet's figures would be a true number under a
@@ -1430,15 +1452,14 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           charges_ever: num(b.charges_total),
           read_at: when(b.synced_at),
         };
-        const ct = await contactsByPerson();
-        const hit = ct.find({ ids: one.ids || [a.driver_id], person, name: one.name });
-        const me = hit?.c || null;
-        values.phone = me?.phone || null;
+        const phones = phonesOf(b.phones);
+        values.phone = phones[0] || null;
+        values.other_phones = phones.length > 1 ? phones.slice(1).join(' · ') : null;
         for (const k of Object.keys(values)) if (values[k] == null) delete values[k];
-        const phoneNote = ct.why ? `this driver's phone number could not be read: ${String(ct.why).slice(0, 160)}`
-          : ct.access || (me && !me.phone ? 'no phone number is on the platforms\' driver records for this driver'
-            : !me ? 'this driver is not on the Compliance list, so no phone number is known'
-              : [hit.by === 'name' ? BY_NAME : null, PHONE_RULE].filter(Boolean).join(' — '));
+        const phoneNote = walletPhoneAccess(g, [b.phones])
+          || (!phones.length ? 'no phone number is on this driver\'s platform driver records'
+            : [b.phone_on_powerdrive ? 'phone is also the number on their PowerDrive account' : null,
+              phones.length > 1 ? 'other_phones are further numbers their platform driver records carry' : null, PHONE_RULE].filter(Boolean).join(' — '));
         const BASIS = { session_plate: 'the session named it', only_car: 'their only car', nearest_trip: 'nearest trip' };
         const rows = (b.recent || []).map((x) => ({ charged: when(x.started_at), kwh: num(x.kwh), cost_aed: num(x.cost),
           minutes: num(x.minutes), plate: x.plate || null, car_from: x.plate ? (BASIS[x.plate_basis] || x.plate_basis || null) : null,
@@ -1457,6 +1478,7 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
         return { kind: 'table', definition, filters, source: '/api/charging/driver', columns, rows, values,
           kinds: { balance_aed: 'aed', on_hold_aed: 'aed', wallets: 'int', on_fleet_wallet: 'text', fleet_limit_available_aed: 'aed',
             powerdrive_group: 'text', last_charged: 'text', charge_window_days: 'int', charges_30d: 'int', kwh_30d: 'num2', cost_30d_aed: 'aed', phone: 'text',
+            other_phones: 'text',
             charges_ever: 'int', read_at: 'text' },
           note: notes.join(' — ') };
       }
@@ -1469,18 +1491,21 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           note: [b.why || 'No PowerDrive wallet is linked to any driver yet.', b.totals?.review ? `${b.totals.review} possible links wait on the Charging page for a person to decide` : null]
             .filter(Boolean).join(' — ') };
       }
-      const ct = await contactsByPerson();
-      let byName = 0;
-      const phoneOf = (r) => { const h = ct.find({ person: r.person_id, name: r.name }); if (h?.by === 'name') byName += 1; return h?.c?.phone || null; };
-      const rows = b.rows.map((r) => ({ driver: r.name || '(a person with no name on file)', phone: phoneOf(r),
+      let onPd = 0; let more = 0;
+      const rows = b.rows.map((r) => {
+        const ph = phonesOf(r.phones);
+        if (ph.length && r.phone_on_powerdrive) onPd += 1;
+        if (ph.length > 1) more += 1;
+        return { driver: r.name || '(a person with no name on file)', phone: ph[0] || null, other_phones: ph.length > 1 ? ph.slice(1).join(' · ') : null,
         balance_aed: r.balance, on_hold_aed: r.hold_amount,
         fleet_wallet: r.using_fleet_wallet ? 'yes' : 'no', fleet_limit_available_aed: r.using_fleet_wallet ? r.fleet_limit_available : null,
         powerdrive_group: r.fleet_group || null, last_charged: when(r.last_session_at), last_charged_at: r.last_session_at || null,
-        charges_30d: r.charges_30d, link: r.tier === 'confirmed' ? 'confirmed by a person' : 'matched automatically' }));
+        charges_30d: r.charges_30d, link: r.tier === 'confirmed' ? 'confirmed by a person' : 'matched automatically' };
+      });
       sortRows(rows, ['balance_aed', 'on_hold_aed', 'charges_30d', 'last_charged_at'].includes(a.sort_by) ? a.sort_by : 'balance_aed',
         a.order === 'asc' ? 'asc' : 'desc');
       const t = b.totals || {};
-      const columns = [col('driver', 'Driver', 'text'), col('phone', 'Phone', 'text'), col('balance_aed', 'Balance', 'aed'), col('on_hold_aed', 'On hold', 'aed'),
+      const columns = [col('driver', 'Driver', 'text'), col('phone', 'Phone', 'text'), col('other_phones', 'Other numbers', 'text'), col('balance_aed', 'Balance', 'aed'), col('on_hold_aed', 'On hold', 'aed'),
         col('fleet_wallet', 'Fleet wallet', 'text'), col('fleet_limit_available_aed', 'Fleet limit left', 'aed'),
         col('powerdrive_group', 'PowerDrive group', 'text'), col('last_charged', 'Last charged', 'text'),
         col('charges_30d', 'Charges, 30 days', 'int'), col('link', 'Linked', 'text')];
@@ -1494,8 +1519,11 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
         note: [readNote(b), t.balance_unknown ? `${NO_PERSONAL}; total_balance_aed leaves those ${t.balance_unknown} out` : null,
           'only drivers whose PowerDrive account is linked to them appear; a driver not listed has no wallet linked, not a balance of AED 0',
           t.review ? `${t.review} possible links wait on the Charging page for a person to decide` : null,
-          ct.why ? `phone numbers could not be read: ${String(ct.why).slice(0, 160)}` : ct.access,
-          !ct.why && byName ? BY_NAME : null, ct.why ? null : PHONE_RULE].filter(Boolean).join(' — ') };
+          ...(walletPhoneAccess(g, b.rows.map((r) => r.phones)) ? [walletPhoneAccess(g, b.rows.map((r) => r.phones))] : [
+            onPd ? 'a driver\'s phone is listed first when it is also the number on their PowerDrive account' : null,
+            more ? `${more} driver(s) have further numbers on their platform driver records, in other_phones` : null,
+            'an empty phone means none is on the driver\'s platform driver records', PHONE_RULE]),
+        ].filter(Boolean).join(' — ') };
     },
 
     /* DRIVER CONTACTS (2026-11-23): the Compliance page's phone numbers and

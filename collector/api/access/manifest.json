@@ -451,6 +451,7 @@
   "subject": "CASH",
   "carries": [
    "CASH",
+   "CT",
    "ID",
    "LOC",
    "SYS",
@@ -458,6 +459,12 @@
   ],
   "grain": "record",
   "fields": [
+   {
+    "class": "CT",
+    "paths": [
+     "phones"
+    ]
+   },
    {
     "class": "ID",
     "paths": [
@@ -505,7 +512,11 @@
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "api/charging_routes.js. PowerDrive (YoCharge white label) read by src/sources/yocharge.js every six hours. ?person=<driver.id>. Body {person_id, synced_at, status, error, customers, wallets_at, currency, why (null, or why no wallet is shown: PowerDrive not read / no wallet linked), wallets[] {yc_user_id, tier auto|confirmed, balance, hold_amount, using_fleet_wallet, fleet_limit_available, fleet_group, last_session_at}, last_30_days {charges, kwh, cost}, charges_total (all ever, so a cut recent list says so), recent[] (20) {started_at, kwh, cost, plate, plate_basis, site, minutes}}. A wallet balance is a named driver's money: CASH. A charge's site with its time places the driver: LOC. Read by the driver money tab (api/public/driverledger.js chargingWallet). 'mixed': a person's record across both fleets, no fleet on the rows."
+  "lift": {
+   "CT": "CASH"
+  },
+  "auditRead": true,
+  "notes": "api/charging_routes.js. PowerDrive (YoCharge white label) read by src/sources/yocharge.js every six hours. ?person=<driver.id>. Body {person_id, synced_at, status, error, customers, wallets_at, currency, why (null, or why no wallet is shown: PowerDrive not read / no wallet linked), wallets[] {yc_user_id, tier auto|confirmed, balance, hold_amount, using_fleet_wallet, fleet_limit_available, fleet_group, last_session_at}, last_30_days {charges, kwh, cost}, charges_total (all ever, so a cut recent list says so), recent[] (20) {started_at, kwh, cost, plate, plate_basis, site, minutes}}. A wallet balance is a named driver's money: CASH. A charge's site with its time places the driver: LOC. Read by the driver money tab (api/public/driverledger.js chargingWallet). 'mixed': a person's record across both fleets, no fleet on the rows. Phones (AG-17, 2026-11-23): phones[] is every distinct number on the person's platform driver records (CT), the one also on their PowerDrive account first (phone_on_powerdrive); null when no wallet is linked. lift CT->CASH: the reader sees the numbers as clearly as the balance — the operator, 'give everyone asking about powerdrive wallet access to phone number' (api/access/shape.js liftLevels)."
  },
  {
   "method": "GET",
@@ -627,11 +638,18 @@
   "subject": "CASH",
   "carries": [
    "CASH",
+   "CT",
    "ID",
    "SYS"
   ],
   "grain": "list",
   "fields": [
+   {
+    "class": "CT",
+    "paths": [
+     "rows[].phones"
+    ]
+   },
    {
     "class": "ID",
     "paths": [
@@ -668,7 +686,11 @@
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "api/charging_routes.js. PowerDrive (YoCharge white label) read by src/sources/yocharge.js every six hours. Body {synced_at (last ok/partial run), status, error, failed {at, status, error} when the latest run failed after a good one, customers, customers_read, wallets_at, why, currency, totals {linked_people, linked_wallets, balance (null when no wallet states one), balance_unknown, nonzero, negative, on_fleet_wallet, auto, confirmed, review, unplaced, fleet_groups_seen}, rows[] {person_id, name, tier, yc_user_id, balance, hold_amount, using_fleet_wallet, fleet_limit, fleet_limit_available, fleet_group, last_session_at, charges_30d}}. The review queue moved to /api/charging/review (2026-11-03) so the people who decide it need not hold CASH; review and unplaced here are counts only. Read by the Charging page (drawWallets) and the Drivers directory's Charging wallet column (api/public/driver.js)."
+  "lift": {
+   "CT": "CASH"
+  },
+  "auditRead": true,
+  "notes": "api/charging_routes.js. PowerDrive (YoCharge white label) read by src/sources/yocharge.js every six hours. Body {synced_at (last ok/partial run), status, error, failed {at, status, error} when the latest run failed after a good one, customers, customers_read, wallets_at, why, currency, totals {linked_people, linked_wallets, balance (null when no wallet states one), balance_unknown, nonzero, negative, on_fleet_wallet, auto, confirmed, review, unplaced, fleet_groups_seen}, rows[] {person_id, name, tier, yc_user_id, balance, hold_amount, using_fleet_wallet, fleet_limit, fleet_limit_available, fleet_group, last_session_at, charges_30d}}. The review queue moved to /api/charging/review (2026-11-03) so the people who decide it need not hold CASH; review and unplaced here are counts only. Read by the Charging page (drawWallets) and the Drivers directory's Charging wallet column (api/public/driver.js). Phones (AG-17, 2026-11-23): rows[].phones is every distinct number on the person's platform driver records (CT), the one also on that PowerDrive account first (rows[].phone_on_powerdrive); [] when their records carry none. lift CT->CASH: the reader sees the numbers as clearly as the balance — the Cash desk, which works these balances, holds no contact details elsewhere (api/access/shape.js liftLevels)."
  },
  {
   "method": "GET",
@@ -9299,6 +9321,7 @@
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
+  "sourcedTables": true,
   "notes": "api/agent_routes.js (2026-10-09). The chat assistant. It holds no data of its own: every figure it relays was fetched by a tool as a GET to another /api route over the loopback, carrying the asker's own cookie, so the gate and shaper judged each one exactly as they judge the page it belongs to (a role without CASH is refused the cash tool in the cash page's words). It writes only its own 24-hour memory (agent_conversation/agent_message/agent_result, sql/schema_v103.sql), keyed on the asker; it has no tool that is not a GET. Anyone who can open the dashboard may use it (the operator, 2026-10-09): every person role holds agent.ask. Body {available, model, memory_hours, read_only, conversation:{id, context, messages}} — the asker's own conversation only."
  },
  {
