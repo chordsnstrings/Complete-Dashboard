@@ -12446,6 +12446,25 @@ pages say the sheet has not been read. The worker also reads once three minutes 
 
   A window starting mid-month reads the day before's card payments too. Without them, the day before's whole
   cash would count as leftover and an over day would read as covered (test §9).
+* **The hotel channel files a card-machine fare as `pos-driver`, never `cash`** (CARD-2b, measured
+  2026-11-23). Its payment types:
+  - `pos-driver`: the driver's own card machine;
+  - `pos-supervisor`: the supervisor's card machine;
+  - `cash-driver` and `cash-supervisor`: cash held by the driver or by the supervisor;
+  - `room-charge`, `hotel-charge` and `posted-for-salary`: on account;
+  - `foc-complimentary`: free.
+
+  A cross-check against `trip_cash` alone called 24.6% of driver-days "no cash trip at all" (AED 113,760),
+  most of it hotel drivers whose card payments were their pos-driver fares, matching to the fils. Card
+  payments are therefore measured against cash trips **plus** pos-driver fares.
+  **For the cash position (CARD-3):** pos-driver fares were never counted as cash held (`driver_holds_cash`
+  is `cash` and `cash-driver` only). Subtracting every card payment from cash would take those twice;
+  subtract only what settles cash trips.
+* **Read trips for a set of people by their account ids, not by joining the views.** `trip_cash` →
+  `trip_ext` → `trip_norm` runs a LATERAL per trip. Joined to `driver_platform_id`, the whole year read every
+  trip and took 4.5–6.6 s on production. Asking with `driver_ext_id = ANY(…)` rides
+  `trip_driver_requested_idx`; map back by (platform, id), so the same id on another platform is not
+  counted.
 * **These payments do not move the cash position yet.** Phase 3 (CARD-3) subtracts them after the operator has
   seen a before-and-after for each driver. Every answer says `in_cash_position: false`.
 
