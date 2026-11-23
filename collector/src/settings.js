@@ -63,10 +63,11 @@ export const SETTING_DEFAULTS = {
      104 customers, egari 47, ecofleet investor fleet 5). */
   YOCHARGE_FLEET_GROUPS: 'ecofleet,egari,ecofleet investor fleet',
   /* Card-machine payments (src/sources/network_cards.js, FIX-STATUS CARD-1):
-     the Network International sheet the operator's team keeps ("view:
-     Network Data"), its first tab, read hourly. The id is not a credential —
-     the sheet answers only the service account it is shared with. */
-  NETWORK_SHEET_ID: '1irWZUDX4hLOdiRgSdiUUuuQojr24mCvH7h1HJMY7_0E',
+     the Network International sheet the operator's team keeps, read hourly.
+     NO sheet id here: the sheet is open to anyone with its link, so the link
+     IS the credential — it reads every driver's Emirates ID — and it lives in
+     DigitalOcean as the secret NETWORK_SHEET_LINK (CARD-1b, 2026-11-23). */
+  NETWORK_SHEET_ID: '',
   NETWORK_SHEET_RANGE: 'A:J',
   NETWORK_CARDS_CRON: '33 * * * *',
   /* FLIGHTS from the OpenSky Network (src/sources/flights.js, 2026-11-16).
@@ -422,10 +423,12 @@ export const SETTING_DEFS = [
      (src/sources/network_cards.js, src/google_sheets.js). A Google Cloud
      service account with the Sheets API enabled; the sheet is shared with its
      client_email as Viewer. */
-  { key: 'GOOGLE_SERVICE_ACCOUNT_JSON', group: 'Card machines (Network International)', label: 'Google service account key (JSON)', secret: true,
+  { key: 'NETWORK_SHEET_LINK', group: 'Card machines (Network International)', label: 'Sheet link (anyone with the link can view)', secret: true,
+    hint: 'The card-payments sheet\u2019s link, as copied from the browser. Anyone holding it can read every driver\u2019s Emirates ID, so it is kept as a secret.' },
+  { key: 'GOOGLE_SERVICE_ACCOUNT_JSON', group: 'Card machines (Network International)', label: 'Google service account key (JSON) — only if the link is restricted', secret: true,
     hint: 'The whole JSON key file of a Google Cloud service account with the Google Sheets API enabled. Share the card-payments sheet with the account\u2019s client_email as Viewer.' },
   { key: 'NETWORK_SHEET_ID', group: 'Card machines (Network International)', label: 'Google Sheet id', secret: false,
-    hint: 'The long id in the sheet\u2019s address, between /d/ and /edit.' },
+    hint: 'Only with a service account key: the long id in the sheet\u2019s address. Without one, it is taken from the link.' },
   { key: 'NETWORK_SHEET_RANGE', group: 'Card machines (Network International)', label: 'Range to read', secret: false,
     hint: 'A:J reads the first tab. Name a tab to read another, e.g. Data!A:J.' },
   { key: 'NETWORK_CARDS_CRON', group: 'Collector', label: 'Card payments schedule (cron)', secret: false,
