@@ -1063,6 +1063,10 @@ the builder's matcher on the review's vocabulary.
 
 ## Traps that have cost time more than once
 
+* **A test with a fixed clock, over a row the database stamps with `now()`, passes only on the day it was
+  written** (2026-11-23, CI on PR #46). `test/events_web.test.mjs` ran the web tier at a fixed 16 Nov while
+  `logRun` (src/db.js) writes `finished_at = now()`; "once a Dubai day" compared the two and broke on 17 Nov on
+  every branch. Pin the stamped row to the test's clock (or pass the clock in) — never let one side read the wall.
 * **One area arrives under four names** (2026-11-16, FIX-STATUS PLC12). Google's dash-form address names a community
   officially ("Marsa Dubai", "Nakhlat Jumeira", "Hadaeq Sheikh Mohammed Bin Rashid") where riders say "Dubai Marina",
   "Palm Jumeirah", "Dubai Hills"; and Uber writes the address in the RIDER's app language, so Business Bay also
@@ -10070,6 +10074,7 @@ page's figure and the gate judges it as it judges the page:
 | `ledger_entries` | `/api/ledger/entries` | the driver money statement's lines, verification rows left out |
 | `platform_statements` | `/api/driver/earnings` | the platforms' statements: gross, fees, net, tips, cash, Salik; line items or periods |
 | `payouts` | `/api/finance/payouts` | bank transfers from each platform to the company |
+| `charging_wallets` (2026-11-23) | `/api/charging/wallets`, `/api/charging/driver` | PowerDrive wallet balance and hold per linked driver, fleet-wallet use and limit left, last charge, charges in 30 days; for one driver the last 30 days (charges, kWh, cost) and the latest 20 sessions. A position as of PowerDrive's last read, never a period's figure; no link → "no wallet linked", never AED 0; a fleet-wallet-only customer has no personal balance (empty, said); a newer failed read is said. CASH-class, so a role without driver cash is refused in the gate's words |
 
 **Decisions, and why.**
 - **The model never reads a clock.** "3pm" goes to `resolveClock`
