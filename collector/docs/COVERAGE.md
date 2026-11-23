@@ -1063,6 +1063,10 @@ the builder's matcher on the review's vocabulary.
 
 ## Traps that have cost time more than once
 
+* **A test with a fixed clock, over a row the database stamps with `now()`, passes only on the day it was
+  written** (2026-11-23, CI on PR #46). `test/events_web.test.mjs` ran the web tier at a fixed 16 Nov while
+  `logRun` (src/db.js) writes `finished_at = now()`; "once a Dubai day" compared the two and broke on 17 Nov on
+  every branch. Pin the stamped row to the test's clock (or pass the clock in) — never let one side read the wall.
 * **One area arrives under four names** (2026-11-16, FIX-STATUS PLC12). Google's dash-form address names a community
   officially ("Marsa Dubai", "Nakhlat Jumeira", "Hadaeq Sheikh Mohammed Bin Rashid") where riders say "Dubai Marina",
   "Palm Jumeirah", "Dubai Hills"; and Uber writes the address in the RIDER's app language, so Business Bay also

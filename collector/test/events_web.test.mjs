@@ -300,6 +300,13 @@ console.log('\n3. collectWeb on PGlite: written, idempotent, once a day, the rea
   check('…and records its own run: events / web, ok, the window searched', run1.length === 1 && run1[0].status === 'ok'
     && run1[0].rows_written === 2 && run1[0].ws === '2026-11-16' && run1[0].we === '2026-12-06', JSON.stringify(run1));
 
+  /* The run is logged with the DATABASE's clock (src/db.js logRun:
+     finished_at = now()), and this file's clock is fixed at NOW. While the two
+     fell on the same Dubai day (16 Nov 2026, when this was written) the check
+     below held by coincidence; from 17 Nov it failed on every branch, CI on
+     PR #46 included — the run read as yesterday's and was due again. Pinned
+     to the file's own clock, so "an hour later" is an hour after the run. */
+  await q(`UPDATE collection_run SET finished_at = $1 WHERE source = 'events' AND mode = 'web'`, [NOW.toISOString()]);
   seen.length = 0;
   const again = await collectWeb({ now: new Date(NOW.getTime() + 3600e3) });
   check('once a Dubai day: an hour later nothing is asked', again.ran === false && seen.length === 0, JSON.stringify({ ran: again.ran, n: seen.length }));
