@@ -1070,7 +1070,9 @@ the builder's matcher on the review's vocabulary.
   know (`other_phones`) passed whole for everyone. A key that holds a contact detail goes in the DICT
   (`api/access/shape.js`), and a table that needs its route's rule carries `source` (`sourcedTables`).
   A test that calls the toolbox directly never sees the reload: seed an `agent_message` and GET the state
-  through the gate (`test/agent_charging.test.mjs` §10).
+  through the gate (`test/agent_charging.test.mjs` §10). And the table a person sees is usually DERIVED —
+  "every driver with a negative balance" is the wallet list through `summarise` — so a derived result must
+  carry its input's `source` (AG-18), or the rule is lost on the most common question.
 * **`people[].person_id` on /api/compliance/drivers is MRG-class, not ID** (2026-11-23, AG-15). A tool that joins a
   person's details by that id works for the Owner and fails silently for a Dispatcher, an Analyst or the Finance
   manager — the field arrives null for them and every join misses. Join by the account ids (`accounts[].driver_ext_id`,
