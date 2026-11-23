@@ -16,7 +16,7 @@
    driver holds: that is phase 3 (FIX-STATUS CARD-3), after the operator has
    seen a before-and-after per driver. A negative amount is a chargeback and
    is labelled as one; the operator: the fare "usually comes back". */
-import { el, esc, note, tableFrom, kpiRow, dtStr, fmt } from './ui.js';
+import { el, esc, note, tableFrom, kpiRow, dtStr, fmt, entity } from './ui.js';
 import { api } from './data.js';
 import { aed } from './deposit_core.js';
 import { post } from './access.js';
@@ -50,7 +50,9 @@ const statusCell = (r) => {
   return r.status === 'over' || r.status === 'no_cash_trips' ? `<strong>${esc(t)}</strong>` : `<span class="dim">${esc(t)}</span>`;
 };
 const cashCell = (r) => (r.cash == null ? money(null) : `${esc(aed(r.cash))} <span class="dim">· ${fmt(r.cash_trips)} trip${r.cash_trips === 1 ? '' : 's'}</span>`);
-const personLink = (r) => `<a href="#driver/p${encodeURIComponent(r.person_id)}/money">${esc(r.name || `person ${r.person_id}`)}</a>`;
+/* Driver cells go through entity() inline (test/interlinking.test.mjs rule 3):
+   a driver with no id degrades to plain text, never to a broken link; a
+   person opens at p<id>. */
 
 const sourceLine = (c) => `From the Network International card-payments sheet, last read ${c.read_at ? dtStr(c.read_at) : '—'}`
   + `${c.covers_to ? `; it runs to ${c.covers_to}` : ''}. Not yet taken off the cash this driver holds — that change waits for review.`;
@@ -230,7 +232,7 @@ async function crossCheck(host) {
   ]));
   if ((x.drivers || []).length) {
     host.append(tableFrom(x.drivers, [
-      { label: 'Driver', key: 'name', render: personLink },
+      { label: 'Driver', key: 'name', render: (r) => entity('driver', r.person_id != null ? `p${r.person_id}` : null, r.name || `person ${r.person_id}`) },
       { label: 'Card days', key: 'card_days', num: true },
       { label: 'Days over', key: 'over_days', num: true },
       { label: 'Over by', key: 'over_aed', num: true, render: (r) => money(r.over_aed) },
