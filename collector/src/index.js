@@ -11,7 +11,7 @@ import { refreshRollups } from './rollup.js';
 import { recordCredentialVisibility, withPinnedSettings, get } from './settings.js';
 import { runDiscovery } from './sources/discovery.js';
 import { liveMoneyTick } from './sources/uber_transactions.js';
-import { backfill, incremental, catchUp, fareRefresh, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk, payoutAudit, chargingTick, walletsTick, flightsArrivalsTick, flightsLiveTick } from './run.js';
+import { backfill, incremental, catchUp, fareRefresh, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick, payoutWalk, payoutAudit, chargingTick, walletsTick, networkCardsTick, flightsArrivalsTick, flightsLiveTick } from './run.js';
 import { clearCheckpoint } from './checkpoint.js';
 import { config } from './config.js';
 import { log } from './log.js';
@@ -82,6 +82,9 @@ async function main() {
   if (cmd === 'live-money') return liveMoneyTick();
   if (cmd === 'charging') return chargingTick();
   if (cmd === 'charging-wallets') return walletsTick();
+  /* `network-cards`: one read of the card-payments sheet, by hand;
+     `--accept-shrink` writes a read the guard held (src/sources/network_cards.js). */
+  if (cmd === 'network-cards') return networkCardsTick({ acceptShrink: process.argv.includes('--accept-shrink') });
   if (cmd === 'audit') return uberAuditTick();
   if (cmd === 'discover') return withPinnedSettings(() => runDiscovery(pool, { log }));
   /* By hand. `sms-preview` decides without writing or sending anything and
@@ -397,6 +400,14 @@ async function main() {
        and never ran (COVERAGE trap; test/yocharge.test.mjs pins the hours). */
     cron.schedule(get('YOCHARGE_WALLETS_CRON', '17 3,9,15,21 * * *'), () => walletsTick().then(skipped('charging wallets'))
       .catch((e) => log.error('scheduler', 'charging wallets', { err: String(e) })), { timezone: 'Asia/Dubai' });
+    /* CARD-MACHINE PAYMENTS (src/sources/network_cards.js, FIX-STATUS CARD-1):
+       the Network International sheet, read at 33 past every hour — before
+       the 05:00 cash text, so a day's card payments are in by the time it is
+       written. Minute 33: not a multiple of five, clear of every minute the
+       note below lists. Silent ("skipped") until the Google service account
+       key is set on the Settings page. */
+    cron.schedule(get('NETWORK_CARDS_CRON', '33 * * * *'), () => networkCardsTick().then(skipped('card payments'))
+      .catch((e) => log.error('scheduler', 'card payments', { err: String(e) })), { timezone: 'Asia/Dubai' });
     /* FLIGHTS LANDING AT DXB AND DWC — OpenSky (src/sources/flights.js).
        ─────────────────────────────────────────────────────────────────────
        The confirmed arrivals at 41 minutes past every third hour from 01:41

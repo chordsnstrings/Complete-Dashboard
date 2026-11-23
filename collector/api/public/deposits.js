@@ -24,6 +24,7 @@
    cost a page load. Same core, different question. */
 import { el, esc, panel, note, loading, tableFrom, entity,
   contract, glance, absenceBand, pageFoot } from './ui.js';
+import { cardMachineFleet } from './card_panel.js';
 import { fmt, areaChart } from './charts.js';
 import { api } from './data.js';
 import { ledgerBand, ceiling, ceilingWho, ceilingCol, lastCashCol, ceilingRanked, monthBars, amountBands,
@@ -66,9 +67,16 @@ export async function renderDeposits(root) {
      the line's. A failure is remembered as one, so the tile can say the line
      did not load rather than that there is no history. */
   const histP = ak ? api('/api/history?page=deposits').catch(historyFailed) : null;
-  if (ak) { root.append(AK.band, head.panel, top.panel, listPanel.panel, after); loading(AK.tiles); }
-  else root.append(head.panel, listPanel.panel);
+  /* Card-machine payments (FIX-STATUS CARD-1): the money a driver took on a
+     card machine rather than in notes — beside the cash figures, not yet
+     taken off them (phase 3 waits on the operator's review). */
+  const cardP = panel('Card machine payments — Network International', 'What drivers took on card machines rather than in cash, '
+    + 'from the sheet the team keeps. Shown beside the cash figures; not yet taken off them.', 'deposit-card');
+  if (ak) { root.append(AK.band, head.panel, top.panel, listPanel.panel, after, cardP.panel); loading(AK.tiles); }
+  else root.append(head.panel, listPanel.panel, cardP.panel);
   loading(listPanel.body);
+  loading(cardP.body);
+  cardMachineFleet(cardP.body).catch((e) => { cardP.body.innerHTML = ''; cardP.body.append(note(`The card payments could not be drawn: ${e.message}`, 'bad')); });
 
   async function refresh() {
     /* THE OFFER AND THE FIGURES ARE DIFFERENT QUESTIONS. This read used to be

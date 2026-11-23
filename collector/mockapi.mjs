@@ -9346,6 +9346,50 @@ app.get('/api/charging/sessions', (req, r) => {
     days: [0, 1, 2, 3].map((d) => ({ day: dayISO(d), charges: 6 - d, kwh: 220 - d * 30, cost: 158 - d * 21 })),
     sites: [{ site: 'Al Quoz Hub', charges: 14, kwh: 520.3 }, { site: 'Marina Mall P2', charges: 11, kwh: 393.1 }], sites_total: 2 });
 });
+/* Card-machine payments (api/card_routes.js, FIX-STATUS CARD-1): person 401
+   has three payments on two terminals, one a chargeback; anyone else has no
+   Emirates ID known. Synthetic IDs only. */
+const CARD_READ = () => ({ read_at: new Date(Date.now() - 18e5).toISOString(), covers_from: '2026-01-01', covers_to: '2026-11-22',
+  skipped_rows: 0, skipped: {}, failed: null, why: null });
+app.get('/api/card/driver', (req, r) => {
+  const person = String(req.query.person || '').replace(/^p/i, '');
+  if (!person) return r.status(400).json({ error: 'person required' });
+  const has = person === '401';
+  const payments = has ? [{ day: '2026-11-21', terminal_id: '10389537', amount: -25, fleet_id: 'ecosine', chargeback: true },
+    { day: '2026-11-20', terminal_id: '10389537', amount: 60, fleet_id: 'ecosine', chargeback: false },
+    { day: '2026-11-18', terminal_id: '10401871', amount: 100, fleet_id: 'ecosine', chargeback: false }] : [];
+  r.json({ person_id: person, from: null, to: null, ...CARD_READ(),
+    why: has ? null : 'No Emirates ID is known for this driver: it is not on the HR export and nobody has linked one, so no card payment can be placed on them.',
+    currency: 'AED', placed_by: { hr_export: has ? 1 : 0, linked: 0 },
+    totals: { payments: payments.length, card: has ? 160 : 0, chargebacks: has ? -25 : 0, chargeback_n: has ? 1 : 0, net: has ? 135 : 0,
+      first_day: has ? '2026-11-18' : null, last_day: has ? '2026-11-21' : null },
+    days: has ? [{ day: '2026-11-21', payments: 1, net: -25, chargebacks: 1, terminals: ['10389537'] },
+      { day: '2026-11-20', payments: 1, net: 60, chargebacks: 0, terminals: ['10389537'] },
+      { day: '2026-11-18', payments: 1, net: 100, chargebacks: 0, terminals: ['10401871'] }] : [],
+    payments,
+    terminals: has ? [{ terminal_id: '10389537', payments: 2, net: 35, first_day: '2026-11-20', last_day: '2026-11-21' },
+      { terminal_id: '10401871', payments: 1, net: 100, first_day: '2026-11-18', last_day: '2026-11-18' }] : [],
+    in_cash_position: false, note: 'card payments are shown beside the cash position, not yet taken off it — that change waits for the operator\'s review' });
+});
+app.get('/api/card/summary', (_req, r) => {
+  r.json({ from: null, to: null, ...CARD_READ(), currency: 'AED',
+    totals: { payments: 8034, net: 542744.8, placed_payments: 6031, placed: 387230, people: 101, no_driver_payments: 572, no_driver: 67306.15,
+      unplaced_payments: 1431, unplaced: 88208.65, unplaced_ids: 45 },
+    months: [{ month: '2026-11', fleet_id: 'ecosine', payments: 585, net: 41002.17, chargebacks: -120, ids: 55, terminals: 57 },
+      { month: '2026-11', fleet_id: 'egari', payments: 298, net: 21185.93, chargebacks: 0, ids: 28, terminals: 28 }],
+    no_driver_terminals: [{ terminal_id: '10392911', payments: 41, net: 6120.5, labels: ['Not Found'], first_day: '2026-01-01', last_day: '2026-11-20', ever_mapped: false },
+      { terminal_id: '10403949', payments: 12, net: 880, labels: ['N/A'], first_day: '2026-03-02', last_day: '2026-10-11', ever_mapped: true }],
+    no_driver_terminals_total: 2, in_cash_position: false,
+    note: 'card payments are shown beside the cash position, not yet taken off it — that change waits for the operator\'s review' });
+});
+app.get('/api/card/review', (_req, r) => {
+  r.json({ ...CARD_READ(),
+    rows: [{ ref: '0a1b2c3d4e5f6071', emirates_id: '784199000000099', why: 'not on the HR export — upload a newer export, or link it to a driver here',
+      payments: 14, net: 1210.5, first_day: '2026-09-02', last_day: '2026-11-19', fleets: ['egari'], terminals: ['10397225'] },
+    { ref: '1a2b3c4d5e6f7081', emirates_id: null, why: 'on the HR export, under 2 driver records — fold those records into one person (Same person page) and it places itself',
+      payments: 3, net: 140, first_day: '2026-11-01', last_day: '2026-11-03', fleets: ['ecosine'], terminals: ['10389542'] }],
+    totals: { ids: 2, payments: 17, net: 1350.5 } });
+});
 app.get('/api/charging/driver', (req, r) => {
   const person = String(req.query.person || '').replace(/^p/i, '');
   if (!person) return r.status(400).json({ error: 'person required' });
