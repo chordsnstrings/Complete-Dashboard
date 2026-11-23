@@ -120,6 +120,11 @@ export const TOOL_SPECS = [
       show: { type: 'string', enum: ['lines', 'periods'] } }, ['driver_id', 'from', 'to']),
   fn('payouts', 'Settlement history: every bank transfer Uber, Bolt and Yango paid the company in a period, by fleet, with the period it settles where the platform says, and totals per platform and fleet.',
     { ...DATES, platform: PLATFORM, fleet: FLEET }, ['from', 'to']),
+  /* ── PowerDrive charging (2026-11-23) ───────────────────────────────── */
+  fn('charging_wallets', 'PowerDrive EV-charging wallets: each linked driver\'s charging wallet balance in AED (money on PowerDrive to pay for charging), the amount on hold, whether they charge on the fleet\'s wallet and the fleet limit still available, their PowerDrive group, when they last charged and their charges in the last 30 days. Give driver_id (from find_driver) for one driver — that adds their last 30 days of charging (charges, kWh, cost) and their latest charging sessions; without it, every driver with a linked wallet. Balances are what PowerDrive reported at its last read, never a period\'s figure. A driver with no wallet linked has no balance — say so, never AED 0.',
+    { driver_id: { type: 'string', description: 'from find_driver' },
+      sort_by: { type: 'string', enum: ['balance_aed', 'on_hold_aed', 'charges_30d', 'last_charged_at'] },
+      order: { type: 'string', enum: ['desc', 'asc'] } }),
   fn('summarise', 'Work on a stored table result: filter rows, group them, total or average a column, sort, keep the top N. Returns a new result. Use this for any adding up, averaging, ranking or counting — never do arithmetic yourself.',
     { result: { type: 'string', description: 'a table result id, e.g. r3' },
       filter: { type: 'array', items: { type: 'object', properties: {
@@ -167,6 +172,7 @@ export const STATUS = {
   ledger_entries: () => 'Fetching the statement lines…',
   platform_statements: () => 'Fetching the platform statements…',
   payouts: () => 'Fetching the payouts…',
+  charging_wallets: () => 'Fetching the PowerDrive charging wallets…',
   summarise: () => 'Working the figures out…',
   compare: () => 'Comparing…',
   combine: () => 'Putting the tables together…',
@@ -290,7 +296,13 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
       if (g.withheld || g.error) return { kind: 'lookup', definition: `Drivers named “${a.name}”`, ...g };
       const rows = Array.isArray(g.body) ? g.body : (g.body.rows || []);
       const m = findDriver(a.name, rows);
-      for (const c of m.candidates) ctx.drivers.set(c.driver_id, { name: c.name, ids: rows.find((r) => String(r.driver_ext_id) === c.driver_id)?.ids || [c.driver_id] });
+      /* The person id travels with the name (2026-11-23): PowerDrive wallets
+         are linked to a PERSON, not to a platform account, and
+         /api/charging/driver takes that id (api/charging_routes.js). */
+      for (const c of m.candidates) {
+        const row = rows.find((r) => String(r.driver_ext_id) === c.driver_id);
+        ctx.drivers.set(c.driver_id, { name: c.name, ids: row?.ids || [c.driver_id], person_id: row?.person_id ?? null });
+      }
       return { kind: 'lookup', definition: `Drivers named “${a.name}”`, verdict: m.verdict, candidates: m.candidates,
         note: m.why };
     },
@@ -1280,6 +1292,135 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           ...(pct != null ? { lending_line_pct: pct } : {}) },
         kinds: { lending_line_pct: 'pct' },
         note: [NOTE, WINDOWS, blankedNote(g, ['EARN', 'BK'])].filter(Boolean).join(' — ') };
+    },
+
+    /* POWERDRIVE CHARGING WALLETS (the operator, 2026-11-23: "give the chat
+       the ability to collect powerdrive charging wallet balance").
+       ─────────────────────────────────────────────────────────────────────
+       The Charging page's own two reads, as the asker: /api/charging/wallets
+       (every linked person's wallet) and /api/charging/driver (one person's
+       wallet(s), last 30 days and latest sessions). Both are CASH-class in
+       the access manifest — a wallet balance is a named driver's money — so a
+       role without driver cash is refused them in the gate's words, and the
+       assistant says so rather than a zero.
+
+       Three truths the page keeps and the chat must keep too
+       (api/charging_routes.js):
+         · NO LINK, NO BALANCE. A person with no PowerDrive wallet linked has
+           no balance: the result says "no wallet linked", never AED 0;
+         · A FLEET-WALLET CUSTOMER HAS NO PERSONAL BALANCE. PowerDrive sends
+           balance null for one; the figure stays empty and the note says
+           why, and the total counts how many it could not include;
+         · A BALANCE IS A POSITION AS OF THE LAST READ, not a period's
+           figure. The definition says "as PowerDrive last reported it", the
+           read time is a value, and a newer failed read is said — balances
+           frozen since the last good read are not passed off as current.
+       Wallets are linked to a PERSON (charging_link.person_id), so the one-
+       driver read needs the person id: find_driver keeps it; a driver_id
+       from an older lookup is resolved through /api/driver/profile. */
+    async charging_wallets(a, ctx) {
+      let one = null;
+      if (a.driver_id) { one = ctx.drivers.get(String(a.driver_id)); if (!one) return notFromLookup(a); }
+      const when = (ts) => (ts ? `${rangeLabel(dayOfTs(ts), dayOfTs(ts))}, ${dubaiTime(ts)}` : null);
+      const readNote = (b) => {
+        if (!b.synced_at) return b.why || 'PowerDrive has not been read yet, so there is no balance to give.';
+        const failedNewer = b.failed && (!b.synced_at || new Date(b.failed.at) > new Date(b.synced_at));
+        return failedNewer
+          ? `the latest PowerDrive read failed at ${when(b.failed.at)} (${String(b.failed.error || b.failed.status).slice(0, 160)}) — these balances are from the last good read, ${when(b.synced_at)}; say they may be out of date`
+          : `balances as PowerDrive reported them at its last read, ${when(b.synced_at)}`;
+      };
+      const NO_PERSONAL = 'a driver who charges only on the fleet\'s wallet has no personal balance: that figure is empty, never zero';
+      if (one) {
+        const definition = `${defn('PowerDrive charging wallet', { driver: one.name })} · as PowerDrive last reported it`;
+        const filters = { driver: one.name };
+        let person = one.person_id ?? null;
+        if (person == null) {
+          const pr = await get(`/api/driver/profile?${qs({ id: a.driver_id })}`);
+          if (pr.withheld || pr.error) return { kind: 'table', definition, filters, ...pr };
+          person = pr.body?.person_id ?? null;
+        }
+        if (person == null) {
+          return { kind: 'value', definition, filters, values: { wallet_linked: 'no' }, kinds: { wallet_linked: 'text' },
+            note: 'this driver has no person record for a PowerDrive wallet to be linked to — say no wallet is linked; never a balance of AED 0' };
+        }
+        const g = await get(`/api/charging/driver?${qs({ person })}`);
+        if (g.withheld || g.error) return { kind: 'table', definition, filters, ...g };
+        const b = g.body;
+        const ws = b.wallets || [];
+        if (!ws.length) {
+          return { kind: 'value', definition, filters, source: '/api/charging/driver', values: { wallet_linked: 'no' }, kinds: { wallet_linked: 'text' },
+            note: [b.why || 'No PowerDrive charging wallet is linked to this driver.', 'say no wallet is linked — never a balance of AED 0',
+              b.synced_at ? readNote(b) : null].filter(Boolean).join(' — ') };
+        }
+        const known = ws.filter((w) => w.balance != null);
+        const holds = ws.filter((w) => w.hold_amount != null);
+        const fleetWs = ws.filter((w) => w.using_fleet_wallet);
+        const lastAt = ws.map((w) => w.last_session_at).filter(Boolean).sort().pop() || null;
+        const l30 = b.last_30_days || {};
+        const values = {
+          balance_aed: known.length ? r2(known.reduce((x, w) => x + w.balance, 0)) : null,
+          on_hold_aed: holds.length ? r2(holds.reduce((x, w) => x + w.hold_amount, 0)) : null,
+          wallets: ws.length,
+          on_fleet_wallet: fleetWs.length ? 'yes' : 'no',
+          fleet_limit_available_aed: fleetWs.some((w) => w.fleet_limit_available != null)
+            ? r2(fleetWs.reduce((x, w) => x + (w.fleet_limit_available || 0), 0)) : null,
+          powerdrive_group: [...new Set(ws.map((w) => w.fleet_group).filter(Boolean))].join(', ') || null,
+          last_charged: when(lastAt),
+          charges_30d: num(l30.charges), kwh_30d: num(l30.kwh), cost_30d_aed: num(l30.cost),
+          charges_ever: num(b.charges_total),
+          read_at: when(b.synced_at),
+        };
+        for (const k of Object.keys(values)) if (values[k] == null) delete values[k];
+        const BASIS = { session_plate: 'the session named it', only_car: 'their only car', nearest_trip: 'nearest trip' };
+        const rows = (b.recent || []).map((x) => ({ charged: when(x.started_at), kwh: num(x.kwh), cost_aed: num(x.cost),
+          minutes: num(x.minutes), plate: x.plate || null, car_from: x.plate ? (BASIS[x.plate_basis] || x.plate_basis || null) : null,
+          site: x.site || null }));
+        const columns = [col('charged', 'Charged', 'text'), col('kwh', 'kWh', 'num2'), col('cost_aed', 'Cost', 'aed'),
+          col('minutes', 'Minutes', 'int'), col('plate', 'Car', 'text'), col('car_from', 'Car from', 'text'), col('site', 'Site', 'text')];
+        const notes = [readNote(b),
+          known.length < ws.length ? NO_PERSONAL : null,
+          ws.length > 1 ? `${ws.length} PowerDrive wallets are linked to this driver; balance_aed is their sum` : null,
+          l30.cost_unknown ? `${l30.cost_unknown} of the last 30 days' charges carry no cost, so cost_30d_aed leaves them out` : null,
+          b.history_read === false ? 'their full charging history is still being read, so charges_ever is a count so far, not all' : null,
+          (b.recent || []).length && b.charges_total > (b.recent || []).length ? `the table is the latest ${(b.recent || []).length} of ${b.charges_total} charges` : null,
+          'a charge is a session that delivered energy; cancelled and zero-energy sessions are not counted',
+        ].filter(Boolean);
+        return { kind: 'table', definition, filters, source: '/api/charging/driver', columns, rows, values,
+          kinds: { balance_aed: 'aed', on_hold_aed: 'aed', wallets: 'int', on_fleet_wallet: 'text', fleet_limit_available_aed: 'aed',
+            powerdrive_group: 'text', last_charged: 'text', charges_30d: 'int', kwh_30d: 'num2', cost_30d_aed: 'aed',
+            charges_ever: 'int', read_at: 'text' },
+          note: notes.join(' — ') };
+      }
+      const definition = 'PowerDrive charging wallets by driver · as PowerDrive last reported them';
+      const g = await get('/api/charging/wallets');
+      if (g.withheld || g.error) return { kind: 'table', definition, ...g };
+      const b = g.body;
+      if (!(b.rows || []).length) {
+        return { kind: 'value', definition, source: '/api/charging/wallets', values: { wallets_linked: 0 }, kinds: { wallets_linked: 'int' },
+          note: [b.why || 'No PowerDrive wallet is linked to any driver yet.', b.totals?.review ? `${b.totals.review} possible links wait on the Charging page for a person to decide` : null]
+            .filter(Boolean).join(' — ') };
+      }
+      const rows = b.rows.map((r) => ({ driver: r.name || '(a person with no name on file)', balance_aed: r.balance, on_hold_aed: r.hold_amount,
+        fleet_wallet: r.using_fleet_wallet ? 'yes' : 'no', fleet_limit_available_aed: r.using_fleet_wallet ? r.fleet_limit_available : null,
+        powerdrive_group: r.fleet_group || null, last_charged: when(r.last_session_at), last_charged_at: r.last_session_at || null,
+        charges_30d: r.charges_30d, link: r.tier === 'confirmed' ? 'confirmed by a person' : 'matched automatically' }));
+      sortRows(rows, ['balance_aed', 'on_hold_aed', 'charges_30d', 'last_charged_at'].includes(a.sort_by) ? a.sort_by : 'balance_aed',
+        a.order === 'asc' ? 'asc' : 'desc');
+      const t = b.totals || {};
+      const columns = [col('driver', 'Driver', 'text'), col('balance_aed', 'Balance', 'aed'), col('on_hold_aed', 'On hold', 'aed'),
+        col('fleet_wallet', 'Fleet wallet', 'text'), col('fleet_limit_available_aed', 'Fleet limit left', 'aed'),
+        col('powerdrive_group', 'PowerDrive group', 'text'), col('last_charged', 'Last charged', 'text'),
+        col('charges_30d', 'Charges, 30 days', 'int'), col('link', 'Linked', 'text')];
+      const values = { wallets: num(t.linked_wallets), drivers: num(t.linked_people), total_balance_aed: t.balance ?? null,
+        wallets_without_a_personal_balance: num(t.balance_unknown), negative_balances: num(t.negative), on_fleet_wallet: num(t.on_fleet_wallet),
+        waiting_for_review: num(t.review), unplaced_customers: num(t.unplaced), read_at: when(b.synced_at) };
+      for (const k of Object.keys(values)) if (values[k] == null) delete values[k];
+      return { kind: 'table', definition, source: '/api/charging/wallets', columns, rows, values,
+        kinds: { wallets: 'int', drivers: 'int', total_balance_aed: 'aed', wallets_without_a_personal_balance: 'int', negative_balances: 'int',
+          on_fleet_wallet: 'int', waiting_for_review: 'int', unplaced_customers: 'int', read_at: 'text' },
+        note: [readNote(b), t.balance_unknown ? `${NO_PERSONAL}; total_balance_aed leaves those ${t.balance_unknown} out` : null,
+          'only drivers whose PowerDrive account is linked to them appear; a driver not listed has no wallet linked, not a balance of AED 0',
+          t.review ? `${t.review} possible links wait on the Charging page for a person to decide` : null].filter(Boolean).join(' — ') };
     },
 
     async ledger_entries(a, ctx) {

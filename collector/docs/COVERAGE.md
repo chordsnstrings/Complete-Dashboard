@@ -10070,6 +10070,7 @@ page's figure and the gate judges it as it judges the page:
 | `ledger_entries` | `/api/ledger/entries` | the driver money statement's lines, verification rows left out |
 | `platform_statements` | `/api/driver/earnings` | the platforms' statements: gross, fees, net, tips, cash, Salik; line items or periods |
 | `payouts` | `/api/finance/payouts` | bank transfers from each platform to the company |
+| `charging_wallets` (2026-11-23) | `/api/charging/wallets`, `/api/charging/driver` | PowerDrive wallet balance and hold per linked driver, fleet-wallet use and limit left, last charge, charges in 30 days; for one driver the last 30 days (charges, kWh, cost) and the latest 20 sessions. A position as of PowerDrive's last read, never a period's figure; no link → "no wallet linked", never AED 0; a fleet-wallet-only customer has no personal balance (empty, said); a newer failed read is said. CASH-class, so a role without driver cash is refused in the gate's words |
 
 **Decisions, and why.**
 - **The model never reads a clock.** "3pm" goes to `resolveClock`
