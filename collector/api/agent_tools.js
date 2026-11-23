@@ -1366,6 +1366,11 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
             ? r2(fleetWs.reduce((x, w) => x + (w.fleet_limit_available || 0), 0)) : null,
           powerdrive_group: [...new Set(ws.map((w) => w.fleet_group).filter(Boolean))].join(', ') || null,
           last_charged: when(lastAt),
+          /* The window's length as a figure of its own (production, 2026-11-23):
+             the model wrote "in the last 30 days" beside charges_30d, the guard
+             found no result carrying 30, and the whole answer fell back to the
+             plain list. A sentence may now say the 30 because a result does. */
+          charge_window_days: 30,
           charges_30d: num(l30.charges), kwh_30d: num(l30.kwh), cost_30d_aed: num(l30.cost),
           charges_ever: num(b.charges_total),
           read_at: when(b.synced_at),
@@ -1387,7 +1392,7 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
         ].filter(Boolean);
         return { kind: 'table', definition, filters, source: '/api/charging/driver', columns, rows, values,
           kinds: { balance_aed: 'aed', on_hold_aed: 'aed', wallets: 'int', on_fleet_wallet: 'text', fleet_limit_available_aed: 'aed',
-            powerdrive_group: 'text', last_charged: 'text', charges_30d: 'int', kwh_30d: 'num2', cost_30d_aed: 'aed',
+            powerdrive_group: 'text', last_charged: 'text', charge_window_days: 'int', charges_30d: 'int', kwh_30d: 'num2', cost_30d_aed: 'aed',
             charges_ever: 'int', read_at: 'text' },
           note: notes.join(' — ') };
       }
@@ -1413,11 +1418,11 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
         col('charges_30d', 'Charges, 30 days', 'int'), col('link', 'Linked', 'text')];
       const values = { wallets: num(t.linked_wallets), drivers: num(t.linked_people), total_balance_aed: t.balance ?? null,
         wallets_without_a_personal_balance: num(t.balance_unknown), negative_balances: num(t.negative), on_fleet_wallet: num(t.on_fleet_wallet),
-        waiting_for_review: num(t.review), unplaced_customers: num(t.unplaced), read_at: when(b.synced_at) };
+        waiting_for_review: num(t.review), unplaced_customers: num(t.unplaced), charge_window_days: 30, read_at: when(b.synced_at) };
       for (const k of Object.keys(values)) if (values[k] == null) delete values[k];
       return { kind: 'table', definition, source: '/api/charging/wallets', columns, rows, values,
         kinds: { wallets: 'int', drivers: 'int', total_balance_aed: 'aed', wallets_without_a_personal_balance: 'int', negative_balances: 'int',
-          on_fleet_wallet: 'int', waiting_for_review: 'int', unplaced_customers: 'int', read_at: 'text' },
+          on_fleet_wallet: 'int', waiting_for_review: 'int', unplaced_customers: 'int', charge_window_days: 'int', read_at: 'text' },
         note: [readNote(b), t.balance_unknown ? `${NO_PERSONAL}; total_balance_aed leaves those ${t.balance_unknown} out` : null,
           'only drivers whose PowerDrive account is linked to them appear; a driver not listed has no wallet linked, not a balance of AED 0',
           t.review ? `${t.review} possible links wait on the Charging page for a person to decide` : null].filter(Boolean).join(' — ') };
