@@ -16,7 +16,7 @@
    driver holds: that is phase 3 (FIX-STATUS CARD-3), after the operator has
    seen a before-and-after per driver. A negative amount is a chargeback and
    is labelled as one; the operator: the fare "usually comes back". */
-import { el, esc, note, tableFrom, kpiRow, dtStr, fmt } from './ui.js';
+import { el, esc, note, tableFrom, kpiRow, dtStr, fmt, entity } from './ui.js';
 import { api } from './data.js';
 import { aed } from './deposit_core.js';
 import { post } from './access.js';
@@ -38,6 +38,22 @@ function readNotes(host, c) {
       + `${c.failed.why || c.failed.status}. ${c.read_at ? `What is shown is from the last good read, ${dtStr(c.read_at)}.` : ''}`, 'warn'));
   }
 }
+/* CARD-2: a day against that day's cash trips, in words. */
+const STATUS = {
+  covered: () => 'covered by cash trips',
+  covered_with_day_before: () => 'covered with the day before (a fare before midnight, paid after)',
+  over: (r) => `over the cash trips by ${aed(r.over_by)}`,
+  no_cash_trips: () => 'no cash trip that day or the day before',
+};
+const statusCell = (r) => {
+  const t = (STATUS[r.status] || (() => '—'))(r);
+  return r.status === 'over' || r.status === 'no_cash_trips' ? `<strong>${esc(t)}</strong>` : `<span class="dim">${esc(t)}</span>`;
+};
+const cashCell = (r) => (r.cash == null ? money(null) : `${esc(aed(r.cash))} <span class="dim">· ${fmt(r.cash_trips)} trip${r.cash_trips === 1 ? '' : 's'}</span>`);
+/* Driver cells go through entity() inline (test/interlinking.test.mjs rule 3):
+   a driver with no id degrades to plain text, never to a broken link; a
+   person opens at p<id>. */
+
 const sourceLine = (c) => `From the Network International card-payments sheet, last read ${c.read_at ? dtStr(c.read_at) : '—'}`
   + `${c.covers_to ? `; it runs to ${c.covers_to}` : ''}. Not yet taken off the cash this driver holds — that change waits for review.`;
 
@@ -71,6 +87,17 @@ export async function cardMachineDriver(host, prof) {
     ], { cards: true, cardLead: 'terminal_id' }));
   }
   if ((c.payments || []).length) {
+    /* CARD-2: each day against the cash trips — a card payment settles a cash
+       trip, so a day's card total should not run past them. */
+    if ((c.days || []).some((d) => d.status)) {
+      host.append(el('h4', 'subhead', 'By day — against the cash trips'));
+      host.append(tableFrom(c.days, [
+        { label: 'Day', key: 'day' },
+        { label: 'Card', key: 'net', num: true, render: (r) => money(r.net) },
+        { label: 'Cash trips', key: 'cash', num: true, render: cashCell },
+        { label: 'Check', key: 'status', render: statusCell },
+      ], { cards: true, cardLead: 'day' }));
+    }
     host.append(el('h4', 'subhead', 'Payments'));
     host.append(tableFrom(c.payments, [
       { label: 'Day', key: 'day' },
@@ -123,6 +150,8 @@ export async function cardMachineFleet(host) {
       host.append(el('p', 'cap', esc(`The ${fmt(s.no_driver_terminals.length)} terminals carrying the most, of ${fmt(s.no_driver_terminals_total)}.`)));
     }
   }
+  const cx = el('div'); host.append(cx);
+  await crossCheck(cx);
   const rev = el('div'); host.append(rev);
   await reviewList(rev);
   host.append(el('p', 'cap', esc(`From the Network International card-payments sheet, last read ${s.read_at ? dtStr(s.read_at) : '—'}. `
@@ -182,3 +211,39 @@ async function reviewList(host) {
     });
   }));
 }
+
+/* THE FLEET'S CROSS-CHECK (CARD-2): every placed driver-day with card
+   payments against that driver's cash trips, and the drivers with the most
+   card money the cash trips do not explain. */
+async function crossCheck(host) {
+  host.innerHTML = '';
+  let x;
+  try { x = await api('/api/card/crosscheck'); }
+  catch (e) { host.append(note(`The cross-check with cash trips could not be read: ${e.message}`, 'bad')); return; }
+  host.append(el('h4', 'subhead', 'Against the cash trips'));
+  if (x.why) { host.append(note(x.why, 'warn')); return; }
+  const t = x.totals || {};
+  host.append(kpiRow([
+    { label: 'Driver-days checked', value: fmt(t.driver_days), sub: `${aed(t.card)} on card` },
+    { label: 'Covered by cash trips', value: fmt((t.covered || 0) + (t.covered_with_day_before || 0)),
+      sub: `${fmt(t.covered_with_day_before)} only with the day before (after midnight)` },
+    { label: 'Over the cash trips', value: t.over_aed == null ? '—' : aed(t.over_aed), sub: `${fmt(t.over)} driver-days` },
+    { label: 'No cash trips at all', value: t.no_cash_aed == null ? '—' : aed(t.no_cash_aed), sub: `${fmt(t.no_cash_trips)} driver-days` },
+  ]));
+  if ((x.drivers || []).length) {
+    host.append(tableFrom(x.drivers, [
+      { label: 'Driver', key: 'name', render: (r) => entity('driver', r.person_id != null ? `p${r.person_id}` : null, r.name || `person ${r.person_id}`) },
+      { label: 'Card days', key: 'card_days', num: true },
+      { label: 'Days over', key: 'over_days', num: true },
+      { label: 'Over by', key: 'over_aed', num: true, render: (r) => money(r.over_aed) },
+      { label: 'Days with no cash trip', key: 'no_cash_days', num: true },
+      { label: 'Card on those days', key: 'no_cash_aed', num: true, render: (r) => money(r.no_cash_aed) },
+      { label: 'Not explained', key: 'unexplained_aed', num: true, render: (r) => money(r.unexplained_aed) },
+    ], { cards: true, cardLead: 'name' }));
+    if (x.drivers_flagged > x.drivers.length) host.append(el('p', 'cap', esc(`The ${fmt(x.drivers.length)} with the most, of ${fmt(x.drivers_flagged)} drivers flagged.`)));
+  }
+  host.append(el('p', 'cap', esc(`A card payment settles a cash trip, so a driver's card total for a day should not run past that day's cash trips `
+    + `(allowing AED ${x.allowance_aed} a day for tips and rounding, and the day before's leftover for a fare taken before midnight). `
+    + 'Over, or no cash trip at all, means the sheet put the payment on the wrong driver, or a ride on no platform was paid by card.')));
+}
+
