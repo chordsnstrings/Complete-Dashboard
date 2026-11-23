@@ -1063,6 +1063,11 @@ the builder's matcher on the review's vocabulary.
 
 ## Traps that have cost time more than once
 
+* **`people[].person_id` on /api/compliance/drivers is MRG-class, not ID** (2026-11-23, AG-15). A tool that joins a
+  person's details by that id works for the Owner and fails silently for a Dispatcher, an Analyst or the Finance
+  manager — the field arrives null for them and every join misses. Join by the account ids (`accounts[].driver_ext_id`,
+  plain ID) first. And the person spine (src/persons.js) is cached when first built: a test that seeds
+  `driver_platform_id` after the first route has read the spine gets an empty spine for the rest of the run.
 * **A test with a fixed clock, over a row the database stamps with `now()`, passes only on the day it was
   written** (2026-11-23, CI on PR #46). `test/events_web.test.mjs` ran the web tier at a fixed 16 Nov while
   `logRun` (src/db.js) writes `finished_at = now()`; "once a Dubai day" compared the two and broke on 17 Nov on
@@ -10075,6 +10080,7 @@ page's figure and the gate judges it as it judges the page:
 | `platform_statements` | `/api/driver/earnings` | the platforms' statements: gross, fees, net, tips, cash, Salik; line items or periods |
 | `payouts` | `/api/finance/payouts` | bank transfers from each platform to the company |
 | `charging_wallets` (2026-11-23) | `/api/charging/wallets`, `/api/charging/driver` | PowerDrive wallet balance and hold per linked driver, fleet-wallet use and limit left, last charge, charges in 30 days; for one driver the last 30 days (charges, kWh, cost) and the latest 20 sessions. A position as of PowerDrive's last read, never a period's figure; no link → "no wallet linked", never AED 0; a fleet-wallet-only customer has no personal balance (empty, said); a newer failed read is said. CASH-class, so a role without driver cash is refused in the gate's words |
+| `driver_contacts` (2026-11-23) | `/api/compliance/drivers` | every person's main phone and email and each platform account's phone (the platforms' own driver records, as the Compliance page shows them); one driver by driver_id. `charging_wallets` carries each driver's phone from the same list. Contact fields are class CT, shaped by the gate per role: withheld (null) for a role without CT — said as withheld, never "no phone" — and masked to the last two digits for CT:M (the Auditor). A driver is matched by their own platform account ids first, then the person id (class MRG, which most roles do not hold), then a name exactly one person carries |
 
 **Decisions, and why.**
 - **The model never reads a clock.** "3pm" goes to `resolveClock`
