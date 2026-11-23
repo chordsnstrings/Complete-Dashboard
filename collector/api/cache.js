@@ -100,7 +100,7 @@ const MAX_BYTES = Number(process.env.CACHE_MAX_BYTES || 64 * 1024 * 1024);
    see, the people they manage). Cached by URL they would be served to the next
    person to ask — measured in development on 2026-09-28: a cash-desk session
    was handed the Owner's whole Access overview as an x-cache: hit. */
-const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/track', '/api/settings', '/api/rollups',
+export const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/track', '/api/settings', '/api/rollups',
   '/api/status', '/api/health', '/api/ready', '/api/probe', '/api/cache-stats',
   '/api/coverage/verified',
   /* WHERE A CAR WAS (api/where_routes.js, 2026-10-13) — the same positions
@@ -130,6 +130,13 @@ const NEVER = ['/api/auth/', '/api/access/', '/api/fleets', '/api/live', '/api/t
      sessions by an index on started_at), and the wallet balances themselves
      move on PowerDrive's six-hourly run, so none is worth a cache. */
   '/api/charging/',
+  /* …and the card-machine payments (api/card_routes.js, FIX-STATUS CARD-2):
+     the same failure, found on production 2026-11-23 — /api/card/review came
+     back x-cache: stale, 45 minutes old, so a "Link to a driver" click would
+     redraw the ID as still unplaced. A link moves which driver a payment is
+     on, and advances no version, so every card read is live; each is a few
+     grouped reads over ~8,000 rows. */
+  '/api/card/',
   /* THE REVENUE TARGET, which the Owner's save and the trips-a-day setting
      move (api/target_routes.js). Neither advances the version above, so a save
      would be answered with the target from before it — the same failure as

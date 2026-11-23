@@ -12430,6 +12430,22 @@ pages say the sheet has not been read. The worker also reads once three minutes 
   serve one (`api/redact.js` HR_NUMBERS_SERVED). So the review list shows the number only for IDs the export
   does **not** carry. An ID the export puts on two records is listed without it, with the fix: fold the
   records.
+* **Card reads must not be served from the response cache.** `api/cache.js` keys on a version that only a
+  collection run or a rollup advances. A link on the review list advances neither, so production served
+  `/api/card/review` x-cache: stale (45 minutes old), and a link click would have redrawn the ID as still
+  unplaced. `/api/card/` is on NEVER, as `/api/charging/` and `/api/same-person` are, for the same reason
+  (CARD-2).
+* **The cross-check against cash trips (CARD-2):** a card payment settles a cash trip, so a driver-day's card
+  total is checked against that day's `trip_cash`. The cash trips are placed by the whole account key and
+  dated by the Dubai day requested.
+  - **Covered:** within AED 5 for tips and rounding.
+  - **Covered with the day before:** using the day before's leftover, for a fare taken before midnight and
+    paid after.
+  - **Over, or no cash trips:** either the sheet put the payment on the wrong driver, or a ride on no platform
+    was paid by card.
+
+  A window starting mid-month reads the day before's card payments too. Without them, the day before's whole
+  cash would count as leftover and an over day would read as covered (test §9).
 * **These payments do not move the cash position yet.** Phase 3 (CARD-3) subtracts them after the operator has
   seen a before-and-after for each driver. Every answer says `in_cash_position: false`.
 

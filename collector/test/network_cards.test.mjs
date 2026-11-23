@@ -41,6 +41,9 @@
      · the driver route's HR lookup removed → §6 "older upload" and "two records" fail
      · slash dates read day-first regardless → §1 "month-first" and "never guessed" fail
      · the sign-in check removed from readCsvByLink → §2b "no longer open" fails
+     · statusOf without the day before's leftover → §9 "covered with the day before" fails
+     · ALLOWANCE 0 → §9 "the allowance" fails
+     · the crosscheck's day-before card read removed → §9 "a window starting on the 16th" fails
      · the link's precedence over the HR export dropped (CASE order) → §5 fails
      · the review serving an ambiguous HR ID → §8 fails
      · the stranded-link fallback dropped → §5 "removed person" fails
@@ -383,6 +386,61 @@ async function cookieFor(email, role) {
   check('an unknown ref is a 404, a malformed one a 400',
     (await HRO('/api/card/link', { method: 'POST', body: JSON.stringify({ ref: '0123456789abcdef', decision: 'link', person_id: PC }) })).status === 404
     && (await HRO('/api/card/link', { method: 'POST', body: JSON.stringify({ ref: 'x', decision: 'link', person_id: PC }) })).status === 400);
+}
+
+console.log('\n§9 against the cash trips (CARD-2)');
+/* A card payment settles a cash trip, so a day's card total should not run
+   past that day's cash trips. One driver, four days, one of each status. */
+{
+  await writeRead(db, parseSheet([HEAD,
+    [fmtE(E1), '1-Nov-2026', 'Ecosine', 601, 100],          // cash 98 + 202 → covered (within the AED 5 allowance of the 98? no: of 300)
+    [fmtE(E1), '2-Nov-2026', 'Ecosine', 601, 200],          // cash 50; the 1st left 200 spare → covered with the day before
+    [fmtE(E1), '5-Nov-2026', 'Ecosine', 601, 150],          // cash 80, none on the 4th → over by 70
+    [fmtE(E1), '8-Nov-2026', 'Ecosine', 601, 60],           // no cash trip on the 7th or 8th
+    [fmtE(E1), '10-Nov-2026', 'Ecosine', 601, 103],         // cash 98 → covered only by the allowance
+    [fmtE(E1), '15-Nov-2026', 'Ecosine', 601, 280],         // cash 300 → covered, 20 left over
+    [fmtE(E1), '16-Nov-2026', 'Ecosine', 601, 100],         // cash 50 + the 20 → over by 30
+    [fmtE(E4), '11-Nov-2026', 'Ecosine', 602, 33]]), { acceptShrink: true });
+  let tn = 0;
+  const cashTrip = (acct, at, price, pay = 'cash') => q(`INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, requested_at, status, payment_type, price, currency)
+    VALUES ('uber', $1, 'ecosine', $2, 'Card Test', $3, 'completed', $4, $5, 'AED')`, [`ct${tn++}`, acct, at, pay, price]);
+  await cashTrip('u-alpha', '2026-11-01T10:00:00+04:00', 98);
+  await cashTrip('u-alpha', '2026-11-01T22:30:00+04:00', 202);
+  await cashTrip('u-alpha', '2026-11-02T09:00:00+04:00', 50);
+  await cashTrip('u-alpha', '2026-11-05T09:00:00+04:00', 80);
+  await cashTrip('u-alpha', '2026-11-05T11:00:00+04:00', 999, 'card');   // a card-paid trip: not a cash trip
+  await cashTrip('u-alpha', '2026-11-10T09:00:00+04:00', 98);
+  await cashTrip('u-alpha', '2026-11-15T09:00:00+04:00', 300);
+  await cashTrip('u-alpha', '2026-11-16T09:00:00+04:00', 50);
+  const d = (await B(`/api/card/driver?person=${PA}`)).body || {};
+  const st16 = (b) => (b.days || []).find((r) => r.day === '2026-11-16');
+  const st = Object.fromEntries((d.days || []).map((x) => [x.day, x]));
+  check('covered: the 1st, 100 on card against 300 of cash trips', st['2026-11-01']?.status === 'covered' && st['2026-11-01'].cash === 300
+    && st['2026-11-01'].cash_trips === 2, JSON.stringify(st['2026-11-01']));
+  check('covered with the day before: the 2nd, 200 on card, 50 of cash trips, 200 left over from the 1st',
+    st['2026-11-02']?.status === 'covered_with_day_before', JSON.stringify(st['2026-11-02']));
+  check('over: the 5th, 150 on card against 80 — over by 70 (a card-paid trip is not a cash trip)', st['2026-11-05']?.status === 'over'
+    && st['2026-11-05'].over_by === 70 && st['2026-11-05'].cash === 80, JSON.stringify(st['2026-11-05']));
+  check('no cash trips: the 8th, nothing that day or the day before', st['2026-11-08']?.status === 'no_cash_trips' && st['2026-11-08'].cash_trips === 0,
+    JSON.stringify(st['2026-11-08']));
+  check('the allowance: 103 on card against 98 is covered (AED 5 a day for tips and rounding)', st['2026-11-10']?.status === 'covered'
+    && d.allowance_aed === 5, JSON.stringify(st['2026-11-10']));
+  const x = (await B('/api/card/crosscheck')).body || {};
+  check('the fleet cross-check: eight driver-days, four covered (one with the day before), two over by 100, two with no cash trip',
+    x.totals?.driver_days === 8 && x.totals.covered === 3 && x.totals.covered_with_day_before === 1 && x.totals.over === 2
+    && x.totals.over_aed === 100 && x.totals.no_cash_trips === 2 && x.totals.no_cash_aed === 93, JSON.stringify(x.totals));
+  check('…the driver with the most unexplained first (100 over + 60 with no cash trip)', x.drivers?.[0]?.person_id === String(PA)
+    && x.drivers[0].unexplained_aed === 160 && x.drivers[1]?.person_id === String(PE) && x.drivers[1].unexplained_aed === 33,
+  JSON.stringify(x.drivers));
+  check('…and the flagged days, largest first', x.days?.[0]?.day === '2026-11-05' && x.days_flagged === 4, JSON.stringify(x.days?.map((r) => r.day)));
+  check('the 16th: 20 left over from the 15th is not enough — over by 30', st16(d)?.status === 'over' && st16(d).over_by === 30, JSON.stringify(st16(d)));
+  const w = (await B('/api/card/crosscheck?from=2026-11-16&to=2026-11-30')).body || {};
+  check('a window starting on the 16th reads the 15th\'s card too — over by 30, not "covered with the day before"',
+    w.totals?.over === 1 && w.totals.over_aed === 30 && w.totals.covered_with_day_before === 0, JSON.stringify(w.totals));
+  /* Not cached (api/cache.js NEVER): a link moves which driver a payment is on. */
+  const { NEVER } = await import('../api/cache.js');
+  check('the card reads are never served from the response cache (a link would otherwise redraw as undone)',
+    ['/api/card/review', '/api/card/driver', '/api/card/summary', '/api/card/crosscheck'].every((r) => NEVER.some((p) => r.startsWith(p))), '');
 }
 
 bare.server?.close?.(); gated.server?.close?.();

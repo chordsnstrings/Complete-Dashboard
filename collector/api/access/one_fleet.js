@@ -171,7 +171,7 @@ const BY_ROUTE = {
   system: ['GET /api/coverage', 'GET /api/coverage/calendar'],
   hr: ['POST /api/hr-roster/commit', 'POST /api/hr-roster/preview'],
   messages: ['GET /api/sms/preview'],
-  cards: ['GET /api/card/driver', 'GET /api/card/summary', 'GET /api/card/review', 'POST /api/card/link'],
+  cards: ['GET /api/card/driver', 'GET /api/card/summary', 'GET /api/card/review', 'GET /api/card/crosscheck', 'POST /api/card/link'],
   charging: ['GET /api/charging/driver', 'GET /api/charging/sessions', 'GET /api/charging/vehicle',
     'GET /api/charging/wallets', 'GET /api/charging/review', 'POST /api/charging/link'],
   tesla: ['GET /api/tesla/status', 'GET /api/tesla/vehicles'],

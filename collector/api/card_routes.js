@@ -68,6 +68,57 @@ export async function readState(q) {
   };
 }
 
+/* THE CROSS-CHECK (FIX-STATUS CARD-2, 2026-11-23: the operator's "go ahead
+   with phase 2"). A card payment settles a CASH trip on the card machine
+   instead of in notes, so a driver's card total for a day should not exceed
+   the cash their cash trips collected that day. Measured on production before
+   it was built, one driver, 1–22 Nov: 14 of 16 card days were covered, most
+   to the fils (45.50 against a 45.50 cash trip, 77.37 against 77.37), and two
+   ran about AED 50 over — exactly what this is for.
+
+   Each driver-day with card payments gets one status:
+     covered                  card ≤ that day's cash trips + the allowance;
+     covered_with_day_before  only with what the day before left over (a
+                              fare taken before midnight, paid after it);
+     over                     card exceeds both, by over_by;
+     no_cash_trips            no cash trip that day or the day before.
+   "over" and "no_cash_trips" mean the sheet put the payment on the wrong
+   driver (the terminal was in someone else's hands), or the driver took card
+   payments for rides not on any platform. The allowance is AED 5 a day: a
+   card payment may carry a tip or a rounding the cash trip did not.
+
+   Cash trips are trip_cash (sql/schema_v80.sql): completed trips the driver
+   holds cash for, valued by Uber's own cash_collected where its payments
+   report has it, else the fare — the figure the cash text uses. Placed on the
+   person by the whole account key, live accounts only; the Dubai day the trip
+   was requested. */
+export const ALLOWANCE = 5;
+export function statusOf({ card, cash, prevCash = 0, prevCard = 0, cashTrips = 0, prevTrips = 0 }) {
+  const spare = Math.max(0, prevCash - Math.max(0, prevCard));
+  if (!cashTrips && !prevTrips) return { status: 'no_cash_trips', over_by: r2(card) };
+  if (card <= cash + ALLOWANCE) return { status: 'covered', over_by: null };
+  if (card <= cash + spare + ALLOWANCE) return { status: 'covered_with_day_before', over_by: null };
+  return { status: 'over', over_by: r2(card - cash - spare) };
+}
+
+/* Cash trips per person per Dubai day, over [lo, hi]. One grouped read. */
+async function cashByDay(q, personIds, lo, hi) {
+  const ids = [...new Set(personIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  const out = new Map();
+  if (!ids.length || !lo || !hi) return out;
+  const rows = await q(`SELECT a.driver_id::text AS person_id, to_char((tc.requested_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
+                               count(*)::int AS trips, coalesce(sum(tc.cash_amount), 0)::float AS cash
+                          FROM trip_cash tc
+                          JOIN driver_platform_id a ON a.platform = tc.platform AND a.external_id = tc.driver_ext_id
+                                                   AND a.detached_at IS NULL AND a.driver_id = ANY($1::bigint[])
+                         WHERE tc.requested_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Dubai')
+                           AND tc.requested_at <  (($3::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+                         GROUP BY 1, 2`, [ids, lo, hi]);
+  for (const r of rows) out.set(`${r.person_id}|${r.day}`, { trips: r.trips, cash: r.cash });
+  return out;
+}
+const dayBefore = (d) => new Date(Date.parse(`${d}T00:00:00Z`) - 864e5).toISOString().slice(0, 10);
+
 export function cardRoutes(app, { q, wrap }) {
   app.get('/api/card/driver', wrap(async (req, res) => {
     res.set('Cache-Control', 'private, no-store');
@@ -93,6 +144,20 @@ export function cardRoutes(app, { q, wrap }) {
     const payments = await q(`SELECT to_char(p.txn_day, 'YYYY-MM-DD') AS day, p.terminal_id, p.amount::float AS amount, p.fleet_id
         FROM card_payment p WHERE ${W}
        ORDER BY p.txn_day DESC, p.row_no DESC LIMIT 200`, P3);
+    /* CARD-2: each day against that day's cash trips (and the day before's
+       leftover). Card per day over the same span, for the day-before term. */
+    const dayList = days.map((d) => d.day).sort();
+    const cashMap = dayList.length ? await cashByDay(q, [person], dayBefore(dayList[0]), dayList[dayList.length - 1]) : new Map();
+    const cardByDay = new Map(dayList.length ? (await q(`SELECT to_char(p.txn_day, 'YYYY-MM-DD') AS day, sum(p.amount)::float AS card
+        FROM card_payment p WHERE p.emirates_id = ANY($1::text[]) AND p.txn_day BETWEEN $2 AND $3 GROUP BY 1`,
+    [E, dayBefore(dayList[0]), dayList[dayList.length - 1]])).map((x) => [x.day, x.card]) : []);
+    const checkDay = (d) => {
+      const k = cashMap.get(`${person}|${d.day}`) || { trips: 0, cash: 0 };
+      const pk = cashMap.get(`${person}|${dayBefore(d.day)}`) || { trips: 0, cash: 0 };
+      const st = statusOf({ card: d.net, cash: k.cash, prevCash: pk.cash, prevCard: cardByDay.get(dayBefore(d.day)) || 0,
+        cashTrips: k.trips, prevTrips: pk.trips });
+      return { cash_trips: k.trips, cash: r2(k.cash), ...st };
+    };
     const terminals = await q(`SELECT p.terminal_id, count(*)::int AS payments, sum(p.amount)::float AS net,
              to_char(min(p.txn_day), 'YYYY-MM-DD') AS first_day, to_char(max(p.txn_day), 'YYYY-MM-DD') AS last_day
         FROM card_payment p WHERE ${W}
@@ -122,10 +187,69 @@ export function cardRoutes(app, { q, wrap }) {
       placed_by: { hr_export: ids.filter((x) => x.basis === 'hr').length, linked: ids.filter((x) => x.basis === 'linked').length },
       totals: { payments: t.payments, card: r2(t.card), chargebacks: r2(t.chargebacks), chargeback_n: t.chargeback_n, net: r2(t.net),
         first_day: t.first_day, last_day: t.last_day },
-      days: days.map((d) => ({ ...d, net: r2(d.net) })),
+      days: days.map((d) => ({ ...d, net: r2(d.net), ...checkDay(d) })),
+      allowance_aed: ALLOWANCE,
       payments: payments.map((p) => ({ ...p, amount: r2(p.amount), chargeback: p.amount < 0 })),
       terminals: terminals.map((x) => ({ ...x, net: r2(x.net) })),
       in_cash_position: false, note: NOT_IN_POSITION });
+  }));
+
+  /* THE FLEET'S CROSS-CHECK (CARD-2): every placed driver-day with card
+     payments, against that driver's cash trips. Not cached (api/cache.js):
+     a link moves which driver a payment is on. */
+  app.get('/api/card/crosscheck', wrap(async (req, res) => {
+    res.set('Cache-Control', 'private, no-store');
+    const from = dayParam(req.query.from); const to = dayParam(req.query.to);
+    const s = await readState(q);
+    const card = await q(`SELECT m.person_id::text AS person_id, d.full_name AS name, to_char(p.txn_day, 'YYYY-MM-DD') AS day,
+             count(*)::int AS payments, sum(p.amount)::float AS card, array_agg(DISTINCT p.terminal_id ORDER BY p.terminal_id) AS terminals
+        FROM card_payment p JOIN card_id_person m ON m.emirates_id = p.emirates_id
+        LEFT JOIN driver d ON d.id = m.person_id
+       WHERE m.person_id IS NOT NULL AND ($1::date IS NULL OR p.txn_day >= $1) AND ($2::date IS NULL OR p.txn_day <= $2)
+       GROUP BY m.person_id, d.full_name, p.txn_day`, [from, to]);
+    const days = card.map((c) => c.day).sort();
+    const cashMap = days.length ? await cashByDay(q, card.map((c) => c.person_id), dayBefore(days[0]), days[days.length - 1]) : new Map();
+    const cardKey = new Map(card.map((c) => [`${c.person_id}|${c.day}`, c.card]));
+    /* The day before a window's first day is read for its cash, and its card
+       too — else a window starting mid-month would call a covered day "over". */
+    if (days.length) {
+      for (const r of await q(`SELECT m.person_id::text AS person_id, to_char(p.txn_day, 'YYYY-MM-DD') AS day, sum(p.amount)::float AS card
+          FROM card_payment p JOIN card_id_person m ON m.emirates_id = p.emirates_id
+         WHERE m.person_id IS NOT NULL AND p.txn_day = $1::date - 1 GROUP BY 1, 2`, [days[0]])) cardKey.set(`${r.person_id}|${r.day}`, r.card);
+    }
+    const rows = card.map((c) => {
+      const k = cashMap.get(`${c.person_id}|${c.day}`) || { trips: 0, cash: 0 };
+      const pk = cashMap.get(`${c.person_id}|${dayBefore(c.day)}`) || { trips: 0, cash: 0 };
+      return { ...c, card: r2(c.card), cash_trips: k.trips, cash: r2(k.cash),
+        ...statusOf({ card: c.card, cash: k.cash, prevCash: pk.cash, prevCard: cardKey.get(`${c.person_id}|${dayBefore(c.day)}`) || 0,
+          cashTrips: k.trips, prevTrips: pk.trips }) };
+    });
+    const by = (st) => rows.filter((r) => r.status === st);
+    const sum = (xs, k) => r2(xs.reduce((a, r) => a + (r[k] || 0), 0));
+    const people = new Map();
+    for (const r of rows) {
+      const p = people.get(r.person_id) || { person_id: r.person_id, name: r.name || null, card_days: 0, card: 0,
+        over_days: 0, over_aed: 0, no_cash_days: 0, no_cash_aed: 0 };
+      p.card_days += 1; p.card += r.card;
+      if (r.status === 'over') { p.over_days += 1; p.over_aed += r.over_by; }
+      if (r.status === 'no_cash_trips') { p.no_cash_days += 1; p.no_cash_aed += r.card; }
+      people.set(r.person_id, p);
+    }
+    const drivers = [...people.values()].map((p) => ({ ...p, card: r2(p.card), over_aed: r2(p.over_aed), no_cash_aed: r2(p.no_cash_aed),
+      unexplained_aed: r2(p.over_aed + p.no_cash_aed) }))
+      .sort((a, b) => b.unexplained_aed - a.unexplained_aed || b.card - a.card);
+    const flagged = rows.filter((r) => r.status === 'over' || r.status === 'no_cash_trips')
+      .sort((a, b) => (b.over_by || 0) - (a.over_by || 0));
+    return res.json({ from, to, ...s, currency: 'AED', allowance_aed: ALLOWANCE,
+      why: s.why || (rows.length ? null : 'No card payment in this window is placed on a driver, so there is nothing to check against cash trips.'),
+      totals: { driver_days: rows.length, card: sum(rows, 'card'),
+        covered: by('covered').length, covered_with_day_before: by('covered_with_day_before').length,
+        over: by('over').length, over_aed: sum(by('over'), 'over_by'),
+        no_cash_trips: by('no_cash_trips').length, no_cash_aed: sum(by('no_cash_trips'), 'card') },
+      drivers: drivers.filter((d) => d.unexplained_aed > 0).slice(0, 60),
+      drivers_flagged: drivers.filter((d) => d.unexplained_aed > 0).length,
+      days: flagged.slice(0, 150), days_flagged: flagged.length,
+      note: 'the cash trips are the platforms\' own: a payment for a ride on no platform shows as over, and so does one the sheet put on the wrong driver' });
   }));
 
   app.get('/api/card/summary', wrap(async (req, res) => {

@@ -9363,13 +9363,24 @@ app.get('/api/card/driver', (req, r) => {
     currency: 'AED', placed_by: { hr_export: has ? 1 : 0, linked: 0 },
     totals: { payments: payments.length, card: has ? 160 : 0, chargebacks: has ? -25 : 0, chargeback_n: has ? 1 : 0, net: has ? 135 : 0,
       first_day: has ? '2026-11-18' : null, last_day: has ? '2026-11-21' : null },
-    days: has ? [{ day: '2026-11-21', payments: 1, net: -25, chargebacks: 1, terminals: ['10389537'] },
-      { day: '2026-11-20', payments: 1, net: 60, chargebacks: 0, terminals: ['10389537'] },
-      { day: '2026-11-18', payments: 1, net: 100, chargebacks: 0, terminals: ['10401871'] }] : [],
+    days: has ? [{ day: '2026-11-21', payments: 1, net: -25, chargebacks: 1, terminals: ['10389537'], cash_trips: 2, cash: 140.5, status: 'covered', over_by: null },
+      { day: '2026-11-20', payments: 1, net: 60, chargebacks: 0, terminals: ['10389537'], cash_trips: 1, cash: 9.5, status: 'over', over_by: 50.5 },
+      { day: '2026-11-18', payments: 1, net: 100, chargebacks: 0, terminals: ['10401871'], cash_trips: 0, cash: 0, status: 'no_cash_trips', over_by: 100 }] : [],
+    allowance_aed: 5,
     payments,
     terminals: has ? [{ terminal_id: '10389537', payments: 2, net: 35, first_day: '2026-11-20', last_day: '2026-11-21' },
       { terminal_id: '10401871', payments: 1, net: 100, first_day: '2026-11-18', last_day: '2026-11-18' }] : [],
     in_cash_position: false, note: 'card payments are shown beside the cash position, not yet taken off it — that change waits for the operator\'s review' });
+});
+app.get('/api/card/crosscheck', (_req, r) => {
+  r.json({ from: null, to: null, ...CARD_READ(), currency: 'AED', allowance_aed: 5, why: null,
+    totals: { driver_days: 5091, card: 387230, covered: 4410, covered_with_day_before: 212, over: 301, over_aed: 18420.5, no_cash_trips: 168, no_cash_aed: 14211.75 },
+    drivers: [{ person_id: '401', name: 'Card Driver One', card_days: 120, card: 9120.5, over_days: 9, over_aed: 610.25, no_cash_days: 3, no_cash_aed: 420, unexplained_aed: 1030.25 },
+      { person_id: '402', name: 'Card Driver Two', card_days: 88, card: 6044, over_days: 2, over_aed: 95, no_cash_days: 0, no_cash_aed: 0, unexplained_aed: 95 }],
+    drivers_flagged: 2,
+    days: [{ person_id: '401', name: 'Card Driver One', day: '2026-11-20', payments: 1, card: 60, terminals: ['10389537'], cash_trips: 1, cash: 9.5, status: 'over', over_by: 50.5 }],
+    days_flagged: 1,
+    note: 'the cash trips are the platforms\' own: a payment for a ride on no platform shows as over, and so does one the sheet put on the wrong driver' });
 });
 app.get('/api/card/summary', (_req, r) => {
   r.json({ from: null, to: null, ...CARD_READ(), currency: 'AED',
