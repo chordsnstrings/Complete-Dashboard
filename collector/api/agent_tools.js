@@ -1750,7 +1750,8 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
         }
         for (const k of Object.keys(values)) if (values[k] == null) { delete values[k]; delete kinds[k]; }
         return { kind: 'table', definition: `${src.definition} — grouped by ${groupCol.label.toLowerCase()}${fdesc ? `, where ${fdesc}` : ''}`,
-          period: src.period, filters: { ...(src.filters || {}), grouped_by: a.group_by }, columns, rows: out, values, kinds, derived_from: src.id };
+          period: src.period, filters: { ...(src.filters || {}), grouped_by: a.group_by }, columns, rows: out, values, kinds, derived_from: src.id,
+          source: src.source };
       }
       sortRows(rows, a.sort_by && known.has(a.sort_by) ? a.sort_by : null, a.order);
       if (a.limit) rows = rows.slice(0, a.limit);
@@ -1764,7 +1765,12 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
       }
       const top = a.limit ? `${a.order === 'asc' ? 'bottom' : 'top'} ${a.limit} by ${a.sort_by || 'order'}` : null;
       return { kind: 'table', definition: [src.definition, [fdesc ? `where ${fdesc}` : null, top].filter(Boolean).join(', ')].filter(Boolean).join(' — '),
-        period: src.period, filters: src.filters, columns: src.columns, rows, values, derived_from: src.id };
+        /* The route its rows came from, carried (production, 2026-11-23): "every
+           driver with a negative balance" is the wallet list filtered here, and
+           a table with no source is shaped on reload at the reader's own
+           contact level — the Cash desk's numbers blank again
+           (api/access/shape.js shapeSourcedTables). */
+        period: src.period, filters: src.filters, columns: src.columns, rows, values, derived_from: src.id, source: src.source };
     },
 
     async compare(a, ctx) {
@@ -1817,6 +1823,9 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
       });
       const unmatched = (L.rows || []).filter((l) => !rightBy.has(String(l[lk]))).length;
       return { kind: 'table', definition: `${L.definition}  joined with  ${R.definition}  on ${a.on}`, period: L.period,
+        /* A join of two routes' rows has one source only when both share it;
+           otherwise none, and a reload shapes it at the reader's own levels. */
+        source: L.source && L.source === R.source ? L.source : null,
         filters: L.filters, columns, rows, values: { rows: rows.length, unmatched }, kinds: { rows: 'int', unmatched: 'int' },
         note: unmatched ? `${unmatched} row(s) of ${L.id} have no match in ${R.id}; their ${R.id} columns are empty, not zero` : undefined };
     },

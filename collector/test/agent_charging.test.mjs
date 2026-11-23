@@ -50,6 +50,7 @@
      · 'other_phones' out of the DICT → §10 "Analyst reload" fails
      · an empty list counted as withheld again → §10 "empty list" fails
      · the join on account id alone (no platform) → §9 "another platform"
+     · summarise dropping `source` → §10 "filtered or grouped" fails
        fails (someone else's FMS record's number on the wallet)
 
    Synthetic people only. */
@@ -395,6 +396,23 @@ check('reload, the Auditor: the wallet table in full, the Compliance table maske
 const rn = await convFor('anl-reload@example.test', 'ANL');
 check('reload, the Analyst (no cash, no contact): every number withheld — other_phones included',
   rn.status === 200 && rn.w?.phone == null && rn.w?.other_phones == null && rn.c?.phone == null, JSON.stringify(rn));
+
+/* A FILTERED wallet table keeps its source (production, 2026-11-23: "every
+   driver with a negative balance" came back as the wallet list filtered by
+   summarise, with source null — blank numbers on the Cash desk's reload). */
+const { tool: T10, ctx: C10 } = harness(fetchVia(bare.port), []);
+const w10 = await T10('charging_wallets', {});
+const f10 = await T10('summarise', { result: w10.id, filter: [{ column: 'balance_aed', op: '>', value: 100 }] });
+const g10 = await T10('summarise', { result: w10.id, group_by: 'powerdrive_group' });
+check('a filtered or grouped wallet table keeps the wallet route as its source',
+  f10.source === '/api/charging/wallets' && f10.rows?.length === 1 && f10.rows[0].phone === '+971500000001' && g10.source === '/api/charging/wallets',
+  JSON.stringify([f10.source, f10.rows, g10.source]));
+const { lookupEntry } = await import('../api/access/manifest.js');
+const reloadAsCashDesk = (source) => shapeBody({ conversation: { messages: [{ tables: [{ id: f10.id, source, columns: f10.columns,
+  rows: f10.rows.map((r) => ({ driver: r.driver, phone: r.phone })) }] }] } },
+{ fields: [], sourcedTables: true }, { ID: 'F', CASH: 'F', SYS: 'F' }, { lookup: lookupEntry }).body.conversation.messages[0].tables[0].rows[0].phone;
+check('…so on the Cash desk\'s reload the filtered table keeps the number (and without a source it would not)',
+  reloadAsCashDesk(f10.source) === '+971500000001' && reloadAsCashDesk(null) == null, JSON.stringify([reloadAsCashDesk(f10.source), reloadAsCashDesk(null)]));
 
 /* AN EMPTY LIST is nothing to withhold: marked withheld, it told the
    assistant "withheld from this person's role" about numbers that did not
