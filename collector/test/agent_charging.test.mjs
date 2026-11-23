@@ -35,6 +35,7 @@ import { accessLayer } from '../api/access/middleware.js';
 import * as svc from '../api/access/service.js';
 import { hashPassword } from '../api/access/crypto.js';
 import { toolbox } from '../api/agent_tools.js';
+import { checkReply } from '../api/agent_guard.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -68,7 +69,7 @@ await sess('yc-a', daysAgo(3), 38.25, null);          // a charge PowerDrive sen
 await sess('yc-a', daysAgo(9), 20, 24);
 await sess('yc-a', daysAgo(40), 30, 36);              // outside the last 30 days
 await sess('yc-a', daysAgo(2), 0, 0);                 // zero energy: not a charge
-await sess('yc-b', daysAgo(2), 25, 30);
+await sess('yc-b', daysAgo(2), 26, 31);       // no figure of 30 anywhere, so only charge_window_days can source one
 const good = new Date(now - 3 * 3600e3).toISOString();
 await q(`INSERT INTO collection_run (source, fleet_id, mode, started_at, finished_at, status) VALUES ('yocharge', '-', 'realtime', $1, $1, 'ok')`, [good]);
 
@@ -111,12 +112,23 @@ check('a position as of the last read: the definition says so and the read time 
   && /last read/.test(a1.note || ''), `${a1.definition} | ${a1.note}`);
 check('the result is about this driver, for the guard', a1.filters?.driver === 'Test Charger Alpha');
 
+
 console.log('\n§2 a fleet-wallet customer has no personal balance');
 const b1 = await tool('charging_wallets', { driver_id: B });
 check('no balance_aed at all — empty, never 0 — and on the fleet wallet with AED 640.50 left',
   !('balance_aed' in (b1.values || {})) && b1.values?.on_fleet_wallet === 'yes' && b1.values?.fleet_limit_available_aed === 640.5,
   JSON.stringify(b1.values));
 check('…and the note says why', /charges only on the fleet's wallet has no personal balance/.test(b1.note || ''), b1.note);
+/* Production, 2026-11-23: the model wrote "in the last 30 days" and the guard
+   refused the whole answer — no result carried 30 (that driver's note did not
+   mention the window either). The window is a value of the result now. The
+   guard is handed the values alone — the note's read time ("09:30") and a
+   session row costing AED 30 can each carry a 30 of their own — so only the
+   value can source the 30 here. */
+const RG = new Map([['r1', { id: 'r1', kind: b1.kind, definition: b1.definition, filters: b1.filters, values: b1.values, kinds: b1.kinds }]]);
+const g30 = checkReply('Test Charger Beta charged {{r1.charges_30d}} times in the last 30 days.', RG, { driverNames: ['Test Charger Beta'] });
+check('a reply saying "the last 30 days" passes the guard: the window is a figure of the result',
+  g30.ok, JSON.stringify(g30.problems));
 
 console.log('\n§3 a driver with no wallet linked');
 const c1 = await tool('charging_wallets', { driver_id: C });
