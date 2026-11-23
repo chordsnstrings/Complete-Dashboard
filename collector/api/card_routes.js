@@ -81,7 +81,7 @@ export async function readState(q) {
      covered_with_day_before  only with what the day before left over (a
                               fare taken before midnight, paid after it);
      over                     card exceeds both, by over_by;
-     no_cash_trips            no cash trip that day or the day before.
+     no_cash_trips            no cash or pos-driver trip that day or the day before.
    "over" and "no_cash_trips" mean the sheet put the payment on the wrong
    driver (the terminal was in someone else's hands), or the driver took card
    payments for rides not on any platform. The allowance is AED 5 a day: a
@@ -101,22 +101,59 @@ export function statusOf({ card, cash, prevCash = 0, prevCard = 0, cashTrips = 0
   return { status: 'over', over_by: r2(card - cash - spare) };
 }
 
-/* Cash trips per person per Dubai day, over [lo, hi]. One grouped read. */
+/* The fares a driver collects on, per person per Dubai day, over [lo, hi]:
+   CASH trips (trip_cash) and the hotel channel's POS-DRIVER trips — the
+   hotel's own word for a fare paid on the driver's card machine. Measured on
+   production the day CARD-2 went live: the three drivers with the most card
+   money "not explained" each had ~135 card days and no cash trip on any —
+   they drive the hotel channel, where the card-machine fares are filed
+   'pos-driver', never 'cash'. Against cash + pos-driver, their November days
+   matched to the fils on 6 of 12 and 7 of 19. ('pos-supervisor' is the
+   supervisor's machine, 'cash-supervisor' cash paid to the supervisor:
+   neither is the driver's.)
+
+   Accounts first, then the trips by their account ids, so the read rides the
+   (driver_ext_id, requested_at) index rather than the views over every trip
+   (the whole year took 4.5–6.6 s joined the other way round). */
 async function cashByDay(q, personIds, lo, hi) {
   const ids = [...new Set(personIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
   const out = new Map();
   if (!ids.length || !lo || !hi) return out;
-  const rows = await q(`SELECT a.driver_id::text AS person_id, to_char((tc.requested_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
-                               count(*)::int AS trips, coalesce(sum(tc.cash_amount), 0)::float AS cash
-                          FROM trip_cash tc
-                          JOIN driver_platform_id a ON a.platform = tc.platform AND a.external_id = tc.driver_ext_id
-                                                   AND a.detached_at IS NULL AND a.driver_id = ANY($1::bigint[])
-                         WHERE tc.requested_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Dubai')
-                           AND tc.requested_at <  (($3::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
-                         GROUP BY 1, 2`, [ids, lo, hi]);
-  for (const r of rows) out.set(`${r.person_id}|${r.day}`, { trips: r.trips, cash: r.cash });
+  const accts = await q(`SELECT platform, external_id, driver_id::text AS person_id FROM driver_platform_id
+                          WHERE detached_at IS NULL AND driver_id = ANY($1::bigint[])`, [ids]);
+  if (!accts.length) return out;
+  const who = new Map(accts.map((a) => [`${a.platform}|${a.external_id}`, a.person_id]));
+  const rows = await q(`SELECT platform, driver_ext_id, day, sum(cash)::float AS cash, sum(cash_n)::int AS cash_trips,
+                               sum(pos)::float AS pos, sum(pos_n)::int AS pos_trips
+                          FROM (
+                            SELECT tc.platform, tc.driver_ext_id, to_char((tc.requested_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
+                                   coalesce(tc.cash_amount, 0) AS cash, 1 AS cash_n, 0::numeric AS pos, 0 AS pos_n
+                              FROM trip_cash tc
+                             WHERE tc.driver_ext_id = ANY($1::text[])
+                               AND tc.requested_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Dubai')
+                               AND tc.requested_at <  (($3::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+                            UNION ALL
+                            SELECT te.platform, te.driver_ext_id, to_char((te.requested_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD'),
+                                   0, 0, coalesce(te.price, 0), 1
+                              FROM trip_ext te
+                             WHERE te.driver_ext_id = ANY($1::text[]) AND lower(coalesce(te.payment_type, '')) = 'pos-driver'
+                               AND te.outcome = 'completed'
+                               AND te.requested_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Dubai')
+                               AND te.requested_at <  (($3::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+                          ) x GROUP BY 1, 2, 3`, [[...new Set(accts.map((a) => a.external_id))], lo, hi]);
+  for (const r of rows) {
+    const pid = who.get(`${r.platform}|${r.driver_ext_id}`);
+    if (!pid) continue;                     // the same id on another platform is someone else's
+    const k = `${pid}|${r.day}`;
+    const cur = out.get(k) || { cash: 0, cash_trips: 0, pos: 0, pos_trips: 0 };
+    cur.cash += r.cash; cur.cash_trips += r.cash_trips; cur.pos += r.pos; cur.pos_trips += r.pos_trips;
+    out.set(k, cur);
+  }
   return out;
 }
+/* What a day's card may be measured against: cash + card-machine fares. */
+const NONE = { cash: 0, cash_trips: 0, pos: 0, pos_trips: 0 };
+const collect = (k) => ({ amount: k.cash + k.pos, trips: k.cash_trips + k.pos_trips });
 const dayBefore = (d) => new Date(Date.parse(`${d}T00:00:00Z`) - 864e5).toISOString().slice(0, 10);
 
 export function cardRoutes(app, { q, wrap }) {
@@ -152,11 +189,11 @@ export function cardRoutes(app, { q, wrap }) {
         FROM card_payment p WHERE p.emirates_id = ANY($1::text[]) AND p.txn_day BETWEEN $2 AND $3 GROUP BY 1`,
     [E, dayBefore(dayList[0]), dayList[dayList.length - 1]])).map((x) => [x.day, x.card]) : []);
     const checkDay = (d) => {
-      const k = cashMap.get(`${person}|${d.day}`) || { trips: 0, cash: 0 };
-      const pk = cashMap.get(`${person}|${dayBefore(d.day)}`) || { trips: 0, cash: 0 };
-      const st = statusOf({ card: d.net, cash: k.cash, prevCash: pk.cash, prevCard: cardByDay.get(dayBefore(d.day)) || 0,
-        cashTrips: k.trips, prevTrips: pk.trips });
-      return { cash_trips: k.trips, cash: r2(k.cash), ...st };
+      const k = cashMap.get(`${person}|${d.day}`) || NONE;
+      const pk = cashMap.get(`${person}|${dayBefore(d.day)}`) || NONE;
+      const st = statusOf({ card: d.net, cash: collect(k).amount, prevCash: collect(pk).amount, prevCard: cardByDay.get(dayBefore(d.day)) || 0,
+        cashTrips: collect(k).trips, prevTrips: collect(pk).trips });
+      return { cash_trips: k.cash_trips, cash: r2(k.cash), pos_trips: k.pos_trips, pos: r2(k.pos), ...st };
     };
     const terminals = await q(`SELECT p.terminal_id, count(*)::int AS payments, sum(p.amount)::float AS net,
              to_char(min(p.txn_day), 'YYYY-MM-DD') AS first_day, to_char(max(p.txn_day), 'YYYY-MM-DD') AS last_day
@@ -218,11 +255,11 @@ export function cardRoutes(app, { q, wrap }) {
          WHERE m.person_id IS NOT NULL AND p.txn_day = $1::date - 1 GROUP BY 1, 2`, [days[0]])) cardKey.set(`${r.person_id}|${r.day}`, r.card);
     }
     const rows = card.map((c) => {
-      const k = cashMap.get(`${c.person_id}|${c.day}`) || { trips: 0, cash: 0 };
-      const pk = cashMap.get(`${c.person_id}|${dayBefore(c.day)}`) || { trips: 0, cash: 0 };
-      return { ...c, card: r2(c.card), cash_trips: k.trips, cash: r2(k.cash),
-        ...statusOf({ card: c.card, cash: k.cash, prevCash: pk.cash, prevCard: cardKey.get(`${c.person_id}|${dayBefore(c.day)}`) || 0,
-          cashTrips: k.trips, prevTrips: pk.trips }) };
+      const k = cashMap.get(`${c.person_id}|${c.day}`) || NONE;
+      const pk = cashMap.get(`${c.person_id}|${dayBefore(c.day)}`) || NONE;
+      return { ...c, card: r2(c.card), cash_trips: k.cash_trips, cash: r2(k.cash), pos_trips: k.pos_trips, pos: r2(k.pos),
+        ...statusOf({ card: c.card, cash: collect(k).amount, prevCash: collect(pk).amount, prevCard: cardKey.get(`${c.person_id}|${dayBefore(c.day)}`) || 0,
+          cashTrips: collect(k).trips, prevTrips: collect(pk).trips }) };
     });
     const by = (st) => rows.filter((r) => r.status === st);
     const sum = (xs, k) => r2(xs.reduce((a, r) => a + (r[k] || 0), 0));
@@ -249,7 +286,7 @@ export function cardRoutes(app, { q, wrap }) {
       drivers: drivers.filter((d) => d.unexplained_aed > 0).slice(0, 60),
       drivers_flagged: drivers.filter((d) => d.unexplained_aed > 0).length,
       days: flagged.slice(0, 150), days_flagged: flagged.length,
-      note: 'the cash trips are the platforms\' own: a payment for a ride on no platform shows as over, and so does one the sheet put on the wrong driver' });
+      note: 'measured against the fares a driver collects on — cash trips, and the hotel channel\'s pos-driver trips (paid on the driver\'s card machine); a payment for a ride on no platform shows as over, and so does one the sheet put on the wrong driver' });
   }));
 
   app.get('/api/card/summary', wrap(async (req, res) => {

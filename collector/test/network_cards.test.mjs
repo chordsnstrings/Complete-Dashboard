@@ -44,6 +44,8 @@
      · statusOf without the day before's leftover → §9 "covered with the day before" fails
      · ALLOWANCE 0 → §9 "the allowance" fails
      · the crosscheck's day-before card read removed → §9 "a window starting on the 16th" fails
+     · pos-driver fares left out of cashByDay → §9 "pos-driver covers the 20th" fails
+     · the platform check on a trip's account dropped → §9 "the 8th" fails
      · the link's precedence over the HR export dropped (CASE order) → §5 fails
      · the review serving an ambiguous HR ID → §8 fails
      · the stranded-link fallback dropped → §5 "removed person" fails
@@ -400,10 +402,13 @@ console.log('\n§9 against the cash trips (CARD-2)');
     [fmtE(E1), '10-Nov-2026', 'Ecosine', 601, 103],         // cash 98 → covered only by the allowance
     [fmtE(E1), '15-Nov-2026', 'Ecosine', 601, 280],         // cash 300 → covered, 20 left over
     [fmtE(E1), '16-Nov-2026', 'Ecosine', 601, 100],         // cash 50 + the 20 → over by 30
+    [fmtE(E1), '20-Nov-2026', 'Ecosine', 601, 120],         // a hotel fare filed pos-driver, 120 → covered
+    [fmtE(E1), '21-Nov-2026', 'Ecosine', 601, 80],          // only a pos-SUPERVISOR fare; the 20th's fare was its own → over by 80
     [fmtE(E4), '11-Nov-2026', 'Ecosine', 602, 33]]), { acceptShrink: true });
   let tn = 0;
-  const cashTrip = (acct, at, price, pay = 'cash') => q(`INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, requested_at, status, payment_type, price, currency)
-    VALUES ('uber', $1, 'ecosine', $2, 'Card Test', $3, 'completed', $4, $5, 'AED')`, [`ct${tn++}`, acct, at, pay, price]);
+  const cashTrip = (acct, at, price, pay = 'cash', platform = 'uber') => q(`INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, requested_at, status, payment_type, price, currency)
+    VALUES ($6, $1, 'ecosine', $2, 'Card Test', $3, 'completed', $4, $5, 'AED')`, [`ct${tn++}`, acct, at, pay, price, platform]);
+  await q(`INSERT INTO driver_platform_id (platform, external_id, driver_id) VALUES ('hotel', 'h-alpha', $1)`, [PA]);
   await cashTrip('u-alpha', '2026-11-01T10:00:00+04:00', 98);
   await cashTrip('u-alpha', '2026-11-01T22:30:00+04:00', 202);
   await cashTrip('u-alpha', '2026-11-02T09:00:00+04:00', 50);
@@ -412,6 +417,9 @@ console.log('\n§9 against the cash trips (CARD-2)');
   await cashTrip('u-alpha', '2026-11-10T09:00:00+04:00', 98);
   await cashTrip('u-alpha', '2026-11-15T09:00:00+04:00', 300);
   await cashTrip('u-alpha', '2026-11-16T09:00:00+04:00', 50);
+  await cashTrip('h-alpha', '2026-11-20T09:00:00+04:00', 120, 'pos-driver', 'hotel');
+  await cashTrip('h-alpha', '2026-11-21T09:00:00+04:00', 80, 'pos-supervisor', 'hotel');
+  await cashTrip('u-alpha', '2026-11-08T09:00:00+04:00', 500, 'cash', 'yango');   // the same id on another platform: someone else's
   const d = (await B(`/api/card/driver?person=${PA}`)).body || {};
   const st16 = (b) => (b.days || []).find((r) => r.day === '2026-11-16');
   const st = Object.fromEntries((d.days || []).map((x) => [x.day, x]));
@@ -421,22 +429,28 @@ console.log('\n§9 against the cash trips (CARD-2)');
     st['2026-11-02']?.status === 'covered_with_day_before', JSON.stringify(st['2026-11-02']));
   check('over: the 5th, 150 on card against 80 — over by 70 (a card-paid trip is not a cash trip)', st['2026-11-05']?.status === 'over'
     && st['2026-11-05'].over_by === 70 && st['2026-11-05'].cash === 80, JSON.stringify(st['2026-11-05']));
-  check('no cash trips: the 8th, nothing that day or the day before', st['2026-11-08']?.status === 'no_cash_trips' && st['2026-11-08'].cash_trips === 0,
-    JSON.stringify(st['2026-11-08']));
+  check('no cash trips: the 8th, nothing that day or the day before — a 500 cash trip under the same id on ANOTHER platform is not theirs',
+    st['2026-11-08']?.status === 'no_cash_trips' && st['2026-11-08'].cash_trips === 0, JSON.stringify(st['2026-11-08']));
+  check('a hotel fare filed pos-driver (the driver\'s own card machine) covers the 20th', st['2026-11-20']?.status === 'covered'
+    && st['2026-11-20'].pos === 120 && st['2026-11-20'].pos_trips === 1 && st['2026-11-20'].cash_trips === 0, JSON.stringify(st['2026-11-20']));
+  check('…a pos-SUPERVISOR fare (the supervisor\'s machine) does not: the 21st is over by the whole 80 (the 20th\'s fare went to the 20th)',
+    st['2026-11-21']?.status === 'over' && st['2026-11-21'].over_by === 80 && st['2026-11-21'].pos_trips === 0, JSON.stringify(st['2026-11-21']));
   check('the allowance: 103 on card against 98 is covered (AED 5 a day for tips and rounding)', st['2026-11-10']?.status === 'covered'
     && d.allowance_aed === 5, JSON.stringify(st['2026-11-10']));
   const x = (await B('/api/card/crosscheck')).body || {};
-  check('the fleet cross-check: eight driver-days, four covered (one with the day before), two over by 100, two with no cash trip',
-    x.totals?.driver_days === 8 && x.totals.covered === 3 && x.totals.covered_with_day_before === 1 && x.totals.over === 2
-    && x.totals.over_aed === 100 && x.totals.no_cash_trips === 2 && x.totals.no_cash_aed === 93, JSON.stringify(x.totals));
-  check('…the driver with the most unexplained first (100 over + 60 with no cash trip)', x.drivers?.[0]?.person_id === String(PA)
-    && x.drivers[0].unexplained_aed === 160 && x.drivers[1]?.person_id === String(PE) && x.drivers[1].unexplained_aed === 33,
+  check('the fleet cross-check: ten driver-days, five covered (one with the day before), three over by 180, two with no fare collected',
+    x.totals?.driver_days === 10 && x.totals.covered === 4 && x.totals.covered_with_day_before === 1 && x.totals.over === 3
+    && x.totals.over_aed === 180 && x.totals.no_cash_trips === 2 && x.totals.no_cash_aed === 93, JSON.stringify(x.totals));
+  check('…the driver with the most unexplained first (180 over + 60 with no fare)', x.drivers?.[0]?.person_id === String(PA)
+    && x.drivers[0].unexplained_aed === 240 && x.drivers[1]?.person_id === String(PE) && x.drivers[1].unexplained_aed === 33,
   JSON.stringify(x.drivers));
-  check('…and the flagged days, largest first', x.days?.[0]?.day === '2026-11-05' && x.days_flagged === 4, JSON.stringify(x.days?.map((r) => r.day)));
+  check('…and the flagged days, largest first', x.days?.[0]?.day === '2026-11-21' && x.days?.[1]?.day === '2026-11-05' && x.days_flagged === 5,
+    JSON.stringify(x.days?.map((r) => r.day)));
   check('the 16th: 20 left over from the 15th is not enough — over by 30', st16(d)?.status === 'over' && st16(d).over_by === 30, JSON.stringify(st16(d)));
   const w = (await B('/api/card/crosscheck?from=2026-11-16&to=2026-11-30')).body || {};
-  check('a window starting on the 16th reads the 15th\'s card too — over by 30, not "covered with the day before"',
-    w.totals?.over === 1 && w.totals.over_aed === 30 && w.totals.covered_with_day_before === 0, JSON.stringify(w.totals));
+  const w16 = (w.days || []).find((r) => r.day === '2026-11-16');
+  check('a window starting on the 16th reads the 15th\'s card too — the 16th over by 30, not "covered with the day before"',
+    w16?.status === 'over' && w16.over_by === 30 && w.totals?.covered_with_day_before === 0, JSON.stringify([w16, w.totals]));
   /* Not cached (api/cache.js NEVER): a link moves which driver a payment is on. */
   const { NEVER } = await import('../api/cache.js');
   check('the card reads are never served from the response cache (a link would otherwise redraw as undone)',
