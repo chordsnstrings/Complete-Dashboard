@@ -182,3 +182,29 @@ export function needsShaping(entry, levels, { fleets = null } = {}) {
 }
 
 export const atLeast = (l, min) => rank(l) >= rank(min);
+
+/* A LIFT (AG-17, 2026-11-23). A manifest entry may say `lift: { CT: 'CASH' }`:
+   on that route the reader sees the first class at the level they hold the
+   second, where that is higher. Written for the PowerDrive wallets — the
+   operator: "give everyone asking about powerdrive wallet access to phone
+   number" — where the Cash desk holds driver cash but no contact details and
+   was handed a list of debts with every number withheld.
+
+   Three rules keep it from being a hole:
+     · it only RAISES — a level is never lowered by a lift;
+     · it may only lift TO the route's subject — the class the gate has just
+       judged this reader on before answering at all (a list grain is refused
+       below Masked, so a lift never hands out more than the record itself) —
+       held here and in test/access_manifest.test.mjs;
+     · it is the route's: the same reader on any other route keeps their own
+       level of the lifted class (the Cash desk still gets no number from the
+       Compliance page).
+   Mutates and returns `levels`. */
+export function liftLevels(levels, entry) {
+  for (const [cls, by] of Object.entries(entry?.lift || {})) {
+    if (by !== entry.subject) continue;
+    const to = levels[by] || '';
+    if (rank(to) > rank(levels[cls] || '')) levels[cls] = to;
+  }
+  return levels;
+}

@@ -19,7 +19,7 @@
                sign-in routes and the health check.
    The Owner flips it in Set up → Access. */
 import { fullAccess, fingerprintOf, computeAccess } from './principal.js';
-import { shapeBody, needsShaping } from './shape.js';
+import { shapeBody, needsShaping, liftLevels } from './shape.js';
 import { lookupEntry } from './manifest.js';
 import { appendAudit } from './audit.js';
 import * as svc from './service.js';
@@ -400,6 +400,10 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     if (fm.kind === 'user' && fm.session) {
       for (const c of Object.keys(L)) if (L[c] === 'M' && revealed(fm.session.id, c)) { L[c] = 'F'; usedReveal = true; }
     }
+    /* After the reveal, so a lifted class follows the subject as this reader
+       sees it now (api/access/shape.js liftLevels: raise only, to the subject
+       only, on this route only). */
+    liftLevels(L, entry);
     const isWrite = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
 
     /* The subject: what the route is about. */

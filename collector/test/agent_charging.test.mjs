@@ -26,11 +26,21 @@
      · the no-wallet branch returning balance_aed 0 → §3 fails
      · readNote ignoring b.failed → §5 fails
      · the /api/driver/profile fallback removed → §6 fails
-     · contactsByPerson ignoring the gate's CT blanking → §8 "Cash desk" fails
+     · contactsByPerson ignoring the gate's CT blanking → §8 "Analyst" fails
        (a withheld phone read as "no phone on record")
      · find() by person id only (no account ids, no unique name) → §8
-       "Dispatcher" and "Finance manager" fail — person_id is MRG-class
-     · the masked check after the blanked one → §8 "Auditor" fails
+       "Dispatcher" fails — person_id is MRG-class
+
+   §9 (AG-17, 2026-11-23 — "give everyone asking about powerdrive wallet
+   access to phone number"): whoever may see a wallet sees its driver's
+   numbers, at the level they see the balance; nowhere else.
+     · liftLevels(L, entry) removed from the gate → §9 "Cash desk" and
+       "Auditor" fail (withheld / masked again)
+     · the subject rule in liftLevels removed and a lift to another class
+       declared → §9 "only to the subject" fails
+     · the PowerDrive-first ordering removed → §9 "PowerDrive's number first"
+       fails (the newer Bolt number wins)
+     · `a.detached_at IS NULL` removed → §9 "detached" fails
 
    Synthetic people only. */
 import { PGlite } from '@electric-sql/pglite';
@@ -58,9 +68,11 @@ const PB = await person('Test Charger Beta');       // fleet wallet only: no per
 const PC = await person('Test Charger Gamma');      // no PowerDrive account at all
 const PD = await person('Test Charger Delta');      // a negative personal balance
 const ua = async (id, o) => q(`INSERT INTO charging_user (yc_user_id, name, fleet_group, using_fleet_wallet, fleet_limit, fleet_limit_available,
-    balance, hold_amount, last_session_at, fetched_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())`,
-[id, o.name, o.group ?? 'ecofleet', !!o.fleet, o.limit ?? null, o.avail ?? null, o.balance ?? null, o.hold ?? null, o.last ?? null]);
-await ua('yc-a', { name: 'Alpha T', balance: 182.4, hold: 25, last: '2026-11-22T10:15:00Z' });
+    balance, hold_amount, last_session_at, phone_norm, fetched_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())`,
+[id, o.name, o.group ?? 'ecofleet', !!o.fleet, o.limit ?? null, o.avail ?? null, o.balance ?? null, o.hold ?? null, o.last ?? null, o.phone ?? null]);
+/* Alpha registered with PowerDrive on the Uber record's number (the collector
+   stores it normalised, src/sources/yocharge.js phoneOf). */
+await ua('yc-a', { name: 'Alpha T', balance: 182.4, hold: 25, last: '2026-11-22T10:15:00Z', phone: '971500000001' });
 await ua('yc-b', { name: 'Beta T', fleet: true, limit: 1000, avail: 640.5, last: '2026-11-21T06:00:00Z' });
 await ua('yc-d', { name: 'Delta T', balance: -12.75, last: '2026-11-02T19:30:00Z' });
 await q(`INSERT INTO charging_link (yc_user_id, person_id, tier) VALUES ('yc-a', $1, 'auto'), ('yc-b', $2, 'confirmed'), ('yc-d', $3, 'auto')`, [PA, PB, PD]);
@@ -86,10 +98,13 @@ const A = 'aaaaaaaa-5555-4555-8555-000000000001', B = 'aaaaaaaa-5555-4555-8555-0
    production every account is already on the spine. */
 await q(`INSERT INTO driver_platform_id (platform, external_id, driver_id) VALUES
   ('uber', $1, $3), ('bolt', 'bolt-alpha', $3), ('uber', $2, $4) ON CONFLICT DO NOTHING`, [A, B, PA, PB]);
-await q(`INSERT INTO driver_compliance (platform, driver_ext_id, fleet_id, full_name, phone, state) VALUES
-  ('uber', $1, 'ecosine', 'Test Charger Alpha', '+971500000001', 'active'),
-  ('bolt', 'bolt-alpha', 'ecosine', 'Test Charger Alpha', '+971500000099', 'active'),
-  ('uber', $2, 'ecosine', 'Test Charger Beta', '+971500000002', 'active') ON CONFLICT DO NOTHING`, [A, B]);
+/* Alpha's Bolt record was reported more recently than the Uber one: the
+   wallet still lists the Uber number first, because it is the one PowerDrive
+   holds (§9). */
+await q(`INSERT INTO driver_compliance (platform, driver_ext_id, fleet_id, full_name, phone, state, updated_at) VALUES
+  ('uber', $1, 'ecosine', 'Test Charger Alpha', '+971500000001', 'active', now() - interval '2 days'),
+  ('bolt', 'bolt-alpha', 'ecosine', 'Test Charger Alpha', '+971500000099', 'active', now() - interval '1 hour'),
+  ('uber', $2, 'ecosine', 'Test Charger Beta', '+971500000002', 'active', now() - interval '1 day') ON CONFLICT DO NOTHING`, [A, B]);
 
 /* ── the tools, bare and behind the gate ───────────────────────────────── */
 const bare = await mountAll(pg);
@@ -215,13 +230,17 @@ console.log('\n§8 phone numbers: on the wallets, and driver_contacts');
 const { tool: T8 } = harness(fetchVia(bare.port), [
   [A, { name: 'Test Charger Alpha', ids: [A], person_id: PA }], [C, { name: 'Test Charger Gamma', ids: [C], person_id: PC }]]);
 const w8 = await T8('charging_wallets', { driver_id: A });
-check('one driver\'s wallet carries their phone', w8.values?.phone === '+971500000001', JSON.stringify(w8.values));
-check('…with the rule for quoting it', /quote a phone number exactly as given/.test(w8.note || ''), w8.note);
+check('one driver\'s wallet carries their phone, and the other number their records hold',
+  w8.values?.phone === '+971500000001' && w8.values?.other_phones === '+971500000099', JSON.stringify(w8.values));
+check('…with the rule for quoting it, and that it is the number on their PowerDrive account',
+  /quote a phone number exactly as given/.test(w8.note || '') && /also the number on their PowerDrive account/.test(w8.note || ''), w8.note);
 const l8 = await T8('charging_wallets', {});
-const ph = Object.fromEntries((l8.rows || []).map((r) => [r.driver, r.phone]));
+const ph = Object.fromEntries((l8.rows || []).map((r) => [r.driver, [r.phone, r.other_phones]]));
 check('every wallet row carries its driver\'s phone; one with none on record is empty, not invented',
-  ph['Test Charger Alpha'] === '+971500000001' && ph['Test Charger Beta'] === '+971500000002' && ph['Test Charger Delta'] === null
-  && l8.columns?.some((c) => c.key === 'phone'), JSON.stringify(ph));
+  ph['Test Charger Alpha']?.[0] === '+971500000001' && ph['Test Charger Alpha']?.[1] === '+971500000099'
+  && ph['Test Charger Beta']?.[0] === '+971500000002' && ph['Test Charger Beta']?.[1] === null && ph['Test Charger Delta']?.[0] === null
+  && l8.columns?.some((c) => c.key === 'phone') && l8.columns?.some((c) => c.key === 'other_phones')
+  && /an empty phone means none is on the driver's platform driver records/.test(l8.note || ''), JSON.stringify([ph, l8.note]));
 const c8 = await T8('driver_contacts', { driver_id: A });
 check('driver_contacts, one driver: the main phone, and the Bolt account\'s different number as another phone',
   c8.values?.phone === '+971500000001' && c8.values?.other_phones === '+971500000099' && c8.rows?.length === 2
@@ -234,24 +253,14 @@ check('driver_contacts, everyone: one row per person, alphabetical, with the pho
   all8.values?.with_a_phone === 2 && all8.rows?.[0]?.driver === 'Test Charger Alpha' && all8.rows.some((r) => r.phone === '+971500000002'),
   JSON.stringify(all8.values));
 const G = (email, role) => cookieFor(email, role).then((c) => harness(fetchVia(gated.port, c), [[A, { name: 'Test Charger Alpha', ids: [A], person_id: PA }]]).tool);
-const CLK = await G('clk-charge@example.test', 'CLK');
-const k8 = await CLK('charging_wallets', { driver_id: A });
-check('the Cash desk (driver cash, no contact details) sees the balance, the phone withheld — and told so, never "no phone"',
-  k8.values?.balance_aed === 182.4 && !('phone' in (k8.values || {})) && /withheld from this person's role/.test(k8.note || ''),
-  JSON.stringify([k8.values, k8.note]).slice(0, 400));
-const AUD = await G('aud-charge@example.test', 'AUD');
-const a8 = await AUD('charging_wallets', { driver_id: A });
-check('the Auditor (contact details masked) sees the last digits only, and is told they are masked',
-  /01$/.test(a8.values?.phone || '') && a8.values?.phone !== '+971500000001' && /masked/.test(a8.note || ''),
-  JSON.stringify([a8.values?.phone, a8.note]).slice(0, 400));
 const FIN8 = await G('fin8-charge@example.test', 'FIN');
 const f8 = await FIN8('charging_wallets', {});
 const fph = Object.fromEntries((f8.rows || []).map((r) => [r.driver, r.phone]));
-check('the Finance manager (contacts and cash, but no person ids) still gets each wallet\'s phone — by the driver\'s unique name, and told so',
-  fph['Test Charger Alpha'] === '+971500000001' && fph['Test Charger Beta'] === '+971500000002' && /matched by the driver's name/.test(f8.note || ''),
+check('the Finance manager (contacts and cash, but no person ids) gets each wallet\'s phone from the wallet itself — no matching by name',
+  fph['Test Charger Alpha'] === '+971500000001' && fph['Test Charger Beta'] === '+971500000002' && !/matched by the driver's name/.test(f8.note || ''),
   JSON.stringify([fph, (f8.note || '').slice(0, 300)]));
 const f1 = await FIN8('charging_wallets', { driver_id: A });
-check('…and one driver\'s phone by their own platform account id, no name needed', f1.values?.phone === '+971500000001'
+check('…and one driver\'s phone the same way', f1.values?.phone === '+971500000001'
   && !/matched by the driver's name/.test(f1.note || ''), JSON.stringify([f1.values?.phone, f1.note]).slice(0, 300));
 const DSP8 = await G('dsp8-charge@example.test', 'DSP');
 const d8 = await DSP8('driver_contacts', { driver_id: A });
@@ -261,6 +270,61 @@ const ANL = await G('anl-charge@example.test', 'ANL');
 const n8 = await ANL('driver_contacts', { driver_id: A });
 check('an Analyst (no contact details) is told the numbers are withheld, never handed one',
   !n8.values?.phone && (n8.withheld || /withheld from this person's role/.test(n8.note || '')), JSON.stringify(n8).slice(0, 300));
+
+console.log('\n§9 whoever may see a wallet sees its driver\'s numbers — and nowhere else (AG-17)');
+/* The operator, 2026-11-23: "give everyone asking about powerdrive wallet
+   access to phone number". The Cash desk holds driver cash and no contact
+   details; the Auditor holds cash in full and contact details masked. On the
+   two wallet routes the gate lifts CT to the reader's level of CASH, the
+   routes' subject (api/access/shape.js liftLevels). */
+const CLK = await G('clk-charge@example.test', 'CLK');
+const k9 = await CLK('charging_wallets', { driver_id: A });
+check('the Cash desk (driver cash, no contact details) sees the balance AND the phone, in full',
+  k9.values?.balance_aed === 182.4 && k9.values?.phone === '+971500000001' && k9.values?.other_phones === '+971500000099'
+  && !/withheld|masked/.test(k9.note || ''), JSON.stringify([k9.values, k9.note]).slice(0, 400));
+const kl9 = await CLK('charging_wallets', {});
+const kph = Object.fromEntries((kl9.rows || []).map((r) => [r.driver, r.phone]));
+check('…and every wallet\'s phone on the list', kph['Test Charger Alpha'] === '+971500000001' && kph['Test Charger Beta'] === '+971500000002'
+  && kph['Test Charger Delta'] === null && !/withheld/.test(kl9.note || ''), JSON.stringify([kph, (kl9.note || '').slice(0, 200)]));
+const AUD = await G('aud-charge@example.test', 'AUD');
+const a9 = await AUD('charging_wallets', { driver_id: A });
+check('the Auditor (cash in full, contact details masked) sees the wallet\'s phone in full, as it sees the balance',
+  a9.values?.phone === '+971500000001' && !/masked/.test(a9.note || ''), JSON.stringify([a9.values?.phone, a9.note]).slice(0, 300));
+
+/* The routes themselves, as the Cash desk: the lift is the route's. */
+const clkCookie = await cookieFor('clk9-charge@example.test', 'CLK');
+const gw = await fetchVia(gated.port, clkCookie)('/api/charging/wallets');
+const gAlpha = (gw.body?.rows || []).find((r) => r.person_id === String(PA));
+check('GET /api/charging/wallets as the Cash desk: rows[].phones in full, CT not among what the gate withheld',
+  gw.status === 200 && JSON.stringify(gAlpha?.phones) === JSON.stringify(['+971500000001', '+971500000099']) && !/CT/.test(gw.withheld || ''),
+  JSON.stringify([gw.status, gAlpha?.phones, gw.withheld]));
+const gd = await fetchVia(gated.port, clkCookie)(`/api/charging/driver?person=${PA}`);
+check('GET /api/charging/driver as the Cash desk: phones in full, PowerDrive\'s number first',
+  gd.status === 200 && gd.body?.phones?.[0] === '+971500000001' && gd.body?.phone_on_powerdrive === true, JSON.stringify([gd.status, gd.body?.phones]));
+const gc = await fetchVia(gated.port, clkCookie)('/api/compliance/drivers');
+const cAlpha = (gc.body?.people || []).find((p) => p.name === 'Test Charger Alpha');
+check('…but the same Cash desk on the Compliance list: no number — the lift does not leave the wallet routes',
+  gc.status === 200 && cAlpha && cAlpha.phone == null && /CT/.test(gc.withheld || ''), JSON.stringify([gc.status, cAlpha?.phone, gc.withheld]));
+const dspCookie = await cookieFor('dsp9-charge@example.test', 'DSP');
+const dw = await fetchVia(gated.port, dspCookie)('/api/charging/wallets');
+check('a lift opens no route: the Dispatcher (no driver cash) is still refused the wallets', dw.status === 403, String(dw.status));
+
+check('PowerDrive\'s number first, though the Bolt record reported its number more recently',
+  JSON.stringify(gAlpha?.phones) === JSON.stringify(['+971500000001', '+971500000099']) && gAlpha?.phone_on_powerdrive === true,
+  JSON.stringify(gAlpha));
+const { liftLevels } = await import('../api/access/shape.js');
+const lv = (o) => liftLevels({ ...o }, { subject: 'CASH', lift: { CT: 'CASH', DOC: 'CASH' } });
+check('liftLevels only raises: CT:F with CASH:M stays F; CT none with CASH:M becomes M',
+  lv({ CT: 'F', CASH: 'M' }).CT === 'F' && lv({ CASH: 'M' }).CT === 'M' && lv({ CT: 'M', CASH: 'F' }).CT === 'F', '');
+check('liftLevels lifts only to the route\'s subject', liftLevels({ CASH: 'F' }, { subject: 'ID', lift: { CT: 'CASH' } }).CT === undefined, '');
+
+/* A detached account is no longer the person's (sql/schema_v101.sql). */
+await q(`INSERT INTO driver_platform_id (platform, external_id, driver_id, detached_at) VALUES ('yango', 'yango-old-alpha', $1, now())`, [PA]);
+await q(`INSERT INTO driver_compliance (platform, driver_ext_id, fleet_id, full_name, phone, state) VALUES
+  ('yango', 'yango-old-alpha', 'ecosine', 'Old Yango Record', '+971500000077', 'active')`);
+const det = await fetchVia(bare.port)('/api/charging/wallets');
+const dAlpha = (det.body?.rows || []).find((r) => r.person_id === String(PA));
+check('a detached account\'s number is not on the wallet', dAlpha && !dAlpha.phones.includes('+971500000077'), JSON.stringify(dAlpha?.phones));
 
 bare.server?.close?.(); gated.server?.close?.();
 await pg.close();

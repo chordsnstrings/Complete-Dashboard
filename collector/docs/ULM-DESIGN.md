@@ -1701,3 +1701,25 @@ two outcomes; the per-route record is docs/FIX-STATUS.md, section ONE.
 
 The deferral in §16 now reads: one-fleet readers are answered for their fleet on the fourteen
 `narrow` routes and refused, each with its own reason, on the 96 still `mixed`.
+
+## As built, 2026-11-23 — a lift: contact details beside a wallet (AG-17)
+
+The operator, 2026-11-23: "give everyone asking about powerdrive wallet access to phone number".
+The Cash desk holds driver cash and no contact details, so it read every debt on the PowerDrive
+wallets with the driver's number withheld; the Auditor read them masked.
+
+A manifest entry may now carry `lift: { CLASS: SUBJECT }`. On that route the reader sees CLASS at
+the level they hold the route's subject, where that is higher than their own (`api/access/shape.js`
+`liftLevels`, applied in the gate after a reveal and before shaping). Three rules:
+
+- **It only raises.** A level is never lowered by a lift.
+- **It lifts only to the route's subject.** The gate has already judged the reader on that class
+  before answering at all, so a lift never shows more than the record itself. `liftLevels` skips
+  any other target, and `test/access_manifest.test.mjs` fails on one.
+- **It belongs to the route.** The same reader keeps their own level of the lifted class everywhere
+  else. The Cash desk still gets no number from the Compliance list (`test/agent_charging.test.mjs` §9).
+
+Two entries carry one, both `{ CT: 'CASH' }`: `GET /api/charging/wallets` (`rows[].phones`) and
+`GET /api/charging/driver` (`phones`). The test fails if any other entry adds a lift. A role without
+driver cash is still refused both routes, because a lift opens no route.
+

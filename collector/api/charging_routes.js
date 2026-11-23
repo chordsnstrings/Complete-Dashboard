@@ -21,12 +21,60 @@
    cancelled and zero-energy sessions; they are counted apart, never as charges.
    A wallet balance is a named driver's money. No link, no balance: a person
    with no wallet linked reads "no charging wallet linked", never AED 0.
-   Phones never leave this file whole — the last three digits, enough to tell
-   two numbers apart on the review list. */
+   The number on a PowerDrive account never leaves this file whole — the last
+   three digits, enough to tell two numbers apart on the review list.
+
+   A DRIVER'S OWN NUMBERS DO, on the two wallet reads (AG-17, 2026-11-23). The
+   operator: "give everyone asking about powerdrive wallet access to phone
+   number". Whoever is shown a wallet is often shown it to chase it — a
+   negative balance, a top-up — and the Cash desk, the role that works these
+   balances, holds driver cash but not contact details, so it was handed a
+   list of debts with every number withheld. Each wallet row, and the one-
+   person read, now carry `phones`: every distinct number the person's
+   platform driver records hold (driver_compliance, through the person
+   spine's accounts — the numbers the Compliance page shows). `phones` is a
+   contact key (class CT, api/access/shape.js DICT); the manifest entries of
+   these two routes LIFT CT to the reader's level of CASH, the routes'
+   subject, so a reader sees the numbers exactly as clearly as the balance
+   beside them and nowhere else (api/access/shape.js liftLevels). Order: the
+   number that is also the one on the PowerDrive account first — the number
+   the driver registered to charge with — then the most recently reported.
+   The PowerDrive number itself is only compared, never sent. */
 import { dubaiDay, winDays } from './window.js';
 import { get } from '../src/settings.js';
+import { uaeMobile } from '../src/smsala.js';
 
 const tail = (p) => (p ? `•••••••${String(p).slice(-3)}` : null);
+/* One number however it was written (05…, +9715…, 009715…): two records
+   writing one mobile two ways are one number, listed once. A number that is
+   not a UAE mobile is compared digit for digit, never rewritten. */
+const phoneKey = (p) => uaeMobile(p) || String(p).replace(/\D/g, '');
+/* Every distinct number on each person's platform driver records, newest
+   report first. Through driver_platform_id → driver_compliance by account id,
+   the join the person spine (api/person_map.js byAccount) makes for the
+   Compliance page; a detached account is no longer theirs. */
+async function phonesByPerson(q, personIds) {
+  const ids = [...new Set(personIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  const out = new Map();
+  if (!ids.length) return out;
+  const rows = await q(`SELECT a.driver_id::text AS person_id, btrim(c.phone) AS phone
+      FROM driver_platform_id a JOIN driver_compliance c ON c.driver_ext_id = a.external_id
+     WHERE a.driver_id = ANY($1::bigint[]) AND a.detached_at IS NULL AND coalesce(btrim(c.phone), '') <> ''
+     ORDER BY a.driver_id, c.updated_at DESC NULLS LAST, c.platform, c.driver_ext_id`, [ids]);
+  for (const r of rows) {
+    const list = out.get(r.person_id) || [];
+    if (!list.some((x) => phoneKey(x) === phoneKey(r.phone))) list.push(r.phone);
+    out.set(r.person_id, list);
+  }
+  return out;
+}
+/* The number PowerDrive holds for the wallet first, when the records carry
+   it: `on` says whether the first number is that one. */
+const withPowerDriveFirst = (list = [], ycNorms = []) => {
+  const yc = new Set(ycNorms.filter(Boolean));
+  const hit = list.filter((p) => yc.has(phoneKey(p)));
+  return { phones: [...hit, ...list.filter((p) => !yc.has(phoneKey(p)))], on: hit.length > 0 };
+};
 const r2 = (v) => (v == null ? null : Math.round(Number(v) * 100) / 100);
 /* Only links whose person still exists: a decision stranded by a fold the
    link did not follow is held back for review by the collector, not shown as
@@ -125,7 +173,7 @@ export function chargingRoutes(app, { q, wrap }) {
     const s = await syncState(q);
     const [rows, reviewN, groupsRow] = await Promise.all([
       q(`WITH link AS (${LINK_SQL})
-         SELECT l.person_id::text AS person_id, l.tier, u.yc_user_id, d.full_name AS name, u.balance, u.hold_amount,
+         SELECT l.person_id::text AS person_id, l.tier, u.yc_user_id, d.full_name AS name, u.balance, u.hold_amount, u.phone_norm,
                 u.using_fleet_wallet, u.fleet_limit, u.fleet_limit_available, u.fleet_group, u.last_session_at,
                 (SELECT count(*) FROM charging_session cs WHERE cs.yc_user_id = u.yc_user_id AND cs.kwh > 0
                    AND cs.started_at > now() - interval '30 days')::int AS charges_30d
@@ -135,12 +183,18 @@ export function chargingRoutes(app, { q, wrap }) {
       reviewCounts(q),
       q(`SELECT count(DISTINCT lower(fleet_group))::int AS n FROM charging_user WHERE fleet_group IS NOT NULL`),
     ]);
-    const out = rows.map((r) => ({
-      person_id: r.person_id, name: r.name || null, tier: r.tier, yc_user_id: r.yc_user_id,
-      balance: r2(r.balance), hold_amount: r2(r.hold_amount), using_fleet_wallet: !!r.using_fleet_wallet,
-      fleet_limit: r2(r.fleet_limit), fleet_limit_available: r2(r.fleet_limit_available), fleet_group: r.fleet_group || null,
-      last_session_at: r.last_session_at, charges_30d: r.charges_30d,
-    }));
+    const phonesOf = await phonesByPerson(q, rows.map((r) => r.person_id));
+    const out = rows.map((r) => {
+      const ph = withPowerDriveFirst(phonesOf.get(r.person_id), [r.phone_norm]);
+      return {
+        person_id: r.person_id, name: r.name || null, tier: r.tier, yc_user_id: r.yc_user_id,
+        balance: r2(r.balance), hold_amount: r2(r.hold_amount), using_fleet_wallet: !!r.using_fleet_wallet,
+        fleet_limit: r2(r.fleet_limit), fleet_limit_available: r2(r.fleet_limit_available), fleet_group: r.fleet_group || null,
+        last_session_at: r.last_session_at, charges_30d: r.charges_30d,
+        /* [] is "none on their records", said as such — never a made-up number. */
+        phones: ph.phones, phone_on_powerdrive: ph.on,
+      };
+    });
     const people = new Set(out.map((r) => r.person_id));
     /* A customer with no PERSONAL wallet has no balance — null, never 0 —
        and the total says how many it could not count (the review). */
@@ -313,8 +367,12 @@ export function chargingRoutes(app, { q, wrap }) {
     if (!Number.isInteger(person) || person <= 0) return res.status(400).json({ error: 'person required' });
     const s = await syncState(q);
     const wallets = await q(`WITH link AS (${LINK_SQL})
-      SELECT u.yc_user_id, l.tier, u.balance, u.hold_amount, u.using_fleet_wallet, u.fleet_limit_available, u.fleet_group, u.last_session_at
+      SELECT u.yc_user_id, l.tier, u.balance, u.hold_amount, u.using_fleet_wallet, u.fleet_limit_available, u.fleet_group, u.last_session_at,
+             u.phone_norm
         FROM link l JOIN charging_user u ON u.yc_user_id = l.yc_user_id WHERE l.person_id = $1`, [person]);
+    /* The numbers go with the wallet: none is linked, none is sent. */
+    const ph = wallets.length ? withPowerDriveFirst((await phonesByPerson(q, [person])).get(String(person)), wallets.map((w) => w.phone_norm))
+      : null;
     const [bf] = await q(`SELECT value FROM source_state WHERE source = 'yocharge' AND fleet_id = '-' AND key = 'backfilled'`);
     let backfilled = new Set();
     try { backfilled = new Set(JSON.parse(bf?.value || '[]')); } catch { /* not read yet */ }
@@ -340,7 +398,8 @@ export function chargingRoutes(app, { q, wrap }) {
       /* Whether each wallet's whole history has been read yet: until it has,
          a count is "so far", not "all" (backfill, 150 customers a run). */
       history_read: wallets.length ? wallets.every((w) => backfilled.has(w.yc_user_id)) : null,
-      charges_total: c30 ? c30.ever : 0, recent });
+      charges_total: c30 ? c30.ever : 0, recent,
+      phones: ph ? ph.phones : null, phone_on_powerdrive: ph ? ph.on : null });
   }));
 
   app.get('/api/charging/vehicle', wrap(async (req, res) => {

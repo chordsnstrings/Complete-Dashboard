@@ -64,9 +64,22 @@ for (const e of allEntries()) {
   if (e.search && (!e.search.param || !Array.isArray(e.search.classes)
     || !e.search.classes.every((c) => CLASS_CODES.includes(c)))) bad.push(`${k}: search ${JSON.stringify(e.search)}`);
   if (e.capBy) for (const c of [e.capBy.default, ...Object.values(e.capBy.map)]) if (!CAP_CODES.includes(c)) bad.push(`${k}: capBy ${c}`);
+  /* A lift (AG-17, api/access/shape.js liftLevels) raises a class to the
+     reader's level of the route's SUBJECT and nothing else: a lift to any
+     other class would hand out a class the gate never judged this reader on.
+     The lifted class must be one the route declares it carries. */
+  for (const [cls, by] of Object.entries(e.lift || {})) {
+    if (!CLASS_CODES.includes(cls)) bad.push(`${k}: lift ${cls}`);
+    if (by !== e.subject) bad.push(`${k}: lift ${cls} to ${by}, not to the subject ${e.subject}`);
+    if (!e.carries.includes(cls)) bad.push(`${k}: lifts ${cls} but does not carry it`);
+  }
 }
 check('classes, grains, fleet rules and actions are all known values', bad.length === 0, bad.slice(0, 20).join('; '));
 const pub = allEntries().filter((e) => e.public).map((e) => e.path);
+const lifted = allEntries().filter((e) => e.lift).map((e) => `${e.method} ${e.path}`).sort();
+check('only the two PowerDrive wallet reads lift a class (contact details, to the reader\'s driver cash)',
+  JSON.stringify(lifted) === JSON.stringify(['GET /api/charging/driver', 'GET /api/charging/wallets'])
+  && allEntries().filter((e) => e.lift).every((e) => JSON.stringify(e.lift) === '{"CT":"CASH"}'), lifted.join(', '));
 check('only the health checks answer without signing in', pub.every((p) => ['/api/health', '/api/ready'].includes(p)), pub.join(', '));
 check('every change needs an action', allEntries().filter((e) => e.method !== 'GET').every((e) => e.cap));
 check('raw records and query plans are the Owner’s alone (subject RAW)',
