@@ -125,6 +125,8 @@ export const TOOL_SPECS = [
     { driver_id: { type: 'string', description: 'from find_driver' },
       sort_by: { type: 'string', enum: ['balance_aed', 'on_hold_aed', 'charges_30d', 'last_charged_at'] },
       order: { type: 'string', enum: ['desc', 'asc'] } }),
+  fn('driver_contacts', 'Drivers\' phone numbers and emails, as the Compliance page and the driver page hold them (the platforms\' own driver records): each person\'s main phone and email and every platform account\'s phone. Give driver_id (from find_driver) for one driver; without it, every driver. Use it to call or message a driver — e.g. the drivers a charging_wallets result lists (charging_wallets also carries each driver\'s phone). Quote a number exactly as given or by its placeholder; never shorten, regroup or complete one. A number this person\'s access withholds or masks is said so.',
+    { driver_id: { type: 'string', description: 'from find_driver' } }),
   fn('summarise', 'Work on a stored table result: filter rows, group them, total or average a column, sort, keep the top N. Returns a new result. Use this for any adding up, averaging, ranking or counting — never do arithmetic yourself.',
     { result: { type: 'string', description: 'a table result id, e.g. r3' },
       filter: { type: 'array', items: { type: 'object', properties: {
@@ -173,6 +175,7 @@ export const STATUS = {
   platform_statements: () => 'Fetching the platform statements…',
   payouts: () => 'Fetching the payouts…',
   charging_wallets: () => 'Fetching the PowerDrive charging wallets…',
+  driver_contacts: () => 'Fetching the phone numbers…',
   summarise: () => 'Working the figures out…',
   compare: () => 'Comparing…',
   combine: () => 'Putting the tables together…',
@@ -259,6 +262,58 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
   };
   const badDates = { error: 'from and to must be YYYY-MM-DD dates — call resolve_period first' };
   const qs = (o) => new URLSearchParams(Object.entries(o).filter(([, v]) => v != null && v !== '')).toString();
+  /* PHONE NUMBERS, PER PERSON (2026-11-23: the operator — "let chat access
+     phone numbers of drivers as well, so that if needed, for charging wallet,
+     we can get the numbers as well"). Read from /api/compliance/drivers, the
+     Compliance page's own list: one row per PERSON (person_id, the id the
+     charging wallets hang on), their main phone and email, and each platform
+     account's. Contact fields are class CT, and the gate shapes them by key
+     name at any depth (api/access/shape.js DICT): a role without CT gets
+     null, a CT:M role the real last two digits behind dots. So "no phone"
+     is said only when the route served the field and it was empty; a
+     blanked field is "withheld for this person's role", a masked one "shown
+     masked". One fetch per turn (getOnce). */
+  async function contactsByPerson() {
+    const g = await get('/api/compliance/drivers');
+    if (g.withheld || g.error) return { why: g.withheld || g.error, withheld: !!g.withheld, find: () => null };
+    /* THREE WAYS IN, MOST CERTAIN FIRST. people[].person_id is class MRG
+       (identity decisions) and most roles that see phones do not hold it — a
+       Dispatcher, an Analyst, the Finance manager — so for them it arrives
+       null (found on the gated test, 2026-11-23). Every account's own platform
+       id is plain ID: a driver from find_driver carries those ids, so that is
+       the first key. Then the person id where it was served. A name is the
+       last resort, and only a name exactly one person on the list carries —
+       two people with one name get no number rather than the wrong one. */
+    const byAccount = new Map(); const byPerson = new Map(); const nameCount = new Map(); const byName = new Map();
+    const all = [];
+    for (const p of g.body?.people || []) {
+      const accounts = (p.accounts || []).map((x) => ({ platform: x.platform, ext_id: x.driver_ext_id || null, phone: x.phone || null, email: x.email || null }));
+      const c = { name: p.name || null, phone: p.phone || null, email: p.email || null, accounts,
+        platforms: p.platforms || [...new Set(accounts.map((x) => x.platform))] };
+      all.push(c);
+      for (const id of [p.driver_ext_id, ...accounts.map((x) => x.ext_id)]) if (id) byAccount.set(String(id), c);
+      if (p.person_id != null) byPerson.set(String(p.person_id), c);
+      const nk = String(p.name || '').trim().toLowerCase();
+      if (nk) { nameCount.set(nk, (nameCount.get(nk) || 0) + 1); byName.set(nk, c); }
+    }
+    const find = ({ ids = [], person = null, name = null } = {}) => {
+      for (const id of ids) { const c = byAccount.get(String(id)); if (c) return { c, by: 'account' }; }
+      if (person != null && byPerson.has(String(person))) return { c: byPerson.get(String(person)), by: 'person' };
+      const nk = String(name || '').trim().toLowerCase();
+      if (nk && nameCount.get(nk) === 1) return { c: byName.get(nk), by: 'name' };
+      return null;
+    };
+    /* Masked first: a CT:M role's numbers arrive as real last digits behind
+       dots, and the gate names CT among what it shaped either way. */
+    const masked = all.some((c) => /[•*]/.test(String(c.phone || '')));
+    const blanked = !masked && g.blanked?.has('CT');
+    const access = masked ? 'phone numbers are shown masked (their last digits only) for this person\'s role — say so, and never guess the hidden digits'
+      : blanked ? 'phone numbers and emails are withheld from this person\'s role — say so; never call a driver\'s number missing'
+        : null;
+    return { all, find, access };
+  }
+  const BY_NAME = 'a phone was matched by the driver\'s name (this person\'s role does not see person ids; a name two people share is left without a number)';
+  const PHONE_RULE = 'quote a phone number exactly as given, or by its placeholder — never shorten, regroup or complete it';
   /* A person whose access covers one fleet: the gate narrows every fleet-
      filtered call to it whether or not the call says so, and a result labelled
      "both fleets" over one fleet's figures would be a true number under a
@@ -1375,7 +1430,15 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           charges_ever: num(b.charges_total),
           read_at: when(b.synced_at),
         };
+        const ct = await contactsByPerson();
+        const hit = ct.find({ ids: one.ids || [a.driver_id], person, name: one.name });
+        const me = hit?.c || null;
+        values.phone = me?.phone || null;
         for (const k of Object.keys(values)) if (values[k] == null) delete values[k];
+        const phoneNote = ct.why ? `this driver's phone number could not be read: ${String(ct.why).slice(0, 160)}`
+          : ct.access || (me && !me.phone ? 'no phone number is on the platforms\' driver records for this driver'
+            : !me ? 'this driver is not on the Compliance list, so no phone number is known'
+              : [hit.by === 'name' ? BY_NAME : null, PHONE_RULE].filter(Boolean).join(' — '));
         const BASIS = { session_plate: 'the session named it', only_car: 'their only car', nearest_trip: 'nearest trip' };
         const rows = (b.recent || []).map((x) => ({ charged: when(x.started_at), kwh: num(x.kwh), cost_aed: num(x.cost),
           minutes: num(x.minutes), plate: x.plate || null, car_from: x.plate ? (BASIS[x.plate_basis] || x.plate_basis || null) : null,
@@ -1389,10 +1452,11 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           b.history_read === false ? 'their full charging history is still being read, so charges_ever is a count so far, not all' : null,
           (b.recent || []).length && b.charges_total > (b.recent || []).length ? `the table is the latest ${(b.recent || []).length} of ${b.charges_total} charges` : null,
           'a charge is a session that delivered energy; cancelled and zero-energy sessions are not counted',
+          phoneNote,
         ].filter(Boolean);
         return { kind: 'table', definition, filters, source: '/api/charging/driver', columns, rows, values,
           kinds: { balance_aed: 'aed', on_hold_aed: 'aed', wallets: 'int', on_fleet_wallet: 'text', fleet_limit_available_aed: 'aed',
-            powerdrive_group: 'text', last_charged: 'text', charge_window_days: 'int', charges_30d: 'int', kwh_30d: 'num2', cost_30d_aed: 'aed',
+            powerdrive_group: 'text', last_charged: 'text', charge_window_days: 'int', charges_30d: 'int', kwh_30d: 'num2', cost_30d_aed: 'aed', phone: 'text',
             charges_ever: 'int', read_at: 'text' },
           note: notes.join(' — ') };
       }
@@ -1405,14 +1469,18 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           note: [b.why || 'No PowerDrive wallet is linked to any driver yet.', b.totals?.review ? `${b.totals.review} possible links wait on the Charging page for a person to decide` : null]
             .filter(Boolean).join(' — ') };
       }
-      const rows = b.rows.map((r) => ({ driver: r.name || '(a person with no name on file)', balance_aed: r.balance, on_hold_aed: r.hold_amount,
+      const ct = await contactsByPerson();
+      let byName = 0;
+      const phoneOf = (r) => { const h = ct.find({ person: r.person_id, name: r.name }); if (h?.by === 'name') byName += 1; return h?.c?.phone || null; };
+      const rows = b.rows.map((r) => ({ driver: r.name || '(a person with no name on file)', phone: phoneOf(r),
+        balance_aed: r.balance, on_hold_aed: r.hold_amount,
         fleet_wallet: r.using_fleet_wallet ? 'yes' : 'no', fleet_limit_available_aed: r.using_fleet_wallet ? r.fleet_limit_available : null,
         powerdrive_group: r.fleet_group || null, last_charged: when(r.last_session_at), last_charged_at: r.last_session_at || null,
         charges_30d: r.charges_30d, link: r.tier === 'confirmed' ? 'confirmed by a person' : 'matched automatically' }));
       sortRows(rows, ['balance_aed', 'on_hold_aed', 'charges_30d', 'last_charged_at'].includes(a.sort_by) ? a.sort_by : 'balance_aed',
         a.order === 'asc' ? 'asc' : 'desc');
       const t = b.totals || {};
-      const columns = [col('driver', 'Driver', 'text'), col('balance_aed', 'Balance', 'aed'), col('on_hold_aed', 'On hold', 'aed'),
+      const columns = [col('driver', 'Driver', 'text'), col('phone', 'Phone', 'text'), col('balance_aed', 'Balance', 'aed'), col('on_hold_aed', 'On hold', 'aed'),
         col('fleet_wallet', 'Fleet wallet', 'text'), col('fleet_limit_available_aed', 'Fleet limit left', 'aed'),
         col('powerdrive_group', 'PowerDrive group', 'text'), col('last_charged', 'Last charged', 'text'),
         col('charges_30d', 'Charges, 30 days', 'int'), col('link', 'Linked', 'text')];
@@ -1425,7 +1493,54 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
           on_fleet_wallet: 'int', waiting_for_review: 'int', unplaced_customers: 'int', charge_window_days: 'int', read_at: 'text' },
         note: [readNote(b), t.balance_unknown ? `${NO_PERSONAL}; total_balance_aed leaves those ${t.balance_unknown} out` : null,
           'only drivers whose PowerDrive account is linked to them appear; a driver not listed has no wallet linked, not a balance of AED 0',
-          t.review ? `${t.review} possible links wait on the Charging page for a person to decide` : null].filter(Boolean).join(' — ') };
+          t.review ? `${t.review} possible links wait on the Charging page for a person to decide` : null,
+          ct.why ? `phone numbers could not be read: ${String(ct.why).slice(0, 160)}` : ct.access,
+          !ct.why && byName ? BY_NAME : null, ct.why ? null : PHONE_RULE].filter(Boolean).join(' — ') };
+    },
+
+    /* DRIVER CONTACTS (2026-11-23): the Compliance page's phone numbers and
+       emails, as the asker — see contactsByPerson above for the access rule.
+       One driver: their person's main phone and email and every platform
+       account's phone (person_id from find_driver, or the profile's). All:
+       one row per person, alphabetical. Never a number the route did not
+       serve; never "no phone" for a field the gate blanked. */
+    async driver_contacts(a, ctx) {
+      let one = null;
+      if (a.driver_id) { one = ctx.drivers.get(String(a.driver_id)); if (!one) return notFromLookup(a); }
+      const ct = await contactsByPerson();
+      if (one) {
+        const definition = defn('Phone numbers and email', { driver: one.name });
+        const filters = { driver: one.name };
+        if (ct.why) return { kind: 'table', definition, filters, ...(ct.withheld ? { withheld: ct.why } : { error: ct.why }) };
+        const hit = ct.find({ ids: one.ids || [a.driver_id], person: one.person_id ?? null, name: one.name });
+        const me = hit?.c || null;
+        if (!me) {
+          return { kind: 'value', definition, filters, values: { on_the_compliance_list: 'no' }, kinds: { on_the_compliance_list: 'text' },
+            note: 'this driver is not on the Compliance list, so no phone number or email is known — say so; never guess one' };
+        }
+        const rows = me.accounts.map((x) => ({ platform: x.platform, phone: x.phone, email: x.email }));
+        const values = { phone: me.phone, email: me.email, accounts: rows.length,
+          other_phones: [...new Set(rows.map((x) => x.phone).filter((x) => x && x !== me.phone))].join(', ') || null };
+        for (const k of Object.keys(values)) if (values[k] == null) delete values[k];
+        return { kind: 'table', definition, filters, source: '/api/compliance/drivers',
+          columns: [col('platform', 'Platform', 'text'), col('phone', 'Phone', 'text'), col('email', 'Email', 'text')], rows, values,
+          kinds: { phone: 'text', email: 'text', accounts: 'int', other_phones: 'text' },
+          note: [ct.access || (!me.phone ? 'no phone number is on the platforms\' driver records for this driver' : null),
+            hit.by === 'name' ? BY_NAME : null,
+            'the main phone is the one the Compliance page shows; each platform account may carry its own', PHONE_RULE].filter(Boolean).join(' — ') };
+      }
+      const definition = 'Drivers\' phone numbers and emails';
+      if (ct.why) return { kind: 'table', definition, ...(ct.withheld ? { withheld: ct.why } : { error: ct.why }) };
+      const rows = ct.all.map((c) => ({ driver: c.name || '(no name on file)', phone: c.phone, email: c.email,
+        platforms: (c.platforms || []).join(', ') || null,
+        other_phones: [...new Set(c.accounts.map((x) => x.phone).filter((x) => x && x !== c.phone))].join(', ') || null }))
+        .sort((x, y) => String(x.driver).localeCompare(String(y.driver)));
+      return { kind: 'table', definition, source: '/api/compliance/drivers',
+        columns: [col('driver', 'Driver', 'text'), col('phone', 'Phone', 'text'), col('email', 'Email', 'text'),
+          col('platforms', 'Platforms', 'text'), col('other_phones', 'Other phones', 'text')], rows,
+        values: { drivers: rows.length, with_a_phone: rows.filter((r) => r.phone).length },
+        kinds: { drivers: 'int', with_a_phone: 'int' },
+        note: [ct.access, 'one row per person; other_phones are numbers a platform account carries that differ from the main one', PHONE_RULE].filter(Boolean).join(' — ') };
     },
 
     async ledger_entries(a, ctx) {
