@@ -12384,10 +12384,16 @@ Measured against the HR export of 23 Sep (via each HR driver's `/api/driver/prof
 IDs, 81% of the ID'd money**. Of the 45 unplaced IDs, 28 stopped before the export. The other 17 are still
 active and account for AED 23k of the AED 140k since then.
 
-**Credential:** the whole JSON key of a Google Cloud service account with the Sheets API enabled. It goes in
-`GOOGLE_SERVICE_ACCOUNT_JSON`, a secret entered on the Settings page under "Card machines". The sheet is
-shared with the account's `client_email` as Viewer. Without the key the hourly tick logs "skipped" and the
-pages say the sheet has not been read.
+**Credential:** **the sheet's link** (CARD-1b). The sheet is shared as "anyone with the link can view";
+measured 2026-11-23, its CSV export answered without a sign-in. One GET of
+`…/spreadsheets/d/<id>/export?format=csv&gid=<tab>` reads it, with no account. That makes the link the
+credential, because anyone holding it reads every driver's Emirates ID. It is the SECRET
+`NETWORK_SHEET_LINK` on the collector in DigitalOcean, and is not in the code; the sheet id once sat in the
+code's defaults and remains in git history. If the owner restricts the link, the reader says "not open to
+anyone with it any more". The fallback is a Google Cloud service account: its JSON key goes in
+`GOOGLE_SERVICE_ACCOUNT_JSON` (Settings → Card machines) and the sheet is shared with its `client_email` as
+Viewer. That path is used whenever a key is set. With neither set, the hourly tick logs "skipped" and the
+pages say the sheet has not been read. The worker also reads once three minutes after it starts.
 
 ### Traps
 * **A read is the WHOLE sheet and replaces everything stored; it never appends.** The first build replaced
@@ -12405,9 +12411,12 @@ pages say the sheet has not been read.
 
   Test: `test/network_cards.test.mjs` §3.
 * **The sheet has two columns headed "Date"**, and only the first is filled. Columns are found by header name,
-  never by position, and the first match wins. Dates are asked for as **serial numbers**
-  (`dateTimeRenderOption=SERIAL_NUMBER`). As formatted text, a sheet in a US locale writes 11/5/2026, and a
-  day-first reading would silently swap days 1–12.
+  never by position, and the first match wins. Through the Sheets API, dates are asked for as **serial
+  numbers** (`dateTimeRenderOption=SERIAL_NUMBER`). Through the link, the CSV carries a date **as displayed**
+  ("1-Jan-2026" today), and serials cannot be had. So a slash date is read only when the column itself proves
+  the order: a first part over 12 means day-first, a second part over 12 means month-first. Otherwise it is
+  counted out with that reason. As formatted text, a sheet in a US locale writes 11/5/2026, and a fixed
+  day-first reading would silently swap every day 1–12.
 * **"Not in `card_id_person`" does not mean "not on the HR export".** The view leaves out an HR row that
   matches no live account. A route that took absence from the view as "not on the export" served the HR
   document number with a false reason. Ask `hr_roster_row` directly (`/api/card/review` `on_hr`). Since the

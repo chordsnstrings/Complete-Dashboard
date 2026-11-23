@@ -39,6 +39,8 @@
      · refOf an unkeyed sha256 → §6 "the ref is keyed" fails
      · the 409 removed → §7 "a second decision" fails
      · the driver route's HR lookup removed → §6 "older upload" and "two records" fail
+     · slash dates read day-first regardless → §1 "month-first" and "never guessed" fail
+     · the sign-in check removed from readCsvByLink → §2b "no longer open" fails
      · the link's precedence over the HR export dropped (CASE order) → §5 fails
      · the review serving an ambiguous HR ID → §8 fails
      · the stranded-link fallback dropped → §5 "removed person" fails
@@ -51,8 +53,8 @@ import { mountAll } from './mount.mjs';
 import { accessLayer } from '../api/access/middleware.js';
 import * as svc from '../api/access/service.js';
 import { hashPassword } from '../api/access/crypto.js';
-import { parseSheet, dayOf, writeRead, collect } from '../src/sources/network_cards.js';
-import { parseServiceAccount, signedAssertion, readValues } from '../src/google_sheets.js';
+import { parseSheet, dayOf, slashOrderOf, writeRead, collect } from '../src/sources/network_cards.js';
+import { parseServiceAccount, signedAssertion, readValues, sheetFromLink, readCsvByLink } from '../src/google_sheets.js';
 import { refOf } from '../api/card_routes.js';
 
 let pass = 0, fail = 0;
@@ -91,6 +93,17 @@ console.log('\n§1 the sheet → payments');
   check('moved column: read by name, not position', moved.payments[0]?.amount === 55 && moved.payments[0].terminal_id === '7'
     && moved.payments[0].emirates_id === E3 && moved.payments[0].txn_day === '2026-02-05', JSON.stringify(moved));
   check('no header row: nothing kept, and said', parseSheet([['a', 'b']]).missing.length === 1);
+  /* Slash dates (CARD-1b): read only when the column itself proves which
+     part is the day — never guessed. */
+  check('slash dates: a first part over 12 proves day-first, a second over 12 month-first, neither or both is unknown',
+    slashOrderOf(['13/01/2026', '02/01/2026']) === 'dmy' && slashOrderOf(['01/13/2026', '01/02/2026']) === 'mdy'
+    && slashOrderOf(['01/02/2026', '03/04/2026']) === 'unknown' && slashOrderOf(['13/01/2026', '01/13/2026']) === 'unknown');
+  const mdy = parseSheet([HEAD, [fmtE(E1), '11/5/2026', 'Ecosine', 1, 5], [fmtE(E1), '11/25/2026', 'Ecosine', 1, 6]]);
+  check('a month-first sheet reads 11/5/2026 as 5 November', mdy.payments[0]?.txn_day === '2026-11-05' && mdy.payments[1]?.txn_day === '2026-11-25',
+    JSON.stringify(mdy.payments.map((x) => x.txn_day)));
+  const amb = parseSheet([HEAD, [fmtE(E1), '5/11/2026', 'Ecosine', 1, 5], [fmtE(E1), '1-Dec-2026', 'Ecosine', 1, 6]]);
+  check('…and a column that cannot tell day from month leaves those rows unread, counted, never guessed',
+    amb.payments.length === 1 && amb.skipped['a slash date whose day and month cannot be told apart'] === 1, JSON.stringify(amb.skipped));
   check('days: D-Mon-YYYY, ISO, day-first slashes, serial; nonsense refused',
     dayOf('1-Jan-2026') === '2026-01-01' && dayOf('2026-03-04') === '2026-03-04' && dayOf('04/03/2026') === '2026-03-04'
     && dayOf(46023) === '2026-01-01' && dayOf('31-Feb-2026') === null && dayOf('soon') === null);
@@ -137,6 +150,27 @@ const keyJson = JSON.stringify({ type: 'service_account', client_email: 'reader@
   try { await readValues({ sa, sheetId: 'sheet-abc', range: 'A:J', fetchImpl: disabledApi }); } catch (e) { mOff = e.message; credOff = e.credential; }
   check('the Sheets API not enabled is said as itself — not "share the sheet", and the key is not blamed',
     /Sheets API is not enabled/.test(mOff) && !/share it/.test(mOff) && /has not been used/.test(mOff) && !credOff, mOff);
+}
+
+console.log('\n§2b by link (the operator: "let\'s go for the easy option")');
+{
+  check('the link names the sheet and its tab: the edit link, an export link, a bare id',
+    sheetFromLink('https://docs.google.com/spreadsheets/d/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-xy/edit?gid=42#gid=42')?.gid === '42'
+    && sheetFromLink('https://docs.google.com/spreadsheets/d/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-xy/edit')?.gid === '0'
+    && sheetFromLink('AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-xy')?.id === 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-xy'
+    && sheetFromLink('https://example.test/nothing') === null);
+  const LINK = 'https://docs.google.com/spreadsheets/d/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-xy/edit?gid=7#gid=7';
+  let asked = '';
+  const csv = `Emirates ID,Date,Platform,TRMNL ID,TRAN AMT,,,,Date,DD/MM/YY\n${fmtE(E1)},1-Jan-2026,Ecosine,10389537,180\n"${fmtE(E1)}",2-Jan-2026,Ecosine,10389537,"1,250.50"\n`;
+  const open = async (url) => { asked = String(url); return new Response(csv, { status: 200, headers: { 'content-type': 'text/csv' } }); };
+  const text = await readCsvByLink({ link: LINK, fetchImpl: open });
+  check('one GET of the tab\'s CSV export, no sign-in', asked === 'https://docs.google.com/spreadsheets/d/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-xy/export?format=csv&gid=7'
+    && text.startsWith('Emirates ID'), asked);
+  const closed = async () => Object.defineProperty(new Response('<html>Sign in</html>', { status: 200, headers: { 'content-type': 'text/html' } }),
+    'url', { value: 'https://accounts.google.com/v3/signin/identifier?continue=x' });
+  let shut = ''; let shutCred = null;
+  try { await readCsvByLink({ link: LINK, fetchImpl: closed }); } catch (e) { shut = e.message; shutCred = e.credential; }
+  check('a link no longer open ends at the sign-in page and says so — never parsed as payments', /not open to anyone with it/.test(shut) && shutCred === true, shut);
 }
 
 console.log('\n§3 a read is the whole sheet, and replaces what is stored');
@@ -187,8 +221,16 @@ const sheet = (...parts) => parseSheet([HEAD, ...parts.flat()]);
 
 console.log('\n§4 collect()');
 {
-  const sk = await collect({ db, keyJson: '', sheetId: 'x' });
-  check('no key: skipped, and says which setting', sk.skipped === 'GOOGLE_SERVICE_ACCOUNT_JSON is not set');
+  const sk = await collect({ db, keyJson: '', sheetId: '', link: '' });
+  check('neither a link nor a key: skipped, and says which setting', sk.skipped === 'NETWORK_SHEET_LINK is not set', JSON.stringify(sk));
+  const before = (await stored()).n;
+  const LINK = 'https://docs.google.com/spreadsheets/d/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-xy/edit?gid=0';
+  const csvRows = [['Emirates ID', 'Date', 'Platform', 'TRMNL ID', 'TRAN AMT'], ...Array.from({ length: 30 }, () => [fmtE(E1), '5-Jan-2026', 'Ecosine', '100', '10'])]
+    .map((r) => r.join(',')).join('\n');
+  const viaLink = await collect({ db, keyJson: '', link: LINK, fetchImpl: async () => new Response(csvRows, { status: 200, headers: { 'content-type': 'text/csv' } }) });
+  const [lastImp] = await q(`SELECT status, sheet_range FROM card_import ORDER BY id DESC LIMIT 1`);
+  check('by link: read, written, and recorded as read by link', viaLink.status === 'ok' && viaLink.kept === 30 && lastImp.sheet_range === 'link'
+    && before === 30, JSON.stringify([viaLink, lastImp, before]));
   const refuse = async (url) => (String(url).includes('/token') ? new Response(JSON.stringify({ access_token: 't' }), { status: 200 })
     : new Response('{}', { status: 403 }));
   const er = await collect({ db, keyJson, sheetId: 'x', fetchImpl: refuse });

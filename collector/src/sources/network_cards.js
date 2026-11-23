@@ -51,7 +51,9 @@ import { get } from '../settings.js';
 import { logRun } from '../db.js';
 import { noteCredential } from '../auth_state.js';
 import { log as defaultLog } from '../log.js';
-import { parseServiceAccount, readValues } from '../google_sheets.js';
+import { parse as parseCsv } from 'csv-parse/sync';
+import { parseServiceAccount, readValues, readCsvByLink, sheetFromLink } from '../google_sheets.js';
+const sheetFromLinkSafe = (l) => { try { return sheetFromLink(l); } catch { return null; } };
 
 export const SOURCE = 'network_cards';
 export const KEEP_SHARE = 0.9;
@@ -66,7 +68,7 @@ const validDay = (y, m, d) => {
 /* "1-Jan-2026" as the sheet shows it; also 2026-01-01, 01/01/2026 (day
    first, the UAE way) and a spreadsheet serial number, in case a cell's
    format changes. Anything else is not a day, and the row is counted out. */
-export function dayOf(v) {
+export function dayOf(v, slashOrder = 'dmy') {
   if (typeof v === 'number' && Number.isFinite(v) && v > 40000 && v < 80000) {
     const t = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 864e5);
     return validDay(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
@@ -77,8 +79,30 @@ export function dayOf(v) {
   m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
   if (m) return validDay(+m[1], +m[2], +m[3]);
   m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
-  if (m) return validDay(+m[3], +m[2], +m[1]);
+  if (m) {
+    if (slashOrder === 'mdy') return validDay(+m[3], +m[1], +m[2]);
+    if (slashOrder === 'dmy') return validDay(+m[3], +m[2], +m[1]);
+    return null;   // the sheet's own dates cannot tell day from month
+  }
   return null;
+}
+
+/* WHICH WAY A SHEET WRITES ITS SLASH DATES (the review of 2026-11-23). The
+   CSV export carries a date as the sheet DISPLAYS it — "1-Jan-2026" today,
+   unambiguous. Should the display become 5/11/2026, the column itself must
+   say whether that is 5 November or 11 May: a first part over 12 proves
+   day-first, a second part over 12 proves month-first. If neither ever
+   happens (or both do), the slash dates are left unread and counted — never
+   guessed, because a wrong guess moves a payment to another month. */
+export function slashOrderOf(cells) {
+  let dayFirst = false; let monthFirst = false;
+  for (const c of cells) {
+    const m = /^(\d{1,2})\/(\d{1,2})\/\d{4}$/.exec(String(c ?? '').trim());
+    if (!m) continue;
+    if (+m[1] > 12) dayFirst = true;
+    if (+m[2] > 12) monthFirst = true;
+  }
+  return dayFirst && !monthFirst ? 'dmy' : monthFirst && !dayFirst ? 'mdy' : 'unknown';
 }
 
 const FLEETS = { ecosine: 'ecosine', egari: 'egari' };
@@ -106,12 +130,17 @@ export function parseSheet(values) {
   if (missing.length) return { payments: [], skipped: {}, rows_read: rows.length - hi - 1, missing };
   const payments = []; const skipped = {};
   const out = (why) => { skipped[why] = (skipped[why] || 0) + 1; };
+  const order = slashOrderOf(rows.slice(hi + 1).map((r) => (r || [])[col.day]));
   for (let i = hi + 1; i < rows.length; i += 1) {
     const r = rows[i] || [];
     const cell = (k) => r[col[k]];
     if (![cell('eid'), cell('day'), cell('terminal'), cell('amount')].some((c) => String(c ?? '').trim())) continue;
-    const day = dayOf(cell('day'));
-    if (!day) { out('no readable day'); continue; }
+    const day = dayOf(cell('day'), order);
+    if (!day) {
+      out(order === 'unknown' && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(String(cell('day') ?? '').trim())
+        ? 'a slash date whose day and month cannot be told apart' : 'no readable day');
+      continue;
+    }
     const fleet = FLEETS[norm(cell('fleet'))];
     if (!fleet) { out('fleet not Ecosine or Egari'); continue; }
     const terminal = String(cell('terminal') ?? '').trim().replace(/\.0+$/, '');
@@ -197,26 +226,38 @@ export async function writeRead(db, parsed, { range = null, acceptShrink = false
 
 export async function collect({ db, now = Date.now(), fetchImpl = fetch, log = defaultLog, acceptShrink = false,
   keyJson = get('GOOGLE_SERVICE_ACCOUNT_JSON', ''), sheetId = get('NETWORK_SHEET_ID', ''),
-  range = get('NETWORK_SHEET_RANGE', 'A:J') } = {}) {
-  if (!String(keyJson || '').trim()) return { skipped: 'GOOGLE_SERVICE_ACCOUNT_JSON is not set' };
-  if (!sheetId) return { skipped: 'NETWORK_SHEET_ID is not set' };
-  const cred = { provider: 'google', credential: 'GOOGLE_SERVICE_ACCOUNT_JSON', surface: 'network sheet' };
+  range = get('NETWORK_SHEET_RANGE', 'A:J'), link = get('NETWORK_SHEET_LINK', '') } = {}) {
+  /* Two ways in. The LINK (the operator's choice, 2026-11-23: the sheet is
+     open to anyone with it) needs no account; a service-account key, when
+     one is set, is used instead — for the day the link is restricted. */
+  const byKey = Boolean(String(keyJson || '').trim());
+  if (!byKey && !String(link || '').trim()) return { skipped: 'NETWORK_SHEET_LINK is not set' };
+  if (byKey && !sheetId && !sheetFromLinkSafe(link)) return { skipped: 'NETWORK_SHEET_ID is not set' };
+  const cred = byKey ? { provider: 'google', credential: 'GOOGLE_SERVICE_ACCOUNT_JSON', surface: 'network sheet' }
+    : { provider: 'google', credential: 'NETWORK_SHEET_LINK', surface: 'network sheet' };
+  const via = byKey ? range : 'link';
   try {
-    const sa = parseServiceAccount(keyJson);
-    const values = await readValues({ sa, sheetId, range, fetchImpl, now });
+    let values;
+    if (byKey) {
+      const sa = parseServiceAccount(keyJson);
+      values = await readValues({ sa, sheetId: sheetId || sheetFromLinkSafe(link).id, range, fetchImpl, now });
+    } else {
+      const csv = await readCsvByLink({ link, fetchImpl });
+      values = parseCsv(csv, { relax_column_count: true, skip_empty_lines: false, bom: true });
+    }
     await noteCredential(db, { ...cred, state: 'ok' }).catch(() => {});
     const parsed = parseSheet(values);
-    const imp = await writeRead(db, parsed, { range, acceptShrink });
+    const imp = await writeRead(db, parsed, { range: via, acceptShrink });
     await logRun({ source: SOURCE, fleet_id: null, mode: 'sheet', status: imp.status === 'ok' ? 'ok' : imp.status === 'held' ? 'partial' : 'error',
       rows_written: imp.status === 'ok' ? imp.rows_kept : 0, error: imp.why || null }, db);
     log.info(SOURCE, 'read', { status: imp.status, kept: imp.rows_kept, skipped: imp.rows_skipped, from: imp.day_from, to: imp.day_to });
     return { status: imp.status, kept: imp.rows_kept, skipped: parsed.skipped, from: imp.day_from, to: imp.day_to, why: imp.why || null };
   } catch (e) {
     const msg = String(e.message || e).slice(0, 300);
-    if (e.credential || /service account key|GOOGLE_SERVICE_ACCOUNT_JSON/.test(msg)) {
+    if (e.credential || /service account key|GOOGLE_SERVICE_ACCOUNT_JSON|NETWORK_SHEET_LINK/.test(msg)) {
       await noteCredential(db, { ...cred, state: 'invalid', detail: msg.slice(0, 160) }).catch(() => {});
     }
-    await db.query(`INSERT INTO card_import (sheet_range, status, why) VALUES ($1, 'error', $2)`, [range, msg]).catch(() => {});
+    await db.query(`INSERT INTO card_import (sheet_range, status, why) VALUES ($1, 'error', $2)`, [via, msg]).catch(() => {});
     await logRun({ source: SOURCE, fleet_id: null, mode: 'sheet', status: 'error', rows_written: 0, error: msg }, db).catch(() => {});
     log.warn(SOURCE, 'read failed', { err: msg.slice(0, 200) });
     return { error: msg };

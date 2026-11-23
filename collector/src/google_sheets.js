@@ -99,3 +99,40 @@ export async function readValues({ sa, sheetId, range, fetchImpl = fetch, now = 
   if (!res.ok) throw fail(`Google Sheets answered ${res.status}${j?.error?.message ? `: ${String(j.error.message).slice(0, 160)}` : ''}`, { status: res.status });
   return Array.isArray(j.values) ? j.values : [];
 }
+
+/* ── BY LINK (the operator, 2026-11-23: "let's go for the easy option") ───
+   The sheet is shared as "anyone with the link can view" (measured: its CSV
+   export answered without a sign-in, 307 straight to Google's download host).
+   So no account is needed at all — one GET of the export link. The link is
+   then the credential: anyone holding it reads every driver's Emirates ID, so
+   it is a SECRET setting (NETWORK_SHEET_LINK, set in DigitalOcean), never in
+   the repository. The service-account path above stays for the day the link
+   is restricted. */
+
+/* The sheet and tab a link names: the edit link the operator copies
+   (…/spreadsheets/d/<id>/edit?gid=0#gid=0), an export link, or a bare id. */
+export function sheetFromLink(link) {
+  const s = String(link ?? '').trim();
+  const m = /\/spreadsheets\/d\/([A-Za-z0-9_-]{20,})/.exec(s) || /^([A-Za-z0-9_-]{30,})$/.exec(s);
+  if (!m) return null;
+  const g = /[?#&]gid=(\d+)/.exec(s);
+  return { id: m[1], gid: g ? g[1] : '0' };
+}
+
+/* The tab as CSV text. A link that is not open to anyone ends at Google's
+   sign-in page (an HTML answer, or a final address on accounts.google.com),
+   and says so rather than parsing a login form as payments. */
+export async function readCsvByLink({ link, fetchImpl = fetch }) {
+  const ref = sheetFromLink(link);
+  if (!ref) throw fail('NETWORK_SHEET_LINK is not a Google Sheets link');
+  const url = `https://docs.google.com/spreadsheets/d/${ref.id}/export?format=csv&gid=${ref.gid}`;
+  const res = await fetchImpl(url, { redirect: 'follow' });
+  const type = String(res.headers?.get?.('content-type') || '');
+  const final = String(res.url || '');
+  if (/accounts\.google\.com|ServiceLogin/i.test(final) || (res.ok && /text\/html/i.test(type))) {
+    throw fail('the sheet\'s link is not open to anyone with it any more — ask its owner to share it as "Anyone with the link: Viewer", or set a Google service account key', { status: 403, credential: true });
+  }
+  if (res.status === 404) throw fail('Google has no sheet at that link (check NETWORK_SHEET_LINK)', { status: 404 });
+  if (!res.ok) throw fail(`Google answered ${res.status} for the sheet's link`, { status: res.status });
+  return res.text();
+}

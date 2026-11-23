@@ -404,10 +404,15 @@ async function main() {
        the Network International sheet, read at 33 past every hour — before
        the 05:00 cash text, so a day's card payments are in by the time it is
        written. Minute 33: not a multiple of five, clear of every minute the
-       note below lists. Silent ("skipped") until the Google service account
-       key is set on the Settings page. */
+       note below lists. Silent ("skipped") until the sheet's link
+       (NETWORK_SHEET_LINK, a secret in DigitalOcean) or a service account key
+       is set. */
     cron.schedule(get('NETWORK_CARDS_CRON', '33 * * * *'), () => networkCardsTick().then(skipped('card payments'))
       .catch((e) => log.error('scheduler', 'card payments', { err: String(e) })), { timezone: 'Asia/Dubai' });
+    /* …and once three minutes after the worker starts, so a deploy shows the
+       payments without waiting for the next :33 (the busy flag and the write's
+       advisory lock make an overlap with that slot harmless). */
+    setTimeout(() => networkCardsTick().then(skipped('card payments')).catch(() => {}), 3 * 60_000);
     /* FLIGHTS LANDING AT DXB AND DWC — OpenSky (src/sources/flights.js).
        ─────────────────────────────────────────────────────────────────────
        The confirmed arrivals at 41 minutes past every third hour from 01:41

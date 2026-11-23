@@ -296,6 +296,12 @@ workers:
       - key: OPENSKY_CLIENT_SECRET
         type: SECRET
         value: "<set in DigitalOcean>"
+      # Network International card payments (FIX-STATUS CARD-1b, 2026-11-23): the
+      # sheet's link — open to anyone holding it, so it reads every driver's
+      # Emirates ID and is a secret. The collector alone reads the sheet.
+      - key: NETWORK_SHEET_LINK
+        type: SECRET
+        value: "<set in DigitalOcean>"
       # BytePlus SearchInfinity, the web search behind "Coming up in Dubai" (EVW2,
       # 2026-11-16): the collector alone searches.
       - key: SEARCHINFINITY_API_KEY
