@@ -18,13 +18,17 @@
    Withheld values become null (the page then says why, from `_withheld` and
    the x-fm-withheld header); masked values keep their real last characters.
    Nothing is ever replaced with an invented value. */
-import { maskValue, rank } from '../public/access_model.js';
+import { maskValue, rank, minLevel } from '../public/access_model.js';
 
 /* Key names that mean one class wherever they occur. Lower-case; matched
    case-insensitively. */
 export const DICT = Object.freeze({
   CT: ['phone', 'phone_number', 'mobile', 'mobile_number', 'email', 'email_address', 'whatsapp',
-    'contact_phone', 'driver_phone', 'hr_phone', 'hr_email', 'phones', 'emails', 'phone_tail'],
+    'contact_phone', 'driver_phone', 'hr_phone', 'hr_email', 'phones', 'emails', 'phone_tail',
+    /* The assistant's further numbers for one person (AG-15/AG-17): kept in
+       the stored chat and re-shaped on every reload, so the key itself must
+       be one the gate knows (the review of AG-17, 2026-11-23). */
+    'other_phones'],
   DOC: ['emirates_id', 'eid', 'emirates_id_no', 'licence_no', 'license_no', 'licence_number',
     'license_number', 'driving_licence_no', 'passport_no', 'passport_number', 'visa_no', 'visa_number',
     'rta_permit_no', 'permit_no', 'placeholder_licence_no'],
@@ -100,24 +104,53 @@ const maskFor = (cls) => (v) => {
 
 /* The dictionary, in one walk. `levels` are the caller's effective levels for
    this request. Records what it touched in `seen`. */
-function applyDictionary(body, levels, seen, depth = 0) {
+/* Nothing to withhold: null, '', and an empty list. An empty list marked
+   "withheld" told the assistant a role could not see numbers that did not
+   exist (the review of AG-17, 2026-11-23); an empty string never was. */
+const isEmpty = (v) => v == null || v === '' || (Array.isArray(v) && v.length === 0);
+function applyDictionary(body, levels, seen, depth = 0, skip = null) {
   if (body == null || typeof body !== 'object' || depth > 40) return body;
+  if (skip?.has(body)) return body;
   if (Array.isArray(body)) {
-    for (let i = 0; i < body.length; i += 1) body[i] = applyDictionary(body[i], levels, seen, depth + 1);
+    for (let i = 0; i < body.length; i += 1) body[i] = applyDictionary(body[i], levels, seen, depth + 1, skip);
     return body;
   }
   for (const k of Object.keys(body)) {
     const cls = DICT_KEY.get(k.toLowerCase());
     if (cls) {
       const l = levels[cls] || '';
-      if (l === 'F') { body[k] = applyDictionary(body[k], levels, seen, depth + 1); continue; }
-      if (body[k] == null || body[k] === '') continue;
+      if (l === 'F') { body[k] = applyDictionary(body[k], levels, seen, depth + 1, skip); continue; }
+      if (isEmpty(body[k])) continue;
       if (l === 'M') { body[k] = maskFor(cls)(body[k]); seen[cls] = 'M'; } else { body[k] = null; seen[cls] = l || ''; }
       continue;
     }
-    body[k] = applyDictionary(body[k], levels, seen, depth + 1);
+    body[k] = applyDictionary(body[k], levels, seen, depth + 1, skip);
   }
   return body;
+}
+
+/* STORED CHAT TABLES (AG-17, the review of 2026-11-23). The assistant keeps a
+   conversation for a day and serves it again on every reload through
+   GET /api/agent/state, whose own entry lifts nothing — so a wallet table the
+   Cash desk had just been shown with each driver's number came back with the
+   Phone column blank and "not shown to your role", beside a sentence quoting
+   the number: a reason that was not the true one. A stored table names the
+   route it came from (`source`, set by the tool, never by the model), and an
+   entry marked `sourcedTables` shapes each such table at the levels THAT
+   route would give this reader now — its lift included, so a reader who has
+   since lost driver cash loses the numbers too. Everything else in the body
+   is shaped at the reader's own levels as before. */
+function shapeSourcedTables(body, levels, seen, lookup, skip, depth = 0) {
+  if (body == null || typeof body !== 'object' || depth > 12) return;
+  if (Array.isArray(body)) { for (const x of body) shapeSourcedTables(x, levels, seen, lookup, skip, depth + 1); return; }
+  if (typeof body.source === 'string' && body.source.startsWith('/api/') && Array.isArray(body.rows) && Array.isArray(body.columns)) {
+    const src = lookup('GET', body.source.split('?')[0]);
+    const L2 = src && !src.self && src.lift ? liftLevels({ ...levels }, src) : levels;
+    body.rows = applyDictionary(body.rows, L2, seen, 0, skip);
+    skip.add(body.rows);
+    return;
+  }
+  for (const k of Object.keys(body)) shapeSourcedTables(body[k], levels, seen, lookup, skip, depth + 1);
 }
 
 /* The whole shaping of one answer.
@@ -127,7 +160,7 @@ function applyDictionary(body, levels, seen, depth = 0) {
      fleets   the fleets the caller may see rows of (null = no row filter)
    Returns { body, withheld: { CLASS: level } }. */
 const ROW_FILTERED = new Set(['rows', 'narrow']);
-export function shapeBody(body, entry, levels, { fleets = null } = {}) {
+export function shapeBody(body, entry, levels, { fleets = null, lookup = null } = {}) {
   const withheld = {};
   if (body == null || typeof body !== 'object') return { body, withheld };
   for (const f of entry.fields || []) {
@@ -137,14 +170,16 @@ export function shapeBody(body, entry, levels, { fleets = null } = {}) {
     let touched = false;
     for (const p of f.paths || []) {
       body = transform(body, parsePath(p), (v) => {
-        if (v == null || v === '') return v;
+        if (isEmpty(v)) return v;
         touched = true;
         return fn(v);
       });
     }
     if (touched) withheld[f.class] = l;
   }
-  body = applyDictionary(body, levels, withheld);
+  const skip = new WeakSet();
+  if (entry.sourcedTables && lookup) shapeSourcedTables(body, levels, withheld, lookup, skip);
+  body = applyDictionary(body, levels, withheld, 0, skip);
   /* 'narrow' too (api/access/one_fleet.js): its handler already answers for
      the one fleet, and where its rows carry the fleet this drops any row of
      another fleet all the same — a second line, not the first. */
@@ -190,12 +225,18 @@ export const atLeast = (l, min) => rank(l) >= rank(min);
    number" — where the Cash desk holds driver cash but no contact details and
    was handed a list of debts with every number withheld.
 
-   Three rules keep it from being a hole:
+   Four rules keep it from being a hole:
      · it only RAISES — a level is never lowered by a lift;
      · it may only lift TO the route's subject — the class the gate has just
        judged this reader on before answering at all (a list grain is refused
-       below Masked, so a lift never hands out more than the record itself) —
-       held here and in test/access_manifest.test.mjs;
+       below Masked) — held here and in test/access_manifest.test.mjs;
+     · it never goes above the reader's level of ID. A phone number names
+       its driver: a custom role holding driver cash without driver identity
+       ({CASH:F, SYS:F} is a role an Access admin can make) would read every
+       name withheld and every number whole, which ties each balance back to
+       its driver (the review of AG-17, 2026-11-23). So the lift is to the
+       lower of the subject and ID — with the identity masked, so are the
+       numbers;
      · it is the route's: the same reader on any other route keeps their own
        level of the lifted class (the Cash desk still gets no number from the
        Compliance page).
@@ -203,7 +244,7 @@ export const atLeast = (l, min) => rank(l) >= rank(min);
 export function liftLevels(levels, entry) {
   for (const [cls, by] of Object.entries(entry?.lift || {})) {
     if (by !== entry.subject) continue;
-    const to = levels[by] || '';
+    const to = minLevel(levels[by] || '', levels.ID || '');
     if (rank(to) > rank(levels[cls] || '')) levels[cls] = to;
   }
   return levels;

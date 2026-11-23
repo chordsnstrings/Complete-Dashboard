@@ -50,15 +50,18 @@ const tail = (p) => (p ? `•••••••${String(p).slice(-3)}` : null);
    not a UAE mobile is compared digit for digit, never rewritten. */
 const phoneKey = (p) => uaeMobile(p) || String(p).replace(/\D/g, '');
 /* Every distinct number on each person's platform driver records, newest
-   report first. Through driver_platform_id → driver_compliance by account id,
-   the join the person spine (api/person_map.js byAccount) makes for the
-   Compliance page; a detached account is no longer theirs. */
+   report first. Through driver_platform_id → driver_compliance on the whole
+   account key, platform AND id: the spine makes its accounts from these very
+   rows (src/persons.js ACCOUNTS_SQL), so the pair always matches, and a
+   numeric Bolt id equal to someone's FMS id can never hand over that
+   person's number (the review of AG-17, 2026-11-23). A detached account is
+   no longer theirs. */
 async function phonesByPerson(q, personIds) {
   const ids = [...new Set(personIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
   const out = new Map();
   if (!ids.length) return out;
   const rows = await q(`SELECT a.driver_id::text AS person_id, btrim(c.phone) AS phone
-      FROM driver_platform_id a JOIN driver_compliance c ON c.driver_ext_id = a.external_id
+      FROM driver_platform_id a JOIN driver_compliance c ON c.platform = a.platform AND c.driver_ext_id = a.external_id
      WHERE a.driver_id = ANY($1::bigint[]) AND a.detached_at IS NULL AND coalesce(btrim(c.phone), '') <> ''
      ORDER BY a.driver_id, c.updated_at DESC NULLS LAST, c.platform, c.driver_ext_id`, [ids]);
   for (const r of rows) {

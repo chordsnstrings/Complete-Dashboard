@@ -396,14 +396,16 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     const j = judge(req, entry, access);
     if (j.refuse) return refuse(res, 403, j.refuse);
     const L = { ...j.levels };
+    /* Before the reveal, not after (the review of AG-17, 2026-11-23): a
+       reveal is recorded per class, so revealing driver cash must not also
+       show contact details unrecorded. A lifted class that is Masked is
+       revealed, if at all, as itself (api/access/shape.js liftLevels: raise
+       only, to the subject only, never above ID, on this route only). */
+    liftLevels(L, entry);
     let usedReveal = false;
     if (fm.kind === 'user' && fm.session) {
       for (const c of Object.keys(L)) if (L[c] === 'M' && revealed(fm.session.id, c)) { L[c] = 'F'; usedReveal = true; }
     }
-    /* After the reveal, so a lifted class follows the subject as this reader
-       sees it now (api/access/shape.js liftLevels: raise only, to the subject
-       only, on this route only). */
-    liftLevels(L, entry);
     const isWrite = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
 
     /* The subject: what the route is about. */
@@ -661,7 +663,7 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
     const origJson = res.json.bind(res);
     const origSend = res.send.bind(res);
     const shapeAndSend = (obj) => {
-      const { body, withheld } = shapeBody(obj, entry, L, { fleets: filterRows });
+      const { body, withheld } = shapeBody(obj, entry, L, { fleets: filterRows, lookup });
       const keys = Object.keys(withheld);
       if (keys.length) res.set('x-fm-withheld', keys.join(','));
       res.fmShaped = true;

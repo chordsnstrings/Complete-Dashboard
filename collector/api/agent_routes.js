@@ -189,7 +189,9 @@ async function loadMessages(q, convId, limit = 200) {
 const HIDDEN = new Set(['driver_id', 'lat', 'lng']);
 function tableBlock(r) {
   const columns = r.columns.filter((c) => !HIDDEN.has(c.key));
-  return { id: r.id, title: r.definition, columns,
+  /* `source`: the route the table came from, so a reload shapes it as that
+     route would (api/access/shape.js shapeSourcedTables). */
+  return { id: r.id, title: r.definition, source: typeof r.source === 'string' ? r.source : null, columns,
     rows: (r.rows || []).slice(0, TABLE_ROWS).map((row) => ({
       ...Object.fromEntries(columns.map((c) => [c.key, row[c.key] ?? null])),
       ...(row.__kind ? { __kind: row.__kind } : {}) })),

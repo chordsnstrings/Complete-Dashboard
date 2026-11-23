@@ -1710,16 +1710,25 @@ wallets with the driver's number withheld; the Auditor read them masked.
 
 A manifest entry may now carry `lift: { CLASS: SUBJECT }`. On that route the reader sees CLASS at
 the level they hold the route's subject, where that is higher than their own (`api/access/shape.js`
-`liftLevels`, applied in the gate after a reveal and before shaping). Three rules:
+`liftLevels`, applied in the gate before a reveal, so that revealing the subject does not also reveal
+the lifted class without a record of it). Four rules:
 
 - **It only raises.** A level is never lowered by a lift.
 - **It lifts only to the route's subject.** The gate has already judged the reader on that class
   before answering at all, so a lift never shows more than the record itself. `liftLevels` skips
   any other target, and `test/access_manifest.test.mjs` fails on one.
+- **It never goes above the reader's level of ID.** A phone number names its driver. A custom role
+  holding cash without identity would otherwise read withheld names beside whole numbers.
 - **It belongs to the route.** The same reader keeps their own level of the lifted class everywhere
   else. The Cash desk still gets no number from the Compliance list (`test/agent_charging.test.mjs` §9).
 
 Two entries carry one, both `{ CT: 'CASH' }`: `GET /api/charging/wallets` (`rows[].phones`) and
 `GET /api/charging/driver` (`phones`). The test fails if any other entry adds a lift. A role without
-driver cash is still refused both routes, because a lift opens no route.
+driver cash is still refused both routes, because a lift opens no route. Both are `auditRead`.
+
+A stored conversation is served again on every reload by `GET /api/agent/state`, whose own entry lifts
+nothing. Its entry is marked `sourcedTables`. Each stored table names the route it came from (its
+`source`, set by the tool, never by the model), and is shaped at the levels that route would give the
+reader now, lift included. Everything else in the body is shaped at the reader's own levels. An empty
+list counts as nothing to withhold, the same as `''`.
 

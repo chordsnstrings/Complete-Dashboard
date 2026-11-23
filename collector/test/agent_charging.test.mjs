@@ -42,6 +42,16 @@
        fails (the newer Bolt number wins)
      · `a.detached_at IS NULL` removed → §9 "detached" fails
 
+   §10 (the review of AG-17, 2026-11-23):
+     · the ID cap in liftLevels removed → §10 "no driver identity" and
+       "identity masked" fail (numbers whole beside withheld names)
+     · shapeSourcedTables not called → §10 "reload" fails (the Cash desk's
+       Phone column blank again beside a sentence quoting it)
+     · 'other_phones' out of the DICT → §10 "Analyst reload" fails
+     · an empty list counted as withheld again → §10 "empty list" fails
+     · the join on account id alone (no platform) → §9 "another platform"
+       fails (someone else's FMS record's number on the wallet)
+
    Synthetic people only. */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
@@ -206,8 +216,10 @@ check('find_driver keeps the person id with the name', /person_id: row\?\.person
 
 console.log('\n§7 access: the asker\'s own GET');
 const cfg = await svc.getConfig(db, { fresh: true });
+const userIds = new Map();
 async function cookieFor(email, role) {
   const u = await svc.createUser(db, { email, name: `Test ${role}`, status: 'active', passwordHash: hashPassword('a long enough test password') });
+  userIds.set(email, u.id);
   await svc.createGrant(db, { userId: u.id, roleCode: role, fleets: null, reason: 'test' });
   const s = await svc.createSession(db, { userId: u.id, mfaOk: true, cfg });
   return `fm_sid=${s.token}; fm_csrf=testcsrf`;
@@ -313,7 +325,7 @@ check('PowerDrive\'s number first, though the Bolt record reported its number mo
   JSON.stringify(gAlpha?.phones) === JSON.stringify(['+971500000001', '+971500000099']) && gAlpha?.phone_on_powerdrive === true,
   JSON.stringify(gAlpha));
 const { liftLevels } = await import('../api/access/shape.js');
-const lv = (o) => liftLevels({ ...o }, { subject: 'CASH', lift: { CT: 'CASH', DOC: 'CASH' } });
+const lv = (o) => liftLevels({ ID: 'F', ...o }, { subject: 'CASH', lift: { CT: 'CASH', DOC: 'CASH' } });
 check('liftLevels only raises: CT:F with CASH:M stays F; CT none with CASH:M becomes M',
   lv({ CT: 'F', CASH: 'M' }).CT === 'F' && lv({ CASH: 'M' }).CT === 'M' && lv({ CT: 'M', CASH: 'F' }).CT === 'F', '');
 check('liftLevels lifts only to the route\'s subject', liftLevels({ CASH: 'F' }, { subject: 'ID', lift: { CT: 'CASH' } }).CT === undefined, '');
@@ -325,6 +337,73 @@ await q(`INSERT INTO driver_compliance (platform, driver_ext_id, fleet_id, full_
 const det = await fetchVia(bare.port)('/api/charging/wallets');
 const dAlpha = (det.body?.rows || []).find((r) => r.person_id === String(PA));
 check('a detached account\'s number is not on the wallet', dAlpha && !dAlpha.phones.includes('+971500000077'), JSON.stringify(dAlpha?.phones));
+/* The whole account key (the review of AG-17): a record on another platform
+   that happens to carry the same id is someone else's. */
+await q(`INSERT INTO driver_compliance (platform, driver_ext_id, fleet_id, full_name, phone, state) VALUES
+  ('fms', 'bolt-alpha', 'ecosine', 'Someone Else Entirely', '+971500000055', 'active')`);
+const pk = await fetchVia(bare.port)('/api/charging/wallets');
+const pAlpha = (pk.body?.rows || []).find((r) => r.person_id === String(PA));
+check('a record on another platform with the same account id is not this driver\'s number', pAlpha && !pAlpha.phones.includes('+971500000055')
+  && pAlpha.phones.includes('+971500000099'), JSON.stringify(pAlpha?.phones));
+
+console.log('\n§10 the review of AG-17: identity, the reload, an empty list');
+/* A custom role an Access admin can make: driver cash, no driver identity.
+   Its names come back withheld — so must the numbers, or each balance is
+   tied back to its driver. With the identity masked, so are the numbers. */
+await svc.createRole(db, { code: 'XCASHONLY', name: 'Test cash only', levels: { CASH: 'F', SYS: 'F' }, caps: [], by: null });
+await svc.createRole(db, { code: 'XCASHIDM', name: 'Test cash, identity masked', levels: { CASH: 'F', ID: 'M', SYS: 'F' }, caps: [], by: null });
+const xw = await fetchVia(gated.port, await cookieFor('xcash-charge@example.test', 'XCASHONLY'))('/api/charging/wallets');
+const xAlpha = (xw.body?.rows || []).find((r) => r.balance === 182.4);
+check('a role with driver cash and NO driver identity: names withheld, and the numbers too',
+  xw.status === 200 && xAlpha && xAlpha.name == null && xAlpha.phones == null && /CT/.test(xw.withheld || ''),
+  JSON.stringify([xw.status, xAlpha?.name, xAlpha?.phones, xw.withheld]));
+const mw = await fetchVia(gated.port, await cookieFor('xcashm-charge@example.test', 'XCASHIDM'))('/api/charging/wallets');
+const mAlpha = (mw.body?.rows || []).find((r) => r.balance === 182.4);
+check('…with the identity masked, the numbers are masked too (last two digits)',
+  mw.status === 200 && Array.isArray(mAlpha?.phones) && mAlpha.phones.every((x) => /^•+\d{2}$/.test(x)) && /01$/.test(mAlpha.phones[0]),
+  JSON.stringify([mw.status, mAlpha?.name, mAlpha?.phones]));
+check('liftLevels never goes above ID', liftLevels({ CASH: 'F' }, { subject: 'CASH', lift: { CT: 'CASH' } }).CT === undefined
+  && liftLevels({ CASH: 'F', ID: 'M' }, { subject: 'CASH', lift: { CT: 'CASH' } }).CT === 'M', '');
+
+/* THE RELOAD: GET /api/agent/state serves a stored conversation through the
+   gate again. A wallet table keeps the numbers its route showed this reader;
+   a table from anywhere else is shaped at the reader's own contact level. */
+const { shapeBody } = await import('../api/access/shape.js');
+const convFor = async (email, role) => {
+  const cookie = await cookieFor(email, role);
+  const id = `conv-${email}`;
+  await q(`INSERT INTO agent_conversation (id, owner) VALUES ($1, $2)`, [id, `u:${userIds.get(email)}`]);
+  const tables = [
+    { id: 'r1', title: 'wallets', source: '/api/charging/wallets', columns: [{ key: 'driver' }, { key: 'phone' }, { key: 'other_phones' }],
+      rows: [{ driver: 'Test Charger Alpha', phone: '+971500000001', other_phones: '+971500000099' }], total_rows: 1 },
+    { id: 'r2', title: 'contacts', source: '/api/compliance/drivers', columns: [{ key: 'driver' }, { key: 'phone' }],
+      rows: [{ driver: 'Test Charger Alpha', phone: '+971500000001' }], total_rows: 1 },
+    { id: 'r3', title: 'no source', source: null, columns: [{ key: 'phone' }], rows: [{ phone: '+971500000001' }], total_rows: 1 },
+  ];
+  await q(`INSERT INTO agent_message (conversation_id, role, body) VALUES ($1, 'assistant', $2::jsonb)`, [id, JSON.stringify({ text: '[[table r1]]', tables })]);
+  const r = await fetchVia(gated.port, cookie)('/api/agent/state');
+  const t = r.body?.conversation?.messages?.[0]?.tables || [];
+  return { status: r.status, w: t[0]?.rows?.[0], c: t[1]?.rows?.[0], n: t[2]?.rows?.[0] };
+};
+const rk = await convFor('clk-reload@example.test', 'CLK');
+check('reload, the Cash desk: the wallet table keeps both numbers; a Compliance or unsourced table does not',
+  rk.status === 200 && rk.w?.phone === '+971500000001' && rk.w?.other_phones === '+971500000099' && rk.c?.phone == null && rk.n?.phone == null,
+  JSON.stringify(rk));
+const ra = await convFor('aud-reload@example.test', 'AUD');
+check('reload, the Auditor: the wallet table in full, the Compliance table masked',
+  ra.w?.phone === '+971500000001' && ra.w?.other_phones === '+971500000099' && /^•+01$/.test(ra.c?.phone || ''), JSON.stringify(ra));
+const rn = await convFor('anl-reload@example.test', 'ANL');
+check('reload, the Analyst (no cash, no contact): every number withheld — other_phones included',
+  rn.status === 200 && rn.w?.phone == null && rn.w?.other_phones == null && rn.c?.phone == null, JSON.stringify(rn));
+
+/* AN EMPTY LIST is nothing to withhold: marked withheld, it told the
+   assistant "withheld from this person's role" about numbers that did not
+   exist. */
+const e1 = shapeBody({ rows: [{ phones: [] }] }, { fields: [] }, { CT: 'M' });
+const e2 = shapeBody({ rows: [{ phones: ['+971500000001'] }] }, { fields: [] }, { CT: 'M' });
+check('empty list: not marked withheld; a real list is masked and marked',
+  !e1.withheld.CT && JSON.stringify(e1.body.rows[0].phones) === '[]' && e2.withheld.CT === 'M' && /^•+01$/.test(e2.body.rows[0].phones[0]),
+  JSON.stringify([e1.withheld, e2.withheld, e2.body.rows[0].phones]));
 
 bare.server?.close?.(); gated.server?.close?.();
 await pg.close();

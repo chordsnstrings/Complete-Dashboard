@@ -80,6 +80,10 @@ const lifted = allEntries().filter((e) => e.lift).map((e) => `${e.method} ${e.pa
 check('only the two PowerDrive wallet reads lift a class (contact details, to the reader\'s driver cash)',
   JSON.stringify(lifted) === JSON.stringify(['GET /api/charging/driver', 'GET /api/charging/wallets'])
   && allEntries().filter((e) => e.lift).every((e) => JSON.stringify(e.lift) === '{"CT":"CASH"}'), lifted.join(', '));
+check('the lifted wallet reads are audited, as every read of contact details is',
+  allEntries().filter((e) => e.lift).every((e) => e.auditRead === true));
+check('only the assistant\'s stored conversation shapes tables by their source route',
+  JSON.stringify(allEntries().filter((e) => e.sourcedTables).map((e) => `${e.method} ${e.path}`)) === JSON.stringify(['GET /api/agent/state']));
 check('only the health checks answer without signing in', pub.every((p) => ['/api/health', '/api/ready'].includes(p)), pub.join(', '));
 check('every change needs an action', allEntries().filter((e) => e.method !== 'GET').every((e) => e.cap));
 check('raw records and query plans are the Owner’s alone (subject RAW)',
