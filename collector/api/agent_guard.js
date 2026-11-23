@@ -34,7 +34,13 @@ const FLEETS = ['ecosine', 'egari'];
    table that way and the braces reached the screen unfilled: the pattern did
    not match, so nothing filled them and nothing refused them. Anything else
    in braces is refused now, whatever it looks like. */
-const PH = /\{\{\s*(r\d+)\.(?:rows\[(\d+)\]\.)?([a-z0-9_]+)\s*\}\}/gi;
+/* `{{rN.values.key}}` is read as `{{rN.key}}` (production, 2026-11-23): the
+   model wrote {{r6.values.rows}} for a result whose values hold `rows`, the
+   pattern did not match, and a correct answer — a table of 39 drivers with
+   their phones and an Excel file — fell back to the plain list. The two
+   spellings name the same figure, so nothing new can be quoted; the guard
+   still refuses a key the result does not hold. */
+const PH = /\{\{\s*(r\d+)\.(?:values\.)?(?:rows\[(\d+)\]\.)?([a-z0-9_]+)\s*\}\}/gi;
 const ANY_BRACES = /\{\{[^}]*\}\}/g;
 const lookup = (r, row, key) => {
   if (!r) return { ok: false };
@@ -226,7 +232,7 @@ export function checkReply(text, results, { userTexts = [], args = [], driverNam
      figure's own; "AED {{r1.trips}}" is left for the reader to see. */
   /* Hours and minutes too (2026-10-13): the server writes "11h 15m" and
      "45 min", and "{{r1.online_hours}} hours" would read "11h 15m hours". */
-  const UNIT = /(AED\s*)?\{\{\s*(r\d+)\.(?:rows\[(\d+)\]\.)?([a-z0-9_]+)\s*\}\}(\s*(?:%|percent\b|per cent\b|AED\b|dirhams?\b|km\b|hours?\b|hrs?\b|minutes?\b|mins?\b))?/gi;
+  const UNIT = /(AED\s*)?\{\{\s*(r\d+)\.(?:values\.)?(?:rows\[(\d+)\]\.)?([a-z0-9_]+)\s*\}\}(\s*(?:%|percent\b|per cent\b|AED\b|dirhams?\b|km\b|hours?\b|hrs?\b|minutes?\b|mins?\b))?/gi;
   const filled = raw.replace(UNIT, (all, pre, rid, row, key, post) => {
     const f = lookup(results.get(rid), row, key);
     if (!f.ok) return '(not available)';
