@@ -104,6 +104,11 @@ const WHY = {
   charging: 'PowerDrive charging is one company account: its wallets, sessions and the people they are '
     + 'linked to are not filed by fleet.' + ASK,
   tesla: 'The Tesla connection is one company account, not one per fleet.' + ASK,
+  /* FIX-STATUS CARD-1: one sheet for both fleets, and a payment is placed on
+     a person by Emirates ID — a person, not a fleet account — so the routes
+     answer for every fleet at once; a one-fleet reading is not built yet. */
+  cards: 'Card-machine payments come from one Network International sheet for both fleets, placed on '
+    + 'people by Emirates ID rather than by fleet account; a reading for one fleet alone is not built yet.' + ASK,
   watch: 'A low-performer watch list may follow both fleets, and its export and edits act on the list '
     + 'as saved, whichever fleet its members are in; narrowing them by fleet is not built yet.' + ASK,
   /* api/lowperf.js populationOf(): with a fleet chosen it still counts the
@@ -166,6 +171,7 @@ const BY_ROUTE = {
   system: ['GET /api/coverage', 'GET /api/coverage/calendar'],
   hr: ['POST /api/hr-roster/commit', 'POST /api/hr-roster/preview'],
   messages: ['GET /api/sms/preview'],
+  cards: ['GET /api/card/driver', 'GET /api/card/summary', 'GET /api/card/review', 'POST /api/card/link'],
   charging: ['GET /api/charging/driver', 'GET /api/charging/sessions', 'GET /api/charging/vehicle',
     'GET /api/charging/wallets', 'GET /api/charging/review', 'POST /api/charging/link'],
   tesla: ['GET /api/tesla/status', 'GET /api/tesla/vehicles'],

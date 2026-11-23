@@ -19,6 +19,7 @@ import * as hotel from './sources/hotel.js';
 import * as external from './sources/external.js';
 import * as events from './sources/events.js';
 import * as yocharge from './sources/yocharge.js';
+import * as networkCards from './sources/network_cards.js';
 import * as flights from './sources/flights.js';
 import { reconcile } from './reconcile.js';
 import { computeInsights } from './insights.js';
@@ -588,6 +589,22 @@ export async function walletsTick() {
     log.error('yocharge', 'wallets tick failed', { err: String(e).slice(0, 200) });
     return { error: String(e) };
   } finally { chargingBusy = false; }
+}
+
+/* CARD-MACHINE PAYMENTS from the Network International sheet
+   (src/sources/network_cards.js, FIX-STATUS CARD-1): one read of the sheet,
+   one at a time — a read replaces the days it covers, and two overlapping
+   reads would only race to do the same thing. */
+let cardsBusy = false;
+export async function networkCardsTick({ acceptShrink = false } = {}) {
+  if (cardsBusy) return { skipped: 'a card-payments read is already going' };
+  cardsBusy = true;
+  try {
+    return await withPinnedSettings(async () => { await loadSettings(); return networkCards.collect({ db: pool, acceptShrink }); });
+  } catch (e) {
+    log.error('network_cards', 'tick failed', { err: String(e).slice(0, 200) });
+    return { error: String(e) };
+  } finally { cardsBusy = false; }
 }
 
 /* FLIGHTS from OpenSky (src/sources/flights.js): the nightly confirmed

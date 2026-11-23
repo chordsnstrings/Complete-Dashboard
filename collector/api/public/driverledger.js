@@ -38,6 +38,7 @@ import { el, esc, panel, note, loading, tableFrom, kpiRow, empty, countOf,
   contract, glance, bandTiles, pageFoot, dtStr, fmt, chanChip } from './ui.js';
 import { api, qAll, windowLabel } from './data.js';
 import { aed } from './deposit_core.js';
+import { cardMachineDriver } from './card_panel.js';
 
 const BOOK_LABEL = { advance: 'Advances', cash: 'Cash', deduction: 'Deductions', pay: 'Pay' };
 
@@ -179,12 +180,18 @@ export async function renderDriverLedger(root, id, prof) {
      appear to contradict each other. */
   const regPanel = panel(`Statement for ${windowLabel()}`, null, 'driver-money-register');
   const pdP = panel('Charging wallet — PowerDrive', null, 'driver-charging');
-  root.append(head.panel, pdP.panel, winP.panel, regPanel.panel);
+  /* Card-machine payments (FIX-STATUS CARD-1): every one on record, each
+     with its terminal, so a figure traces back to the device. Beside the
+     position, not inside it, until phase 3 (./card_panel.js). */
+  const cardP = panel('Card machine — Network International', null, 'driver-card');
+  root.append(head.panel, pdP.panel, cardP.panel, winP.panel, regPanel.panel);
   loading(head.body);
   loading(pdP.body);
+  loading(cardP.body);
   loading(winP.body);
   loading(regPanel.body);
   chargingWallet(pdP.body, prof).catch((e) => { pdP.body.innerHTML = ''; pdP.body.append(note(`The charging wallet could not be drawn: ${e.message}`, 'bad')); });
+  cardMachineDriver(cardP.body, prof).catch((e) => { cardP.body.innerHTML = ''; cardP.body.append(note(`The card payments could not be drawn: ${e.message}`, 'bad')); });
 
   /* The account this page is addressed by, and the platform if the profile
      names one — sent together so an id that two providers both use resolves to

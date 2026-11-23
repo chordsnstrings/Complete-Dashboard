@@ -122,6 +122,19 @@ const argsFor = (route) => {
   if (route === '/api/corporate/property') return '&id=p-marina';
   return '';
 };
+/* CARD-1 (the review of 2026-11-23): the card-payment routes are swept over
+   card payments under EVERY HR number seeded above — person 24, whom the
+   export matches to nobody, included — so /api/card/review answers with rows
+   and the sweep tests it, rather than passing over an empty table. */
+{
+  const [imp] = (await db.query(`INSERT INTO card_import (status) VALUES ('ok') RETURNING id`)).rows;
+  for (const n of N) {
+    await db.query(`INSERT INTO card_payment (import_id, row_no, txn_day, fleet_id, terminal_id, amount, emirates_id)
+                    VALUES ($1, 2, '2026-08-10', 'ecosine', '900', 50, $2)`, [imp.id, n.eid_digits]);
+  }
+  const cr = await (await fetch(`${base}/api/card/review?${WIN}`)).json();
+  check('the card review is swept over payments under the HR numbers (it answers with rows)', (cr.rows || []).length >= 1, JSON.stringify(cr).slice(0, 200));
+}
 let swept = 0;
 for (const route of declaredRoutes()) {
   if (route.includes(':')) continue;

@@ -417,4 +417,10 @@ export const SCHEMA_FILES = [
      that names a tracker or plus-code position. Filled by src/trip_places.js;
      place_area() is untouched. */
   'schema_v126.sql',
+  /* v127: card-machine payments from Network International (FIX-STATUS
+     CARD-1) — card_payment as the sheet has it (terminal id on every row,
+     chargebacks negative), card_import per read, card_id_link for a person's
+     Emirates-ID-to-driver decisions, and the card_id_person view (link first,
+     then the HR export). Filled by src/sources/network_cards.js. */
+  'schema_v127.sql',
 ];

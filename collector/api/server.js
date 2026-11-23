@@ -121,6 +121,7 @@ import { samePersonRoutes } from './sameperson_routes.js';
 /* Charging from PowerDrive: wallets, the links to our people, sessions by car
    (api/charging_routes.js over src/sources/yocharge.js). */
 import { chargingRoutes } from './charging_routes.js';
+import { cardRoutes } from './card_routes.js';
 /* Flights landing at DXB and DWC (OpenSky) beside the fleet's airport trips,
    and how the two move together — GET /api/airport (api/airport_routes.js
    over src/sources/flights.js). Mounted outside the slice test/mount.mjs
@@ -7306,6 +7307,7 @@ whereRoutes(app, { q, wrap });
    proposal and folds nothing until somebody answers it. */
 samePersonRoutes(app, { q, wrap });
 chargingRoutes(app, { q, wrap });
+cardRoutes(app, { q, wrap });
 airportRoutes(app, { q, wrap });
 /* Uber's live per-trip money: what the feed holds and whether its fares agree
    with the payments report's (api/uber_live_money_routes.js). Outside the

@@ -62,6 +62,13 @@ export const SETTING_DEFAULTS = {
   /* PowerDrive's names for our fleets there (measured 2026-11-03: ecofleet
      104 customers, egari 47, ecofleet investor fleet 5). */
   YOCHARGE_FLEET_GROUPS: 'ecofleet,egari,ecofleet investor fleet',
+  /* Card-machine payments (src/sources/network_cards.js, FIX-STATUS CARD-1):
+     the Network International sheet the operator's team keeps ("view:
+     Network Data"), its first tab, read hourly. The id is not a credential —
+     the sheet answers only the service account it is shared with. */
+  NETWORK_SHEET_ID: '1irWZUDX4hLOdiRgSdiUUuuQojr24mCvH7h1HJMY7_0E',
+  NETWORK_SHEET_RANGE: 'A:J',
+  NETWORK_CARDS_CRON: '33 * * * *',
   /* FLIGHTS from the OpenSky Network (src/sources/flights.js, 2026-11-16).
      Two hosts: the token comes from OpenSky's Keycloak realm (OAuth2 client
      credentials — Basic auth on the REST API was switched off by OpenSky on
@@ -411,6 +418,18 @@ export const SETTING_DEFS = [
     hint: 'A full read of PowerDrive\u2019s customers takes ~20 minutes at its pace; every six hours is the default.' },
   { key: 'YOCHARGE_WALLETS_CRON', group: 'Collector', label: 'Charging wallets refresh (cron)', secret: false,
     hint: 'Our own drivers\u2019 wallets only, between the full reads: 03:17, 09:17, 15:17 and 21:17 Dubai by default.' },
+  /* CARD MACHINES — Network International, read from a Google Sheet
+     (src/sources/network_cards.js, src/google_sheets.js). A Google Cloud
+     service account with the Sheets API enabled; the sheet is shared with its
+     client_email as Viewer. */
+  { key: 'GOOGLE_SERVICE_ACCOUNT_JSON', group: 'Card machines (Network International)', label: 'Google service account key (JSON)', secret: true,
+    hint: 'The whole JSON key file of a Google Cloud service account with the Google Sheets API enabled. Share the card-payments sheet with the account\u2019s client_email as Viewer.' },
+  { key: 'NETWORK_SHEET_ID', group: 'Card machines (Network International)', label: 'Google Sheet id', secret: false,
+    hint: 'The long id in the sheet\u2019s address, between /d/ and /edit.' },
+  { key: 'NETWORK_SHEET_RANGE', group: 'Card machines (Network International)', label: 'Range to read', secret: false,
+    hint: 'A:J reads the first tab. Name a tab to read another, e.g. Data!A:J.' },
+  { key: 'NETWORK_CARDS_CRON', group: 'Collector', label: 'Card payments schedule (cron)', secret: false,
+    hint: 'Hourly at 33 past by default, so a day\u2019s card payments are in before the 05:00 cash text.' },
   /* FLIGHTS — the OpenSky Network (src/sources/flights.js). A free account's
      API client (opensky-network.org → Account → API client): a client id and
      a client secret, exchanged for a 30-minute token. 4,000 credits a day;

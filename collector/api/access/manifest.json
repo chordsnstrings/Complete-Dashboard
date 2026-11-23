@@ -447,6 +447,164 @@
  },
  {
   "method": "GET",
+  "path": "/api/card/driver",
+  "subject": "CASH",
+  "carries": [
+   "CASH",
+   "ID",
+   "SYS"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "person_id"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "totals.card",
+     "totals.chargebacks",
+     "totals.net",
+     "days[].net",
+     "payments[].amount",
+     "terminals[].net"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "read_at",
+     "covers_from",
+     "covers_to",
+     "skipped_rows",
+     "skipped",
+     "failed"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/card_routes.js (FIX-STATUS CARD-1). Network International card-machine payments read hourly from the operator's Google Sheet by src/sources/network_cards.js. ?person=<driver.id>[&from&to]. Body {person_id, from, to, read_at, covers_from, covers_to, skipped_rows, skipped, failed, why (null, or the true reason nothing is shown: sheet never read / no Emirates ID known for the person / none under it), currency, placed_by {hr_export, linked}, totals {payments, card, chargebacks, chargeback_n, net, first_day, last_day}, days[] (90) {day, payments, net, chargebacks, terminals[]}, payments[] (200) {day, terminal_id, amount, fleet_id, chargeback}, terminals[] {terminal_id, payments, net, first_day, last_day}, in_cash_position false, note}. A payment is placed by the sheet's Emirates ID through card_id_person (a person's link, then the HR export) — never by the car. A negative amount is a chargeback, summed as it is. A named driver's money: CASH. No Emirates ID is served. Read by the driver money tab (api/public/driverledger.js cardMachine)."
+ },
+ {
+  "method": "GET",
+  "path": "/api/card/review",
+  "subject": "MRG",
+  "carries": [
+   "CASH",
+   "DOC",
+   "MRG",
+   "SYS"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "DOC",
+    "paths": [
+     "rows[].emirates_id"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "rows[].net",
+     "totals.net"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "read_at",
+     "covers_from",
+     "covers_to",
+     "skipped_rows",
+     "skipped",
+     "failed"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/card_routes.js (FIX-STATUS CARD-1). The Emirates IDs on the card payments that no driver is placed on yet, for a person to link: rows[] {ref (opaque, sent back to POST /api/card/link), emirates_id (DOC; null where the HR export carries the ID under two or more driver records — that is fixed by folding the records, and an HR document number is served by /api/driver/profile alone), why, payments, net, first_day, last_day, fleets[], terminals[]}, totals {ids, payments, net}. Subject MRG, as /api/charging/review: the people who decide same-person pairs read it without needing the cash. Read by the Deposits page (api/public/deposits.js cardPanel)."
+ },
+ {
+  "method": "GET",
+  "path": "/api/card/summary",
+  "subject": "CASH",
+  "carries": [
+   "CASH",
+   "SYS"
+  ],
+  "grain": "aggregate",
+  "fields": [
+   {
+    "class": "CASH",
+    "paths": [
+     "totals.net",
+     "totals.placed",
+     "totals.no_driver",
+     "totals.unplaced",
+     "months[].net",
+     "months[].chargebacks",
+     "no_driver_terminals[].net"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "read_at",
+     "covers_from",
+     "covers_to",
+     "skipped_rows",
+     "skipped",
+     "failed"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/card_routes.js (FIX-STATUS CARD-1). The fleet's card-machine payments: [from, to] optional. Body {from, to, read state, currency, totals {payments, net, placed_payments, placed, people, no_driver_payments, no_driver, unplaced_payments, unplaced, unplaced_ids}, months[] {month, fleet_id, payments, net, chargebacks, ids, terminals}, no_driver_terminals[] (40) {terminal_id, payments, net, labels[] (the sheet's own words: Not Found, N/A), first_day, last_day, ever_mapped}, no_driver_terminals_total, in_cash_position false, note}. No person is named: aggregate. Read by the Deposits page (api/public/deposits.js cardPanel)."
+ },
+ {
+  "method": "POST",
+  "path": "/api/card/link",
+  "subject": "MRG",
+  "carries": [
+   "ID",
+   "MRG"
+  ],
+  "grain": "none",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "person_id"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "identity.decide",
+  "notes": "api/card_routes.js (FIX-STATUS CARD-1). Body {ref (from /api/card/review), decision: link | unlink, person_id to link}. Writes card_id_link: an Emirates ID on the card payments belongs to this driver (a link wins over the HR export). The cap that decides same-person pairs, as POST /api/charging/link."
+ },
+ {
+  "method": "GET",
   "path": "/api/charging/driver",
   "subject": "CASH",
   "carries": [

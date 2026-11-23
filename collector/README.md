@@ -14,6 +14,7 @@ normalized on **license plate** so a driver/vehicle rolls up across every platfo
 | **CABMAN/DT** | Ecosine | realtime only | poll `GetIVDData`, append snapshots | no history param |
 | **Bolt** | Egari (roster) | portal blocked | FI API roster; portal trips/earnings need a fresh refresh token | ~7-day token |
 | **PowerDrive** (YoCharge, charging) | both, as fleet groups | every session | `/open/v1/users` (all customers, pruned to ours) + `/open/v1/mini-transactions` + `/v3/mini-transactions?user_id=`; GET only | 40 users/page (more times out) · MENA host + tenant `client-id` · `src/sources/yocharge.js` (2026-11-03) |
+| **Network International** (card machines, via the team's Google Sheet) | both | since 2025-12-13 | Google Sheets API as a service account, hourly; each read replaces the days it covers | day, terminal, amount and Emirates ID only — no time, no reference |
 | **OpenSky Network** (flights, not fleet data) | Dubai's airports: OMDB (DXB), OMDW (DWC) | yesterday and back 30 days; today only as live estimates | `/api/flights/arrival` per airport per UTC day (30 credits) + `/api/states/all` over Dubai every 2 min (1 credit, a separate pool); OAuth2 client credentials | 4,000 credits a day each · published in a nightly batch (today 404s) · no aircraft type · `src/sources/flights.js` (2026-11-16) |
 
 ## Run
