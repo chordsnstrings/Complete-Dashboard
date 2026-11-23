@@ -223,7 +223,8 @@ async function reviewList(host) {
    (measured on production, 2026-11-23), 90 days about 1.6 s. */
 async function crossCheck(host, coversTo) {
   host.innerHTML = '';
-  const from = coversTo ? new Date(Date.parse(`${coversTo}T00:00:00Z`) - 89 * 864e5).toISOString().slice(0, 10) : null;
+  /* Anchored at T12:00:00Z (the codebase's rule, test/timezone.test.mjs): far from both midnights, so subtracting days cannot cross one in any viewer's zone. */
+  const from = coversTo ? new Date(Date.parse(`${coversTo}T12:00:00Z`) - 89 * 864e5).toISOString().slice(0, 10) : null;
   let x;
   try { x = await api(`/api/card/crosscheck${from ? `?from=${from}` : ''}`); }
   catch (e) { host.append(note(`The cross-check with cash trips could not be read: ${e.message}`, 'bad')); return; }
