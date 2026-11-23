@@ -21,6 +21,12 @@ import { api } from './data.js';
 import { aed } from './deposit_core.js';
 import { post } from './access.js';
 
+/* Why a payment has no driver, in words that are true: the sheet's own words
+   quoted where it wrote some ("Not Found", "N/A"), and ours where it wrote a
+   number this reader could not read (the review of 2026-11-23: the column
+   said "the sheet says" over a label the sheet never wrote). */
+const WHY_LABEL = { 'unreadable Emirates ID': 'an Emirates ID too short or long to read', 'no driver named': 'left blank' };
+const whyNoDriver = (labels) => (labels || []).map((l) => WHY_LABEL[l] || `the sheet says \u201c${l}\u201d`).join('; ') || '—';
 const span = (a, b) => (a && b && a !== b ? `${a} – ${b}` : (a || b || '—'));
 const money = (v) => (v == null ? '<span class="ent-off" title="Not shown to your role">—</span>' : esc(aed(v)));
 const amountCell = (r) => (r.amount == null ? money(null)
@@ -89,7 +95,7 @@ export async function cardMachineFleet(host) {
     { label: 'Card payments on record', value: t.net == null ? '—' : aed(t.net), sub: `${fmt(t.payments)} payments, ${span(s.covers_from, s.covers_to)}` },
     { label: 'Placed on a driver', value: t.placed == null ? '—' : aed(t.placed), sub: `${fmt(t.people)} drivers, by Emirates ID` },
     { label: 'No driver named', value: t.no_driver == null ? '—' : aed(t.no_driver),
-      sub: `${fmt(t.no_driver_payments)} payments on ${fmt(s.no_driver_terminals_total)} terminals the sheet maps to nobody` },
+      sub: `${fmt(t.no_driver_payments)} payments with no readable driver, on ${fmt(s.no_driver_terminals_total)} terminals` },
     { label: 'Emirates ID not placed', value: t.unplaced == null ? '—' : aed(t.unplaced), sub: `${fmt(t.unplaced_ids)} IDs, ${fmt(t.unplaced_payments)} payments` },
   ]));
   if ((s.months || []).length) {
@@ -109,7 +115,7 @@ export async function cardMachineFleet(host) {
       { label: 'Terminal', key: 'terminal_id' },
       { label: 'Payments', key: 'payments', num: true },
       { label: 'Amount', key: 'net', num: true, render: (r) => money(r.net) },
-      { label: 'The sheet says', key: 'labels', render: (r) => esc((r.labels || []).join(', ') || '—') },
+      { label: 'Why no driver', key: 'labels', render: (r) => esc(whyNoDriver(r.labels)) },
       { label: 'Days', key: 'first_day', render: (r) => esc(span(r.first_day, r.last_day)) },
       { label: 'Ever mapped', key: 'ever_mapped', render: (r) => esc(r.ever_mapped ? 'yes, on other days' : 'never') },
     ], { cards: true, cardLead: 'terminal_id' }));

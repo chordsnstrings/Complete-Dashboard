@@ -71,18 +71,29 @@ export async function accessToken(sa, { fetchImpl = fetch, now = Date.now(), sco
   return j.access_token;
 }
 
-/* The sheet's cells as rows of values. Numbers stay numbers; dates come back
-   as the text the sheet shows them in ("1-Jan-2026"), so a date column never
-   arrives as a spreadsheet serial number. */
+/* The sheet's cells as rows of values. Numbers stay numbers, and a date
+   cell arrives as its SERIAL NUMBER (the review of 2026-11-23): as formatted
+   text a sheet in a US locale writes 11/5/2026, and a day-first reading would
+   swap every day 1–12 silently. A date typed as text arrives as that text. */
 export async function readValues({ sa, sheetId, range, fetchImpl = fetch, now = Date.now() }) {
   if (!sheetId) throw fail('NETWORK_SHEET_ID is not set');
   const token = await accessToken(sa, { fetchImpl, now });
   const url = `${SHEETS_HOST}/v4/spreadsheets/${encodeURIComponent(sheetId)}/values/${encodeURIComponent(range || 'A:J')}`
-    + '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING&majorDimension=ROWS';
+    + '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER&majorDimension=ROWS';
   const res = await fetchImpl(url, { headers: { authorization: `Bearer ${token}` } });
   const j = await readJson(res);
   if (res.status === 403) {
-    throw fail(`the sheet is not shared with ${sa.email} — share it with that address as Viewer`, { status: 403, credential: true });
+    /* Two different 403s (the review of 2026-11-23). The usual first-setup
+       one is the Sheets API not enabled in the account's project — the key is
+       fine and sharing would not help, so it is said as itself, with
+       Google's own words. */
+    const gmsg = String(j?.error?.message || '');
+    const disabled = /has not been used|is disabled|SERVICE_DISABLED|accessNotConfigured/i.test(gmsg)
+      || (j?.error?.details || []).some((d) => d?.reason === 'SERVICE_DISABLED');
+    if (disabled) {
+      throw fail(`the Google Sheets API is not enabled in the service account's project — enable it in Google Cloud (Google: ${gmsg.slice(0, 160)})`, { status: 403 });
+    }
+    throw fail(`the sheet is not shared with ${sa.email} — share it with that address as Viewer${gmsg ? ` (Google: ${gmsg.slice(0, 120)})` : ''}`, { status: 403, credential: true });
   }
   if (res.status === 404) throw fail('Google has no sheet with that id (check NETWORK_SHEET_ID)', { status: 404 });
   if (!res.ok) throw fail(`Google Sheets answered ${res.status}${j?.error?.message ? `: ${String(j.error.message).slice(0, 160)}` : ''}`, { status: res.status });

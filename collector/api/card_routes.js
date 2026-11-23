@@ -34,8 +34,17 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const dayParam = (v) => (DAY.test(String(v || '').trim()) ? String(v).trim() : null);
 /* An unplaced Emirates ID is named on the review list by an opaque ref, so a
    decision can be sent back without the number travelling again — and a
-   reader whose role sees the number masked can still decide. */
-export const refOf = (eid) => crypto.createHash('sha256').update(`card-id:${eid}`).digest('hex').slice(0, 16);
+   reader whose role sees the number masked can still decide.
+
+   KEYED, not a bare hash (the review of 2026-11-23): an Emirates ID is 784,
+   a birth year, seven digits and a check digit — some 10^8 candidates, and a
+   reader shown the last four has ~10^5 left. An unsalted sha256 of that
+   space is reversed in under a second. An HMAC under a key only this server
+   holds (the same root the settings encryption derives from) is not; the
+   ref stays stable across restarts, so a page loaded before one still links. */
+const REF_KEY = crypto.createHash('sha256')
+  .update(`card-ref:${process.env.SETTINGS_KEY || process.env.DATABASE_URL || 'fleet-dev-key'}`).digest();
+export const refOf = (eid) => crypto.createHmac('sha256', REF_KEY).update(String(eid)).digest('hex').slice(0, 16);
 
 export const NOT_IN_POSITION = 'card payments are shown beside the cash position, not yet taken off it — that change waits for the operator\'s review';
 
@@ -66,29 +75,49 @@ export function cardRoutes(app, { q, wrap }) {
     if (!Number.isInteger(person) || person <= 0) return res.status(400).json({ error: 'person required' });
     const from = dayParam(req.query.from); const to = dayParam(req.query.to);
     const s = await readState(q);
-    const ids = await q(`SELECT basis FROM card_id_person WHERE person_id = $1`, [person]);
-    const W = `m.person_id = $1 AND ($2::date IS NULL OR p.txn_day >= $2) AND ($3::date IS NULL OR p.txn_day <= $3)`;
+    /* The view once (the review of 2026-11-23: it was evaluated five times
+       a call); the payments are then read by the IDs it placed here. */
+    const ids = await q(`SELECT emirates_id, basis FROM card_id_person WHERE person_id = $1`, [person]);
+    const E = ids.map((x) => x.emirates_id);
+    const W = `p.emirates_id = ANY($1::text[]) AND ($2::date IS NULL OR p.txn_day >= $2) AND ($3::date IS NULL OR p.txn_day <= $3)`;
+    const P3 = [E, from, to];
     const [t] = await q(`SELECT count(*)::int AS payments, coalesce(sum(p.amount) FILTER (WHERE p.amount > 0), 0)::float AS card,
              coalesce(sum(p.amount) FILTER (WHERE p.amount < 0), 0)::float AS chargebacks, coalesce(sum(p.amount), 0)::float AS net,
              count(*) FILTER (WHERE p.amount < 0)::int AS chargeback_n,
              to_char(min(p.txn_day), 'YYYY-MM-DD') AS first_day, to_char(max(p.txn_day), 'YYYY-MM-DD') AS last_day
-        FROM card_payment p JOIN card_id_person m ON m.emirates_id = p.emirates_id WHERE ${W}`, [person, from, to]);
+        FROM card_payment p WHERE ${W}`, P3);
     const days = await q(`SELECT to_char(p.txn_day, 'YYYY-MM-DD') AS day, count(*)::int AS payments, sum(p.amount)::float AS net,
              count(*) FILTER (WHERE p.amount < 0)::int AS chargebacks, array_agg(DISTINCT p.terminal_id ORDER BY p.terminal_id) AS terminals
-        FROM card_payment p JOIN card_id_person m ON m.emirates_id = p.emirates_id WHERE ${W}
-       GROUP BY p.txn_day ORDER BY p.txn_day DESC LIMIT 90`, [person, from, to]);
+        FROM card_payment p WHERE ${W}
+       GROUP BY p.txn_day ORDER BY p.txn_day DESC LIMIT 90`, P3);
     const payments = await q(`SELECT to_char(p.txn_day, 'YYYY-MM-DD') AS day, p.terminal_id, p.amount::float AS amount, p.fleet_id
-        FROM card_payment p JOIN card_id_person m ON m.emirates_id = p.emirates_id WHERE ${W}
-       ORDER BY p.txn_day DESC, p.row_no DESC LIMIT 200`, [person, from, to]);
+        FROM card_payment p WHERE ${W}
+       ORDER BY p.txn_day DESC, p.row_no DESC LIMIT 200`, P3);
     const terminals = await q(`SELECT p.terminal_id, count(*)::int AS payments, sum(p.amount)::float AS net,
              to_char(min(p.txn_day), 'YYYY-MM-DD') AS first_day, to_char(max(p.txn_day), 'YYYY-MM-DD') AS last_day
-        FROM card_payment p JOIN card_id_person m ON m.emirates_id = p.emirates_id WHERE ${W}
-       GROUP BY p.terminal_id ORDER BY max(p.txn_day) DESC, p.terminal_id`, [person, from, to]);
-    /* Why there is nothing, truly: no ID known for this person is a
-       different fact from an ID known with no payments under it. */
-    const why = s.why || (t.payments ? null
-      : !ids.length ? 'No Emirates ID is known for this driver: it is not on the HR export and nobody has linked one, so no card payment can be placed on them.'
-        : 'No card payment on the Network International sheet is under this driver\'s Emirates ID' + (from || to ? ' in this window.' : '.'));
+        FROM card_payment p WHERE ${W}
+       GROUP BY p.terminal_id ORDER BY max(p.txn_day) DESC, p.terminal_id`, P3);
+    /* Why there is nothing, TRULY (the review of 2026-11-23: "not on the HR
+       export" was also said when it IS on the export but placed on nobody or
+       on another record). The person's own HR rows are asked directly. */
+    let why = s.why;
+    if (!why && !t.payments) {
+      if (ids.length) {
+        why = `No card payment on the Network International sheet is under this driver's Emirates ID${from || to ? ' in this window' : ''}.`;
+      } else {
+        const hr = await q(`SELECT DISTINCT m.basis, m.person_id, m.hr_people FROM hr_roster_row r
+            CROSS JOIN LATERAL jsonb_array_elements(coalesce(r.matched_accounts, '[]'::jsonb)) a
+            JOIN driver_platform_id d ON d.platform = a ->> 'platform' AND d.external_id = a ->> 'ext_id'
+                                     AND d.detached_at IS NULL AND d.driver_id = $1
+            LEFT JOIN card_id_person m ON m.emirates_id = r.emirates_id
+           WHERE r.emirates_id ~ '^784[0-9]{12}$'`, [person]);
+        why = !hr.length
+          ? 'No Emirates ID is known for this driver: it is not on the HR export and nobody has linked one, so no card payment can be placed on them.'
+          : hr.some((x) => x.basis === 'hr_ambiguous')
+            ? 'This driver\'s Emirates ID is on the HR export under more than one driver record, so no card payment is placed on any of them — fold the records into one person (Same person page).'
+            : 'This driver\'s Emirates ID on an older HR export is placed on another driver record by a newer one (or by a person\'s link), so its card payments are shown there.';
+      }
+    }
     return res.json({ person_id: String(person), from, to, ...s, why, currency: 'AED',
       placed_by: { hr_export: ids.filter((x) => x.basis === 'hr').length, linked: ids.filter((x) => x.basis === 'linked').length },
       totals: { payments: t.payments, card: r2(t.card), chargebacks: r2(t.chargebacks), chargeback_n: t.chargeback_n, net: r2(t.net),
@@ -137,26 +166,34 @@ export function cardRoutes(app, { q, wrap }) {
   app.get('/api/card/review', wrap(async (_req, res) => {
     res.set('Cache-Control', 'private, no-store');
     const s = await readState(q);
-    const rows = await q(`SELECT p.emirates_id, m.basis, coalesce(m.hr_people, 0) AS hr_people, count(*)::int AS payments, sum(p.amount)::float AS net,
+    const rows = await q(`SELECT p.emirates_id, m.basis, coalesce(m.hr_people, 0) AS hr_people,
+             EXISTS (SELECT 1 FROM hr_roster_row h WHERE h.emirates_id = p.emirates_id) AS on_hr,
+             count(*)::int AS payments, sum(p.amount)::float AS net,
              to_char(min(p.txn_day), 'YYYY-MM-DD') AS first_day, to_char(max(p.txn_day), 'YYYY-MM-DD') AS last_day,
              array_agg(DISTINCT p.fleet_id) AS fleets, array_agg(DISTINCT p.terminal_id ORDER BY p.terminal_id) AS terminals
         FROM card_payment p LEFT JOIN card_id_person m ON m.emirates_id = p.emirates_id
        WHERE p.emirates_id IS NOT NULL AND m.person_id IS NULL
        GROUP BY p.emirates_id, m.basis, m.hr_people ORDER BY max(p.txn_day) DESC, sum(p.amount) DESC`);
-    const WHY = {
-      hr_ambiguous: (n) => `on the HR export, under ${n} driver records — fold those records into one person (Same person page) and it places itself`,
-      link_stranded: () => 'it was linked to a driver record that no longer exists — link it again',
-    };
+    /* The reason asks hr_roster_row itself (the review of 2026-11-23): the
+       view leaves out an HR row matched to no live account, so "not in the
+       view" said "not on the HR export" — falsely — and served the number. */
+    const whyOf = (r) => (r.basis === 'hr_ambiguous'
+      ? `on the HR export, under ${r.hr_people} driver records — fold those records into one person (Same person page) and it places itself`
+      : r.basis === 'link_stranded'
+        ? `it was linked to a driver record that no longer exists${r.on_hr ? ', and the HR export matches it to no driver either' : ''} — link it again`
+        : r.on_hr ? 'on the HR export, but that employee is matched to no driver record — match them on the HR roster page, or link it here'
+          : 'not on the HR export — upload a newer export, or link it to a driver here');
     return res.json({ ...s,
       rows: rows.map((r) => ({
         ref: refOf(r.emirates_id),
-        /* The number is shown only where the HR export does not carry it:
-           an ID the export holds is one the export already names a person
-           for, and an HR document number is served by /api/driver/profile
-           alone (api/redact.js HR_NUMBERS_SERVED). Class DOC by key name
-           (api/access/shape.js), so a role without documents gets null. */
-        emirates_id: r.basis === 'hr_ambiguous' ? null : r.emirates_id,
-        why: (WHY[r.basis] || (() => 'not on the HR export — upload a newer export, or link it to a driver here'))(r.hr_people),
+        /* The number is shown only where NO HR row carries it: an HR
+           document number is served by /api/driver/profile alone
+           (api/redact.js HR_NUMBERS_SERVED; test/hr_roster_numbers sweeps
+           this route over payments under every seeded HR number). Class DOC
+           by key name (api/access/shape.js), so a role without documents
+           gets null. */
+        emirates_id: r.on_hr ? null : r.emirates_id,
+        why: whyOf(r),
         payments: r.payments, net: r2(r.net), first_day: r.first_day, last_day: r.last_day,
         fleets: (r.fleets || []).filter(Boolean), terminals: r.terminals || [] })),
       totals: { ids: rows.length, payments: rows.reduce((a, r) => a + r.payments, 0), net: r2(rows.reduce((a, r) => a + r.net, 0)) } });
@@ -182,6 +219,16 @@ export function cardRoutes(app, { q, wrap }) {
     }
     const [d] = await q('SELECT 1 FROM driver WHERE id = $1', [person]);
     if (!d) return res.status(404).json({ error: 'not_found', detail: 'No person has that id.' });
+    /* An earlier decision for another driver is not silently overwritten
+       (the review of 2026-11-23; POST /api/charging/link answers 409 the same
+       way): two people on stale pages must not clobber each other. A link to
+       a person since removed is no decision any more and is replaced. */
+    const [prev] = await q(`SELECT l.person_id::text AS person_id FROM card_id_link l
+                             WHERE l.emirates_id = $1 AND EXISTS (SELECT 1 FROM driver x WHERE x.id = l.person_id)`, [eid]);
+    if (prev && prev.person_id !== String(person) && b.replace !== true) {
+      return res.status(409).json({ error: 'already_linked', person_id: prev.person_id,
+        detail: 'This Emirates ID is already linked to another driver. Unlink it first, or send replace: true.' });
+    }
     await q(`INSERT INTO card_id_link (emirates_id, person_id, decided_by) VALUES ($1, $2, $3)
              ON CONFLICT (emirates_id) DO UPDATE SET person_id = EXCLUDED.person_id, decided_by = EXCLUDED.decided_by, decided_at = now()`,
     [eid, person, who.by]);

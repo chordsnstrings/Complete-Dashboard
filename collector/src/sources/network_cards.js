@@ -18,18 +18,32 @@
        change"), so a payment is placed by the sheet's own Emirates ID, never
        by the car, and the terminal id stays on it for tracing back.
 
-   ONE READ REPLACES THE DAYS IT COVERS. The sheet is one running list with no
-   transaction reference, so there is nothing to append by: a read deletes the
-   stored payments between its first and last day and writes the sheet's rows
-   in their place, in one transaction. Identical rows are separate payments,
-   as the sheet's own total counts them.
+   ONE READ IS THE WHOLE SHEET, AND REPLACES WHAT IS STORED. The sheet is one
+   running list with no transaction reference, so there is nothing to append
+   by. The first build replaced only the days between a read's first and last
+   payment; the review of 2026-11-23 showed what that leaves behind — a row
+   dated 2026-12-01 by mistake widens the range, and once corrected its stored
+   copy sits outside the next read's days forever, and a last-day row re-dated
+   one day earlier is kept twice. So a read replaces every stored payment from
+   this source, in one transaction. Identical rows are separate payments, as
+   the sheet's own total counts them.
 
-   THE GUARD. A read that would leave fewer than 90% of the payments already
-   stored for its own days is HELD, not written — a sheet half-cleared while
-   someone edits it, or a filter left on, must not wipe a month. The hold is
-   recorded (card_import status 'held', with the counts) and the page says so;
+   THE GUARD, by the whole and by the month. A read is HELD, not written, when
+   it would keep fewer than 90% of the stored payments overall, OR fewer than
+   90% of any month holding at least 20 (a deleted month is ~9% of a year's
+   sheet, which the overall share alone let through), OR when it is empty or
+   every row is unreadable. A sheet half-cleared while someone edits it, or a
+   filter left on, must not wipe a month. The hold is recorded (card_import
+   status 'held', with the counts and the months) and the pages say so;
    `node src/index.js network-cards --accept-shrink` writes it once a person
-   has looked. An empty read is never written.
+   has looked.
+
+   ONE READ AT A TIME, across processes. `cardsBusy` (src/run.js) holds within
+   one worker only; a by-hand run, or the old and new worker overlapping in a
+   deploy, is a second process, and under READ COMMITTED two overlapping
+   replaces each keep their own insert — every payment doubled, and the guard
+   then holding every later read. So the write takes a transaction-scoped
+   advisory lock first and counts what is stored only after it holds it.
 
    Nothing here moves a money figure: the cash position is unchanged until
    phase 3 (FIX-STATUS CARD-3), which waits on the operator's review. */
@@ -119,8 +133,12 @@ export function parseSheet(values) {
 
 const sum = (xs) => Math.round(xs.reduce((a, p) => a + p.amount, 0) * 100) / 100;
 
-/* Write one read: replace the days it covers, or hold it. Returns the import
-   row. `client` is a pooled pg client inside a transaction, or PGlite. */
+export const MONTH_FLOOR = 20;
+const LOCK_KEY = 727001;   // pg_advisory_xact_lock key for card-payment writes
+
+/* Write one read: replace what is stored, or hold it. Returns the import
+   row. Inside one transaction, under the advisory lock; the counts the guard
+   compares are taken only once the lock is held. */
 export async function writeRead(db, parsed, { range = null, acceptShrink = false } = {}) {
   const P = parsed.payments;
   const skippedN = Object.values(parsed.skipped).reduce((a, n) => a + n, 0);
@@ -132,19 +150,39 @@ export async function writeRead(db, parsed, { range = null, acceptShrink = false
      VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11) RETURNING *`, [...base, replaced, status, why]))[0];
   const q0 = (t, p) => db.query(t, p).then((r) => r.rows);
   if (parsed.missing?.length) return record(q0, 'error', `the sheet has no ${parsed.missing.join(', ')} column`);
-  if (!P.length) return record(q0, 'held', 'the sheet returned no payments; nothing was replaced');
-  const [{ n: stored }] = await q0(`SELECT count(*)::int AS n FROM card_payment WHERE source = 'network_sheet' AND txn_day BETWEEN $1 AND $2`, [from, to]);
-  if (!acceptShrink && stored > 0 && P.length < stored * KEEP_SHARE) {
-    return record(q0, 'held', `this read has ${P.length} payments for ${from} to ${to}, where ${stored} are stored — `
-      + `fewer than ${Math.round(KEEP_SHARE * 100)}%, so nothing was replaced until a person looks`);
+  if (!P.length) {
+    const why = parsed.rows_read > 0 && skippedN
+      ? `none of the sheet's ${parsed.rows_read} rows could be read (${Object.entries(parsed.skipped).map(([k, n]) => `${n} ${k}`).join(', ')}); nothing was replaced`
+      : 'the sheet returned no payments; nothing was replaced';
+    return record(q0, 'held', why);
   }
   const pooled = typeof db.connect === 'function';
   const client = pooled ? await db.connect() : db;
   const q = (t, p) => client.query(t, p).then((r) => r.rows);
+  let held = null;
   try {
     await client.query('BEGIN');
+    await q('SELECT pg_advisory_xact_lock($1)', [LOCK_KEY]);
+    const [{ n: stored }] = await q(`SELECT count(*)::int AS n FROM card_payment WHERE source = 'network_sheet'`);
+    if (!acceptShrink && stored > 0) {
+      const months = await q(`SELECT to_char(txn_day, 'YYYY-MM') AS m, count(*)::int AS n FROM card_payment
+                               WHERE source = 'network_sheet' GROUP BY 1 HAVING count(*) >= $1`, [MONTH_FLOOR]);
+      const fresh = {};
+      for (const p of P) { const m = p.txn_day.slice(0, 7); fresh[m] = (fresh[m] || 0) + 1; }
+      const short = months.filter((x) => (fresh[x.m] || 0) < x.n * KEEP_SHARE)
+        .map((x) => `${x.m} (${fresh[x.m] || 0} of ${x.n})`);
+      if (P.length < stored * KEEP_SHARE || short.length) {
+        held = `this read keeps ${P.length} of the ${stored} stored payments`
+          + `${short.length ? `, and fewer than ${Math.round(KEEP_SHARE * 100)}% of ${short.join(', ')}` : ''}`
+          + ` — so nothing was replaced until a person looks`;
+      }
+    }
+    if (held) {
+      await client.query('ROLLBACK');
+      return record(q0, 'held', held, stored);
+    }
     const imp = await record(q, 'ok', null, stored);
-    await q(`DELETE FROM card_payment WHERE source = 'network_sheet' AND txn_day BETWEEN $1 AND $2`, [from, to]);
+    await q(`DELETE FROM card_payment WHERE source = 'network_sheet'`);
     await q(`INSERT INTO card_payment (import_id, row_no, txn_day, fleet_id, terminal_id, amount, emirates_id, id_label)
              SELECT $1, * FROM unnest($2::int[], $3::date[], $4::text[], $5::text[], $6::numeric[], $7::text[], $8::text[])`,
     [imp.id, P.map((p) => p.row_no), P.map((p) => p.txn_day), P.map((p) => p.fleet_id), P.map((p) => p.terminal_id),

@@ -12390,13 +12390,33 @@ shared with the account's `client_email` as Viewer. Without the key the hourly t
 pages say the sheet has not been read.
 
 ### Traps
-* **A read REPLACES the days it covers; it never appends.** There is no reference to append by, so a read
-  deletes the stored payments between its first and last day and writes the sheet's rows, in one transaction.
-  A read that would leave fewer than 90% of its days' stored payments is **held** (`card_import.status`
-  'held', with the counts), and so is an empty read. `node src/index.js network-cards --accept-shrink` writes
-  a held read once a person has looked. Test: `test/network_cards.test.mjs` §3.
+* **A read is the WHOLE sheet and replaces everything stored; it never appends.** The first build replaced
+  only the days between a read's first and last payment. Then a row dated 2026-12-01 by mistake, once
+  corrected, stayed stored forever, and a last-day row re-dated a day earlier was kept twice (the review of
+  2026-11-23).
+  - **When a read is held:** if it keeps under 90% of all stored payments; if any month holding 20 or more
+    loses more than a tenth (a deleted month is about 9% of a year, which the overall share alone let
+    through); or if it is empty or every row is unreadable.
+  - **Locking:** the write takes `pg_advisory_xact_lock` and counts only after holding it. Two processes
+    (a by-hand run, or a deploy overlap at :33) would otherwise each keep their own insert under READ
+    COMMITTED, doubling every payment, and the guard would then hold every later read.
+  - **Writing a held read:** `node src/index.js network-cards --accept-shrink` writes it once a person has
+    looked.
+
+  Test: `test/network_cards.test.mjs` §3.
 * **The sheet has two columns headed "Date"**, and only the first is filled. Columns are found by header name,
-  never by position, and the first match wins.
+  never by position, and the first match wins. Dates are asked for as **serial numbers**
+  (`dateTimeRenderOption=SERIAL_NUMBER`). As formatted text, a sheet in a US locale writes 11/5/2026, and a
+  day-first reading would silently swap days 1–12.
+* **"Not in `card_id_person`" does not mean "not on the HR export".** The view leaves out an HR row that
+  matches no live account. A route that took absence from the view as "not on the export" served the HR
+  document number with a false reason. Ask `hr_roster_row` directly (`/api/card/review` `on_hr`). Since the
+  fix, `test/hr_roster_numbers.test.mjs` sweeps the card routes over payments under every seeded HR number.
+* **A ref for an Emirates ID must be keyed.** About 10^8 candidates, or ~10^5 for a reader shown the last
+  four digits, is reversed from an unkeyed hash in under a second. `refOf` is an HMAC under a server-held key.
+* **Two 403s from Sheets.** "Not shared with the account" is one. The Sheets API not enabled in the project
+  (SERVICE_DISABLED) is the other, and the usual first-setup failure. They are said apart, with Google's own
+  words, and only the first marks the key.
 * **An ID the HR export carries is an HR document number.** `/api/driver/profile` is the only route allowed to
   serve one (`api/redact.js` HR_NUMBERS_SERVED). So the review list shows the number only for IDs the export
   does **not** carry. An ID the export puts on two records is listed without it, with the fix: fold the

@@ -32,8 +32,17 @@
      · `amount < 0` rows dropped → §1 "chargebacks" and §6 "net" fail
      · the DELETE before the INSERT removed (append) → §3 "replaced" fails
      · the KEEP_SHARE guard removed → §3 "held" fails
+     · the per-month guard removed → §3 "held by the month" fails
+     · replace by date range again → §3 "stray date" fails
+     · the advisory lock removed, or the count before it → §3 "the lock" fails
+     · `on_hr` ignored on the review (the view alone) → §8 "matched to nobody" fails
+     · refOf an unkeyed sha256 → §6 "the ref is keyed" fails
+     · the 409 removed → §7 "a second decision" fails
+     · the driver route's HR lookup removed → §6 "older upload" and "two records" fail
      · the link's precedence over the HR export dropped (CASE order) → §5 fails
      · the review serving an ambiguous HR ID → §8 fails
+     · the stranded-link fallback dropped → §5 "removed person" fails
+     · d.driver_id IS NOT NULL dropped → §5 "no person" fails
    Synthetic people, IDs and keys only: the RSA key is generated here. */
 import crypto from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
@@ -116,37 +125,64 @@ const keyJson = JSON.stringify({ type: 'service_account', client_email: 'reader@
   check('one token request, then the values of the named sheet and range, unformatted', v.length === 2
     && new URLSearchParams(String(calls[0].opts.body)).get('grant_type') === 'urn:ietf:params:oauth:grant-type:jwt-bearer'
     && sheetCall.url.includes('/spreadsheets/sheet-abc/values/A%3AJ') && sheetCall.url.includes('valueRenderOption=UNFORMATTED_VALUE')
+    && sheetCall.url.includes('dateTimeRenderOption=SERIAL_NUMBER')
     && sheetCall.opts.headers.authorization === 'Bearer synthetic-token', JSON.stringify(calls.map((x) => x.url)));
   let m403 = '';
   try { await readValues({ sa, sheetId: 'sheet-abc', range: 'A:J', fetchImpl: fake(403) }); } catch (e) { m403 = e.message; }
   check('a sheet not shared says whom to share it with', m403.includes('reader@test-project.iam.gserviceaccount.com') && /Viewer/.test(m403), m403);
+  const disabledApi = async (url) => (String(url).includes('/token') ? new Response(JSON.stringify({ access_token: 't' }), { status: 200 })
+    : new Response(JSON.stringify({ error: { status: 'PERMISSION_DENIED', message: 'Google Sheets API has not been used in project 123 before or it is disabled.',
+      details: [{ reason: 'SERVICE_DISABLED' }] } }), { status: 403 }));
+  let mOff = ''; let credOff = null;
+  try { await readValues({ sa, sheetId: 'sheet-abc', range: 'A:J', fetchImpl: disabledApi }); } catch (e) { mOff = e.message; credOff = e.credential; }
+  check('the Sheets API not enabled is said as itself — not "share the sheet", and the key is not blamed',
+    /Sheets API is not enabled/.test(mOff) && !/share it/.test(mOff) && /has not been used/.test(mOff) && !credOff, mOff);
 }
 
-console.log('\n§3 a read replaces the days it covers');
+console.log('\n§3 a read is the whole sheet, and replaces what is stored');
 const pg = new PGlite();
 await applySchema(pg);
 const db = { query: (t, p) => pg.query(t, p) };
 const q = (t, p = []) => pg.query(t, p).then((r) => r.rows);
 const stored = async () => (await q(`SELECT count(*)::int n, coalesce(sum(amount),0)::float s FROM card_payment`))[0];
 const rows = (n, day, amt = 10, eid = E1, term = 100) => Array.from({ length: n }, () => [fmtE(eid), day, 'Ecosine', term, amt]);
+const sheet = (...parts) => parseSheet([HEAD, ...parts.flat()]);
 {
-  const r1 = await writeRead(db, parseSheet([HEAD, ...rows(10, '1-Jan-2026'), ...rows(10, '2-Jan-2026')]));
-  check('the first read writes every payment', r1.status === 'ok' && (await stored()).n === 20, JSON.stringify(r1));
-  const r2 = await writeRead(db, parseSheet([HEAD, ...rows(10, '1-Jan-2026', 12), ...rows(10, '2-Jan-2026', 12)]));
+  const r1 = await writeRead(db, sheet(rows(30, '5-Jan-2026'), rows(30, '5-Feb-2026')));
+  check('the first read writes every payment', r1.status === 'ok' && (await stored()).n === 60, JSON.stringify(r1));
+  const r2 = await writeRead(db, sheet(rows(30, '5-Jan-2026', 12), rows(30, '5-Feb-2026', 12)));
   const s2 = await stored();
-  check('a corrected read REPLACES the same days — 20 payments, the new amounts, not 40', r2.status === 'ok' && s2.n === 20 && s2.s === 240, JSON.stringify(s2));
-  const r3 = await writeRead(db, parseSheet([HEAD, ...rows(10, '2-Jan-2026', 15), ...rows(5, '3-Jan-2026', 15)]));
-  const byDay = await q(`SELECT to_char(txn_day,'YYYY-MM-DD') d, count(*)::int n, sum(amount)::float s FROM card_payment GROUP BY 1 ORDER BY 1`);
-  check('a read of 2–3 Jan leaves 1 Jan as it was', r3.status === 'ok' && byDay.length === 3 && byDay[0].s === 120 && byDay[1].s === 150 && byDay[2].n === 5, JSON.stringify(byDay));
-  const r4 = await writeRead(db, parseSheet([HEAD, ...rows(5, '2-Jan-2026'), ...rows(5, '3-Jan-2026')]));
-  check('held: a read with 10 payments for days holding 15 replaces nothing, and says why', r4.status === 'held' && /fewer than 90%/.test(r4.why)
-    && (await stored()).n === 25, JSON.stringify([r4.status, r4.why]));
-  const r5 = await writeRead(db, parseSheet([HEAD, ...rows(5, '2-Jan-2026'), ...rows(5, '3-Jan-2026')]), { acceptShrink: true });
-  check('…written once a person accepts it', r5.status === 'ok' && (await stored()).n === 20);
-  const r6 = await writeRead(db, parseSheet([HEAD]));
-  check('an empty read is held, nothing removed', r6.status === 'held' && (await stored()).n === 20);
-  const r7 = await writeRead(db, parseSheet([['Emirates ID', 'Date', 'TRMNL ID', 'TRAN AMT'], [fmtE(E1), '1-Jan-2026', 1, 5]]));
-  check('a sheet missing a column is an error, nothing removed', r7.status === 'error' && /fleet/.test(r7.why) && (await stored()).n === 20, r7.why);
+  check('a corrected read REPLACES — 60 payments at the new amounts, not 120', r2.status === 'ok' && s2.n === 60 && s2.s === 720, JSON.stringify(s2));
+  const r3 = await writeRead(db, sheet(rows(30, '5-Jan-2026')));
+  check('held: a read without February (half the stored payments) replaces nothing, and says why', r3.status === 'held'
+    && /keeps 30 of the 60/.test(r3.why) && (await stored()).n === 60, JSON.stringify([r3.status, r3.why]));
+  const r4 = await writeRead(db, sheet(rows(31, '5-Jan-2026', 12), rows(25, '5-Feb-2026', 12), rows(3, '6-Mar-2026', 12)));
+  check('held by the month: February down to 25 of 30 is held though the read keeps 59 of 60',
+    r4.status === 'held' && /2026-02 \(25 of 30\)/.test(r4.why) && (await stored()).n === 60, JSON.stringify([r4.status, r4.why]));
+  const r5 = await writeRead(db, sheet(rows(30, '5-Jan-2026', 12), rows(30, '5-Feb-2026', 12), rows(1, '1-Dec-2026', 12)));
+  const r6 = await writeRead(db, sheet(rows(30, '5-Jan-2026', 12), rows(30, '5-Feb-2026', 12)));
+  const dec = (await q(`SELECT count(*)::int n FROM card_payment WHERE txn_day >= '2026-12-01'`))[0].n;
+  check('a stray date, once corrected, leaves nothing behind (a month under 20 is not guarded)', r5.status === 'ok' && r6.status === 'ok'
+    && dec === 0 && (await stored()).n === 60, JSON.stringify([r5.status, r6.status, dec]));
+  const r7 = await writeRead(db, sheet(rows(30, '5-Jan-2026')), { acceptShrink: true });
+  check('…a held read is written once a person accepts it', r7.status === 'ok' && (await stored()).n === 30);
+  const r8 = await writeRead(db, sheet());
+  check('an empty read is held, nothing removed', r8.status === 'held' && /returned no payments/.test(r8.why) && (await stored()).n === 30);
+  const r9 = await writeRead(db, parseSheet([HEAD, [fmtE(E1), 'soon', 'Ecosine', 1, 5], [fmtE(E1), 'later', 'Ecosine', 1, 5]]));
+  check('a read with every row unreadable says so, and replaces nothing', r9.status === 'held'
+    && /none of the sheet's 2 rows could be read \(2 no readable day\)/.test(r9.why) && (await stored()).n === 30, r9.why);
+  const r10 = await writeRead(db, parseSheet([['Emirates ID', 'Date', 'TRMNL ID', 'TRAN AMT'], [fmtE(E1), '1-Jan-2026', 1, 5]]));
+  check('a sheet missing a column is an error, nothing removed', r10.status === 'error' && /fleet/.test(r10.why) && (await stored()).n === 30, r10.why);
+  /* ONE READ AT A TIME, ACROSS PROCESSES: the advisory lock is taken inside
+     the transaction BEFORE the stored payments are counted — the statements
+     in the order they were sent. */
+  const seen = [];
+  const spy = { query: (t, p) => { seen.push(String(t).replace(/\s+/g, ' ').trim().slice(0, 40)); return pg.query(t, p); } };
+  await writeRead(spy, sheet(rows(30, '5-Jan-2026')));
+  const at = (re) => seen.findIndex((x) => re.test(x));
+  check('the lock is taken inside the transaction, before the count, the delete and the insert',
+    at(/^BEGIN/) >= 0 && at(/^BEGIN/) < at(/pg_advisory_xact_lock/) && at(/pg_advisory_xact_lock/) < at(/^SELECT count/)
+    && at(/^SELECT count/) < at(/^DELETE FROM card_payment/) && at(/^DELETE/) < at(/^INSERT INTO card_payment/), JSON.stringify(seen));
 }
 
 console.log('\n§4 collect()');
@@ -178,15 +214,26 @@ await hrRow(U2, 'e1', E1, [{ platform: 'uber', ext_id: 'u-alpha' }]);
 await hrRow(U2, 'e2', E2, [{ platform: 'uber', ext_id: 'u-beta' }, { platform: 'bolt', ext_id: 'b-beta' }]);   // two records
 await hrRow(U1, 'e4', E4, [{ platform: 'uber', ext_id: 'u-delta' }]);                                          // older upload…
 await hrRow(U2, 'e4', E4, [{ platform: 'uber', ext_id: 'u-eps' }]);                                            // …the newer one wins
+const E5 = '784199000000005', E6 = '784199000000006';
+await hrRow(U2, 'e5', E5, []);                                                                                   // on the export, matched to nobody
+await q(`INSERT INTO driver_platform_id (platform, external_id, driver_id) VALUES ('uber', 'u-orphan', NULL)`);
+await hrRow(U2, 'e6', E6, [{ platform: 'uber', ext_id: 'u-orphan' }]);                                          // an account with no person
 await writeRead(db, parseSheet([HEAD,
   [fmtE(E1), '10-Nov-2026', 'Ecosine', 501, 100], [fmtE(E1), '10-Nov-2026', 'Ecosine', 501, 60], [fmtE(E1), '12-Nov-2026', 'Ecosine', 502, -25],
   [fmtE(E2), '11-Nov-2026', 'Ecosine', 503, 70], [fmtE(E3), '11-Nov-2026', 'Egari', 504, 90], [fmtE(E4), '11-Nov-2026', 'Ecosine', 505, 33],
-  ['Not Found', '12-Nov-2026', 'Egari', 506, 300], ['N/A', '12-Nov-2026', 'Egari', 501, 20]]), { acceptShrink: true });
+  ['Not Found', '12-Nov-2026', 'Egari', 506, 300], ['N/A', '12-Nov-2026', 'Egari', 501, 20],
+  [fmtE(E5), '13-Nov-2026', 'Ecosine', 507, 44]]), { acceptShrink: true });
 const map = Object.fromEntries((await q(`SELECT emirates_id, person_id, basis FROM card_id_person`)).map((r) => [r.emirates_id, r]));
 check('the HR export places an ID on its one driver', map[E1]?.person_id == PA && map[E1].basis === 'hr', JSON.stringify(map[E1]));
 check('an ID the export puts on two records is placed on neither, and says so', map[E2]?.person_id == null && map[E2].basis === 'hr_ambiguous', JSON.stringify(map[E2]));
 check('the newest upload carrying an ID wins', map[E4]?.person_id == PE, JSON.stringify(map[E4]));
 check('an ID not on the export is not in the map', !map[E3]);
+check('an HR row matched to nobody, or to an account with no person, places nothing (never "hr" with no person)', !map[E5] && !map[E6],
+  JSON.stringify([map[E5], map[E6]]));
+await q(`INSERT INTO card_id_link (emirates_id, person_id, decided_by) VALUES ($1, 999999, 'test')`, [E1]);
+const m1 = (await q(`SELECT person_id, basis FROM card_id_person WHERE emirates_id = $1`, [E1]))[0];
+check('a link to a removed person falls back to the HR export\'s own placement', m1.person_id == PA && m1.basis === 'hr', JSON.stringify(m1));
+await q(`DELETE FROM card_id_link WHERE emirates_id = $1`, [E1]);
 await q(`INSERT INTO card_id_link (emirates_id, person_id, decided_by) VALUES ($1, $2, 'test')`, [E4, PD]);
 const m4 = (await q(`SELECT person_id, basis FROM card_id_person WHERE emirates_id = $1`, [E4]))[0];
 check('a person\'s link wins over the HR export', m4.person_id == PD && m4.basis === 'linked', JSON.stringify(m4));
@@ -210,22 +257,25 @@ const B = fetchVia(bare.port);
     && b.terminals?.length === 2 && b.terminals.find((t) => t.terminal_id === '501')?.payments === 2
     && b.terminals.find((t) => t.terminal_id === '502')?.first_day === '2026-11-12' && b.payments.find((p) => p.amount === -25)?.chargeback === true,
   JSON.stringify(b.terminals));
-  check('by day, and the read\'s coverage', b.days?.[0]?.day === '2026-11-12' && b.days[1].net === 160 && b.covers_to === '2026-11-12' && b.read_at,
+  check('by day, and the read\'s coverage', b.days?.[0]?.day === '2026-11-12' && b.days[1].net === 160 && b.covers_to === '2026-11-13' && b.read_at,
     JSON.stringify([b.days, b.covers_to]));
   check('placed by the HR export, said; no Emirates ID anywhere in the answer', b.placed_by?.hr_export === 1 && !JSON.stringify(b).includes(E1));
   check('…and it says the cash position is not yet changed', b.in_cash_position === false && /not yet taken off/.test(b.note || ''));
   const none = await B(`/api/card/driver?person=${PC}`);
   check('no Emirates ID known: the true reason, not "no payments"', /No Emirates ID is known for this driver/.test(none.body?.why || ''), none.body?.why);
   const d4 = await B(`/api/card/driver?person=${PD}`);
-  check('an ID known (an older upload) but none placed on them now: the other true reason',
-    d4.body?.totals?.payments === 0 && /No Emirates ID is known|No card payment/.test(d4.body?.why || ''), d4.body?.why);
+  check('an ID on an older upload, placed on another record by the newer one: said so, not "no ID known"',
+    d4.body?.totals?.payments === 0 && /placed on another driver record by a newer one/.test(d4.body?.why || ''), d4.body?.why);
+  const db1 = await B(`/api/card/driver?person=${PB1}`);
+  check('an ID the export puts on two records: said so, with the fix', /under more than one driver record/.test(db1.body?.why || '')
+    && /Same person page/.test(db1.body.why), db1.body?.why);
   const w = await B(`/api/card/driver?person=${PA}&from=2026-11-11&to=2026-11-30`);
   check('a window narrows it', w.body?.totals?.payments === 1 && w.body.totals.net === -25, JSON.stringify(w.body?.totals));
   check('a missing person is a 400', (await B('/api/card/driver')).status === 400);
 
   const s = (await B('/api/card/summary')).body || {};
-  check('the summary: placed, no driver named, and IDs not placed — every dirham once', s.totals?.payments === 8 && s.totals.net === 648
-    && s.totals.placed === 168 && s.totals.no_driver === 320 && s.totals.unplaced === 160 && s.totals.unplaced_ids === 2
+  check('the summary: placed, no driver named, and IDs not placed — every dirham once', s.totals?.payments === 9 && s.totals.net === 692
+    && s.totals.placed === 168 && s.totals.no_driver === 320 && s.totals.unplaced === 204 && s.totals.unplaced_ids === 3
     && Math.round((s.totals.placed + s.totals.no_driver + s.totals.unplaced) * 100) === Math.round(s.totals.net * 100), JSON.stringify(s.totals));
   const nd = Object.fromEntries((s.no_driver_terminals || []).map((t) => [t.terminal_id, t]));
   check('no-driver payments by terminal, in the sheet\'s words, and whether the terminal was ever mapped',
@@ -240,6 +290,11 @@ const B = fetchVia(bare.port);
   check('§8 an ID the export carries on two records: listed WITHOUT the number, and why', byWhy[refOf(E2)] && byWhy[refOf(E2)].emirates_id === null
     && /under 2 driver records/.test(byWhy[refOf(E2)].why), JSON.stringify(byWhy[refOf(E2)]));
   check('§8 an ID the export places is not on the review list at all', !byWhy[refOf(E1)] && !JSON.stringify(r).includes(E1) && !JSON.stringify(r).includes(E2));
+  check('§8 an ID on the export but matched to nobody: listed WITHOUT the number, and the true reason (not "not on the HR export")',
+    byWhy[refOf(E5)] && byWhy[refOf(E5)].emirates_id === null && /matched to no driver record/.test(byWhy[refOf(E5)].why)
+    && !JSON.stringify(r).includes(E5), JSON.stringify(byWhy[refOf(E5)]));
+  check('the ref is keyed: not the bare hash of the number, which a reader shown its last digits could reverse',
+    refOf(E3) !== crypto.createHash('sha256').update(`card-id:${E3}`).digest('hex').slice(0, 16) && /^[0-9a-f]{16}$/.test(refOf(E3)));
 }
 
 console.log('\n§7 behind the real gate');
@@ -275,6 +330,12 @@ async function cookieFor(email, role) {
     JSON.stringify([ok.status, ok.body, lk]));
   const pc = await FIN(`/api/card/driver?person=${PC}`);
   check('…and the payment is now on that driver, placed by the link', pc.body?.totals?.net === 90 && pc.body.placed_by?.linked === 1, JSON.stringify(pc.body?.totals));
+  const clash = await HRO('/api/card/link', { method: 'POST', body: JSON.stringify({ ref: refOf(E3), decision: 'link', person_id: PA }) });
+  check('a second decision for ANOTHER driver is refused (409), never silently overwriting the first', clash.status === 409
+    && clash.body?.person_id === String(PC) && (await q(`SELECT person_id FROM card_id_link WHERE emirates_id = $1`, [E3]))[0].person_id == PC,
+  JSON.stringify([clash.status, clash.body]));
+  const over = await HRO('/api/card/link', { method: 'POST', body: JSON.stringify({ ref: refOf(E3), decision: 'link', person_id: PA, replace: true }) });
+  check('…and goes through when it says replace', over.status === 200 && (await q(`SELECT person_id FROM card_id_link WHERE emirates_id = $1`, [E3]))[0].person_id == PA);
   const un = await HRO('/api/card/link', { method: 'POST', body: JSON.stringify({ ref: refOf(E3), decision: 'unlink' }) });
   check('unlink takes it off again', un.status === 200 && (await q(`SELECT 1 FROM card_id_link WHERE emirates_id = $1`, [E3])).length === 0);
   check('an unknown ref is a 404, a malformed one a 400',

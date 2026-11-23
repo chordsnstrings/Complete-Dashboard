@@ -34,7 +34,14 @@
 --                 person's link first, then by the HR export (the newest
 --                 upload that carries the ID, through its matched platform
 --                 accounts and the person spine). An ID the export ties to
---                 two driver records places on neither, and says so.
+--                 two driver records places on neither, and says so. An HR
+--                 row matched to no live account is NOT in it — so "not in
+--                 the view" never means "not on the HR export"; readers ask
+--                 hr_roster_row for that (api/card_routes.js).
+--
+-- Corrected in place before it was ever applied (the review of 2026-11-23,
+-- on the branch, never deployed): an account row with no person, and a
+-- stranded link hiding a valid HR placement.
 --
 -- A read REPLACES the stored payments of the days it covers (the sheet has no
 -- reference to append by); see src/sources/network_cards.js for the guard
@@ -89,7 +96,7 @@ WITH hr AS (
     JOIN hr_roster_upload u ON u.id = r.upload_id
     CROSS JOIN LATERAL jsonb_array_elements(coalesce(r.matched_accounts, '[]'::jsonb)) a
     JOIN driver_platform_id d ON d.platform = a ->> 'platform' AND d.external_id = a ->> 'ext_id'
-                             AND d.detached_at IS NULL
+                             AND d.detached_at IS NULL AND d.driver_id IS NOT NULL
    WHERE r.emirates_id ~ '^784[0-9]{12}$'
 ), newest AS (
   SELECT DISTINCT ON (eid) eid, upload_id FROM hr ORDER BY eid, export_date DESC, upload_id DESC
@@ -99,12 +106,14 @@ WITH hr AS (
    GROUP BY h.eid
 )
 SELECT coalesce(l.emirates_id, p.eid) AS emirates_id,
-       CASE WHEN l.emirates_id IS NOT NULL
-              THEN CASE WHEN EXISTS (SELECT 1 FROM driver x WHERE x.id = l.person_id) THEN l.person_id END
+       CASE WHEN l.emirates_id IS NOT NULL AND EXISTS (SELECT 1 FROM driver x WHERE x.id = l.person_id) THEN l.person_id
             WHEN cardinality(p.people) = 1 THEN p.people[1] END AS person_id,
-       CASE WHEN l.emirates_id IS NOT NULL
-              THEN CASE WHEN EXISTS (SELECT 1 FROM driver x WHERE x.id = l.person_id) THEN 'linked' ELSE 'link_stranded' END
+       /* A link to a person since removed falls back to the HR export's own
+          placement when it has one (the review of 2026-11-23): a stranded
+          decision must not hide a valid one-person match. */
+       CASE WHEN l.emirates_id IS NOT NULL AND EXISTS (SELECT 1 FROM driver x WHERE x.id = l.person_id) THEN 'linked'
             WHEN cardinality(p.people) = 1 THEN 'hr'
+            WHEN l.emirates_id IS NOT NULL THEN 'link_stranded'
             ELSE 'hr_ambiguous' END AS basis,
        coalesce(cardinality(p.people), 0) AS hr_people
   FROM hr_people p
