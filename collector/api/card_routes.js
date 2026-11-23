@@ -63,7 +63,7 @@ export async function readState(q) {
     covers_from: iso(cov?.first_day), covers_to: iso(cov?.last_day),
     skipped_rows: ok ? ok.rows_skipped : null, skipped: ok?.skipped || null,
     failed,
-    why: !ok && !last ? 'The card-payments sheet has not been read yet — the Google service account key is set on the Settings page (Card machines).'
+    why: !ok && !last ? 'The card-payments sheet has not been read yet: it is read once a Google service account key is entered on the Settings page (Card machines) and the sheet is shared with that account.'
       : !ok ? `The card-payments sheet has never been read successfully: ${String(last.why || last.status).slice(0, 200)}` : null,
   };
 }
