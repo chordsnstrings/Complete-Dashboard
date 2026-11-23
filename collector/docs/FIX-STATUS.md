@@ -4535,7 +4535,7 @@ What the first rendering found, and what was changed before commit:
 - `network_cards` 70: §2b covers the link naming the sheet and tab, one GET of the export, and a closed link said as closed; §1 covers slash-date order; §4 covers collect() by link.
 - Reversions: day-first regardless (2 fail), the sign-in check removed (1).
 - The real sheet read by link (sandbox, totals only): 8,034 payments, AED 542,744.80, 7,462 with an ID, 17 chargebacks, 0 skipped — the same as the Drive export.
-- `credential_save_check` 109, `uber_oauth_paste` 36, `cabman_egari` 11, `uber_roster_schedule` 17, `uber_fares_mode` 8. |
+- `credential_save_check` 109, `uber_oauth_paste` 36, `cabman_egari` 11, `uber_roster_schedule` 17, `uber_fares_mode` 8, `deploy_scripts` 73 (the spec's pinned counts: 46 + COMMIT_SHA on the worker, 23 SECRET, 88 value lines). The secret was added to the live spec on 2026-11-23 and `bin/app-spec.mjs --check` reports it in step. |
 (1) the review list served an Emirates ID carried by the HR export when that HR row matched no live account. The view leaves such a row out, so the route showed the number with a false reason. It now asks `hr_roster_row` directly.
 (2) the ref was an unkeyed sha256, which could be reversed from the last four digits in under a second. It is now an HMAC under a server key.
 (3) two overlapping reads, from a by-hand run or a deploy overlap, could double every payment under READ COMMITTED. The write now takes `pg_advisory_xact_lock` and counts only after it holds the lock.
