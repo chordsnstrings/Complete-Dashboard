@@ -146,6 +146,12 @@ const RG = new Map([['r1', { id: 'r1', kind: b1.kind, definition: b1.definition,
 const g30 = checkReply('Test Charger Beta charged {{r1.charges_30d}} times in the last 30 days.', RG, { driverNames: ['Test Charger Beta'] });
 check('a reply saying "the last 30 days" passes the guard: the window is a figure of the result',
   g30.ok, JSON.stringify(g30.problems));
+/* Production, 2026-11-23: {{r6.values.rows}} — the values path spelled out —
+   threw away a correct answer. Read as {{r6.rows}}; an unknown key still fails. */
+const gv = checkReply('Test Charger Beta charged {{r1.values.charges_30d}} times.', RG, { driverNames: ['Test Charger Beta'] });
+const gx = checkReply('Test Charger Beta charged {{r1.values.no_such_key}} times.', RG, { driverNames: ['Test Charger Beta'] });
+check('{{rN.values.key}} is read as {{rN.key}} and filled; a key the result does not hold still fails',
+  gv.ok && /charged 1 times/.test(gv.text) && !gx.ok, JSON.stringify([gv.problems, gv.text, gx.ok]));
 
 console.log('\n§3 a driver with no wallet linked');
 const c1 = await tool('charging_wallets', { driver_id: C });
