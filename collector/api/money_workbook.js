@@ -37,6 +37,7 @@ import { phoneFor, HOLD_WHY, loadPhoneBook } from '../src/driver_sms.js';
 import { uaeMobile } from '../src/smsala.js';
 import { TRIP_RUN_SQL } from './run_kinds.js';
 import { ALL_PAYOUTS, PAYOUT_PROVIDERS } from './payout_routes.js';
+import { cardNet, cardPartFor, dubaiToday } from '../src/card_notes.js';
 
 /* Every trip is one row each on the Trips sheet up to this many days. A
    month of bookings is about 25,000 rows; a year would be 290,000 on the
@@ -448,7 +449,7 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
   rm.blank();
   rm.text('The sheets', 'bold');
   const guide = [
-    ...(person ? [['Driver', 'This driver as their own page shows them for these dates: bookings, booked revenue, platform earnings, money, cash collected, km and days.']] : []),
+    ...(person ? [['Driver', 'This driver as their own page shows them for these dates: bookings, gross revenue, bank collection, money, cash trips (including POS), km and days.']] : []),
     ['Cash to collect', 'One row per driver: cash from trips, advanced, handed in, and to hand in, with the mobile.'],
     ['Cash by day', 'The same, per driver per day, with a running total to hand in across the dates.'],
     ['Cash trips', 'Every trip on which a driver took cash: when, which car, how much, and how the amount was valued.'],
@@ -489,16 +490,44 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
     /* All still waiting for a price: the page's tile reads "not reported",
        so this is empty, never a 0.00 that looks measured. */
     const cashTaken = cashTrips && cashUnpriced === cashTrips ? null : r2(es.reduce((a, e) => a + e.cashTaken, 0));
-    const sd = wb.sheet('Driver', { widths: [34, 10, 10, 16, 10, 14, 18, 14, 18, 10, 12, 10, 10] });
-    sd.header(['Driver', 'Bookings', 'Completed', 'Booked revenue (AED)', 'Priced', 'Average fare (AED)', 'Platform earnings (AED)',
-      'Money (AED)', 'Cash collected (AED)', 'Cash trips', 'Not priced yet', 'Km', 'Days worked'],
-    ['text', 'int', 'int', 'money', 'int', 'money', 'money', 'money', 'money', 'int', 'int', 'int', 'int']);
+    /* "CASH TRIPS (INCLUDING POS)" AND "CASH IN HAND", as the page's two tiles
+       (the operator, 2026-11-24; api/driver_routes.js /api/driver/kpis): the
+       hotel's fares paid on the driver's own card machine are added to the
+       cash trips; the POS part is those fares plus what card payments paid of
+       the cash fares from 1 Aug 2026 (src/card_notes.js); cash in hand is the
+       rest. */
+    const [pos] = await q(`SELECT count(*)::int AS n, round(sum(price)::numeric, 2)::float AS v FROM trip_ext
+        WHERE lower(coalesce(payment_type, '')) = 'pos-driver' AND outcome = 'completed'
+          AND (requested_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
+          AND (platform || ':' || driver_ext_id = ANY($3::text[]) OR '*:' || driver_ext_id = ANY($3::text[]))`, [from, to, accts || []]);
+    const posV = pos?.n ? r2(pos.v || 0) : 0;
+    const net = person.id != null
+      ? await cardNet(q, [person.id], { from, to: [to, dubaiToday(now.getTime())].sort()[0] })
+        .catch((e) => ({ from, by: new Map(), absent: `the card payments could not be read (${String(e.message || e).slice(0, 120)})` }))
+      : { from, by: new Map(), absent: 'this file is for one account on no person, so no card payment can be placed on it' };
+    const part = cardPartFor(net, person.id);
+    const inclPos = cashTaken == null && !posV ? cashTaken : r2((cashTaken || 0) + posV);
+    const posPart = r2(posV + (part.card || 0));
+    const inHand = cashTaken == null ? null : r2(cashTaken - (part.card || 0));
+    const sd = wb.sheet('Driver', { widths: [34, 10, 10, 16, 10, 14, 18, 14, 18, 14, 14, 10, 12, 10, 10] });
+    sd.header(['Driver', 'Bookings', 'Completed', 'Gross revenue (AED)', 'Priced', 'Average fare (AED)', 'Bank collection (AED)',
+      'Money (AED)', 'Cash trips (including POS) (AED)', 'POS payments (AED)', 'Cash in hand (AED)', 'Cash trips', 'Not priced yet', 'Km', 'Days worked'],
+    ['text', 'int', 'int', 'money', 'int', 'money', 'money', 'money', 'money', 'money', 'money', 'int', 'int', 'int', 'int']);
     const priced = Number(mine?.priced_trips) || 0;
     sd.row([h('ID', person.name || person.account || mine?.driver_name || ''), Number(mine?.trips) || 0, Number(mine?.completed) || 0,
       h('REV', priced ? r2(mine.revenue) : null), priced, h('REV', priced ? r2(Number(mine.revenue) / priced) : null),
-      h('EARN', r2(mine?.payout)), h('EARN', r2(mine?.money)), h('CASH', cashTaken), cashTrips, cashUnpriced,
+      /* Bank collection adds the POS payments, which come into the bank (the
+         operator, 2026-11-24), as the page's tile does. */
+      h('EARN', mine?.payout == null && !posPart ? null : r2((Number(mine?.payout) || 0) + posPart)), h('EARN', r2(mine?.money)),
+      h('CASH', inclPos), h('CASH', posPart), h('CASH', inHand), cashTrips, cashUnpriced,
       mine?.km == null ? null : Number(mine.km), Number(mine?.days) || 0]);
     if (!mine) sd.text('No booking of theirs is on record for these dates and filters.', 'dim');
+    rm.blank();
+    rm.text(`Driver sheet — POS payments are ${pos?.n ? `${pos.n} hotel fare${pos.n === 1 ? '' : 's'} paid on the driver's card machine` : 'no hotel fare on the card machine'}`
+      + (part.card != null ? ` plus what card payments (Network International) paid of the cash fares from ${net.from > '2026-08-01' ? net.from : '2026-08-01'}`
+        + `${net.card_to && net.card_to < to ? ` to ${net.card_to}, the card sheet's last day` : ''}`
+        : `; card payments are not taken off: ${part.absent}, so Cash in hand is at most this`)
+      + '. POS payments go to the bank; Cash in hand is what is left in notes.', 'dim');
   }
 
   /* ── Cash to collect ─────────────────────────────────────────────────── */

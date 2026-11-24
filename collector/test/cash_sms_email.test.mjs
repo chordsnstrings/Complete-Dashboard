@@ -10,7 +10,7 @@
      2. what cannot be said is said to be unknown: a split not kept, cash on a
         platform the text left out, a text the gateway reported undelivered,
         drivers with cash who were not texted (counted, by reason);
-     3. it waits for the cash text run to finish, and at 09:15 goes anyway,
+     3. it waits for the cash text run to finish, and at 20:15 goes anyway (09:15 until CARD-4),
         saying why the list is short or empty;
      4. each address gets a day's list once; a failed send is retried; with
         no address set nothing is sent.
@@ -146,7 +146,9 @@ const http = async (url, opt) => {
   posts.push({ url, headers: opt.headers, body: JSON.parse(opt.body) });
   return resendStatus === 200 ? { status: 200, data: { id: `re_${posts.length}` } } : { status: resendStatus, data: { message: 'down' } };
 };
-check('09:15 Dubai the morning after is the last call', lastCall(D).toISOString() === '2026-09-30T05:15:00.000Z', lastCall(D).toISOString());
+/* CARD-4: the cash text waits for the card sheet until 20:00, so the email's
+   last call is 20:15 the day after (it was 09:15). */
+check('20:15 Dubai the day after is the last call', lastCall(D).toISOString() === '2026-09-30T16:15:00.000Z', lastCall(D).toISOString());
 check('the address from the setting, lower-cased, and a non-address ignored',
   j(cashRecipients('Desk@Example.test, nope, desk@example.test;x@y.ae')) === '["desk@example.test","x@y.ae"]');
 
@@ -155,7 +157,9 @@ await runRow('held', 'waiting', { finished: false, missing_catchup: ['egari'], u
 let r = await cashEmailRun({ q, http, day: D, now: new Date('2026-09-30T04:00:00Z') });
 check('08:00, the cash text run still waiting: nothing sent yet', r.waiting === true && posts.length === 0, j(r));
 r = await cashEmailRun({ q, http, day: D, now: new Date('2026-09-30T05:15:00Z') });
-check('…and at 09:15 it goes anyway', r.sent === 1 && posts.length === 1, j(r));
+check('…nor at 09:15, the old last call: the run may be waiting for the card sheet', r.waiting === true && posts.length === 0, j(r));
+r = await cashEmailRun({ q, http, day: D, now: new Date('2026-09-30T16:15:00Z') });
+check('…and at 20:15 it goes anyway', r.sent === 1 && posts.length === 1, j(r));
 check('…saying why the list may be short', posts[0]?.body.html.includes('still waiting for Uber’s figures')
   && posts[0]?.body.html.includes('Uber Egari had not caught up'), posts[0]?.body.text.slice(0, 300));
 check('the Resend call: one address, the sender, the day’s idempotency key',
@@ -167,8 +171,8 @@ check('the Resend call: one address, the sender, the day’s idempotency key',
    REVERSION: stop reading cash_email_send before sending -> 34 passed,
    1 FAILED ("…and a second run the same morning sends nothing"). */
 console.log('\n4. once per address, and retried when it failed');
-r = await cashEmailRun({ q, http, day: D, now: new Date('2026-09-30T05:30:00Z') });
-check('…and a second run the same morning sends nothing', r.due === 0 && posts.length === 1, j(r));
+r = await cashEmailRun({ q, http, day: D, now: new Date('2026-09-30T16:30:00Z') });
+check('…and a second run the same day sends nothing', r.due === 0 && posts.length === 1, j(r));
 
 const D2 = '2026-09-28';
 await q(`INSERT INTO sms_outbox (kind, dedupe_key, status, business_day, detail) VALUES ('cash_run', $1, 'sent', $2, '{"finished":true}')`, [`cash-run:${D2}`, D2]);
@@ -187,9 +191,20 @@ console.log('\n5. nothing to say, said');
 check('no run recorded for the day: said, not an empty table read as nobody owing',
   /did not record finishing for this day .* and nobody was texted\./.test(runNote({ run: null, drivers: [] }))
   && /so this list is only the drivers it had texted before it stopped\./.test(runNote({ run: null, drivers: [{}] })));
-check('the run gave up at 09:00: nobody texted, and why',
-  /Nobody was texted for this day: Uber’s figures for it were still not complete at 09:00 \(Uber Ecosine had not caught up\), and 3 Uber cash trips were still without Uber’s own amount\./
+check('the run gave up: nobody texted, and why',
+  /Nobody was texted for this day: Uber’s figures for it were still not complete at the run’s last try \(Uber Ecosine had not caught up\), and 3 Uber cash trips were still without Uber’s own amount\./
     .test(runNote({ run: { status: 'held', reason: 'not_complete', finished: true, missing_catchup: ['ecosine'], without_figure: 3 } })));
+/* CARD-4: the run waits for the card payments sheet to have the day. */
+check('still waiting for the card sheet when it went: said, with the day the sheet ends on',
+  /still waiting when this email went: the card payments sheet ended on 2026-09-28/.test(runNote({ run: { status: 'held', reason: 'waiting_for_card_sheet', finished: false, missing_catchup: [], card_sheet_to: '2026-09-28' } })));
+check('…and given up on at 20:00: nobody texted, and why',
+  /^Nobody was texted for this day: the card payments sheet ended on 2026-09-28, and a text with that day’s card payments left in/.test(runNote({ run: { status: 'held', reason: 'card_sheet_not_ready', finished: true, missing_catchup: [], card_sheet_to: '2026-09-28' } })));
+{
+  const withCard = renderCashEmail({ ...f, drivers: f.drivers.map((x, i) => (i ? x : { ...x, card_paid: 25 })), card_total: 25 });
+  check('a driver whose card paid part of the cash: "less card" under the split, and the total card on the platform line',
+    /less card&nbsp;&nbsp;<span class="n">25\.00/.test(withCard.html) && /, less card 25\.00/.test(withCard.text)
+    && /less card payments AED 25\.00/.test(withCard.text), withCard.text.slice(0, 500));
+}
 check('switched off: said', /switched off/.test(runNote({ run: { status: 'held', reason: 'switched_off', finished: true, missing_catchup: [] } })));
 const empty = renderCashEmail({ day: '2026-09-27', run: null, drivers: [], total: 0, by_platform: [], unsplit: 0, not_texted: [] });
 check('…and an empty day’s email says nobody was texted, with no table', empty.subject.endsWith('nobody texted')

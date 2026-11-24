@@ -238,9 +238,9 @@ check('…and that count is the one the table below actually flags',
 /* ── 3. #finance's payout tile ───────────────────────────────────────────── */
 console.log('\n#finance no longer names two platforms over a figure holding one');
 await open('#finance',
-  () => [...document.querySelectorAll('.kpi .l')].some((l) => /Platform payouts/.test(l.textContent)));
+  () => [...document.querySelectorAll('.kpi .l')].some((l) => /Bank collection/.test(l.textContent)));
 const finTiles = await tiles();
-const payTile = finTiles.find((k) => k.label === 'Platform payouts');
+const payTile = finTiles.find((k) => k.label === 'Bank collection');
 check('the tile is on the page', !!payTile, finTiles.map((k) => k.label).join(' | '));
 /* THE DEFECT IS FIXED BY THE FIGURE NOW, NOT BY THE CAPTION.
    ─────────────────────────────────────────────────────────────────────────

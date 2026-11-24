@@ -27,7 +27,7 @@ import { el, esc, panel, note, loading, tableFrom, entity,
 import { cardMachineFleet } from './card_panel.js';
 import { fmt, areaChart } from './charts.js';
 import { api } from './data.js';
-import { ledgerBand, ceiling, ceilingWho, ceilingCol, lastCashCol, ceilingRanked, monthBars, amountBands,
+import { ledgerBand, ceiling, ceilingWho, ceilingCol, lastCashCol, ceilingRanked, monthBars, amountBands, cardWords,
   firstReason, booksRecorded } from './ledger_ak.js';
 import { entryForm } from './entry_form.js';
 import { aed, loadPeople } from './deposit_core.js';
@@ -56,8 +56,9 @@ export async function renderDeposits(root) {
      band. One extra GET: the handovers on record. */
   const ak = contract();
   const AK = ak ? ledgerBand() : null;
-  const top = ak ? panel('Who is carrying the most', 'The cash-fare ceiling — every cash fare on record in a driver’s hand, '
-    + 'never a balance. The twenty largest; the drivers with none as one count.', 'deposit-top') : null;
+  const top = ak ? panel('Who is carrying the most', 'The cash-fare ceiling — every cash fare on record in a driver’s hand, less what '
+    + 'card payments settled of the fares from 1 Aug 2026 where that is known (each row says when it is not) — never a balance. '
+    + 'The twenty largest; the drivers with none as one count.', 'deposit-top') : null;
   const after = ak ? el('div') : null;
   const handP = ak ? api('/api/ledger/entries?type_code=cash_deposit').catch(() => null) : null;
   /* The ceiling and its carriers, cut at each of the last twelve weeks' ends
@@ -68,11 +69,13 @@ export async function renderDeposits(root) {
      did not load rather than that there is no history. */
   const histP = ak ? api('/api/history?page=deposits').catch(historyFailed) : null;
   /* Card-machine payments (FIX-STATUS CARD-1): the money a driver took on a
-     card machine rather than in notes — beside the cash figures, not yet
-     taken off them (phase 3 waits on the operator's review). */
+     card machine rather than in notes. From 1 Aug 2026 what card paid of the
+     cash fares is taken off the ceiling above (CARD-3b). Placed before the
+     distributions and the † band, which closes the page (it was after it,
+     unseen because the browser suites do not run in CI). */
   const cardP = panel('Card machine payments — Network International', 'What drivers took on card machines rather than in cash, '
-    + 'from the sheet the team keeps. Shown beside the cash figures; not yet taken off them.', 'deposit-card');
-  if (ak) { root.append(AK.band, head.panel, top.panel, listPanel.panel, after, cardP.panel); loading(AK.tiles); }
+    + 'from the sheet the team keeps. From 1 Aug 2026, what card paid of the cash fares is taken off the ceiling above.', 'deposit-card');
+  if (ak) { root.append(AK.band, head.panel, top.panel, listPanel.panel, cardP.panel, after); loading(AK.tiles); }
   else root.append(head.panel, listPanel.panel, cardP.panel);
   loading(listPanel.body);
   loading(cardP.body);
@@ -170,7 +173,8 @@ function depositsContract(AK, top, after, root, people, d, hand, hist) {
   const handed = hand?.totals ? hand.totals.rows : null;
   glance(AK.tiles, [
     c.n ? { label: 'Ceiling on cash outstanding', value: aed(c.sum), hero: true,
-      sub: `every cash fare on record, not a balance · ${ceilingWho(c)} · ${fmt(c.trips)} cash trips, ${c.from} to ${c.to}`,
+      sub: `cash fares on record${cardWords(c) ? `, ${cardWords(c)}` : ''}, not a balance · `
+        + `${ceilingWho(c)} · ${fmt(c.trips)} cash trips, ${c.from} to ${c.to}`,
       ...(hist ? lineFor(hist, 'cash_ceiling') : {}) }
       : { label: 'Ceiling on cash outstanding', hero: true, na: 'no cash-marked trip is on record for anyone here' },
     known ? { label: 'Cash actually in hand', value: `${fmt(known)} of ${fmt(n)} known`,

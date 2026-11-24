@@ -354,7 +354,7 @@ export async function renderDriverLedger(root, id, prof) {
          channels are in it and which are missing from it, and the value
          carries "at least" when any channel is silent, because a figure that
          omits a channel the driver worked is a floor and not a total. */
-      { label: 'Income',
+      { label: 'Net earnings',
         value: ow.earned == null ? '—'
           : ((ow.accounts_silent || []).length ? 'at least ' : '') + aed(ow.earned),
         sub: ow.earned == null ? ow.earned_absent_reason
@@ -390,12 +390,17 @@ export async function renderDriverLedger(root, id, prof) {
     winP.body.append(el('p', 'cap', `Cash taken is ${esc(aed(t.cash_fares))} of cash fares`
       + (t.cash_advance_rows ? `, plus ${esc(aed(t.cash_advance))} advanced` : '')
       + (t.cash_deposit_rows ? `, less ${esc(aed(Math.abs(Number(t.cash_deposit))))} handed back` : '')
+      /* CARD-3b: what card payments settled of the cash fares from 1 Aug 2026. */
+      + (+t.card_paid > 0 ? `, less ${esc(aed(t.card_paid))} that card payments settled of the fares from ${esc(t.card_paid_from)}` : '')
       + `, over ${esc(midSentence(windowLabel()))}. It is what moved between these dates — not a balance, and `
       + 'not what they are holding now, which is the Still held tile above.'));
     if (!t.cash_advance_rows && !t.cash_deposit_rows) {
-      winP.body.append(note('Two of the three terms are absent: nothing is recorded in the cash '
-        + 'book for these dates, so this figure is cash fares alone. It is therefore a CEILING '
-        + 'on what they took, not a net — an advance nobody entered would raise it and a '
+      /* CARD-3b: card is a term too (the review of 2026-11-24: "cash fares
+         alone" was said of a figure card had been taken off). */
+      winP.body.append(note('Nothing is recorded in the cash book for these dates, so this figure is cash fares'
+        + (+t.card_paid > 0 ? ' less what card paid of them' : ' alone')
+        + (t.card_paid == null && t.card_absent_reason ? ` (card payments not taken off: ${t.card_absent_reason})` : '')
+        + '. It is therefore a CEILING on what they took, not a net — an advance nobody entered would raise it and a '
         + 'deposit nobody entered would lower it.', 'warn'));
     }
   }

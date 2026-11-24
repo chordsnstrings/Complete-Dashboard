@@ -62,7 +62,7 @@ const cashCell = (r) => (r.cash == null ? money(null)
    person opens at p<id>. */
 
 const sourceLine = (c) => `From the Network International card-payments sheet, last read ${c.read_at ? dtStr(c.read_at) : '—'}`
-  + `${c.covers_to ? `; it runs to ${c.covers_to}` : ''}. Not yet taken off the cash this driver holds — that change waits for review.`;
+  + `${c.covers_to ? `; it runs to ${c.covers_to}` : ''}. From 1 Aug 2026, what card paid of this driver's cash fares is taken off their cash-taken tiles and the ceiling; before then it is shown beside them.`;
 
 export async function cardMachineDriver(host, prof) {
   host.innerHTML = '';
@@ -173,7 +173,7 @@ export async function cardMachineFleet(host) {
   const rev = el('div'); host.append(rev);
   await reviewList(rev);
   host.append(el('p', 'cap', esc(`From the Network International card-payments sheet, last read ${s.read_at ? dtStr(s.read_at) : '—'}. `
-    + 'A negative amount is a chargeback. These payments are not yet taken off the cash any driver holds — that change waits for review.')));
+    + 'A negative amount is a chargeback, and never puts cash back. From 1 Aug 2026, what card paid of the cash fares is taken off the cash-fare ceiling and the driver tiles; before then it is shown beside them.')));
 }
 
 /* THE REVIEW: IDs not placed, and a link for whoever decides same-person
@@ -279,7 +279,7 @@ async function notesPreview(host) {
   let n;
   try { n = await api('/api/card/notes'); }
   catch (e) { host.append(note(`The cash-in-notes preview could not be read: ${e.message}`, 'bad')); return; }
-  host.append(el('h4', 'subhead', `Cash in notes — preview, ${n.from || '—'} to ${n.to || '—'}`));
+  host.append(el('h4', 'subhead', `Cash in notes, ${n.from || '—'} to ${n.to || '—'}`));
   if (n.why) { host.append(note(n.why, 'warn')); return; }
   const t = n.totals || {};
   host.append(kpiRow([
@@ -314,12 +314,9 @@ async function notesPreview(host) {
       { label: 'Not taken off', key: 'unexplained', num: true, render: (r) => money(r.unexplained) },
     ], { cards: true, cardLead: 'name' }));
   }
-  host.append(el('p', 'cap', esc('A preview for review: nothing else on this page uses it yet, and the cash-fare ceiling above still counts every cash fare. '
+  host.append(el('p', 'cap', esc('Approved from August (24 Nov 2026): the cash-fare ceiling above and each driver\'s cash-taken tile take off what card paid of the fares from 1 Aug 2026; this view also shows any earlier window, for reference only. '
     + 'Card payments pay the hotel\'s pos-driver fares first (those were never cash), then that day\'s cash fares, then the day before\'s (a fare paid after midnight). '
     + 'Card money beyond the fares is not taken off anything, and a chargeback does not put cash back (the fare comes back). '
-    + (n.whole_span
-      ? `Once approved, the ceiling would drop by the ${t.on_cash == null ? '—' : aed(t.on_cash)} paid by card.`
-      : `This window is not every card payment on record: over it, ${t.on_cash == null ? '—' : aed(t.on_cash)} of cash fares were paid by card; `
-        + 'what approval would take off the ceiling is the same figure over every card payment.'))));
+    + `Over this window, ${t.on_cash == null ? '—' : aed(t.on_cash)} of cash fares were paid by card; the ceiling takes off the part of it from 1 Aug 2026 on.`)));
 }
 

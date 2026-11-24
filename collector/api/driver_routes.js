@@ -12,6 +12,7 @@
    is a worse failure than showing the same person twice. */
 
 import { win, winDays } from './window.js';
+import { cardNet, cardPartFor, dubaiToday, NET_FROM } from '../src/card_notes.js';
 /* One definition of an online span, shared with /api/supply/heat and with the
    rollup that writes driver_day.online_min. Four private copies of it had
    drifted into the same defect at once; see the module header for the
@@ -2128,6 +2129,41 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               round(sum(cash_amount)::numeric, 2) AS cash_taken,
               count(*) FILTER (WHERE cash_amount IS NULL)::int AS cash_unvalued
          FROM trip_cash WHERE ${TW}`, p);
+    /* CARD-3b: what card payments settled of this window's cash fares from
+       NET_FROM comes off the tile, as it does off the ceiling and the money
+       tab (src/card_notes.js). */
+    const [kFrom, kTo] = winDays(req);
+    /* The driver page asks by ACCOUNT (?id=), so the person is looked up from
+       the spine for the resolved accounts, as the money tab's register does
+       (the review of 2026-11-24: read only from ?person=, the tile never took
+       card off on a real page and said the account was on no person). */
+    let kPerson = d.person_id ?? null; let kWhy = null;
+    if (kPerson == null) {
+      const pr = await q(`SELECT DISTINCT driver_id::text AS p FROM driver_platform_id
+                           WHERE external_id = ANY($1::text[]) AND detached_at IS NULL`, [d.ids || []])
+        .catch((e) => { kWhy = `the person register could not be read (${String(e.message || e).slice(0, 120)})`; return []; });
+      if (pr.length === 1) kPerson = Number(pr[0].p);
+      else if (!kWhy) kWhy = pr.length ? 'this account is on more than one person, so whose card payments are whose is not settled'
+        : 'this account is on no person, so no card payment can be placed on it';
+    }
+    const kNet = kPerson != null
+      ? await cardNet(q, [kPerson], { from: kFrom, to: [kTo, dubaiToday()].sort()[0] })
+        .catch((e) => ({ from: NET_FROM, by: new Map(), absent: `the card payments could not be read (${String(e.message || e).slice(0, 120)})` }))
+      : { from: NET_FROM, by: new Map(), absent: kWhy };
+    const kPart = cardPartFor(kNet, kPerson);
+    const kCard = kPart.card;
+    /* "CASH TRIPS (INCLUDING POS)" AND "CASH IN HAND" (the operator,
+       2026-11-24: "POS directly comes to our bank. So it should be deducted
+       from the Cash held with the driver. Which is why Total Cash trip
+       (including POS) was the rename. We can add another one where Cash In
+       Hand which is Cash Trips - POS deposits"). The hotel channel files a
+       fare paid on the driver's own card machine 'pos-driver', never cash, so
+       it is read here and added to the cash trips; the POS part is those fares
+       plus what card payments paid of the cash fares (from NET_FROM, above);
+       cash in hand is the rest — the cash fares less what card paid of them. */
+    const [posK] = await q(
+      `SELECT count(*)::int AS pos_trips, round(sum(price)::numeric, 2) AS pos_fares
+         FROM trip_ext WHERE ${TW} AND lower(coalesce(payment_type, '')) = 'pos-driver' AND outcome = 'completed'`, p);
 
     const num = (v) => (v == null ? null : Number(v));
     const hoursOnline = num(kept?.online_h);
@@ -2189,6 +2225,23 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       cash_booking_value: num(cashTrips?.cash_booking_value),
       cash_trips: taken?.cash_trips ?? 0,
       cash_taken: num(taken?.cash_taken),
+      pos_trips: posK?.pos_trips ?? 0,
+      pos_fares: num(posK?.pos_fares),
+      /* POS PAYMENTS, its own tile (the operator, 2026-11-24: "driver page
+         should have POS payment as a separate modal"): what went to the bank
+         by card machine — the hotel's card-machine fares plus the card
+         payments (Network International) that paid cash trips, from
+         NET_FROM. So Cash trips (including POS) − POS payments = Cash in
+         hand. Card on the sheet that matched no fare is said beside it, never
+         taken off. */
+      pos_payments: Math.round(((num(posK?.pos_fares) || 0) + (kCard || 0)) * 100) / 100,
+      pos_card_total: kCard == null ? null : (kNet.by.get(String(kPerson))?.card ?? 0),
+      pos_card_unmatched: kCard == null ? null : (kNet.by.get(String(kPerson))?.unexplained ?? 0),
+      cash_in_hand: taken?.cash_taken == null ? null : Math.round((num(taken.cash_taken) - (kCard || 0)) * 100) / 100,
+      cash_in_hand_card: kCard,
+      cash_in_hand_card_from: kNet.from,
+      cash_in_hand_card_to: kCard == null ? null : kNet.card_to,
+      cash_in_hand_card_absent_reason: kPart.absent,
       cash_unvalued: taken?.cash_unvalued ?? 0,
       cash_booking_platforms: cashTrips?.cash_booking_platforms ?? [],
       hours_online: hoursOnline,

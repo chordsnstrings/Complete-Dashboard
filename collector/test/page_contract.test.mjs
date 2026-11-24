@@ -662,7 +662,7 @@ const OVR = () => {
       'Top drivers', '† What this page does not know']), JSON.stringify(r.heads));
   check('00 leads the page, and the verdict is its statement (ruling 7)', r.first === 'cband' && r.vdctIn00, r.first);
   check('all seven tiles, Trips the hero — Money in, Vehicles and Safety alerts kept (rule 1)',
-    r.glance === 7 && r.hero === 'Trips' && ['Money in', 'Vehicles', 'Safety alerts'].every((l) => r.labels.includes(l)),
+    r.glance === 7 && r.hero === 'Trips' && ['Net earnings', 'Vehicles', 'Safety alerts'].every((l) => r.labels.includes(l)),
     JSON.stringify(r.labels));
   check('five deltas on a calendar period, each a real delta', r.deltas.length === 5
     && r.deltas.every((c) => /dlt-(positive|negative|neutral)/.test(c)), JSON.stringify(r.deltas));

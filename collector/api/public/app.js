@@ -405,7 +405,7 @@ const VIEWS = [
   { id: 'unit', label: 'Money per car and driver', ic: '◆', sec: 'Money', sub: 'What each car and driver earned per day, per km and per trip, including zero earners' },
   { id: 'revenue', label: 'Money by platform', ic: '◇', sec: 'Money', sub: 'What each platform reports about money, and which ones report nothing' },
   { id: 'corporate', label: 'Corporate & hotels', ic: '❖', sec: 'Money', sub: 'Hotel and company bookings, with the cost of each ride as well as its price' },
-  { id: 'finance', label: 'Money in and out', ic: '◈', sec: 'Finance', sub: 'Money in, how riders paid, and every fee, bonus and adjustment on record' },
+  { id: 'finance', label: 'Money in and out', ic: '◈', sec: 'Finance', sub: 'Net earnings, how riders paid, and every fee, bonus and adjustment on record' },
   /* The register the finance team asked for in as many words: "how much got
      into the account, which date, from the source exactly". Above Bank
      reconciliation because it is what reconciliation is done AGAINST. */
@@ -476,7 +476,7 @@ const VIEWS = [
      answer. They rank a week; this one measures each driver against their OWN
      record, so a steadily excellent driver never appears on it and one in the
      middle who has quietly halved does. */
-  { id: 'performance', label: 'Better or worse', ic: '◲', sec: 'People', sub: 'Every active driver ranked on jobs and on trip value separately, and who is doing something different from what they usually do' },
+  { id: 'performance', label: 'Better or worse', ic: '◲', sec: 'People', sub: 'Every active driver ranked on jobs and on gross revenue separately, and who is doing something different from what they usually do' },
   { id: 'retention', label: 'Joiners & leavers', ic: '⇅', sec: 'People', sub: 'Whether the driver count fell because people left or because nobody joined' },
   { id: 'compliance', label: 'Compliance', ic: '❑', sec: 'People', sub: 'Driver licences and vehicle papers, and when each one expires' },
   /* Beside Compliance, because it is where most of that page's documents now
@@ -1416,11 +1416,11 @@ async function overviewContract(root) {
     ? { ...base.Distance, na: 'no booking in this range carries a distance', sub: null }
     : { ...base.Distance, spark: series('km'), delta: dl('km') };
   const value = k.revenue == null || !k.priced_trips
-    ? { ...base['Trip value'], na: 'no booking in this range carries a price', sub: null }
-    : { ...base['Trip value'], spark: series('revenue'), delta: dl('fares') };
+    ? { ...base['Gross revenue'], na: 'no booking in this range carries a price', sub: null }
+    : { ...base['Gross revenue'], spark: series('revenue'), delta: dl('fares') };
   const moneyIn = !k.accounted
-    ? { ...base['Money in'], na: 'no fare and no payout statement in this range', sub: null }
-    : { ...base['Money in'], delta: dl('money'),
+    ? { ...base['Net earnings'], na: 'no fare and no payout statement in this range', sub: null }
+    : { ...base['Net earnings'], delta: dl('money'),
       spark: 'No daily line: most of this is weekly payout statements, which have no day-by-day figure.' };
   const completion = k.completed_trips == null
     ? { ...base.Completion, na: 'no channel in this range reports how its bookings ended', sub: null }
@@ -1551,7 +1551,7 @@ async function overviewContract(root) {
     { label: 'Bookings not yet priced', fig: unpriced == null ? null : fmt(unpriced), hl: true,
       none: 'Not counted',
       why: unpriced == null ? 'The kpis answer carries no priced count for this window.'
-        : `${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings carry a price, and Trip value is over those alone. `
+        : `${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings carry a price, and Gross revenue is over those alone. `
           + `${UBER_FARE_WHY}, so the newest Uber bookings are priced only after it; a booking cancelled `
           + 'without a fee has no price to carry.' },
     { label: 'Bookings carrying no distance', fig: noKm == null ? null : fmt(noKm), none: 'Not counted',
@@ -1567,12 +1567,12 @@ async function overviewContract(root) {
           v.partial ? `${fmt(v.partial)} had at least one source silent, so their bars are understated.` : '',
           'Collection gaps names which source and when.'].filter(Boolean).join(' ')
         : 'Every source filed on every day in this window.' },
-    { label: 'Money in, day by day', fig: null, none: 'No series',
+    { label: 'Net earnings, day by day', fig: null, none: 'No series',
       why: k.accounted_statements
         ? `${money(k.accounted_statements)} of the ${money(k.accounted)} is payout statements, which a platform `
-          + 'files a week at a time, so Money in has no day-by-day figure. Trip value is the daily money line: '
+          + 'files a week at a time, so Net earnings has no day-by-day figure. Gross revenue is the daily money line: '
           + 'what riders paid, booking by booking.'
-        : 'Money in has no day-by-day series on this page; Trip value, what riders paid per booking, is the daily money line.' },
+        : 'Net earnings has no day-by-day series on this page; Gross revenue, what riders paid per booking, is the daily money line.' },
   ]);
 
   /* ── the footer's colophon (the basis is the provenance line, which the
@@ -1594,8 +1594,8 @@ function overviewTiles(k) {
      joined by nothing at all — a reader who doubted the figure had to find the
      page in the sidebar and hope it was the right one. */
   const GO = {
-    Trips: href('demand'), Distance: href('vehicles'), 'Money in': href('revenue'),
-    'Trip value': href('revenue'),
+    Trips: href('demand'), Distance: href('vehicles'), 'Net earnings': href('revenue'),
+    'Gross revenue': href('revenue'),
     Completion: href('platforms'), Vehicles: href('vehicles'), 'Safety alerts': href('safety'),
   };
   return [
@@ -1634,12 +1634,12 @@ function overviewTiles(k) {
        585,058 of money in — the difference is the platforms' commission and the
        bookings nobody priced. The two tiles are not two opinions about one
        number, and the sub-lines say which is which. */
-    ['Trip value', money(k.revenue),
+    ['Gross revenue', money(k.revenue),
       k.priced_trips
         ? `what riders paid · ${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings`
           + ` carry a price (${pct(k.priced_pct, 1)})`
         : 'no booking in this range carries a price'],
-    ['Money in', k.accounted ? money(k.accounted) : '—',
+    ['Net earnings', k.accounted ? money(k.accounted) : '—',
       k.accounted
         ? [k.accounted_statements ? `${money(k.accounted_statements)} in statement net` : null,
           k.accounted_fares ? `${money(k.accounted_fares)} in fares` : null,
@@ -3933,7 +3933,7 @@ function financeTiles({ k, settle, cash, tipAll, tipTotal, fareTotal, coverage }
        trip table — which for this fleet is the hotel and Yango channels and
        nothing else, because the Uber export has no fare column. A page titled
        Finance opened on a number covering 9% of the work. */
-    { label: 'Money in', value: money(k.accounted),
+    { label: 'Net earnings', value: money(k.accounted),
       sub: k.payout_coverage_pct != null && k.payout_coverage_pct < 90
         ? `fares plus platform payouts — payouts cover ${pct(k.payout_coverage_pct, 0)} of the window`
         : 'fares plus platform payouts',
@@ -3997,15 +3997,28 @@ function financeTiles({ k, settle, cash, tipAll, tipTotal, fareTotal, coverage }
           : bases.every((b) => /fares/.test(b)) ? 'counted on their fares instead'
             : 'counted on their own statements and fares instead';
       const on = who ? `${who} being ${how}` : how;
-      return { label: 'Platform payouts', value: money(wired),
-        sub: k.payout_days
+      /* POS PAYMENTS COME INTO THE BANK TOO (the operator, 2026-11-24: "Bank
+         Collection should add POS payment as well"): the hotel's card-machine
+         fares and the card payments that paid cash trips (from 1 Aug 2026),
+         both from /api/settlement/mix. */
+      const posFares = settle?.pos_driver?.revenue != null ? +settle.pos_driver.revenue : 0;
+      const posCard = settle?.pos_card?.on_cash != null ? +settle.pos_card.on_cash : 0;
+      const posAll = posFares + posCard;
+      const posWords = posAll
+        ? ` · plus ${money(posAll)} of POS payments: ${money(posFares)} hotel fares on the card machine`
+          + `${settle?.pos_card?.on_cash != null ? ` and ${money(posCard)} of card payments that paid cash trips (fares from ${settle.pos_card.from})` : ''}`
+        : '';
+      const posWhy = settle?.pos_card?.absent ? ` · card payments not added: ${settle.pos_card.absent}` : '';
+      return { label: 'Bank collection', value: wired == null && !posAll ? money(wired) : money((wired || 0) + posAll),
+        sub: (k.payout_days
           ? `wired by ${(k.payout_platforms || []).map(sourceLabel).join(', ')} · `
             + `${countOf(k.payout_days, 'day')}, ${countOf(k.payout_drivers, 'driver')}`
             + (elsewhere
               ? ` — ${money(elsewhere)} of it is not counted as income here, ${on}, `
                 + 'so the same work is not counted twice'
               : '')
-          : 'no payout statement covers this range' };
+          : (posAll ? 'at least: no payout statement covers this range, so only the POS payments are here' : 'no payout statement covers this range'))
+          + posWords + posWhy };
     })(),
     /* The statement view beside the bank view. What the fleet EARNED on trip
        (gross minus commission, from the platform's statement reports) vs what
@@ -4070,13 +4083,20 @@ function financeTiles({ k, settle, cash, tipAll, tipTotal, fareTotal, coverage }
       const classified = Number.isFinite(total) ? total - unl
         : (settle.classes || []).reduce((a, c) => a + (+c.trips || 0), 0);
       const any = +k.trips > 0 || classified > 0;
-      return { label: 'Cash collected — measured portion',
-        value: cash ? (cash.revenue == null ? 'not reported' : money(cash.revenue))
-          : (classified > 0 ? money(0) : '\u2014'),
+      /* "INCLUDING POS" (the operator, 2026-11-24): the hotel's fares paid on
+         the driver's own card machine are added (/api/settlement/mix
+         pos_driver) — every cash trip, whichever way the rider paid at the car. */
+      const pos = settle.pos_driver || null;
+      const posRev = pos && pos.revenue != null ? +pos.revenue : 0;
+      const posWords = pos && pos.trips ? ` · plus ${money(posRev)} from ${fmt(pos.trips)} hotel bookings paid on the driver’s card machine (POS)` : '';
+      return { label: 'Cash trips (including POS) — measured portion',
+        value: cash ? (cash.revenue == null ? 'not reported' : money(+cash.revenue + posRev))
+          : (pos && pos.trips ? money(posRev) : (classified > 0 ? money(0) : '\u2014')),
         sub: cash
           ? `the ${fmt(cash.priced_trips)} of ${fmt(cash.trips)} cash bookings that report a fare `
             + `(${pct(cash.trips ? (cash.priced_trips / cash.trips) * 100 : 0, 1)}) — the rest are `
-            + 'real money with no figure attached'
+            + `real money with no figure attached${posWords}`
+          : pos && pos.trips ? `no cash booking; ${fmt(pos.trips)} hotel bookings were paid on the driver’s card machine (POS)`
           : classified > 0
             ? `none of the ${fmt(classified)} bookings in this range whose settlement route is `
               + 'recorded was paid in cash'
@@ -4459,7 +4479,7 @@ async function financeClassic(root) {
      statement's net where a channel filed one, its fares where it did not,
      at Dubai-day grain. That is what this draws, with the metered share and
      the grain said underneath rather than left for a reader to assume. */
-  const rev = panel('Money in per day',
+  const rev = panel('Net earnings per day',
     'Everything the fleet was paid, by the day it was earned — the platforms\u2019 own '
     + 'statements where they file one, and the metered fare where they do not'); g.append(rev.panel);
   const pay = panel('Payment mix', 'Cash vs card vs wallet — cash is money the fleet has to collect'); g.append(pay.panel);
@@ -4554,8 +4574,8 @@ async function financeClassic(root) {
       `Fares cover ${pct(k.priced_pct, 1)} of trips — the other ${fmt(k.trips - k.priced_trips)} ` +
       `carry no fare at all, because Uber's trip export omits them and telematics trips have none. ` +
       `That work is paid for, and the money arrives as weekly platform statements rather than per-trip ` +
-      `fares, which is what Platform payouts counts. The two are different measurements — a fare is what ` +
-      `a rider paid, a payout is a statement net of the platform's commission — so Money in is their sum ` +
+      `fares, which is what Bank collection counts. The two are different measurements — a fare is what ` +
+      `a rider paid, a payout is a statement net of the platform's commission — so Net earnings is their sum ` +
       `and every tile below it is over fares only.`));
   }
 
@@ -4633,13 +4653,13 @@ async function financeContract(root) {
   band.append(secHead('00', 'At a glance', windowLabel()), vHost, tilesHost);
   root.append(band);
   loading(tilesHost);
-  const rev = panel('Money in, day by day',
+  const rev = panel('Net earnings, day by day',
     'Everything the fleet was paid, by the day it was earned — the platforms’ own '
     + 'statements where they file one, and the metered fare where they do not', 'fin-money');
   root.append(rev.panel);
   const g1 = el('div', 'grid g2'); root.append(g1);
-  const tv = panel('Trip value a day', 'Gross fare on every priced booking — what riders were charged. Never added to Money in.', 'fin-tripvalue');
-  const po = panel('Platform payouts a day', 'What the platforms wired, by the day the work was done.', 'fin-payouts');
+  const tv = panel('Gross revenue a day', 'Gross fare on every priced booking — what riders were charged. Never added to Net earnings.', 'fin-tripvalue');
+  const po = panel('Bank collection a day', 'What the platforms wired, by the day the work was done.', 'fin-payouts');
   g1.append(tv.panel, po.panel);
   const pay = panel('How the rider paid', 'Cash vs card vs wallet — cash is money the fleet has to collect', 'fin-paymix');
   root.append(pay.panel);
@@ -4696,15 +4716,15 @@ async function financeContract(root) {
   const spark = (key, skip = () => false) => wholeDays(fr).map((r) => (r.nothing_recorded || skip(r) ? null : (r[key] == null ? null : +r[key])));
   const derived = (r) => !!r.money_derived;
   const { tiles: shown, dropped } = notRepeated([
-    { ...base['Money in'], hero: true, delta: fr.length ? finWow(fr, 'money', { skip: derived }) : null,
+    { ...base['Net earnings'], hero: true, delta: fr.length ? finWow(fr, 'money', { skip: derived }) : null,
       spark: fr.length ? spark('money', derived) : null },
-    { ...base['Platform payouts'], delta: fr.length ? finWow(fr, 'payout') : null, spark: fr.length ? spark('payout') : null },
+    { ...base['Bank collection'], delta: fr.length ? finWow(fr, 'payout') : null, spark: fr.length ? spark('payout') : null },
     base['On-trip revenue'],
-    base['Cash collected — measured portion'],
-    fin ? { label: 'Trip value booked', value: money(ft.fares),
-      sub: `gross fare on ${fmt(ft.priced_trips)} priced of ${fmt(ft.bookings)} bookings — what riders were charged, never added to Money in`,
+    base['Cash trips (including POS) — measured portion'],
+    fin ? { label: 'Gross revenue', value: money(ft.fares),
+      sub: `gross fare on ${fmt(ft.priced_trips)} priced of ${fmt(ft.bookings)} bookings — what riders were charged, never added to Net earnings`,
       delta: finWow(fr, 'revenue'), spark: spark('revenue') }
-      : { label: 'Trip value booked', na: 'the daily money series did not load' },
+      : { label: 'Gross revenue', na: 'the daily money series did not load' },
     fin && +ft.money_derived_part > 0 && opens.length
       ? { label: 'The open week', value: money(ft.money_derived_part),
         sub: opens.map((o) => `${sourceLabel(o.platform)} ${dayStr(o.open_start)} – ${dayStr(o.open_end)}, `
@@ -4739,7 +4759,7 @@ async function financeContract(root) {
     empty(tv.body, 'The daily money series did not load.');
     empty(po.body, 'The daily money series did not load.');
   } else {
-    gapBars(tv.body, fr.map((r) => ({ ...r, tv_gap: r.revenue == null })), { x: 'd', y: 'revenue', label: 'trip value',
+    gapBars(tv.body, fr.map((r) => ({ ...r, tv_gap: r.revenue == null })), { x: 'd', y: 'revenue', label: 'gross revenue',
       color: '--ink', gapKey: 'tv_gap', gapLabel: 'no priced booking on this day', valueFmt: (v) => money(v) });
     tv.body.append(el('p', 'cap', esc(`${money(ft.fares)} over the window, on ${fmt(ft.priced_trips)} of ${fmt(ft.bookings)} bookings that carry a fare of their own.`)));
     gapBars(po.body, fr.map((r) => ({ ...r, po_gap: r.payout == null })), { x: 'd', y: 'payout', label: 'payouts',
@@ -4800,8 +4820,8 @@ async function financeContract(root) {
         ? `Fares cover ${pct(k.priced_pct, 1)} of trips — the other ${fmt(k.trips - k.priced_trips)} `
           + 'carry no fare at all, because Uber’s trip export omits them and telematics trips have none. '
           + 'That work is paid for, and the money arrives as weekly platform statements rather than per-trip '
-          + 'fares, which is what Platform payouts counts. The two are different measurements — a fare is what '
-          + 'a rider paid, a payout is a statement net of the platform’s commission — so Money in is their sum '
+          + 'fares, which is what Bank collection counts. The two are different measurements — a fare is what '
+          + 'a rider paid, a payout is a statement net of the platform’s commission — so Net earnings is their sum '
           + 'and every tile below it is over fares only.'
         : k.priced_pct != null ? 'Nearly every trip in this range carries a fare of its own.' : 'No trip in this range carries a fare.' },
     { label: 'Money out', fig: null, none: 'No cost feed',
@@ -4814,7 +4834,7 @@ async function financeContract(root) {
         + 'channel’s own statement or fares — adding both would count it twice.'
         : 'Every payout wired in this range is counted as income.' },
   ]);
-  pageFoot({ colophon: [windowLabel(), k.accounted != null ? `${money(k.accounted)} money in` : null] }, root);
+  pageFoot({ colophon: [windowLabel(), k.accounted != null ? `${money(k.accounted)} net earnings` : null] }, root);
 }
 
 /* Safety — three pages, because "which car" and "which person" and "what kind
@@ -10329,7 +10349,7 @@ async function todayNow() {
           /* ' lb-hl': the strip's one emphasis, drawn locally (a rule and a
              weight step, no wash), so it does not count against the page's
              highlight budget (plan §3). The old band ignores the class. */
-          fact('trip value', tv.estimated ? `\u2248 ${money(tv.amount)}` : money(tv.amount), tv.sub, ' lb-hl');
+          fact('gross revenue', tv.estimated ? `\u2248 ${money(tv.amount)}` : money(tv.amount), tv.sub, ' lb-hl');
         }
       }
       /* The measured fares kept beside the estimate rather than replaced by
@@ -10347,7 +10367,7 @@ async function todayNow() {
          of leaving a reader to wonder why one figure disagrees with the one
          next to it. Measured 5 September: AED 24,118 in, AED 6,110 of fares. */
       if (t.money != null) {
-        fact('money in', money(t.money), moneyHalves(t) || null);
+        fact('net earnings', money(t.money), moneyHalves(t) || null);
       }
       /* Why that ratio is low at breakfast and high by lunch — a schedule, not
          a hole. See FARES_LAG. */
@@ -10380,7 +10400,7 @@ async function todayNow() {
     const fixed = 'Fares are the price on the bookings taken since midnight, not a share of a '
       + 'weekly statement.';
     const notes = [fixed, lag ? FARES_LAG : null,
-      t.projectionBasis ? `Trip value is ${t.projectionBasis}.` : null,
+      t.projectionBasis ? `Gross revenue is ${t.projectionBasis}.` : null,
       wiredNote(t, sourceLabel)].filter(Boolean);
     if (lb) {
       /* THE LIVEBAR. What the old band keeps in host.title — where a
@@ -10406,7 +10426,7 @@ async function todayNow() {
       + 'does not follow the filters above it. Fares are the price on the bookings taken '
       + 'since midnight, not a share of a weekly statement.'
       + (lag ? `\n\n${FARES_LAG}` : '')
-      + (t.projectionBasis ? `\n\nTrip value is ${t.projectionBasis}.` : '')
+      + (t.projectionBasis ? `\n\nGross revenue is ${t.projectionBasis}.` : '')
       + (wiredNote(t, sourceLabel) ? `\n\n${wiredNote(t, sourceLabel)}` : '');
     host.hidden = false;
   } catch {

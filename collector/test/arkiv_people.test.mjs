@@ -126,7 +126,7 @@ if (want('driver-overview')) {
     const tm = (st.metrics || []).find((m) => m.key === 'trips');
     check('00: Trips the hero, the working tiles first, the money on the second row — every old tile kept',
       s.hero === 'Trips' && s.labels.slice(0, 6).join('|') === 'Trips|Days worked|Hours online|Utilisation|Completion|Typical start'
-      && ['Money in', 'Cash on hand', 'Bank deposit', 'Fares'].every((l) => s.labels.includes(l)), JSON.stringify(s.labels));
+      && ['Net earnings', 'Cash on hand', 'Bank deposit', 'Fares'].every((l) => s.labels.includes(l)), JSON.stringify(s.labels));
     const d = await txtOf(page, '#view .kpis.glance .is-hero .t-d');
     const gap = Number(k.trips) - Number(tm.median);
     check('the hero\'s gap is its OWN figure against the standing\'s fleet median, worded (ruling 4)',
@@ -306,9 +306,13 @@ if (want('driver-earnings')) {
     /* ERN (2026-11-16): the operator asked for it on production, which can
        still draw this skin, so the old row carries it too. REVERSION: delete
        the actualEarningsTile(...) line from driver.js. */
-    check('old skin: seven tiles, Actual earnings directly after Platform earnings',
-      r.labels.length === 7 && r.labels.indexOf('Actual earnings') === r.labels.indexOf('Platform earnings') + 1
-      && r.labels.indexOf('Platform earnings') >= 0, JSON.stringify(r.labels));
+    /* Eight since 2026-11-24: Cash in hand beside Cash trips (including POS)
+       (the operator: "Cash In Hand which is Cash Trips - POS deposits"). */
+    check('old skin: nine tiles, Net earnings directly after Bank collection; Cash trips (including POS), POS payments, Cash in hand in a row',
+      r.labels.length === 9 && r.labels.indexOf('Net earnings') === r.labels.indexOf('Bank collection') + 1
+      && r.labels.indexOf('POS payments') === r.labels.indexOf('Cash trips (including POS)') + 1
+      && r.labels.indexOf('Cash in hand') === r.labels.indexOf('POS payments') + 1
+      && r.labels.indexOf('Bank collection') >= 0, JSON.stringify(r.labels));
     await ctx.close();
   }
   {
@@ -321,16 +325,23 @@ if (want('driver-earnings')) {
        REVERSION: delete the actualEarningsTile(...) line from driver.js and
        the count, the order and the value all fail; read k.reported_earnings
        for its value and the third fails. */
-    check('00: the seven tiles, booked revenue the hero, the same figures, untoned', s.glance === 7 && s.hero === 'Booked revenue'
-      && s.values['Booked revenue'] === aedOf(k.revenue) && (await toned(page)).length === 0, JSON.stringify(s.values));
+    check('00: the nine tiles, gross revenue the hero, the same figures, untoned', s.glance === 9 && s.hero === 'Gross revenue'
+      && s.values['Gross revenue'] === aedOf(k.revenue) && (await toned(page)).length === 0, JSON.stringify(s.values));
+    check('00: cash trips include the hotel\'s card-machine fares; cash in hand is the cash trips less the card that paid them',
+      s.values['Cash trips (including POS)'] === aedOf(+k.cash_taken + +k.pos_fares) && s.values['Cash in hand'] === aedOf(k.cash_in_hand)
+      && /less AED 100\.00 that card payments \(POS\) paid of them/.test(s.subs['Cash in hand'] || '')
+      && s.values['POS payments'] === aedOf(k.pos_payments) && /AED 50\.00 more on the card sheet matched no fare/.test(s.subs['POS payments'] || '')
+      && s.values['Bank collection'] === aedOf(+k.reported_earnings + +k.pos_payments)
+      && /plus the AED 370\.00 of POS payments \(the card machine\), which come into the bank/.test(s.subs['Bank collection'] || ''),
+    JSON.stringify([s.values['Bank collection'], s.subs['Bank collection'], s.values['Cash trips (including POS)'], s.values['POS payments'], s.subs['POS payments'], s.values['Cash in hand'], s.subs['Cash in hand']]));
     check('00: Actual earnings sits directly after Platform earnings',
-      s.labels.indexOf('Platform earnings') >= 0 && s.labels.indexOf('Actual earnings') === s.labels.indexOf('Platform earnings') + 1,
+      s.labels.indexOf('Bank collection') >= 0 && s.labels.indexOf('Net earnings') === s.labels.indexOf('Bank collection') + 1,
       JSON.stringify(s.labels));
     check('…reading day_money (Money in\'s figure), not the payout, and saying what is in it',
-      s.values['Actual earnings'] === aedOf(k.day_money) && s.values['Actual earnings'] !== aedOf(k.reported_earnings)
-      && /the driver\u2019s cash in hand included, not netted off/.test(s.subs['Actual earnings'] || '')
-      && /It is Money in on the Overview, the same figure/.test(s.subs['Actual earnings'] || ''),
-      JSON.stringify([s.values['Actual earnings'], aedOf(k.day_money), (s.subs['Actual earnings'] || '').slice(0, 90)]));
+      s.values['Net earnings'] === aedOf(k.day_money) && s.values['Net earnings'] !== aedOf(k.reported_earnings)
+      && /the driver\u2019s cash in hand included, not netted off/.test(s.subs['Net earnings'] || '')
+      && /It is Net earnings on the Overview, the same figure/.test(s.subs['Net earnings'] || ''),
+      JSON.stringify([s.values['Net earnings'], aedOf(k.day_money), (s.subs['Net earnings'] || '').slice(0, 90)]));
     const mix = answer('/api/driver/mix');
     const bar = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => /How riders paid/.test(x.querySelector('h3')?.textContent || ''));
       const segs = p ? [...p.querySelectorAll('svg rect[data-share], svg rect')].map((r) => r.getAttribute('fill') || r.style.fill) : [];
@@ -355,8 +366,8 @@ if (want('driver-earnings')) {
       '/api/driver/kpis': (_q, real) => ({ ...real, day_money: null, day_stmt_net: null, day_cash: null }) } });
     const s = await shape(page);
     check('no money record: Actual earnings absent with the true reason, not nought',
-      /^no platform statement and no priced booking covers this window, so what their \d[\d,]* bookings earned is not measured — the AED [\d,.]+ under Platform earnings is the payout report/.test(s.na['Actual earnings'] || '')
-      && !/AED 0/.test(s.values['Actual earnings'] || ''), JSON.stringify([s.na['Actual earnings'], s.values['Actual earnings']]));
+      /^no platform statement and no priced booking covers this window, so what their \d[\d,]* bookings earned is not measured — the AED [\d,.]+ under Bank collection is the payout report/.test(s.na['Net earnings'] || '')
+      && !/AED 0/.test(s.values['Net earnings'] || ''), JSON.stringify([s.na['Net earnings'], s.values['Net earnings']]));
     await ctx.close();
   }
 }
@@ -427,10 +438,10 @@ if (want('driver-record')) {
       return tabs && band ? !!(tabs.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING) : false; });
     check('the grain switch stays first; the verdict is the 00 statement', order && s.vdctIn00, String(order));
     check('ruling 7: no tile repeats the verdict\'s figure, and the rest of the positions are kept',
-      !Object.values(s.values).includes(f) && ['Position on jobs', 'Trip value', 'Position on value', 'Active days', 'Jobs a day'].every((l) => l in s.values || l in s.na),
+      !Object.values(s.values).includes(f) && ['Position on jobs', 'Gross revenue', 'Position on value', 'Active days', 'Jobs a day'].every((l) => l in s.values || l in s.na),
       JSON.stringify([f, s.values]));
     check('no tile toned, none a bare dash; every chart and the period table kept', (await toned(page)).length === 0 && !s.bare.length
-      && ['Jobs done, week by week', 'Trip value, week by week', 'Where they stood, week by week', 'Every period on record', 'How to read this'].every((h) => s.heads.includes(h)),
+      && ['Jobs done, week by week', 'Gross revenue, week by week', 'Where they stood, week by week', 'Every period on record', 'How to read this'].every((h) => s.heads.includes(h)),
       JSON.stringify(s.heads));
     await ctx.close();
   }
@@ -1091,7 +1102,7 @@ if (want('performance')) {
     check(`#${hash}: the verdict's figure is the active-driver count — that tile folds into it; Changed leads`, s.vdctIn00
       && !('Active drivers' in s.values) && (await vfig(page)) === n(S.drivers) && s.hero === 'Changed', JSON.stringify([s.hero, s.values]));
     check(`#${hash}: the tiles off the summary`, s.values['Jobs done'] === n(S.completed) && s.values.Changed === n(d.movers.length)
-      && (S.value == null ? 'Trip value' in s.na : s.values['Trip value'] === aedOf(S.value)), JSON.stringify(s.values));
+      && (S.value == null ? 'Gross revenue' in s.na : s.values['Gross revenue'] === aedOf(S.value)), JSON.stringify(s.values));
     check(`#${hash}: no tone, no bare dash`, (await toned(page)).length === 0 && !s.bare.length);
     const at = d.periods.findIndex((x) => x.period === d.period);
     const prev = d.period_complete && at > 0 ? [...d.periods.slice(0, at)].reverse().find((x) => x.complete) : null;

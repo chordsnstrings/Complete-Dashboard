@@ -218,7 +218,7 @@ async function tabOverview(root, plate, prof) {
        led with the price of its handful of hotel bookings while the platform
        paid for the rest of its work by the week. That money was already on the
        page, three panels down, under "attributed". */
-    { label: 'Money in', value: k.accounted ? money(k.accounted) : '—',
+    { label: 'Net earnings', value: k.accounted ? money(k.accounted) : '—',
       sub: k.accounted
         ? [k.accounted_statements ? `${money(k.accounted_statements)} in statement net` : null,
           k.accounted_fares ? `${money(k.accounted_fares)} in fares` : null,
@@ -404,12 +404,12 @@ function vovTiles(AKB, k, fleet) {
   const fr = fleet?.revenue_per_km != null ? Number(fleet.revenue_per_km) : null;
   const tiles = [
     k.accounted
-      ? { label: 'Money in', value: money(k.accounted), hero: true,
+      ? { label: 'Net earnings', value: money(k.accounted), hero: true,
         sub: [k.accounted_statements ? `${money(k.accounted_statements)} in statement net` : null,
           k.accounted_fares ? `${money(k.accounted_fares)} in fares` : null,
           k.accounted_payouts ? `${money(k.accounted_payouts)} attributed from platform payouts` : null,
         ].filter(Boolean).join(' · ') + ` · ${(k.accounted_platforms || []).map(sourceLabel).join(', ')}` }
-      : { label: 'Money in', hero: true, na: 'no fare and no payout reaches this vehicle in this range' },
+      : { label: 'Net earnings', hero: true, na: 'no fare and no payout reaches this vehicle in this range' },
     { label: 'Bookings', value: fmt(k.trips), sub: `${fmt(k.days_earning ?? k.days_worked)} earning days`
       + (k.telematics_journeys ? ` · ${fmt(k.telematics_journeys)} tracked journeys behind them` : '') },
     k.measured_trips
@@ -492,7 +492,7 @@ function vovDays(earnHost, bookHost, fixHost, daily, k) {
        plan's open question, not ruled here. */
     const sum = series.reduce((a, r) => a + r.revenue, 0);
     earnHost.append(el('p', 'cap', `The best day was ${dayStr(best.d)}, ${money(best.revenue)}; the last with a fare, ${dayStr(last.d)}, ${money(last.revenue)}. `
-      + `These are the fares riders were charged on every channel, before commission — ${money(sum)} over the window. They are not Money in, which counts a channel believed on its payout by that payout; `
+      + `These are the fares riders were charged on every channel, before commission — ${money(sum)} over the window. They are not Net earnings, which counts a channel believed on its payout by that payout; `
       + `and the Fares tile counts only the channels believed on their fares${k?.accounted_fares != null ? ` (${money(k.accounted_fares)})` : ''} — which of the two that tile should print is not yet ruled.`));
   } else earnHost.append(el('p', 'cap', 'No booking on this vehicle in this window reports a fare.'));
   const b = el('div'); bookHost.append(b);
@@ -605,8 +605,8 @@ function vovAbsence(root, k, mv, dd) {
       why: allNull(k) ? 'No utilisation report in this window covers this vehicle: utilisation, hours online, hours on trip, earnings per hour and trips per online hour are all empty for it.'
         : 'The utilisation report carries some hours for this vehicle and no utilisation share.' }] : []),
     { label: 'A channel statement for this car', fig: null, none: k.accounted_statements ? 'Counted' : 'None',
-      why: k.accounted_statements ? `${money(k.accounted_statements)} of statement net reaches this car and is in Money in.`
-        : 'No channel\u2019s statement net reaches this car in this window; its Money in is fares and attributed payouts.' },
+      why: k.accounted_statements ? `${money(k.accounted_statements)} of statement net reaches this car and is in Net earnings.`
+        : 'No channel\u2019s statement net reaches this car in this window; its Net earnings is fares and attributed payouts.' },
     ...(k.drivers ? [{ label: 'Whether its drivers are that many people', fig: null, none: `${fmt(k.drivers)} counted`,
       why: `Counted through the person register: accounts it joins are one person, and two it has not joined count twice. The custody list holds ${countOf((dd.totals || []).length, 'account')}.` }] : []),
   ];

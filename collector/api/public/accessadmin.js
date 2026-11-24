@@ -1407,13 +1407,14 @@ function settingsTab(host, ctx) {
     one(title, key, sel, sentence, () => sel.value,
       (v) => (v === 'off' ? `${what} are switched off. Nothing more is sent until you switch them on.` : `${what} are on.`), 'Sending');
   };
-  smsSwitch('sms_cash', 'Driver text: cash to deposit (05:00)',
-    'Every day at 05:00 Dubai, each driver who took cash yesterday is texted: “Please deposit AED X of Uber cash you '
-    + 'received yesterday. Talk to your supervisor on WhatsApp.” X is Uber’s own cash-collected figure and the fare on '
-    + 'the other channels, and the message names the channels it covers (“Uber and Yango cash”). A channel that did not '
-    + 'collect — Bolt, say — is left out and the rest is still sent. It waits until Uber’s figures for yesterday are in, '
-    + 'and gives up at 09:00 if they never are. The Messages page shows every message, what each left out, and every '
-    + 'one held back, with the reason.', 'Cash reminders');
+  smsSwitch('sms_cash', 'Driver text: cash to deposit (from 05:00)',
+    'Every day from 05:00 Dubai, each driver who took cash the day before is texted: “Please deposit AED X of Uber cash you '
+    + 'received on 23 Nov. Talk to your supervisor on WhatsApp.” X is Uber’s own cash-collected figure and the fare on '
+    + 'the other channels, less what card payments (Network International) paid of them that day, and the message names '
+    + 'the channels it covers (“Uber and Yango cash”) and the day. Only a driver with more than AED 99 left is texted. A '
+    + 'channel that did not collect — Bolt, say — is left out and the rest is still sent. It waits until Uber’s figures '
+    + 'for the day are in AND the card payments sheet has the day, and gives up at 20:00 if they never are. The Messages '
+    + 'page shows every message, what each left out, and every one held back, with the reason.', 'Cash reminders');
   smsSwitch('sms_trip', 'Driver text: register a trip',
     'When a journey with no booking is found, the driver it names is texted: “Please Register your trip from X to Y - '
     + 'z km with your supervisor - ADMIN.” Only when exactly one driver is named — the last driver of the car counts, '

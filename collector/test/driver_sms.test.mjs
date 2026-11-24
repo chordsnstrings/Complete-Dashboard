@@ -107,28 +107,33 @@ check('an address with a building number is its road; a numbered street is a nam
   [readablePlace('33 Sheikh Rashid Rd'), readablePlace('30th St'), readablePlace('19 5th Street')].join(' | '));
 
 /* ── 2. the 05:00 cash reminder ─────────────────────────────────────────── */
-console.log('\n2. the 05:00 cash reminder');
+console.log('\n2. the cash reminder');
+/* CARD-4 (the operator, 2026-11-23/24): the text asks for what is left in
+   notes — the day's cash fares less what card payments paid of them — names
+   the day, goes only over AED 99, and waits for the card sheet to have the
+   day. The amounts here are over AED 99 so the channel rules below are still
+   exercised by a text that goes. */
 const T = (id, o) => q(
   `INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, plate, requested_at, ended_at, status, payment_type, price, currency, raw)
    VALUES ($1, $2, $3, $4, 'x', $5, $6::timestamptz, $6::timestamptz + interval '20 minutes', $7, $8, $9, 'AED', $10::jsonb)`,
   [o.platform || 'uber', id, o.fleet || 'ecosine', o.driver, o.plate || 'C0', o.at, o.status || 'completed', o.pay || 'cash', o.price ?? null,
     JSON.stringify(o.cash != null ? { uber_payments: { cash_collected: -o.cash } } : {})]);
 /* D = 2026-09-27 (Dubai). Requested times are UTC. */
-await T('c1', { driver: 'u-a', at: '2026-09-27T10:00:00Z', price: 40, cash: 50 });
-await T('c2', { driver: 'u-a', at: '2026-09-27T15:00:00Z', price: 55, cash: 60.5 });
+await T('c1', { driver: 'u-a', at: '2026-09-27T10:00:00Z', price: 140, cash: 150 });
+await T('c2', { driver: 'u-a', at: '2026-09-27T15:00:00Z', price: 155, cash: 160.5 });
 await T('c3', { driver: 'u-b', at: '2026-09-27T11:00:00Z', price: 70, pay: 'braintree' });   // card: no cash
-await T('c4', { driver: 'b-c', platform: 'bolt', at: '2026-09-27T12:00:00Z', price: 30 });
-await T('c5', { driver: 'u-d', at: '2026-09-27T13:00:00Z', price: 45 });                        // no payments figure yet
-await T('c6', { driver: REFUSED[0].a.id, at: '2026-09-27T09:00:00Z', price: 20, cash: 25 });
-await T('c7', { driver: 'y-h', platform: 'yango', at: '2026-09-27T08:00:00Z', price: 35 });
-await T('c8', { driver: 'u-a', at: '2026-09-26T19:59:00Z', price: 99, cash: 99 });            // 23:59 Dubai on the 26th: not yesterday
-await T('m1', { driver: 'u-m', at: '2026-09-27T10:30:00Z', price: 40, cash: 44 });
+await T('c4', { driver: 'b-c', platform: 'bolt', at: '2026-09-27T12:00:00Z', price: 130 });
+await T('c5', { driver: 'u-d', at: '2026-09-27T13:00:00Z', price: 145 });                       // no payments figure yet
+await T('c6', { driver: REFUSED[0].a.id, at: '2026-09-27T09:00:00Z', price: 120, cash: 125 });
+await T('c7', { driver: 'y-h', platform: 'yango', at: '2026-09-27T08:00:00Z', price: 135 });
+await T('c8', { driver: 'u-a', at: '2026-09-26T19:59:00Z', price: 99, cash: 99 });            // 23:59 Dubai on the 26th: not that day
+await T('m1', { driver: 'u-m', at: '2026-09-27T10:30:00Z', price: 140, cash: 144 });
 await T('m2', { driver: 'b-m', platform: 'bolt', at: '2026-09-27T12:30:00Z', price: 25 });     // Bolt: did not collect
-await T('y1', { driver: 'u-y', at: '2026-09-27T10:40:00Z', price: 30, cash: 33 });
-await T('y2', { driver: 'y-y', platform: 'yango', at: '2026-09-27T12:40:00Z', price: 20 });    // Yango: collected
-await T('q1', { driver: 'u-q', at: '2026-09-27T10:50:00Z', price: 50, cash: 55 });
+await T('y1', { driver: 'u-y', at: '2026-09-27T10:40:00Z', price: 130, cash: 133 });
+await T('y2', { driver: 'y-y', platform: 'yango', at: '2026-09-27T12:40:00Z', price: 120 });   // Yango: collected
+await T('q1', { driver: 'u-q', at: '2026-09-27T10:50:00Z', price: 150, cash: 155 });
 await T('q2', { driver: 'y-q', platform: 'yango', at: '2026-09-27T12:50:00Z', price: null });  // Yango: no fare
-await T('z1', { driver: 'u-z', at: '2026-09-27T11:00:00Z', price: 10, cash: 11 });
+await T('z1', { driver: 'u-z', at: '2026-09-27T11:00:00Z', price: 110, cash: 111 });
 await T('z2', { driver: 'name:test driver z', platform: 'hotel', at: '2026-09-27T13:00:00Z', price: 60 });  // hotel by name
 await T('v1', { driver: 'y-v', platform: 'yango', at: '2026-09-27T14:00:00Z', price: null });  // only cash, no amount
 const run = (o) => q(`INSERT INTO collection_run (source, fleet_id, mode, window_start, window_end, started_at, finished_at, status, rows_written)
@@ -149,29 +154,52 @@ check('…and the page can say the run is waiting', w?.status === 'held' && w.ho
 
 /* Every figure in, but Uber's nightly catch-up has not run since the day
    ended: a trip that has not been fetched yet has no figure to be missing. */
-await q(`UPDATE trip SET raw = '{"uber_payments":{"cash_collected":-47.5}}'::jsonb WHERE external_id = 'c5'`);
+await q(`UPDATE trip SET raw = '{"uber_payments":{"cash_collected":-147.5}}'::jsonb WHERE external_id = 'c5'`);
 r = await cashDepositRun({ q, now: new Date('2026-09-28T01:40:00Z'), send, cfg: {} });
 check('…nor before Uber’s catch-up has run since the day ended', r.waiting === true && sent.length === 0
   && r.missing_catchup?.join() === 'ecosine', JSON.stringify(r));
 await run({ source: 'uber', mode: 'catchup', at: '2026-09-27T21:18:00Z' });
+
+/* CARD-4: Uber is complete, but the card sheet does not have the 27th yet —
+   it ends on the 26th. Nobody is texted, and the page says why. */
+await q(`INSERT INTO card_import (id, read_at, rows_read, rows_kept, day_from, day_to, status) VALUES (1, '2026-09-28T01:33:00Z', 1, 1, '2026-09-26', '2026-09-26', 'ok')`);
+const pay = (row, day, eid, amount) => q(`INSERT INTO card_payment (import_id, row_no, txn_day, fleet_id, terminal_id, amount, emirates_id)
+                                          VALUES (1, $1, $2, 'ecosine', 'T1', $3, $4)`, [row, day, amount, eid]);
+await pay(1, '2026-09-26', null, 10);
+await pay(9, '2026-12-01', null, 5);      // typed with a future date: must not open the gate (the review of 2026-11-24)
 r = await cashDepositRun({ q, now: new Date('2026-09-28T01:45:00Z'), send, cfg: {} });
+const [wc] = await q(`SELECT status, hold_reason, detail FROM sms_outbox WHERE dedupe_key = 'cash-run:2026-09-27'`);
+check('the card sheet ends on the 26th: nobody is texted, the run waits for it, and says why', r.waiting === true && sent.length === 0
+  && wc?.hold_reason === 'waiting_for_card_sheet' && wc.detail?.card_sheet_to === '2026-09-26' && !wc.detail.finished, JSON.stringify([r, wc]));
+
+/* The sheet reads the 27th: driver Y paid AED 53 of it by card (placed by a
+   person's link), driver Z AED 20, and a payment under no driver. */
+await q(`INSERT INTO card_id_link (emirates_id, person_id) VALUES ('784199000000013', 13), ('784199000000015', 15)`);
+await pay(2, '2026-09-27', '784199000000013', 53);
+await pay(3, '2026-09-27', '784199000000015', 20);
+await pay(4, '2026-09-27', null, 40);
+await pay(5, '2026-09-27', '784199000000013', -15);       // a chargeback: never put back as cash
+/* The summed fares table is built but empty (as if an hour behind): the text
+   must read the trips live, as its amount does (the review of 2026-11-24). */
+await q(`INSERT INTO source_state (source, fleet_id, key, value) VALUES ('network_cards', '-', 'fares_full_at', '2026-09-28T00:00:00Z'),
+           ('network_cards', '-', 'fares_from', '2026-09-01')`);
+r = await cashDepositRun({ q, now: new Date('2026-09-28T12:45:00Z'), send, cfg: {} });
 const toA = sent.find((m) => m.to === '971501111111');
-check('a driver is told Uber’s cash collected, summed — AED 110.50, not the fare (95.00) — and that it is the Uber cash',
-  toA?.text === cashText(110.5, ['uber'])
-  && toA.text === 'Please deposit AED 110.50 of Uber cash you received yesterday. Talk to your supervisor on WhatsApp.', toA?.text);
-check('…and the trip at 23:59 Dubai the night before is not yesterday’s', !/209|99/.test(toA?.text || 'x'));
+check('a driver is told Uber’s cash collected, summed — AED 310.50, not the fare (295.00) — the Uber cash, and the day by name',
+  toA?.text === cashText(310.5, ['uber'], '2026-09-27')
+  && toA.text === 'Please deposit AED 310.50 of Uber cash you received on 27 Sep. Talk to your supervisor on WhatsApp.', toA?.text);
+check('…and the trip at 23:59 Dubai the night before is not that day’s', !/409|99\.00/.test(toA?.text || 'x'));
 check('a driver with only card trips gets nothing', !sent.some((m) => m.to === '971502222222'));
 check('a Yango driver with no Uber number is texted on HR’s number, told it is the Yango cash', sent.some((m) => m.to === '971509999999'
-  && m.text === 'Please deposit AED 35.00 of Yango cash you received yesterday. Talk to your supervisor on WhatsApp.'));
+  && m.text === 'Please deposit AED 135.00 of Yango cash you received on 27 Sep. Talk to your supervisor on WhatsApp.'));
 const textTo = (n) => sent.find((m) => m.to === n)?.text || '';
 check('Bolt did not collect: the driver is still asked for the Uber cash, and told it is the Uber cash',
-  textTo('971503131313') === 'Please deposit AED 44.00 of Uber cash you received yesterday. Talk to your supervisor on WhatsApp.', textTo('971503131313'));
-check('both channels collected: the sum, and both named', textTo('971503232323')
-  === 'Please deposit AED 53.00 of Uber and Yango cash you received yesterday. Talk to your supervisor on WhatsApp.', textTo('971503232323'));
+  textTo('971503131313') === 'Please deposit AED 144.00 of Uber cash you received on 27 Sep. Talk to your supervisor on WhatsApp.', textTo('971503131313'));
+check('both channels collected, and AED 53 of it paid by card: 253.00 less 53.00, both channels named', textTo('971503232323')
+  === 'Please deposit AED 200.00 of Uber and Yango cash you received on 27 Sep. Talk to your supervisor on WhatsApp.', textTo('971503232323'));
 check('a Yango trip with no fare: the Uber cash is asked for, Yango left out', textTo('971503434343')
-  === 'Please deposit AED 55.00 of Uber cash you received yesterday. Talk to your supervisor on WhatsApp.', textTo('971503434343'));
-check('a hotel account matched by name: the Uber cash is asked for, the hotel cash left out', textTo('971503535353')
-  === 'Please deposit AED 11.00 of Uber cash you received yesterday. Talk to your supervisor on WhatsApp.', textTo('971503535353'));
+  === 'Please deposit AED 155.00 of Uber cash you received on 27 Sep. Talk to your supervisor on WhatsApp.', textTo('971503434343'));
+check('AED 111 of cash, AED 20 of it paid by card: AED 91 left — not over AED 99, so not texted', !textTo('971503535353'), textTo('971503535353'));
 const [mRow] = await q(`SELECT status, detail FROM sms_outbox WHERE kind = 'cash_deposit' AND person_id = 12`);
 const bolt = (mRow?.detail?.left_out || []).find((x) => x.platform === 'bolt');
 check('…and the record says what was left out and why: Bolt, 1 trip, AED 25.00 seen, did not collect',
@@ -180,44 +208,65 @@ check('…and the record says what was left out and why: Bolt, 1 trip, AED 25.00
 const [qRow] = await q(`SELECT detail FROM sms_outbox WHERE kind = 'cash_deposit' AND person_id = 14`);
 check('…and a trip with no fare is recorded as left out for that reason, not silently dropped',
   (qRow?.detail?.left_out || []).some((x) => x.platform === 'yango' && x.why === 'not_priced' && x.trips === 1), JSON.stringify(qRow?.detail));
-/* The split by platform of the amount texted, kept for the 08:00 cash email
-   (src/cash_sms_email.js). REVERSION (run 2026-09-30): drop by_channel from
-   the detail -> 58 passed, 2 FAILED: this check and "the 08:00 email reads
-   the split…". */
+/* The split by platform, kept for the cash email (src/cash_sms_email.js):
+   the day's cash fares per platform before card, and what card took off. */
 const [yRow] = await q(`SELECT detail FROM sms_outbox WHERE kind = 'cash_deposit' AND person_id = 13`);
-check('the record keeps the amount per platform, summing to what was texted: Uber 33.00, Yango 20.00',
-  JSON.stringify((yRow?.detail?.by_channel || []).map((c) => [c.platform, c.amount, c.trips])) === '[["uber",33,1],["yango",20,1]]'
-  && yRow.detail.amount === 53, JSON.stringify(yRow?.detail));
+check('the record keeps the cash per platform, what card took off, and what was texted: Uber 133 + Yango 120 − card 53 = 200',
+  JSON.stringify((yRow?.detail?.by_channel || []).map((c) => [c.platform, c.amount, c.trips])) === '[["uber",133,1],["yango",120,1]]'
+  && yRow.detail.cash_fares === 253 && yRow.detail.card_paid === 53 && yRow.detail.amount === 200, JSON.stringify(yRow?.detail));
+const [zRow] = await q(`SELECT status, hold_reason, detail FROM sms_outbox WHERE kind = 'cash_deposit' AND person_id = 15`);
+check('…and the driver left under the floor is held with that reason, the figures kept', zRow?.status === 'held'
+  && zRow.hold_reason === 'under_threshold' && zRow.detail.cash_fares === 111 && zRow.detail.card_paid === 20 && zRow.detail.amount === 91,
+  JSON.stringify(zRow));
 {
-  const { cashEmailFacts } = await import('../src/cash_sms_email.js');
+  const { cashEmailFacts, renderCashEmail } = await import('../src/cash_sms_email.js');
   const ef = await cashEmailFacts(q, '2026-09-27');
   const y = ef.drivers.find((x) => x.person_id === 13);
-  check('the 08:00 email reads the split and the texted drivers straight from this run',
-    ef.drivers.length === 7 && y?.name === 'Test Driver Y' && y.phone === '971503232323'
-    && JSON.stringify((y.split || []).map((c) => [c.platform, c.amount])) === '[["uber",33],["yango",20]]',
-    JSON.stringify(ef.drivers.map((x) => [x.person_id, x.amount, x.split])));
+  check('the cash email reads the split, the card line and the texted drivers straight from this run',
+    ef.drivers.length === 6 && y?.name === 'Test Driver Y' && y.phone === '971503232323' && y.amount === 200 && y.card_paid === 53
+    && JSON.stringify((y.split || []).map((c) => [c.platform, c.amount])) === '[["uber",133],["yango",120]]' && ef.card_total === 53,
+    JSON.stringify(ef.drivers.map((x) => [x.person_id, x.amount, x.card_paid, x.split])));
+  const em = renderCashEmail(ef);
+  check('…and prints it: "less card 53.00" under the driver, and the AED 99 rule in the footnote', /less card 53\.00/.test(em.text)
+    && /less card&nbsp;&nbsp;<span class="n">53\.00/.test(em.html) && /more than AED 99/.test(em.html), em.text.slice(0, 600));
 }
 const heldRows = await q(`SELECT person_id, hold_reason FROM sms_outbox WHERE kind = 'cash_deposit' AND status = 'held' ORDER BY person_id`);
 const heldBy = Object.fromEntries(heldRows.map((h) => [h.person_id, h.hold_reason]));
 check('a Bolt-only driver, when Bolt did not collect, is held — there is no certain amount', heldBy[3] === 'channel_not_collected', JSON.stringify(heldBy));
 check('a driver whose only cash has no amount yet is held, with that reason', heldBy[16] === 'amount_not_final', JSON.stringify(heldBy));
 check('a driver in a refused same-person pair is held', heldBy[5] === 'identity_held');
-check('the counts add up: 7 sent (3 with a channel left out), 3 held', r.sent === 7 && r.held === 3 && r.partial === 3 && sent.length === 7,
-  JSON.stringify({ sent: r.sent, held: r.held, partial: r.partial, n: sent.length }));
+check('the counts add up: 6 sent (2 with a channel left out), 4 held (one under the floor)', r.sent === 6 && r.held === 4 && r.partial === 2
+  && sent.length === 6 && r.holds.under_threshold === 1, JSON.stringify({ sent: r.sent, held: r.held, partial: r.partial, n: sent.length, holds: r.holds }));
 const n1 = sent.length;
-r = await cashDepositRun({ q, now: new Date('2026-09-28T02:00:00Z'), send, cfg: {} });
+r = await cashDepositRun({ q, now: new Date('2026-09-28T13:00:00Z'), send, cfg: {} });
 check('the next quarter-hour sends nothing twice', r.already === true && sent.length === n1);
 const [row] = await q(`SELECT destination, message_text, provider_message_id, status FROM sms_outbox WHERE kind = 'cash_deposit' AND person_id = 1`);
 check('the outbox keeps the number, the words and the gateway id (as text)', row.status === 'sent' && row.destination === '971501111111'
-  && row.message_text === cashText(110.5, ['uber']) && typeof row.provider_message_id === 'string');
+  && row.message_text === cashText(310.5, ['uber'], '2026-09-27') && typeof row.provider_message_id === 'string');
 
-/* The 28th never completes: 09:00 gives up and says so. */
+/* The 28th never completes: 20:00 gives up and says so. */
 await T('c9', { driver: 'u-a', at: '2026-09-28T10:00:00Z', price: 10 });
-r = await cashDepositRun({ q, now: new Date('2026-09-29T05:00:00Z'), send, cfg: {}, final: true });
+r = await cashDepositRun({ q, now: new Date('2026-09-29T16:00:00Z'), send, cfg: {}, final: true });
 const [gave] = await q(`SELECT status, hold_reason FROM sms_outbox WHERE dedupe_key = 'cash-run:2026-09-28'`);
-check('at 09:00, an incomplete day is given up on — stated, not sent', r.gaveUp === true && gave?.hold_reason === 'not_complete' && sent.length === n1);
+check('at 20:00, an incomplete day is given up on — stated, not sent', r.gaveUp === true && gave?.hold_reason === 'not_complete' && sent.length === n1);
 r = await cashDepositRun({ q, now: new Date('2026-09-30T01:30:00Z'), send, cfg: { sms_cash: 'off' } });
 check('switched off: nothing is sent', r.off === true && sent.length === n1);
+/* CARD-4: a day the card sheet never reaches. 1 Oct, complete on the trip
+   side (no Uber cash), and the sheet still ends on the 27th at 20:00 the
+   next day: given up on, said, nobody texted. */
+await T('k1', { driver: 'y-h', platform: 'yango', at: '2026-10-01T08:00:00Z', price: 300 });
+await run({ source: 'yango', at: '2026-10-01T21:40:00Z', to: '2026-10-01', from: '2026-09-01' });
+/* A later read whose sheet runs PAST the day (the 2nd) with no payment dated
+   the day itself: "runs to" is not "has" — the day must hold payments. */
+await q(`INSERT INTO card_import (id, read_at, rows_read, rows_kept, day_from, day_to, status) VALUES (2, '2026-10-02T15:00:00Z', 1, 1, '2026-10-02', '2026-10-02', 'ok')`);
+await q(`INSERT INTO card_payment (import_id, row_no, txn_day, fleet_id, terminal_id, amount) VALUES (2, 1, '2026-10-02', 'ecosine', 'T1', 30)`);
+r = await cashDepositRun({ q, now: new Date('2026-10-02T16:00:00Z'), send, cfg: {}, final: true });
+const [nr] = await q(`SELECT status, hold_reason, detail FROM sms_outbox WHERE dedupe_key = 'cash-run:2026-10-01'`);
+check('the sheet runs past the day but holds nothing dated it: at 20:00 given up on, with the reason, nobody texted', r.gaveUp === true
+  && nr?.hold_reason === 'card_sheet_not_ready' && nr.detail?.finished === true && nr.detail.card_sheet_to === '2026-10-02'
+  && nr.detail.card_sheet_day_rows === 0 && sent.length === n1, JSON.stringify([r, nr]));
+check('the reasons read in words on the page', /card payments sheet/.test(HOLD_WHY.waiting_for_card_sheet) && /20:00/.test(HOLD_WHY.card_sheet_not_ready)
+  && /AED 99/.test(HOLD_WHY.under_threshold));
 
 /* ── 3. the trip request ────────────────────────────────────────────────── */
 console.log('\n3. the trip request');

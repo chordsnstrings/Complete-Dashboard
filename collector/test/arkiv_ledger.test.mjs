@@ -74,7 +74,7 @@ if (want('opening')) {
   check('with no cash fare among the people still to count, the ceiling tile is ABSENT and says who is not on the read',
     /not on it, so no cash fare has been measured for them/.test(s.na['Unstated, at its ceiling'] || ''), JSON.stringify(s.na));
   const tariq = ex.find((p) => p.owes?.cash_taken != null);
-  check('the grid gains the cash-fare ceiling, beside what was stated', r.head.includes('Cash fares on record (ceiling)')
+  check('the grid gains the cash-fare ceiling, beside what was stated', r.head.includes('Cash ceiling, less card')
     && r.rows.some((t) => t.includes(aed(tariq.owes.cash_taken)) && t.includes(`since ${tariq.owes.cash_taken_from}`)), JSON.stringify(r.head));
   check('after the grid: first cash fare by month, how long cash has run, what exposure could judge', r.charts.every(Boolean), JSON.stringify(r.charts));
   const books = ex.filter((p) => p.owes && (p.owes.books_recorded ?? (p.owes.advance != null || p.owes.deduction != null))).length;
@@ -86,7 +86,7 @@ if (want('opening')) {
   const c = await open('classic', 'opening');
   const head = await c.page.evaluate(() => [...document.querySelectorAll('#view thead th')].map((t) => t.textContent.trim()));
   check('old skin: no 00 band, and the grid without the ceiling column', !(await c.page.$('#view .cband'))
-    && !head.includes('Cash fares on record (ceiling)'), JSON.stringify(head));
+    && !head.includes('Cash ceiling, less card'), JSON.stringify(head));
   await c.ctx.close();
 }
 
@@ -162,7 +162,7 @@ if (want('advances')) {
   check('the lending line is a tile that opens #policy, its figure the one in force', s.hrefs['The lending line'] === '#policy'
     && s.values['The lending line'] === `${exp.policy.pct}%`, JSON.stringify(s.hrefs));
   check('the owes table keeps its rows and gains the ceiling beside Cash held',
-    r.rows === ex.length && r.head.indexOf('Cash fares on record (ceiling)') === r.head.indexOf('Cash held') + 1, JSON.stringify(r.head));
+    r.rows === ex.length && r.head.indexOf('Cash ceiling, less card') === r.head.indexOf('Cash held') + 1, JSON.stringify(r.head));
   const both = ex.filter((p) => p.owes?.cash_taken != null && p.earned != null).length;
   check('the scatter draws only people with both, and says so', r.dots === both && r.scCap.startsWith(`${both} of ${n} people have both`),
     `${r.dots} ${r.scCap}`);
@@ -184,7 +184,7 @@ if (want('advances')) {
   await nl.ctx.close();
   const c = await open('classic', 'advances');
   const head = await c.page.evaluate(() => [...document.querySelectorAll('[data-panel="advances"] thead th')].map((t) => t.textContent.trim()));
-  check('old skin: no 00 band, no ceiling column', !(await c.page.$('#view .cband')) && !head.includes('Cash fares on record (ceiling)'), JSON.stringify(head));
+  check('old skin: no 00 band, no ceiling column', !(await c.page.$('#view .cband')) && !head.includes('Cash ceiling, less card'), JSON.stringify(head));
   await c.ctx.close();
 }
 
@@ -322,16 +322,20 @@ if (want('deposits')) {
     formFirst: document.querySelector('[data-panel="deposits"] .depform') != null,
   }));
   check('the order: 00, the form, the twenty largest, the table, three distributions, †', JSON.stringify(s.heads)
-    === JSON.stringify(['At a glance', 'Record a handover', 'Who is carrying the most', 'Who is carrying cash', 'The ceilings, in bands',
+    === JSON.stringify(['At a glance', 'Record a handover', 'Who is carrying the most', 'Who is carrying cash',
+      'Card machine payments — Network International', 'The ceilings, in bands',
       'The month each driver’s last cash fare was taken', 'How concentrated the ceiling is', '† What this page does not know']) && r.formFirst,
   JSON.stringify(s.heads));
   check('the hero is the ceiling, called one and not a balance', s.hero === 'Ceiling on cash outstanding' && s.values[s.hero] === aed(sum)
-    && s.subs[s.hero].startsWith('every cash fare on record, not a balance'), JSON.stringify([s.values[s.hero], s.subs[s.hero]]));
+    /* CARD-3b: the ceiling is net of what card settled of the fares from
+       1 Aug 2026, and the hero says by how much. */
+    && /^cash fares on record, less AED [\d,.]+ card paid of the fares from 2026-08-01, not a balance/.test(s.subs[s.hero]),
+  JSON.stringify([s.values[s.hero], s.subs[s.hero]]));
   check('the cash trips behind it, and their mean said to be derived', s.values['Cash trips behind it'] === trips.toLocaleString('en-US')
     && s.subs['Cash trips behind it'] === `a mean of ${aed(sum / trips)} a trip — derived`, JSON.stringify(s.subs['Cash trips behind it']));
   check('handovers recorded, from the register\'s own count', s.values['Handovers recorded'] === String(hand.totals.rows), s.values['Handovers recorded']);
   check('the table gains the ceiling and the last cash fare, and becomes sortable — its default order kept',
-    r.head.includes('Cash fares on record (ceiling)') && r.head.includes('Last cash fare') && r.sortable > 0
+    r.head.includes('Cash ceiling, less card') && r.head.includes('Last cash fare') && r.sortable > 0
     && r.first === [...ex].sort((a, b) => (b.owes?.cash ?? -1) - (a.owes?.cash ?? -1))[0].name, JSON.stringify([r.head, r.first]));
   check('the twenty largest, plus the drivers with none as one count', r.top === Math.min(20, carriers.length) + 1, String(r.top));
   check('concentration says how many drivers carry half', /carry half the ceiling/.test(r.conc), r.conc);

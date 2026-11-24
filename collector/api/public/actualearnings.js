@@ -100,7 +100,7 @@
    statements) stays a number, through moneyInTile's own branch for it. */
 import { money, fmt, countOf, plural, moneyInTile, moneyParts, grainClause } from './ui.js';
 
-const LABEL = 'Actual earnings';
+const LABEL = 'Net earnings';
 
 /* `worked` and `bookingsN` are the Earnings tab's own reading of whether this
    person worked in the window (api/public/driver.js tabEarnings), passed in
@@ -117,7 +117,7 @@ export function actualEarningsTile(k, { worked = false, bookingsN = 0 } = {}) {
     : 'the payout report, a different record';
   if (!Number.isFinite(p.gross)) {
     const aside = Number.isFinite(payout)
-      ? ` — the ${money(payout)} under Platform earnings is ${payoutIs}, and not what the work earned`
+      ? ` — the ${money(payout)} under Bank collection is ${payoutIs}, and not what the work earned`
       : '';
     return { label: LABEL, key: 'actual-earnings', value: '—',
       sub: (worked
@@ -163,7 +163,7 @@ export function actualEarningsTile(k, { worked = false, bookingsN = 0 } = {}) {
     sub: `${floor}${floor ? 'What' : 'what'} the work earned, the driver\u2019s cash in hand `
       + `included, not netted off${stmt ? ', the statements\u2019 tips not' : ''}: ${parts}`
       + `${grainClause(p, 'what was earned', { alignment: true })}. `
-      + 'It is Money in on the Overview, the same figure'
-      + (Number.isFinite(payout) ? `; Platform earnings is ${payoutIs}, so the two are not added` : '')
+      + 'It is Net earnings on the Overview, the same figure'
+      + (Number.isFinite(payout) ? `; Bank collection is ${payoutIs}, so the two are not added` : '')
       + `.${reach}` };
 }

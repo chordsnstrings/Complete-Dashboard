@@ -1412,10 +1412,10 @@ function overviewAbsence(root, k, prof) {
   const absHost = el('div'); root.append(absHost);
   absenceBand(absHost, [
     { label: 'A fare on every booking', hl: trips > priced, fig: trips ? `${fmt(priced)} of ${fmt(trips)}` : null, none: 'No booking',
-      why: trips > priced ? `${UBER_FARE_WHY}; Money in takes the statement where a channel filed one.`
+      why: trips > priced ? `${UBER_FARE_WHY}; Net earnings takes the statement where a channel filed one.`
         : trips ? 'Every booking in this window carries a fare.' : 'No booking in this window.' },
     { label: 'The bank transfer itself', fig: null, none: 'Not read',
-      why: 'Bank deposit is what is left of Money in after the cash the driver already holds — a remainder, not a receipt. No bank statement is read here.' },
+      why: 'Bank deposit is what is left of Net earnings after the cash the driver already holds — a remainder, not a receipt. No bank statement is read here.' },
     { label: 'Licence and ID numbers', fig: withheld ? `${fmt(withheld)} withheld` : null, none: 'None withheld',
       why: withheld ? (prof.identity_withheld_reason || 'withheld from an unauthenticated response') : 'Nothing on the identity card was withheld.' },
     { label: 'When a pickup happened', fig: null, none: 'Not sent',
@@ -2230,15 +2230,15 @@ async function tabEarnings(root, id, prof) {
        the fare twice. The sentence says so rather than leaving the tile to be
        read as earnings. */
     (k.priced_trips
-      ? { label: 'Booked revenue', value: money(k.revenue),
+      ? { label: 'Gross revenue', value: money(k.revenue),
           sub: `the gross the riders were charged, over ${fmt(k.priced_trips)} of `
-            + `${fmt(k.trips)} trips that report a fare — the payout below is what was left `
+            + `${fmt(k.trips)} trips that report a fare — the Bank collection below is what was left `
             + 'of it after the platform’s commission, not an addition to it',
           tone: k.trips && k.priced_trips / k.trips < 0.5 ? 'warn' : null }
-      : { label: 'Booked revenue', value: k.statement_fares ? money(k.statement_fares) : '—',
+      : { label: 'Gross revenue', value: k.statement_fares ? money(k.statement_fares) : '—',
           sub: k.statement_fares
             ? `no trip of theirs reports a fare — this is the statement's own fare line, over `
-              + `${countOf(k.statement_fare_periods, 'period')}, and the payout below came out of it`
+              + `${countOf(k.statement_fare_periods, 'period')}, and the Bank collection below came out of it`
             : 'no trip of theirs reports a fare, and no statement reports one either' }),
     /* The only tile in this row with no sub-line at all: `sub: … : null`, so a
        driver with no priced trip got a bare em dash while its five siblings
@@ -2257,7 +2257,15 @@ async function tabEarnings(root, id, prof) {
             + `is nothing to average — ${UBER_FARE_WHY}, and an average over the statement would be `
             + 'a week divided by trips it does not count'
           : 'no booking of any kind in this window, so there is no fare to average' },
-    { label: 'Platform earnings', value: money(k.reported_earnings), sub: 'as the platform reported it' },
+    /* POS payments come into the bank too (the operator, 2026-11-24: "Bank
+       Collection should add POS payment as well"), so they are added to what
+       the platform reported. */
+    { label: 'Bank collection', value: k.reported_earnings == null && !(+k.pos_payments > 0) ? money(k.reported_earnings)
+      : money((k.reported_earnings == null ? 0 : +k.reported_earnings) + (+k.pos_payments || 0)),
+    sub: +k.pos_payments > 0
+      ? `${k.reported_earnings == null ? 'at least: no platform statement for these dates, so only' : `${money(+k.reported_earnings)} as the platform reported it, plus`} `
+        + `the ${money(+k.pos_payments)} of POS payments (the card machine), which come into the bank`
+      : 'as the platform reported it' },
     /* WHAT ACTUALLY CAME IN, directly after the payout the operator reads as
        "platform share" (2026-11-16). Platform earnings is driver_payout_day —
        for Uber the bank transfer, after the cash the driver already took — so
@@ -2299,7 +2307,7 @@ async function tabEarnings(root, id, prof) {
        in scope: `k` is /api/driver/kpis, fetched by this same Promise.all. A
        count of nought is still a true count \u2014 TRIPS 0 stays 0 on the overview
        \u2014 but a MONEY figure over an empty population is not a figure. */
-    { label: 'Cash collected', value: (() => {
+    { label: 'Cash trips (including POS)', value: (() => {
       /* CASH TAKEN, AS THE MONEY WORKBOOK STATES IT (2026-10-20).
          ─────────────────────────────────────────────────────────────────
          Completed cash trips at the platform's own cash-collected figure,
@@ -2310,9 +2318,15 @@ async function tabEarnings(root, id, prof) {
          1-20 October where "Excel ⤓ this driver" said AED 2,445.99 over 44,
          and both were right about different things
          (docs/FIXLIST-2026-09-05.md DR3). The older chain below stays for
-         an API that does not yet send cash_trips. */
+         an API that does not yet send cash_trips.
+         "INCLUDING POS" (the operator, 2026-11-24): the hotel's fares paid on
+         the driver's own card machine (pos_fares) are added — every cash trip,
+         whichever way the rider paid at the car. What is still in the
+         driver's hand is the Cash in hand tile beside it. */
       if (cashTakenKnown) {
-        if (+k.cash_trips > 0) return k.cash_taken != null ? money(k.cash_taken) : 'not reported';
+        const pos = +k.pos_trips > 0 ? (+k.pos_fares || 0) : 0;
+        if (+k.cash_trips > 0) return k.cash_taken != null ? money(+k.cash_taken + pos) : 'not reported';
+        if (+k.pos_trips > 0) return money(pos);
         return worked && labelledTrips ? money(0) : '\u2014';
       }
       // The clawback line in the payout breakdown is the same money seen from
@@ -2343,10 +2357,11 @@ async function tabEarnings(root, id, prof) {
     })(),
     /* "73 cash trips across cash" — the label list is usually the single word
        "cash", and naming it after "across" made the sentence eat itself. */
-    sub: cashTakenKnown && (+k.cash_trips > 0 || +k.cash_bookings > 0)
+    sub: cashTakenKnown && (+k.cash_trips > 0 || +k.cash_bookings > 0 || +k.pos_trips > 0)
       ? (() => {
         const open = Math.max(0, (+k.cash_bookings || 0) - (+k.cash_trips || 0));
         return `${countOf(+k.cash_trips, 'completed cash trip')}`
+          + (+k.pos_trips > 0 ? ` \u00b7 plus ${money(+k.pos_fares || 0)} from ${countOf(+k.pos_trips, 'hotel fare')} paid on the driver\u2019s card machine (POS)` : '')
           + (+k.cash_unvalued ? ` \u00b7 ${countOf(+k.cash_unvalued, 'not valued yet', 'not valued yet')}` : '')
           + (open ? ` \u00b7 ${countOf(open, 'cash booking')} not completed, not counted` : '')
           + ' \u00b7 the platform\u2019s own cash figure where it has filed one, the fare otherwise';
@@ -2387,6 +2402,36 @@ async function tabEarnings(root, id, prof) {
             + (lastWorked ? ` \u2014 this person\u2019s last trip was ${dateStr(lastWorked)}` : ''),
     tone: cashTakenKnown ? (+k.cash_unvalued ? 'warn' : null)
       : (cashTrips && cashKnown.length < cashRows.length ? 'warn' : null) },
+    /* POS PAYMENTS (the operator, 2026-11-24: "driver page should have POS
+       payment as a separate modal"): what went straight to the bank by card
+       machine, between the two cash tiles so the sum reads across them —
+       Cash trips (including POS) − POS payments = Cash in hand. */
+    ...(cashTakenKnown && k.pos_payments !== undefined ? [{ label: 'POS payments',
+      value: +k.pos_trips > 0 || k.cash_in_hand_card != null ? money(+k.pos_payments || 0) : '\u2014',
+      sub: [
+        +k.pos_trips > 0 ? `${money(+k.pos_fares || 0)} from ${countOf(+k.pos_trips, 'hotel fare')} on the driver\u2019s card machine` : null,
+        k.cash_in_hand_card != null
+          ? `${money(+k.cash_in_hand_card)} of card payments (Network International) that paid cash trips, fares from ${k.cash_in_hand_card_from}`
+            + `${k.cash_in_hand_card_to ? ` to ${k.cash_in_hand_card_to}` : ''}`
+          : (k.cash_in_hand_card_absent_reason ? `card payments not known: ${k.cash_in_hand_card_absent_reason}` : null),
+        +k.pos_card_unmatched > 0 ? `${money(+k.pos_card_unmatched)} more on the card sheet matched no fare and is not counted` : null,
+      ].filter(Boolean).join(' \u00b7 ') || 'no card-machine payment in this window',
+      tone: k.cash_in_hand_card == null && +k.cash_trips > 0 ? 'warn' : null }] : []),
+    /* CASH IN HAND (the operator, 2026-11-24): "Cash Trips - POS deposits".
+       POS goes straight to the bank: the hotel's card-machine fares were never
+       cash, and card payments (Network International) that paid cash fares
+       come off — from 1 Aug 2026, as approved (src/card_notes.js). Where the
+       card part cannot be known, the figure is a ceiling and says why. */
+    ...(cashTakenKnown && (k.cash_in_hand !== undefined) ? [{ label: 'Cash in hand',
+      value: +k.cash_trips > 0 ? (k.cash_in_hand != null ? money(k.cash_in_hand) : 'not reported')
+        : (+k.pos_trips > 0 || (worked && labelledTrips) ? money(0) : '\u2014'),
+      sub: !(+k.cash_trips > 0) ? (+k.pos_trips > 0 ? 'no cash trip: every one was paid on the card machine, which goes to the bank' : 'no cash trip in this window')
+        : k.cash_in_hand_card != null
+          ? `cash trips less ${money(+k.cash_in_hand_card)} that card payments (POS) paid of them, fares from ${k.cash_in_hand_card_from}`
+            + `${k.cash_in_hand_card_to ? ` to ${k.cash_in_hand_card_to}` : ''}`
+            + (+k.pos_trips > 0 ? `; the ${money(+k.pos_fares || 0)} of hotel fares on the card machine were never cash` : '')
+          : `at most this: card payments (POS) not taken off \u2014 ${k.cash_in_hand_card_absent_reason || 'not known'}`,
+      tone: +k.cash_trips > 0 && k.cash_in_hand_card == null ? 'warn' : null }] : []),
     // Priced fares over the distance of the priced trips. Dividing by the whole
     // distance mixes two populations and understates it by however much of the
     // work carries no fare.

@@ -225,7 +225,9 @@ const F = {
       banned_on: [], platform_compliance: [] },
     kpis: { trips: 60, days_worked: 12, bookings: 60, priced_trips: 60, outcome_n: 60,
       revenue: 3640, km: 700, avg_fare: 60.7, reported_earnings: null, cash_earnings: null,
-      statement_fares: null, cash_bookings: 0, cash_trips: 0, cash_taken: null, cash_unvalued: 0 },
+      statement_fares: null, cash_bookings: 0, cash_trips: 0, cash_taken: null, cash_unvalued: 0,
+      pos_trips: 29, pos_fares: 1230, pos_payments: 1230, pos_card_total: null, pos_card_unmatched: null,
+      cash_in_hand: null, cash_in_hand_card: null, cash_in_hand_card_absent_reason: null },
     mix: { distance: [], product: [], status: [], platform: [],
       payment: [{ label: 'pos-driver', n: 29, revenue: 1230 }, { label: 'cash-supervisor', n: 9, revenue: 355 },
         { label: 'room-charge', n: 22, revenue: 2055 }] },
@@ -376,7 +378,7 @@ const bare = await render('bare', 'earnings');
      return v ? money(v) : (cashTrips ? 'not reported' : money(0));
    at api/public/driver.js's Cash collected tile. The value becomes "AED 0" and
    this assertion fails. */
-const qc = tile(quiet, 'Cash collected');
+const qc = tile(quiet, 'Cash trips (including POS)');
 check('cash collected on an empty window draws no figure at all',
   qc && qc.value === '—', JSON.stringify(qc));
 /* REVERSION: restore `: 'no cash booking in this window'` as the sub. The
@@ -453,7 +455,7 @@ check('the Counted column prunes itself rather than borrowing the Statement colu
 console.log('\na measurement of nought is still a measurement');
 
 const card = await render('cardonly', 'earnings');
-const cc = tile(card, 'Cash collected');
+const cc = tile(card, 'Cash trips (including POS)');
 /* THE BRANCH THAT MUST NOT CHANGE. 84 bookings, none of them cash: AED 0 is a
    real measurement of the cash this driver took, and rendering it as an absence
    would be this same defect facing the other way.
@@ -491,7 +493,7 @@ console.log('\na nought the PLATFORM published is not a figure nobody reported')
    `if (v != null) return money(v);`. The value becomes "not reported" and both
    assertions below fail. */
 const zc = await render('zerocash', 'earnings');
-const zt = tile(zc, 'Cash collected');
+const zt = tile(zc, 'Cash trips (including POS)');
 // Was 'AED 0': a published nought now carries its fils like every money figure.
 check('a cash figure the platform published AT nought still reads AED 0.00',
   zt && zt.value === 'AED 0.00', JSON.stringify(zt));
@@ -501,7 +503,7 @@ check('…and is never described as not reported',
 /* REVERSION (run 2026-10-20): take the `if (cashTakenKnown)` branch
    out of the tile — "the tile reads cash taken" fails with AED 2,310.58, and
    the sub returns to "56 cash trips". */
-const ct = tile(await render('cashtaken', 'earnings'), 'Cash collected');
+const ct = tile(await render('cashtaken', 'earnings'), 'Cash trips (including POS)');
 check('the tile reads cash taken, as the driver\u2019s Excel does: AED 2,445.99',
   ct && ct.value === 'AED 2,445.99', JSON.stringify(ct));
 check('…over the 44 completed cash trips, and says the 12 not completed are not counted',
@@ -510,11 +512,19 @@ check('…over the 44 completed cash trips, and says the 12 not completed are no
 /* REVERSION (run 2026-10-20): the first cut's guard, `k.cash_trips != null
    && !(+k.cash_trips === 0 && !(+k.cash_bookings) && cashTrips > 0)` — both
    checks fail: AED 1,585.00 over "38 cash trips". */
-const po = tile(await render('posonly', 'earnings'), 'Cash collected');
-check('card-terminal and supervisor-collected bookings are not cash the driver took: AED 0.00, as their Excel says',
-  po && po.value === 'AED 0.00', JSON.stringify(po));
-check('…and the sub says why, naming the labels',
-  po && /none of these bookings was cash in the driver/.test(po.sub) && /29 pos-driver/.test(po.sub), po && po.sub);
+/* The operator, 2026-11-24: "Cash Trips (including POS)" counts the hotel's
+   fares paid on the driver's card machine (POS goes straight to the bank);
+   "Cash in hand" beside it is what is left in notes — nothing here. */
+const poPage = await render('posonly', 'earnings');
+const po = tile(poPage, 'Cash trips (including POS)');
+check('card-machine (POS) fares are cash trips including POS: AED 1,230.00 from the 29 pos-driver fares; supervisor cash is not the driver\'s',
+  po && po.value === 'AED 1,230.00' && /plus AED 1,230.00 from 29 hotel fares paid on the driver’s card machine \(POS\)/.test(po.sub), JSON.stringify(po));
+const pp = tile(poPage, 'POS payments');
+check('…POS payments, its own tile: the AED 1,230.00 that went to the bank on the card machine',
+  pp && pp.value === 'AED 1,230.00' && /AED 1,230\.00 from 29 hotel fares on the driver’s card machine/.test(pp.sub), JSON.stringify(pp));
+const ih = tile(poPage, 'Cash in hand');
+check('…and cash in hand is AED 0.00: every one was paid on the card machine, which goes to the bank',
+  ih && ih.value === 'AED 0.00' && /card machine, which goes to the bank/.test(ih.sub), JSON.stringify(ih));
 
 console.log('\na population is not coverage: nobody recorded how any of it was paid');
 
@@ -530,7 +540,7 @@ console.log('\na population is not coverage: nobody recorded how any of it was p
    to AED 0 and the sentence returns to claiming a measurement over 84 bookings
    nobody classified. */
 const up = await render('unknownpay', 'earnings');
-const ut = tile(up, 'Cash collected');
+const ut = tile(up, 'Cash trips (including POS)');
 check('a window whose every booking is unlabelled draws no cash figure at all',
   ut && ut.value === '\u2014', JSON.stringify(ut));
 check('…and says nobody recorded how it was paid, not that none of it was cash',
@@ -654,7 +664,7 @@ console.log('\nthe one money tile that still drew a nought, and why it stays one
    REVERSION THAT PROVES THIS: remove the `if (p.gross === 0)` branch from
    moneyInTile in api/public/ui.js. The value is unchanged and the second
    assertion fails, which is the point: the number was never the bug. */
-const mi = tile(ov, 'Money in');
+const mi = tile(ov, 'Net earnings');
 // Was 'AED 0': a published nought now carries its fils like every money figure.
 check('a nought the platforms published is still a number',
   mi && mi.value === 'AED 0.00', JSON.stringify(mi));

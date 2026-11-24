@@ -195,7 +195,7 @@ function rankTable(host, rows, basis, d) {
             + `${esc(r.driver_name || r.driver_ext_id)}</a>`
           : `<span class="ent-off">${esc(r.driver_name || '—')}</span>`) },
     onValue
-      ? { label: 'Trip value', key: 'value', num: true, render: (r) => money(r.value) }
+      ? { label: 'Gross revenue', key: 'value', num: true, render: (r) => money(r.value) }
       /* "Jobs", not "Jobs done" — the panel heading above already says which
          work is counted, and the two words cost this table the column that
          matters most. See the header of the last column below. */
@@ -297,7 +297,7 @@ export async function renderPerformance(root, periodParam) {
   /* The period chips are chrome under the contract: above the band whose
      verdict they choose, beside the grain tabs. */
   const pick = el('div'); if (ak) root.insertBefore(pick, AKB.band); else root.append(pick);
-  const scP = ak ? panel('Every driver, jobs against trip value', 'One dot per driver whose fares can be placed; a name opens their record', 'perf-scatter') : null;
+  const scP = ak ? panel('Every driver, jobs against gross revenue', 'One dot per driver whose fares can be placed; a name opens their record', 'perf-scatter') : null;
   if (scP) root.append(scP.panel);
   const mv = panel('Who is doing something different',
     `Measured against each driver’s own previous periods, not against each other`);
@@ -308,7 +308,7 @@ export async function renderPerformance(root, periodParam) {
      the pair worth having: the disagreement between the two rankings is only
      visible when both positions are on one line without scrolling for it. */
   const jb = panel('Ranked on jobs done', 'The work that reached a rider');
-  const vl = panel('Ranked on trip value',
+  const vl = panel('Ranked on gross revenue',
     'Gross fares over the same period — the same people, in a different order');
   root.append(jb.panel); root.append(vl.panel);
   const trend = panel(`The fleet, ${L} by ${L}`,
@@ -397,7 +397,7 @@ export async function renderPerformance(root, periodParam) {
       sub: `accepted at least one booking this ${L}` },
     { key: 'perf-jobs', label: 'Jobs done', value: fmt(s?.completed ?? 0),
       sub: `median ${fmt(s?.jobs_median ?? 0)} a driver` },
-    { key: 'perf-value', label: 'Trip value', value: s?.value == null ? 'not measured' : money(s.value),
+    { key: 'perf-value', label: 'Gross revenue', value: s?.value == null ? 'not measured' : money(s.value),
       sub: s?.value == null
         ? 'no completed trip in this period carries a fare'
         : `gross fares over ${countOf(s.value_drivers, 'driver')} whose trips are priced` },
@@ -485,7 +485,7 @@ export async function renderPerformance(root, periodParam) {
   root.append(how.panel);
   const ul = el('ul', 'bul');
   const li = (h) => { const x = el('li'); x.innerHTML = h; ul.append(x); };
-  li('<b>The two rankings are never blended.</b> Jobs done and trip value answer different '
+  li('<b>The two rankings are never blended.</b> Jobs done and gross revenue answer different '
     + 'questions, and where a driver sits high on one and low on the other, that disagreement is '
     + 'the finding. Both positions are on every row of both tables for exactly that reason.');
   li(`<b>Position is out of the drivers who were ACTIVE in the ${L}</b> — a driver who `
@@ -498,7 +498,7 @@ export async function renderPerformance(root, periodParam) {
     + 'is not charged to the individual — each driver’s expected figure is scaled by how '
     + 'the median driver moved over the same periods.');
   li(`<b>${d.movement.why}</b>`);
-  li('<b>Trip value is gross.</b> It is what riders were charged, before any platform commission '
+  li('<b>Gross revenue is before commission.</b> It is what riders were charged, before any platform commission '
     + 'and before the cash a driver has already taken. What the fleet actually receives is on the '
     + 'Revenue page and on each driver’s Earnings tab.');
   how.body.innerHTML = '';
@@ -512,7 +512,7 @@ function perfScatter(host, d) {
   if (!rows.length) { host.append(note('No driver in this period has enough priced trips to place on value.')); return; }
   const box = el('div'); host.append(box);
   scatter(box, rows.map((r) => ({ ...r, value: Number(r.value), completed: Number(r.completed) })), {
-    x: 'completed', y: 'value', label: 'driver_name', xLabel: 'jobs done', yLabel: 'trip value',
+    x: 'completed', y: 'value', label: 'driver_name', xLabel: 'jobs done', yLabel: 'gross revenue',
     yFmt: (v) => money(v), xFmt: (v) => fmt(v),
     onClick: (r) => { if (r.driver_ext_id) location.hash = href('driver', r.driver_ext_id, 'record'); } });
   const out = (d.rows || []).length - rows.length;

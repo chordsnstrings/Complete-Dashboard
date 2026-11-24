@@ -61,6 +61,17 @@ export function ceiling(people) {
     n: carriers.length,
     none: measured.length - carriers.length,
     sum: r2(carriers.reduce((a, p) => a + (+p.owes.cash_taken || 0), 0)),
+    /* CARD-3b: what card settled of the fares from cash_taken_card_from, already
+       taken off `sum`; null when no row could take it off (the reason rides on
+       each row). */
+    card: carriers.some((p) => p.owes.cash_taken_card != null)
+      ? r2(carriers.reduce((a, p) => a + (+p.owes.cash_taken_card || 0), 0)) : null,
+    card_from: carriers.find((p) => p.owes.cash_taken_card_from)?.owes.cash_taken_card_from || null,
+    /* Carriers whose card part is unknown, and the reason the first of them
+       gives (the sheet never read, a failed read, no Emirates ID known) — so a
+       page never calls the ceiling "less card" where card was not taken off. */
+    card_unknown: carriers.filter((p) => p.owes.cash_taken_card == null).length,
+    card_why: carriers.find((p) => p.owes.cash_taken_card == null && p.owes.cash_taken_card_absent_reason)?.owes.cash_taken_card_absent_reason || null,
     trips: carriers.reduce((a, p) => a + (+p.owes.cash_taken_trips || 0), 0),
     from: froms[0] || null,
     to: tos[tos.length - 1] || null,
@@ -79,12 +90,25 @@ export function ceilingWho(c) {
 }
 
 /* The table column the plan adds to #opening, #advances and #deposits. */
+/* CARD-3b: the card part of a ceiling, in words, for a hero's sub-line — what
+   came off, and for how many drivers it could not be known and why. */
+export function cardWords(c) {
+  const parts = [];
+  if (c.card) parts.push(`less ${aed(c.card)} card paid of the fares from ${c.card_from}`);
+  if (c.card_unknown) parts.push(`card not taken off for ${fmt(c.card_unknown)} of them: ${c.card_why || 'not known'}`);
+  return parts.join('; ');
+}
 export const ceilingCol = () => ({
-  label: 'Cash fares on record (ceiling)', key: 'ak_ceiling', num: true,
+  label: 'Cash ceiling, less card', key: 'ak_ceiling', num: true,
   sortValue: (p) => (p.owes?.cash_taken == null ? -1 : +p.owes.cash_taken),
   render: (p) => (p.owes?.cash_taken != null
     ? `${esc(aed(p.owes.cash_taken))}${p.owes.cash_taken_from
       ? ` <span class="dim">since ${esc(p.owes.cash_taken_from)}</span>` : ''}`
+      /* CARD-3b: the part card took off, beside the figure (the operator: "keep
+         the card part beside them"). */
+      + (+p.owes.cash_taken_card > 0 ? `<br><span class="dim">after ${esc(aed(p.owes.cash_taken_card))} paid by card</span>` : '')
+      + (p.owes.cash_taken_card == null && p.owes.cash_taken_card_absent_reason
+        ? `<br><span class="dim" title="${esc(p.owes.cash_taken_card_absent_reason)}">card not taken off</span>` : '')
     : `<span class="dash" title="${esc(p.owes ? (p.owes.cash_taken_means || 'no cash-marked trip is on record for this person')
       : 'this person is not on the exposure read, so no cash fare has been measured for them')}">—</span>`),
 });

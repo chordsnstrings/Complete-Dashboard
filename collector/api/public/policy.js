@@ -264,7 +264,7 @@ function policyContract(AK, after, root, d, ex) {
   if (!ex) { after.append(note('The exposure read did not answer, so what a line needs cannot be counted here.', 'warn')); return; }
   const g = el('div', 'grid g3'); after.append(g);
   const need = panel('What a lending line needs, and how much of it exists', `Each over the ${fmt(n)} people on the exposure read.`, 'policy-needs');
-  const spread = panel('How the cash-fare ceiling spreads', 'Every cash fare on record, per driver — a ceiling, not a balance.', 'policy-ceiling');
+  const spread = panel('How the cash-fare ceiling spreads', 'Every cash fare on record, per driver, less what card settled of the fares from 1 Aug 2026 — a ceiling, not a balance.', 'policy-ceiling');
   const halves = panel('Both halves of the ratio on the same person', 'A line judges cash against what a driver generates; it can judge only people with both.', 'policy-halves');
   g.append(need.panel, spread.panel, halves.panel);
   const adv = people.filter((p) => (+p.owes?.advance_rows || 0) > 0 || (p.owes?.advance_rows == null && p.owes?.advance != null)).length;

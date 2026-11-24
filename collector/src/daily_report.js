@@ -523,7 +523,7 @@ ${changed}
 </td></tr>
 <tr><td class="pad" style="padding:28px 36px 8px 36px">
   <div style="font:400 20px/1.3 ${SERIF};color:${T.ink};padding-bottom:4px">Drivers</div>
-  <div style="font:400 13px/1.5 ${SANS};color:${T.grey};padding-bottom:12px">Everyone who drove a booking, by fares. Cash is what the 05:00 text asked each to deposit.</div>
+  <div style="font:400 13px/1.5 ${SANS};color:${T.grey};padding-bottom:12px">Everyone who drove a booking, by fares. Cash is the day’s cash fares; the cash text asks for these less what card paid of them, and only when more than AED 99 is left.</div>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
     <tr>${th('Driver')}${th('<span class="hide-s">Channels</span>')}${th('Bookings', true)}${th('Fares AED', true)}${th('Cash AED', true)}${thGap('<span class="hide-s">Car</span>')}</tr>${driverRows}
   </table>

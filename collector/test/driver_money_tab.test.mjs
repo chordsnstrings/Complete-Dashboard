@@ -176,9 +176,9 @@ console.log('\na driver who has a record');
   /* THE OPERATOR'S SECOND REQUEST, in their words: "this should show the
      amount that has come in for the date range selected as well, income". */
   check('the windowed panel carries an INCOME figure for the selected dates',
-    /Income/i.test(winTile(/Income/i)), JSON.stringify(winTiles.map((t) => t.slice(0, 26))));
+    /Net earnings/i.test(winTile(/Net earnings/i)), JSON.stringify(winTiles.map((t) => t.slice(0, 26))));
   check('…as a figure, not a dash, when the platforms published one',
-    /Income[^A-Za-z]*(at least )?AED/i.test(winTile(/Income/i)), winTile(/Income/i));
+    /Net earnings[^A-Za-z]*(at least )?AED/i.test(winTile(/Net earnings/i)), winTile(/Net earnings/i));
   /* INCOME IS THE EARNED SIDE AND SAYS WHAT IS MISSING FROM IT.
      ─────────────────────────────────────────────────────────────────────
      The tile used to sum driver_payout_day.earnings — Uber's netOutstanding,
@@ -191,15 +191,15 @@ console.log('\na driver who has a record');
      plural, while one of four accounts reported. A driver who worked Bolt saw
      their Bolt trips listed, a smaller number, and no explanation. */
   check('the income tile names its basis rather than asserting a bare figure',
-    /statement net/i.test(winTile(/Income/i)) && /fares/i.test(winTile(/Income/i)),
-    winTile(/Income/i));
+    /statement net/i.test(winTile(/Net earnings/i)) && /fares/i.test(winTile(/Net earnings/i)),
+    winTile(/Net earnings/i));
   check('a channel that reported nothing is NAMED on the tile',
-    /bolt/i.test(winTile(/Income/i)), winTile(/Income/i));
+    /bolt/i.test(winTile(/Net earnings/i)), winTile(/Net earnings/i));
   check('…and the figure reads as a floor, because a channel is missing from it',
-    /at least/i.test(winTile(/Income/i)), winTile(/Income/i));
+    /at least/i.test(winTile(/Net earnings/i)), winTile(/Net earnings/i));
   check('…saying MISSING rather than letting a small number speak for itself',
-    /missing from this figure rather than nought/i.test(winTile(/Income/i)),
-    winTile(/Income/i));
+    /missing from this figure rather than nought/i.test(winTile(/Net earnings/i)),
+    winTile(/Net earnings/i));
   /* THE COMPOSITION, term by term. "cash taken should be cash trip amount +
      cash advance - cash deposited for the duration" — a total whose parts are
      not on screen is a total a reader can only trust. */

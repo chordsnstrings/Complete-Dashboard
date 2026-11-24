@@ -86,6 +86,7 @@ import { resolvePerson, personKey } from './ledger_person.js';
 /* One answer to "who is this", read from the table src/persons.js builds. */
 import { personMap } from './person_map.js';
 import { aedText } from '../src/util.js';
+import { cardNet, applyCardNet, dubaiToday, NET_FROM } from '../src/card_notes.js';
 import { isPeriod, periodWindow } from './window.js';
 
 const round2 = (v) => (v == null ? null : Math.round(Number(v) * 100) / 100);
@@ -1590,6 +1591,15 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
         last_entry: r.last_entry,
       };
     });
+
+    /* CARD-3b (the operator, 2026-11-24: "approve from August"). The ceiling
+       comes down by what card payments settled of the cash fares from
+       NET_FROM (src/card_notes.js has the rule and the measurement behind the
+       date), and keeps both parts beside it. A read that fails leaves the
+       ceiling as every cash fare, and says so on each row. */
+    const net = await cardNet(q, people.filter((p) => p.owes.cash_taken != null).map((p) => p.person_id), { to: to || dubaiToday() })
+      .catch((e) => ({ from: NET_FROM, to, by: new Map(), absent: `the card payments could not be read (${String(e.message || e).slice(0, 120)})` }));
+    for (const p of people) applyCardNet(p.owes, net, p.person_id);
 
     const measured = people.filter((p) => p.exposure_pct != null);
     res.json({

@@ -4590,6 +4590,64 @@ Smaller fixes:
   (6) the caption said the ceiling would drop by a figure covering only part of the record. It now says so only when the window is every card payment (`whole_span`).
   (7) this row had been inserted inside CARD-1's, taking its production proof. Put back.
   Refuted: two refreshes racing on the primary key (the loser rolls back, the winner's rows stand, and the error never reaches a page), and a failed full rebuild freezing the recent days (the next hourly read retries it in full). | yes | **live (7636e5f, PR #59), verified on production 2026-11-24.** The worker's first read after the deploy (04:32 UTC) summed the fares in full within seconds. `/api/card/notes` then served the whole span (2025-12-13 to 2026-11-22, `whole_span: true`) in 1.7 s, and the whole-year cross-check in 1.2 s (19 s live before). Totals: 96 drivers; cash fares AED 1,315,094.57; card AED 388,727.03, of which AED 246,219.82 settled cash fares and AED 36,225.00 hotel card-machine fares, with AED 106,282.21 not taken off; in notes AED 1,068,874.75; chargebacks AED −659.31; 0 trips with no fare. On all 96 rows, cash − paid by card = in notes, and on_pos + on_cash + paid_before_window + unexplained = card. Before the first full rebuild, the 30-day live default answered in 1.3 s (71 drivers). Rendered through bin/prod-mirror.mjs: Deposits at 1280 and 390, and the driver money tab of person 114 at 1280. No page error and no overflow; the only console errors were the mirror's 405s to POSTs. Per month: COVERAGE "There is no cash position to subtract from". | `network_cards` 107 (§10 adds 24). Reversions, one at a time: pos-driver not first (3 fail), no one-day carry (5), chargebacks netted (3), the table ignored once built (1), the hourly refresh rebuilding everything (2), the fares refreshed only after a read that worked (1). After the review: booked on the card's day (5), card from the rows shown only (1), the day-before driver kept (1), the table read before `fares_from` (2), no forced rebuild (1), a trip with no fare counted as 0 (1). Neighbours, one at a time, green: `access_manifest` 20, `access_one_fleet` 115, `cache` 66, `credential_save_check` 109, `deposit_ui` 43, `interlinking` 11, `migrate` 34, `mockapi` 10, `timezone` 19, `data_retention_schema` 23. |
+| CARD-3b | **Card taken off the cash figures from August** (the operator, 2026-11-24: "approve from August", after the per-driver preview). Measured the same day: the fares we hold explain 85–91% of card money a month from August; January to July, 29–61% had no fare to set it against (COVERAGE). What card settled of cash fares on fare days from `NET_FROM = 2026-08-01` now comes off:
+- the cash-fare ceiling, `/api/ledger/exposure` `owes.cash_taken`. That covers #deposits (the hero, "Who is carrying the most", the bands), #advances, #opening, #policy and the assistant's `ledger_balances`;
+- the money tab's Cash taken (`/api/driver/register` `over_window`);
+- the overview tile (`/api/driver/kpis`);
+- the ceiling's weekly line (`/api/history` `cash_ceiling`). It is netted only with no fleet or platform filter, because a card payment is placed on a person; filtered, it says so.
+
+Both parts are kept beside the figure: `cash_taken_gross`, `cash_taken_card`, `_from`, `_to` (the sheet's last day) and `_absent_reason`. The card part is null with its true reason in each of these cases: the sheet never read, a failed read, a window before August or still in the future, an account on no person or on two, and a driver with no Emirates ID known.
+
+**One definition**: `src/card_notes.js` holds the allocation, `cashByDay`, `notesByPerson`, `cardNet`, `cardPartFor`, `applyCardNet` and `onCashByDay`. The code was moved out of `api/card_routes.js`; the preview, every netted figure and the cash text read it. The card panels and captions now say what is taken off. The card panel sits before the † band; it was after it since CARD-1, unseen because the browser suites do not run in CI.
+
+**An independent review before merge** confirmed 19 findings, 14 distinct, all fixed:
+- the overview tile is asked by account, so its person is now looked up on the spine. It had never taken card off on a real page, and said "on no person";
+- a window reads the day after its end for the carry. The next day's card had come off no window;
+- coverage ignores rows dated after the day of the read, and the text needs payments dated the day itself;
+- the text reads the trips live;
+- every reason is true: a future window, a driver with no ID, the sheet's last day;
+- the stale wording is corrected: #messages, #advances, the money tab note, card captions, the assistant's note, the 07:00 report, the Access switch;
+- the response cache key includes `card_id_link`, so a link moves the netted figures.
+
+Refuted: two fixture and labels claims that cannot happen on production. | yes | not deployed | `network_cards` 119 (§11 adds 12), `cache` 68. Reversions, one at a time:
+- each figure not netted: exposure, money tab, overview, history (1 each);
+- after the review: the KPI person not looked up (1), the window end without the next day (1), a future window (1), a no-ID driver read as 0 (1), the card link out of the cache key (2).
+
+Neighbours green: `ledger_exposure` 46, `history_routes` 71, `history_sparklines` 64, `driver_register` 57, `driver_routes` 85, `driver_money_tab` 56, `driver_money_tiles` 82, `access_manifest` 20, `access_one_fleet` 115, `mockapi` 10, `deposit_ui` 43, `arkiv_ledger` 63 (its label checks follow the new column name), and 26 more touching cash or the ledger. `truncation` is red on the production branch as well: a clock-dependent collision with an unrelated LIMIT 14 at 14:00 Dubai. |
+| CARD-4 | **The cash text: in notes, the day named, only over AED 99, once the card sheet has the day** (the operator, 2026-11-23: "send t-1 sms, with date mentioned. and only to people with over 99 AED left in cash"; 2026-11-24: "Once the sheet has it").
+- **The amount:** the day's cash fares (Uber's own cash figure, the fare elsewhere, channels left out as before), less what card paid of them that day. The card goes to pos-driver fares first, then the day's cash, from `notesByPerson` read live. It is capped at the cash asked for.
+- **The wording:** "Please deposit AED X of Uber cash you received on 27 Sep. Talk to your supervisor on WhatsApp."
+- **Only when more than AED 99 is left;** otherwise held `under_threshold`, with the figures kept.
+- **Timing.** At 08:33 Dubai on 24 Nov the sheet still ended on the 22nd; it had the 22nd by 16:49 the day before. So the run waits every quarter hour from 05:00 for Uber's figures **and** for the sheet to have the day: rows dated the day, its last real day at or after it. It gives up at 20:00 with `card_sheet_not_ready`; it was 05:00–09:00. The cash desk's email waits until 20:15 and shows "less card" per driver.
+- **Words:** #messages and the Access switch describe it; HOLD_WHY gains `waiting_for_card_sheet`, `card_sheet_not_ready` and `under_threshold`.
+- **Known limit:** a day pasted into the sheet only in part cannot be told from here (COVERAGE). | yes | not deployed | `driver_sms` 76: its cash section is rewritten, with amounts over AED 99 so the channel rules are still exercised by a text that goes. `cash_sms_email` 39.
+
+Reversions, one at a time:
+- not waiting for the sheet (9 fail), no AED 99 floor (4), card not taken off (7), the day not named (6), the email's last call at 09:15 (3), the email's card line dropped (1);
+- after the review: future-dated rows counted (2), the day need not hold payments (1), the text reading the summed table (7). |
+| LBL-1 | **One name per figure, everywhere** (the operator, 2026-11-24). On the driver Earnings tab:
+- Booked Revenue → **Gross Revenue**
+- Platform Earnings → **Bank Collection**
+- Actual Earnings → **Net Earnings**
+- Cash Collected → **Cash Trips (including POS)**
+
+At fleet level ("Yes, rename them too"):
+- Trip value → Gross Revenue
+- Platform payouts → Bank Collection
+- Money in / Income → Net Earnings
+
+The renames cover tiles, panels, columns, captions, the phone screens, the Excel exports (driver and today), the history labels, the assistant's labels and the monthly report. Only visible text changed, never a key or an id. Done by one isolated agent in two directed waves and verified by the lead with a grep: every remaining hit is a code comment, Uber's own "cash collected" field, or an unrelated phrase. Left on purpose: "platform payouts" where it names the counted payout part of Net Earnings (a different number from the Bank Collection tile), the PAY access class, and the assistant's bank-transfer register. | yes | not deployed | Agent waves 1 and 2 ran 23 suites, all green except `arkiv_fleet` 258/1. That one is a #vehicles panel-order check, red without the renames too. A reversion of the faresTile wording fails `driver_money_tiles`. |
+| CARD-3c | **Cash Trips (including POS), POS payments, Cash in hand, and Bank Collection with POS** (the operator, 2026-11-24: "POS directly comes to our bank. So it should be deducted from the Cash held with the driver… Cash In Hand which is Cash Trips - POS deposits"; "driver page should have POS payment as a separate modal"; "Bank Collection should add POS payment as well, as that comes into the bank").
+- **Cash Trips (including POS)** is the cash trips (`trip_cash`, gross) plus the hotel's fares paid on the driver's own card machine (`pos-driver`). It appears on the driver Earnings tile, the driver Excel, and the Finance tile (`/api/settlement/mix` `pos_driver`).
+- **POS payments** is a tile of its own: those hotel fares plus the card payments (Network International) that paid cash trips from 1 Aug 2026. Card on the sheet that matched no fare is said beside it, never counted.
+- **Cash in hand** = Cash Trips (including POS) − POS payments, which is the cash fares less what card paid of them. Where the card part is unknown it reads "at most this", with the reason.
+- **Bank Collection** adds the POS payments: the driver tile, the driver Excel, and the Finance tile (`pos_card` on the mix, not split for a fleet or platform filter, and said).
+- `/api/driver/kpis`: `cash_taken` is gross again. New fields: `pos_trips`, `pos_fares`, `pos_payments`, `pos_card_total`, `pos_card_unmatched`, `cash_in_hand`, `cash_in_hand_card*`. | yes | not deployed | `network_cards` 120, `driver_empty_window_page` 68, `money_workbook` 61, `arkiv_people` 246, `arkiv_finance` 132, `driver_routes` 85, and others green.
+
+Reversions, one at a time (each fails its check):
+- tile without POS, cash in hand not netted, POS fares not read, Excel without POS, Finance tile without POS;
+- Bank Collection without POS on the driver tile, the Finance tile and the Excel;
+- POS payments without the card part. |
 | DD-1 | #driver/…/day, the server (2026-10-13, Kashif Ali Ayyub Khan online from 07:04 with nothing drawn): `/api/driver/day` adds Uber's live status spans (SPANS_SQL, placed where each spell began), finds the car from Uber's own status rows (raw driverUuid) as well as bookings, keeps fixes to the hours the car was HIS (api/day_movement.js custodyWindows — never another driver's shift in a shared car; overlaps said as `shared`), and returns `movement` (runs by seat, stops/drives/silences, km by seat); manifest classes for every new field | yes | **on production** `87f5cca` (deployment ca1815a1, 2026-10-13) | driver_day_movement (new, 33 checks) — the review's server fixes each reverted alone, see DD-4 |
 | DD-2 | #driver/…/day, the page: a day with no booking draws everything else and says why; yesterday · today · tomorrow; one clock for every row — jobs in their platform's colour, Uber's log-in record and live status in Uber's ramp, the car in its tracker's ramp; custody sentence, km by seat, a map split at silences, a movement log with Uber's status changes; absence band measures distance with a passenger | yes | **on production** `87f5cca` (deployment ca1815a1, 2026-10-13) | mock renders in both skins and the phone with no error (scratchpad dday/shots); arkiv_classic_frozen: 13 driver routes re-recorded — the day page by design, the other 12 only for the strip link (proved: with the link off they match the old hashes); re-recorded again for DD-4, the same 13: rendered from HEAD's public/ and the tree's, the only differences are the link's `?period=month?on=` → `&on=` on all 13 and, on the day page, the old skin's colour fallback, `background-color` and the legend's "moving, no passenger" — nothing else |
 | DD-3 | The driver page's live status strip links to today's day page | yes | **on production** `87f5cca` (deployment ca1815a1, 2026-10-13) | as DD-2 |

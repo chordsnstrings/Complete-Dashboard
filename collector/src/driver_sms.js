@@ -29,6 +29,7 @@ import { attributionJoin, ATTRIBUTION_COLS } from '../api/unauthorized_sql.js';
 import { occCountsOnce } from '../api/occupancy_sql.js';
 import { placeEnds } from '../api/place_sql.js';
 import { TRIP_RUN_SQL } from '../api/run_kinds.js';
+import { cardSheet, notesByPerson } from './card_notes.js';
 
 /* ── Dubai's calendar (UTC+4, no daylight saving) ───────────────────────── */
 const DXB_MS = 4 * 3600_000;
@@ -61,10 +62,19 @@ export const channelWords = (platforms = []) => {
   const w = [...known, ...other].map((c) => CHANNEL_WORD[c] || c);
   return w.length <= 1 ? (w[0] || '') : `${w.slice(0, -1).join(', ')} and ${w.at(-1)}`;
 };
-export const cashText = (amount, platforms = []) => {
+/* CARD-4 (the operator, 2026-11-23: "send t-1 sms, with date mentioned"):
+   the day is named — "on 23 Nov" — because the text now goes when the card
+   sheet has that day, which can be the afternoon after, and a "yesterday"
+   read late is the wrong day. Without a day (a caller from before), the old
+   word. */
+export const cashText = (amount, platforms = [], day = null) => {
   const list = channelWords(platforms);
-  return `Please deposit AED ${aed(amount)} of ${list ? `${list} ` : ''}cash you received yesterday. Talk to your supervisor on WhatsApp.`;
+  return `Please deposit AED ${aed(amount)} of ${list ? `${list} ` : ''}cash you received ${day ? `on ${shortDay(day)}` : 'yesterday'}. Talk to your supervisor on WhatsApp.`;
 };
+/* Only a driver with MORE than this left in notes, after the card payments
+   that paid the day's cash fares, is texted (the operator, 2026-11-23: "only
+   to people with over 99 AED left in cash"). */
+export const CASH_MIN_AED = 99;
 export const tripText = (from, to, km, day = null) =>
   `Please Register your trip ${day ? `on ${shortDay(day)} ` : ''}from ${from} to ${to} - ${km} km with your supervisor - ADMIN.`;
 /* "29 Sep" — the day of a trip texted late (a re-check, below), so the driver
@@ -99,7 +109,11 @@ export const HOLD_WHY = Object.freeze({
   daily_cap: 'This driver has already had three trip messages today.',
   no_longer_unauthorized: 'By the time it was due, the journey was no longer judged unexplained.',
   switched_off: 'Driver messages of this kind were switched off when it was due.',
-  not_complete: 'Yesterday’s cash was not complete by 09:00 Dubai, so no reminder was sent.',
+  not_complete: 'The day’s cash was not complete by the run’s last try (09:00 Dubai until 24 November 2026, 20:00 since), so no reminder was sent.',
+  /* CARD-4: the text waits for the card payments sheet to have the day. */
+  waiting_for_card_sheet: 'Waiting for the card payments sheet to include the day, so the part paid by card can be taken off before anyone is asked for it.',
+  card_sheet_not_ready: 'The card payments sheet still did not include the day by 20:00 Dubai, so no reminder was sent: an amount with that day’s card payments left in would ask drivers for cash they no longer hold.',
+  under_threshold: 'After the card payments that paid the day’s cash fares, AED 99 or less was left in cash, so no reminder was sent (only over AED 99 is asked for).',
   /* The goal texts, src/target_sms.js. */
   dry_run: 'Dry run: decided and written here, not sent. Switch the goal texts to On in Access → Settings to send them.',
   channel_not_fresh: 'An app this driver used in the last 8 days has not collected in the last 90 minutes, so today’s trip count may be short.',
@@ -225,7 +239,17 @@ export async function collectedPairs(q, day, since) {
   return new Set(rows.map((r) => `${r.source}:${r.fleet_id}`));
 }
 
-/* ═════════════════════════ the 05:00 cash reminder ═════════════════════════ */
+/* ═════════════════════════ the cash reminder ═════════════════════════ */
+/* CARD-4 (the operator, 2026-11-23/24): the reminder asks for what is left IN
+   NOTES — the day's cash fares less what card payments (Network
+   International, src/sources/network_cards.js) paid of them, the same rule
+   as the ceiling (src/card_notes.js) — names the day, and goes only to a
+   driver with more than AED 99 left. The card sheet gets a day's payments
+   later than this run used to send: at 08:33 Dubai on 24 Nov it still ended
+   on the 22nd, and it had the 22nd by 16:49 the day before. So the run waits
+   for the sheet to have the day ("Once the sheet has it", the operator,
+   2026-11-24), trying every quarter hour from 05:00, and at 20:00 gives up
+   and says so — never sending an amount with the day's card left in. */
 /* Yesterday's cash, per person, from trip_cash (sql/schema_v80.sql): Uber's
    own cash_collected where the payments report has it — 11.1% above the fare
    on every one of 73 Uber cash trips measured, because it is what the rider
@@ -272,6 +296,19 @@ export async function cashDepositRun({ q, now = new Date(), send = sendSms, cfg 
     await note('held', final ? 'not_complete' : 'waiting', detail);
     return { day: D, waiting: !final, gaveUp: final, ...detail };
   }
+  /* CARD-4: the card sheet must have the day. "Has the day" is the newest
+     payment it holds being dated the day or later; a day pasted only in part
+     cannot be told from here. */
+  const sheet = await cardSheet(q, { day: D });
+  /* covers_to ignores rows dated after the day of the read (a mis-typed future
+     date must not open this gate — the review of 2026-11-24), and the day
+     itself must hold payments. A day pasted only in part still cannot be told
+     from here (COVERAGE). */
+  if (sheet.absent || !sheet.covers_to || sheet.covers_to < D || !(sheet.day_rows > 0)) {
+    const detail = { finished: final, card_sheet_to: sheet.covers_to, card_sheet_day_rows: sheet.day_rows, card_sheet_read_at: sheet.read_at };
+    await note('held', final ? 'card_sheet_not_ready' : 'waiting_for_card_sheet', detail);
+    return { day: D, waiting: !final, gaveUp: final, ...detail };
+  }
 
   const rows = await q(
     `SELECT a.driver_id::text AS person, tc.platform, tc.fleet_id, tc.driver_ext_id, tc.cash_amount
@@ -307,6 +344,12 @@ export async function cashDepositRun({ q, now = new Date(), send = sendSms, cfg 
   for (const w of worked) people.get(w.person)?.worked.add(`${w.platform}:${w.fleet_id}`);
   const collected = await collectedPairs(q, D, dayEnd);
   const pb = book || await loadPhoneBook(q);
+  /* CARD-4: what card paid of each person's cash fares that day — booked on
+     the fare's day: the hotel's pos-driver fares first, then the day's cash
+     (src/card_notes.js). The next day's card is not in the sheet yet, so a
+     fare paid by card after midnight still counts as notes here. */
+  const cardBy = new Map((persons.length ? await notesByPerson(q, { from: D, to: D, personIds: persons, live: true, today: dubaiDay(now) }) : [])
+    .map((r) => [String(r.person_id), r]));
 
   /* Why a channel is left out of the amount, in the order the whole-message
      hold reports it when nothing is left. */
@@ -336,19 +379,27 @@ export async function cashDepositRun({ q, now = new Date(), send = sendSms, cfg 
       const [platform, fleet] = k.split(':');
       if (!collected.has(k) && !p.channels.has(platform)) leftOut.push({ platform, fleets: [fleet], trips: 0, known_aed: 0, why: 'not_collected' });
     }
-    const amount = Math.round(sum * 100) / 100;
+    const cashFares = Math.round(sum * 100) / 100;
     const seen = leftOut.filter((x) => x.trips > 0);
-    if (!(amount > 0) && !seen.length) continue;
+    if (!(cashFares > 0) && !seen.length) continue;
     out.people += 1;
+    /* CARD-4: what card paid of the day's cash fares comes off. Capped at the
+       cash asked for: card that paid a channel left out of the amount cannot
+       be told apart, and never takes the amount below nought. */
+    const cr = cardBy.get(String(person));
+    const cardPaid = cr ? Math.min(Math.round(cr.on_cash * 100) / 100, cashFares) : 0;
+    const amount = Math.round((cashFares - cardPaid) * 100) / 100;
     /* Nothing certain left: held with the reason of the channel that took it
-       away. Otherwise the number's own reasons, as before. */
-    let hold = amount > 0 ? null : LEFT_OUT[seen[0].why];
+       away. Otherwise the number's own reasons, as before; then the AED 99
+       floor on what is left. */
+    let hold = cashFares > 0 ? null : LEFT_OUT[seen[0].why];
     const ph = phoneFor(pb, person);
     if (!hold && ph.hold) hold = ph.hold;
-    const text = amount > 0 ? cashText(amount, included) : null;
+    if (!hold && !(amount > CASH_MIN_AED)) hold = 'under_threshold';
+    const text = amount > 0 ? cashText(amount, included, D) : null;
     if (!hold && seen.length) out.partial += 1;
-    out.decisions.push({ person, amount, hold, to: ph.phone ? maskPhone(ph.phone) : null, source: ph.source || null,
-      channels: included, left_out: leftOut });
+    out.decisions.push({ person, amount, cash_fares: cashFares, card_paid: cardPaid, hold, to: ph.phone ? maskPhone(ph.phone) : null,
+      source: ph.source || null, channels: included, left_out: leftOut });
     if (hold) { out.held += 1; out.holds[hold] = (out.holds[hold] || 0) + 1; }
     if (dry) continue;
     /* The amount per channel, kept beside the total. The 08:00 cash email
@@ -366,13 +417,17 @@ export async function cashDepositRun({ q, now = new Date(), send = sendSms, cfg 
     const id = await decide(q, {
       kind: 'cash_deposit', dedupe_key: `cash:${person}:${D}`, person_id: Number(person), business_day: D,
       destination: ph.phone || null, message_text: text, status: hold ? 'held' : 'queued', hold_reason: hold,
-      detail: JSON.stringify({ amount, source: ph.source || null, channels: included, by_channel: byChannel, left_out: leftOut }),
+      /* amount is what the text asks for; by_channel is the day's cash fares
+         per platform BEFORE card, and card_paid what card took off them
+         (CARD-4) — so the 08:00 email can show the sum. */
+      detail: JSON.stringify({ amount, cash_fares: cashFares, card_paid: cardPaid, card_total: cr ? cr.card : 0, card_on_pos: cr ? cr.on_pos : 0,
+        source: ph.source || null, channels: included, by_channel: byChannel, left_out: leftOut }),
     });
     if (!id || hold) continue;
     if (await deliver(q, id, { to: ph.phone, text, ref: `fm-cash-${D}-${person}`, send })) out.sent += 1;
   }
   await note('sent', null, { finished: true, people: out.people, sent: out.sent, held: out.held, partial: out.partial,
-    holds: out.holds, unplaced_trips: out.unplaced_trips, unplaced_aed: out.unplaced_aed });
+    holds: out.holds, unplaced_trips: out.unplaced_trips, unplaced_aed: out.unplaced_aed, card_sheet_to: sheet.covers_to });
   return out;
 }
 

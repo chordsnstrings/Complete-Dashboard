@@ -2343,6 +2343,12 @@
      "cash_booking_platforms",
      "cash_trips",
      "cash_taken",
+     "pos_fares",
+     "pos_payments",
+     "pos_card_total",
+     "pos_card_unmatched",
+     "cash_in_hand",
+     "cash_in_hand_card",
      "cash_unvalued"
     ]
    },
@@ -6467,7 +6473,9 @@
      "unlabelled_trips",
      "classes[].trips",
      "classes[].priced_trips",
-     "classes[].foc_trips"
+     "classes[].foc_trips",
+     "pos_driver.trips",
+     "pos_driver.priced_trips"
     ]
    }
   ],

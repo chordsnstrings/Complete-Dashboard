@@ -554,7 +554,7 @@ console.log('\nthe account fold closes, whichever door it is entered by');
   check('…at Uber\u2019s own cash-collected figure, not the fare', Number(ck.cash_taken) === 45, String(ck.cash_taken));
   const page = readFileSync('api/public/driver.js', 'utf8');
   check('the Earnings tile reads cash_trips and cash_taken before any older figure',
-    /if \(cashTakenKnown\) \{\s*if \(\+k\.cash_trips > 0\) return k\.cash_taken != null \? money\(k\.cash_taken\)/.test(page));
+    /if \(cashTakenKnown\) \{\s*const pos = [^\n]+\n\s*if \(\+k\.cash_trips > 0\) return k\.cash_taken != null \? money\(\+k\.cash_taken \+ pos\)/.test(page));
 }
 
 server.close();

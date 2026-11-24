@@ -145,11 +145,11 @@ check('…it is the figure the statement reported', num(fares?.v) === 1200, JSON
    state is the commission, not the payout. */
 check('…and it says whose figure it is and how it relates to the money beside it',
   /platform's own fare line/i.test(fares?.s || '')
-    && /before the commission that makes it the Money in beside it/i.test(fares?.s || ''),
+    && /before the commission that makes it the Net earnings beside it/i.test(fares?.s || ''),
   (fares?.s || '').slice(0, 220));
 /* The tile next door is the money in. If the two were added it would read
    2,060; it must still read what the day rows actually hold. */
-const moneyIn = find(ov, /^Money in$/i);
+const moneyIn = find(ov, /^Net earnings$/i);
 check('the Money in tile did not absorb the gross', num(moneyIn?.v) !== 2060, JSON.stringify(moneyIn));
 /* And the two cards the operator asked for are on the same strip, adding to
    it. A fixture driver whose channel files no statement has no cash line, so
@@ -166,7 +166,7 @@ check('a priced channel still shows its trip fares, unchanged',
   num(find(hv, /^Fares$/i)?.v) === 2400, JSON.stringify(find(hv, /^Fares$/i)));
 
 const earn = await tiles(`#driver/${RIDE}/earnings?${W}`);
-const booked = find(earn, /^Booked revenue$/i);
+const booked = find(earn, /^Gross revenue$/i);
 check('the Earnings tab’s Booked revenue tile shows it too',
   num(booked?.v) === 1200, JSON.stringify(booked));
 check('…and says it is the statement’s line, not the trips’',

@@ -1340,11 +1340,11 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
       for (const r of rows) delete r.__reasons;
       const columns = [col('driver', 'Driver', 'text'), col('advance_owed_aed', 'Advances owed', 'aed'),
         col('deductions_owed_aed', 'Deductions owed', 'aed'), col('cash_held_aed', 'Cash held', 'aed'),
-        col('cash_taken_aed', 'Cash taken (ceiling)', 'aed'), col('cash_trips', 'Cash trips', 'int'),
+        col('cash_taken_aed', 'Cash taken (ceiling, less card from 1 Aug 2026)', 'aed'), col('cash_trips', 'Cash trips', 'int'),
         col('total_owed_aed', 'Total owed', 'aed'), col('pay_owed_to_driver_aed', 'Pay owed to driver', 'aed'),
         col('earned_aed', 'Earned', 'aed'), col('exposure_pct', 'Exposure', 'pct'), col('against_line', 'Against the line', 'text'),
         col('driver_id', 'Driver id', 'text')];
-      const NOTE = 'advances and deductions owed are what the ledger records; cash held is known only where the accounts team stated an opening cash position; cash taken is every cash fare on record — a ceiling on what they could still hold, not a balance; pay owed to the driver is recorded salary, commission, incentives and reimbursements not yet paid out; an empty figure means nothing was recorded, never a balance of nought';
+      const NOTE = 'advances and deductions owed are what the ledger records; cash held is known only where the accounts team stated an opening cash position; cash taken is every cash fare on record, less what card payments settled of the fares from 1 Aug 2026 where that is known (a row with no card figure says why) — a ceiling on what they could still hold, not a balance; pay owed to the driver is recorded salary, commission, incentives and reimbursements not yet paid out; an empty figure means nothing was recorded, never a balance of nought';
       const earnedOver = p ? rangeLabel(p.from, p.to) : 'every date on record';
       const WINDOWS = `every balance, cash taken and cash trips is everything recorded up to ${rangeLabel(asOf, asOf)} — NEVER only a period's, so never say "last week" or any period beside them; cash_trips_from/to are the dates of the first and last cash trip counted; only earned_aed is over ${earnedOver}`;
       if (one) {

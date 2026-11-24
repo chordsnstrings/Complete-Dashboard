@@ -397,7 +397,7 @@ function drawYields(chan, A) {
           + pill(r.basis === 'fares' || r.basis === 'partial_fares' ? 'gross fare' : 'net payout',
             r.basis === 'fares' ? 'ok' : null)
           + (String(r.basis || '').startsWith('partial') ? ' ' + pill('partial', 'warn') : '') },
-      { label: 'Money in', key: 'money', num: true, render: (r) => money(r.money) },
+      { label: 'Net earnings', key: 'money', num: true, render: (r) => money(r.money) },
       { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
       { label: 'Per km', key: 'aed_per_km', num: true, render: (r) => money(r.aed_per_km, 'AED', 2) },
     ], { compact: true }));
@@ -409,7 +409,7 @@ function rankCars({ best, worst, pbest, pworst }, A) {
     { label: 'Held by', key: 'current_driver',
       render: (r) => (r.current_driver_id ? entity('driver', r.current_driver_id, r.current_driver)
         : absent('no custody row names a driver for this plate')) },
-    { label: 'Money in', key: 'money', num: true, render: (r) => money(r.money) },
+    { label: 'Net earnings', key: 'money', num: true, render: (r) => money(r.money) },
     { label: 'Days', key: 'days_earning', num: true, render: (r) => fmt(r.days_earning) },
     { label: 'Per day', key: 'aed_per_earning_day', num: true,
       render: (r) => money(r.aed_per_earning_day) },
@@ -534,7 +534,7 @@ function rankPeople({ pbest, pworst }, D, { gate, days, nDays }) {
   const pCols = [
     { label: 'Driver', key: 'driver_name',
       render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
-    { label: 'Money in', key: 'money', num: true, render: (r) => money(r.money) },
+    { label: 'Net earnings', key: 'money', num: true, render: (r) => money(r.money) },
     { label: 'Days', key: 'days_worked', num: true, render: (r) => fmt(r.days_worked) },
     { label: 'Per day', key: 'aed_per_day_worked', num: true,
       render: (r) => money(r.aed_per_day_worked) },
@@ -807,7 +807,7 @@ async function assetsTab(root, { contract: ak = false } = {}) {
 
   (ak ? (tiles) => glance(akTiles, tiles.map((x, i) => ({ ...x, tone: null, hero: i === 0 })))
     : (tiles) => root.insertBefore(kpiRow(tiles), bar))([
-    { label: 'Money in', value: money(t.money), sub: `over ${fmt(A.window_days)} days` },
+    { label: 'Net earnings', value: money(t.money), sub: `over ${fmt(A.window_days)} days` },
     { label: 'Per earning vehicle-day', value: money(t.aed_per_earning_day),
       sub: `${fmt(t.earning_vehicle_days)} earned · ${fmt(t.idle_vehicle_days)} idle` },
     { label: 'Earning', value: fmt(t.earning), tone: 'good', sub: `of ${fmt(t.vehicles)} vehicles` },
@@ -833,7 +833,7 @@ async function assetsTab(root, { contract: ak = false } = {}) {
        earning car (km and money both above nought), so the band needs no
        second mark. */
     scatter(sc.body, withKm, { x: 'km', y: 'money', label: 'plate',
-      xLabel: 'booked km', yLabel: 'money in (AED)', yFmt: (v) => money(v),
+      xLabel: 'booked km', yLabel: 'net earnings (AED)', yFmt: (v) => money(v),
       ...(ak && num(t.aed_per_km) != null ? { refLine: { slope: num(t.aed_per_km) } } : {}),
       onClick: (r) => { location.hash = href('vehicle', r.plate); } });
     sc.body.append(el('p', 'cap',
@@ -857,7 +857,7 @@ async function assetsTab(root, { contract: ak = false } = {}) {
     { label: 'Held by', key: 'current_driver',
       render: (r) => (r.current_driver_id ? entity('driver', r.current_driver_id, r.current_driver)
         : absent('no custody row names a driver for this plate')) },
-    { label: 'Money in', key: 'money', num: true,
+    { label: 'Net earnings', key: 'money', num: true,
       render: (r) => (r.money == null
         ? absent('no fare and no payout reaches this vehicle in this range') : money(r.money)) },
     { label: 'Per day', key: 'aed_per_earning_day', num: true,
@@ -1016,7 +1016,7 @@ async function driversTab(root, { contract: ak = false } = {}) {
     { label: 'Channels', key: 'platforms', nosort: true,
       render: (r) => (r.platforms.length ? r.platforms.map((p) => chanChip(p)).join(' ')
         : absent('no platform record for this person in this range')) },
-    { label: 'Money in', key: 'money', num: true,
+    { label: 'Net earnings', key: 'money', num: true,
       render: (r) => (r.money == null
         ? absent('no payout statement and no priced booking reaches this person')
         : money(r.money)) },

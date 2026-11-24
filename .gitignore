@@ -12,3 +12,8 @@ scratchpad/
 # tree dirty, and so nobody mistakes one for work.
 collector/_*.mjs
 collector/.__*.mjs
+
+# Git worktrees that Claude Code's isolated agents check out under .claude/.
+# Each is a separate checkout of this repository on its own branch; its work
+# reaches the main branch by a merge, never by committing the folder.
+.claude/worktrees/

@@ -96,6 +96,9 @@ await T('f2', { driver: 'b-f', platform: 'bolt', at: '2026-09-04T09:00:00Z', pri
 await T('z1', { driver: 'u-z', name: '', at: '2026-09-05T08:00:00Z', price: 25, pay: 'card' });
 await T('g1', { driver: 'u-g', fleet: 'egari', at: '2026-09-03T08:00:00Z', price: 30, pay: 'card', km: null });
 await T('g2', { driver: 'h-g', platform: 'hotel', fleet: 'egari', at: '2026-09-04T08:00:00Z', price: 90, pay: 'card', km: null });
+/* A hotel fare paid on the driver's own card machine (pos-driver): a cash trip
+   INCLUDING POS, never cash in hand (the operator, 2026-11-24). */
+await T('g3', { driver: 'h-g', platform: 'hotel', fleet: 'egari', at: '2026-09-04T10:00:00Z', price: 55, pay: 'pos-driver', km: null });
 await T('h1', { driver: 'u-h', at: '2026-09-04T12:00:00Z' });                                            // cash, no price, no Uber figure
 await T('i0', { driver: 'u-i', at: '2026-08-20T08:00:00Z', price: 30, pay: 'card' });                    // before the dates: on the books
 await q(`INSERT INTO driver_payout_day (platform, fleet_id, driver_ext_id, day, period_start, period_end, period_days, earnings)
@@ -201,7 +204,7 @@ check('…an Uber wire says the week it pays for', w1?.['Pays for, from'] instan
 check('…a Bolt payout says Bolt does not say', bp.find((r) => r['Amount (AED)'] === 800)?.['Pays for, from'] === 'Bolt does not say');
 check('…and one only Bolt’s ledger shows is marked as such', /^not yet/.test(bp.find((r) => r['Amount (AED)'] === 321)?.['Listed by the platform'] || ''));
 check('the platform’s own statement is carried as it filed it', table(all.file, 'Platform statements')[0]?.['To the bank (AED)'] === 12345.67);
-check('every trip, cash or card, for a week — seventeen bookings, the three outside the dates left out', table(all.file, 'Every trip').length === 17, String(table(all.file, 'Every trip').length));
+check('every trip, cash or card, for a week — eighteen bookings (the pos-driver one added 2026-11-24), the three outside the dates left out', table(all.file, 'Every trip').length === 18, String(table(all.file, 'Every trip').length));
 
 console.log('\n2. the chips, one driver, a longer range');
 const eg = await make({ fleet: 'egari' });
@@ -272,9 +275,15 @@ console.log('\n4. the Drivers sheet is the Drivers page (DR1-DR3, 2026-10-20)');
   const d1 = table(one.file, 'Driver');
   const pa = page.find((r) => r.driver_name === 'Test Driver A');
   check('one driver\u2019s file opens with their page\u2019s figures', d1.length === 1 && d1[0].Driver === 'Test Driver A'
-    && d1[0].Bookings === pa.trips && d1[0]['Booked revenue (AED)'] === Number(pa.revenue) && d1[0]['Platform earnings (AED)'] === 98.76
-    && d1[0]['Money (AED)'] === 123.45 && d1[0]['Cash collected (AED)'] === 97 && d1[0]['Cash trips'] === 4 && d1[0]['Days worked'] === 4,
+    && d1[0].Bookings === pa.trips && d1[0]['Gross revenue (AED)'] === Number(pa.revenue) && d1[0]['Bank collection (AED)'] === 98.76
+    && d1[0]['Money (AED)'] === 123.45 && d1[0]['Cash trips (including POS) (AED)'] === 97 && d1[0]['Cash trips'] === 4 && d1[0]['Days worked'] === 4,
   JSON.stringify(d1));
+  const gFile = table((await make({ person: { id: 7, name: 'Test Driver G' } })).file, 'Driver')[0] || {};
+  check('a driver whose only "cash" trip was paid on their card machine: cash trips including POS 55, POS payments 55, cash in hand 0',
+    gFile['Cash trips (including POS) (AED)'] === 55 && gFile['POS payments (AED)'] === 55 && gFile['Cash in hand (AED)'] === 0
+    /* Bank collection adds the POS payments, which come into the bank. */
+    && Math.round((gFile['Bank collection (AED)'] - (Number(page.find((r) => r.driver_name === 'Test Driver G')?.payout) || 0)) * 100) / 100 === 55,
+  JSON.stringify(gFile));
   const named = await make({ person: { id: 1, name: 'Test Driver A As Their Page Names Them' } });
   check('…under the name their page prints, on every sheet of it', table(named.file, 'Driver')[0]?.Driver === 'Test Driver A As Their Page Names Them'
     && table(named.file, 'Cash to collect')[0]?.Driver === 'Test Driver A As Their Page Names Them');
@@ -296,7 +305,7 @@ console.log('\n4. the Drivers sheet is the Drivers page (DR1-DR3, 2026-10-20)');
     H && H['Cash trips'] === 1 && H['Cash from trips (AED)'] == null && H['Cash not priced yet'] === 1, JSON.stringify(H));
   const h1 = table((await make({ person: { id: 8, name: 'Test Driver H' } })).file, 'Driver')[0];
   check('…and their own file says the same: no Cash collected figure, one trip not priced yet',
-    h1 && h1['Cash collected (AED)'] == null && h1['Not priced yet'] === 1 && h1['Cash trips'] === 1, JSON.stringify(h1));
+    h1 && h1['Cash trips (including POS) (AED)'] == null && h1['Not priced yet'] === 1 && h1['Cash trips'] === 1, JSON.stringify(h1));
   check('A, partly priced: the priced part, and the one waiting named beside it',
     A?.['Cash from trips (AED)'] === 97 && A?.['Cash not priced yet'] === 1, JSON.stringify(A));
   let threw = false;
