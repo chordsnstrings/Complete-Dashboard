@@ -46,6 +46,12 @@
      · the crosscheck's day-before card read removed → §9 "a window starting on the 16th" fails
      · pos-driver fares left out of cashByDay → §9 "pos-driver covers the 20th" fails
      · the platform check on a trip's account dropped → §9 "the 8th" fails
+     · allocate paying cash before pos-driver → §10 "pos-driver fare first" fails
+     · allocate without the one-day carry → §10 "before midnight" and the preview fail
+     · chargebacks netted into what card paid → §10 "the chargeback is shown" fails
+     · cashByDay reading the trip views even when the table is built → §10 "the pages read the table" fails
+     · the hourly refresh rebuilding everything → §10 "the last 14 days only" fails
+     · the fares refreshed only after a read that worked → §10 "a read that fails" fails
      · the link's precedence over the HR export dropped (CASE order) → §5 fails
      · the review serving an ambiguous HR ID → §8 fails
      · the stranded-link fallback dropped → §5 "removed person" fails
@@ -60,7 +66,8 @@ import * as svc from '../api/access/service.js';
 import { hashPassword } from '../api/access/crypto.js';
 import { parseSheet, dayOf, slashOrderOf, writeRead, collect } from '../src/sources/network_cards.js';
 import { parseServiceAccount, signedAssertion, readValues, sheetFromLink, readCsvByLink } from '../src/google_sheets.js';
-import { refOf } from '../api/card_routes.js';
+import { refOf, allocate } from '../api/card_routes.js';
+import { refreshFares } from '../src/card_fares.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -392,7 +399,11 @@ async function cookieFor(email, role) {
 
 console.log('\n§9 against the cash trips (CARD-2)');
 /* A card payment settles a cash trip, so a day's card total should not run
-   past that day's cash trips. One driver, four days, one of each status. */
+   past that day's cash trips. One driver, four days, one of each status.
+   §4's reads summed the fares before any trip existed (CARD-3); §9 reads them
+   live, and §10 proves the summed table gives the same answer. */
+await q(`DELETE FROM card_fare_day`);
+await q(`DELETE FROM source_state WHERE source = 'network_cards' AND key IN ('fares_full_at', 'fares_at')`);
 {
   await writeRead(db, parseSheet([HEAD,
     [fmtE(E1), '1-Nov-2026', 'Ecosine', 601, 100],          // cash 98 + 202 → covered (within the AED 5 allowance of the 98? no: of 300)
@@ -455,6 +466,77 @@ console.log('\n§9 against the cash trips (CARD-2)');
   const { NEVER } = await import('../api/cache.js');
   check('the card reads are never served from the response cache (a link would otherwise redraw as undone)',
     ['/api/card/review', '/api/card/driver', '/api/card/summary', '/api/card/crosscheck'].every((r) => NEVER.some((p) => r.startsWith(p))), '');
+}
+
+console.log('\n§10 cash in notes (CARD-3)');
+/* The operator, 2026-11-24: "net card off cash fares". notes = cash fares −
+   the part card payments paid; pos-driver fares first (never cash), then the
+   same day's cash, then the day before's; the rest is not taken off. */
+{
+  const a1 = allocate([{ day: '2026-11-01', cash: 100, pos: 50, pay: 80 }]);
+  check('card pays the hotel\'s pos-driver fare first, then cash: 80 = 50 pos + 30 cash, 70 left in notes',
+    a1[0].on_pos === 50 && a1[0].on_cash === 30 && a1[0].notes === 70 && a1[0].unexplained === 0, JSON.stringify(a1));
+  const a2 = allocate([{ day: '2026-11-01', cash: 100, pay: 0 }, { day: '2026-11-02', cash: 0, pay: 60 }]);
+  check('a fare taken before midnight, paid by card after: the 1st keeps 40 in notes, the 2nd\'s 60 settles it',
+    a2[0].notes === 40 && a2[0].paid_next_day === 60 && a2[1].on_cash === 60 && a2[1].unexplained === 0, JSON.stringify(a2));
+  const a3 = allocate([{ day: '2026-11-01', cash: 100, pay: 0 }, { day: '2026-11-03', cash: 0, pay: 60 }]);
+  check('…one day back, never further: the 3rd\'s 60 is not explained, the 1st keeps its 100', a3[0].notes === 100 && a3[1].unexplained === 60,
+    JSON.stringify(a3));
+  const a4 = allocate([{ day: '2026-11-05', cash: 50, pay: 80 }]);
+  check('card beyond the fares is not taken off: 50 paid by card, 30 not explained, notes 0 (never below)', a4[0].on_cash === 50
+    && a4[0].unexplained === 30 && a4[0].notes === 0, JSON.stringify(a4));
+  const many = allocate([{ day: '2026-11-01', cash: 120, pay: 30 }, { day: '2026-11-02', cash: 40, pay: 150, pos: 20 }, { day: '2026-11-03', cash: 75, pay: 10 }]);
+  const sm = (k) => Math.round(many.reduce((x, r) => x + r[k], 0) * 100) / 100;
+  check('summed: notes = cash − the part paid by card', sm('notes') === Math.round((sm('cash') - sm('on_cash')) * 100) / 100, JSON.stringify(many));
+
+  /* THE FARES, summed per account and day (sql/schema_v128.sql). */
+  const before = (await B('/api/card/crosscheck')).body?.totals;
+  const fr = await refreshFares(db, { full: true, now: Date.parse('2026-11-23T08:00:00Z') });
+  const fd = Object.fromEntries((await q(`SELECT platform || '|' || driver_ext_id || '|' || to_char(day, 'YYYY-MM-DD') AS k, cash::float AS cash, cash_trips, pos::float AS pos, pos_trips FROM card_fare_day`))
+    .map((r) => [r.k, r]));
+  check('the full rebuild sums cash trips and pos-driver fares per account and day (a card-paid trip and a pos-supervisor fare left out)',
+    fr.full === true && fd['uber|u-alpha|2026-11-01']?.cash === 300 && fd['uber|u-alpha|2026-11-01'].cash_trips === 2
+    && fd['hotel|h-alpha|2026-11-20']?.pos === 120 && fd['uber|u-alpha|2026-11-05']?.cash === 80 && !fd['hotel|h-alpha|2026-11-21'],
+  JSON.stringify([fr, fd['uber|u-alpha|2026-11-01'], fd['hotel|h-alpha|2026-11-21']]));
+  const after = (await B('/api/card/crosscheck')).body?.totals;
+  check('…and the cross-check reads the same answer from the table as it did live', JSON.stringify(before) === JSON.stringify(after),
+    JSON.stringify([before, after]));
+  await q(`UPDATE card_fare_day SET cash = 9999 WHERE platform = 'uber' AND driver_ext_id = 'u-alpha' AND day = '2026-11-05'`);
+  const dd = (await B(`/api/card/driver?person=${PA}`)).body || {};
+  check('once built, the pages read the table (a planted 9999 shows), not the trip views', (dd.days || []).find((r) => r.day === '2026-11-05')?.cash === 9999);
+  await q(`UPDATE card_fare_day SET cash = 7777 WHERE platform = 'uber' AND driver_ext_id = 'u-alpha' AND day = '2026-11-01'`);
+  const recent = await refreshFares(db, { now: Date.parse('2026-11-23T08:00:00Z') });
+  const [s01] = await q(`SELECT cash::float AS cash FROM card_fare_day WHERE driver_ext_id = 'u-alpha' AND day = '2026-11-01'`);
+  const [s05] = await q(`SELECT cash::float AS cash FROM card_fare_day WHERE driver_ext_id = 'u-alpha' AND day = '2026-11-05'`);
+  check('an hourly refresh rebuilds the last 14 days only (the 10th to the 23rd): the 1st and the 5th keep what was planted',
+    recent.full === false && recent.from === '2026-11-10' && s01.cash === 7777 && s05.cash === 9999, JSON.stringify([recent, s01, s05]));
+  await refreshFares(db, { full: true, now: Date.parse('2026-11-23T08:00:00Z') });
+  await q(`INSERT INTO card_fare_day (platform, driver_ext_id, day, cash, cash_trips) VALUES ('uber', 'u-ghost', '2026-11-20', 5555, 1)`);
+  const failed = await collect({ db, keyJson, sheetId: 'x', now: Date.parse('2026-11-23T09:00:00Z'),
+    fetchImpl: async (url) => (String(url).includes('/token') ? new Response(JSON.stringify({ access_token: 't' }), { status: 200 }) : new Response('{}', { status: 403 })) });
+  const [ghost] = await q(`SELECT count(*)::int AS n FROM card_fare_day WHERE driver_ext_id = 'u-ghost'`);
+  check('a read that fails still refreshes the fares (they come from the trips, not the sheet): a planted day with no trip is gone',
+    failed.error && failed.fares?.full === false && ghost.n === 0, JSON.stringify([failed.fares, ghost]));
+
+  /* THE PREVIEW, per driver. A chargeback on the 1st is not put back. */
+  const [imp] = await q(`SELECT id FROM card_import ORDER BY id DESC LIMIT 1`);
+  await q(`INSERT INTO card_payment (import_id, row_no, txn_day, fleet_id, terminal_id, amount, emirates_id) VALUES ($1, 999, '2026-11-01', 'ecosine', '601', -25, $2)`,
+    [imp.id, E1]);
+  const n = (await B('/api/card/notes')).body || {};
+  const na = (n.drivers || []).find((r) => r.person_id === String(PA));
+  check('the preview, one driver: 878 of cash fares, 828 paid by card, 50 left in notes; 120 on the hotel card machine; 245 not taken off',
+    na?.cash === 878 && na.on_cash === 828 && na.notes === 50 && na.on_pos === 120 && na.unexplained === 245 && na.card === 1193,
+    JSON.stringify(na));
+  check('…the chargeback is shown, not put back into notes', na?.chargebacks === -25 && na.notes === 50, JSON.stringify(na));
+  check('…the whole span by default once the fares are summed, with the totals', n.from === '2026-11-01' && n.to === '2026-11-21' && n.fares_summarised_at
+    && n.totals?.drivers === 2 && n.totals.cash === 878 && n.totals.on_cash === 828 && n.totals.notes === 50 && n.totals.unexplained === 278,
+  JSON.stringify([n.from, n.to, n.totals]));
+  check('…and it says it is a preview no other figure uses yet', n.in_cash_position === false && /a preview/.test(n.note || ''));
+  const d1 = ((await B(`/api/card/driver?person=${PA}`)).body?.days || []);
+  const dy = (day) => d1.find((r) => r.day === day) || {};
+  check('the driver\'s day table: the 1st paid 100 by card and 150 the next day, 50 left in notes; the 16th paid 70, 30 not taken off',
+    dy('2026-11-01').on_cash === 100 && dy('2026-11-01').paid_next_day === 150 && dy('2026-11-01').notes === 50
+    && dy('2026-11-16').on_cash === 70 && dy('2026-11-16').unexplained === 30, JSON.stringify([dy('2026-11-01'), dy('2026-11-16')]));
 }
 
 bare.server?.close?.(); gated.server?.close?.();

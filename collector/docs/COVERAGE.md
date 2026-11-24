@@ -12465,6 +12465,19 @@ pages say the sheet has not been read. The worker also reads once three minutes 
   trip and took 4.5–6.6 s on production. Asking with `driver_ext_id = ANY(…)` rides
   `trip_driver_requested_idx`; map back by (platform, id), so the same id on another platform is not
   counted.
-* **These payments do not move the cash position yet.** Phase 3 (CARD-3) subtracts them after the operator has
-  seen a before-and-after for each driver. Every answer says `in_cash_position: false`.
+* **There is no cash position to subtract from** (measured 2026-11-24). No driver has a cash opening and there
+  is no cash deposit, so "cash still held" is absent for everyone. The only cash figure is the cash-fare
+  ceiling. The operator chose "net card off cash fares": **cash in notes** = cash fares − the part card
+  payments paid (CARD-3).
+  - **The rule:** chargebacks are left out. Card pays pos-driver fares first, then that day's cash, then the
+    day before's leftover (one day back). The rest is "not taken off", never deducted.
+  - **Status:** a preview (`/api/card/notes`, the Deposits panel). Every answer still says
+    `in_cash_position: false` until the operator approves the per-driver figures.
+* **`card_fare_day` is as fresh as the last card read, not the last trip** (CARD-3). It is refreshed after
+  each read, hourly at :33, whether the sheet answered or not: the last 14 days, and once a day in full. A
+  trip collected after a read shows at the next one. A trip more than 14 days back shows at the next full
+  rebuild. Until the first full rebuild sets `fares_full_at`, the pages read the trip views live (19 s for
+  a year).
+  - **In tests:** any `collect()` call sums the fares and sets `fares_full_at`. A suite that seeds trips
+    afterwards must clear the table and that state, or call `refreshFares` (test §9 vs §10).
 

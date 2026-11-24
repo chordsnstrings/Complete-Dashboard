@@ -53,7 +53,18 @@ import { noteCredential } from '../auth_state.js';
 import { log as defaultLog } from '../log.js';
 import { parse as parseCsv } from 'csv-parse/sync';
 import { parseServiceAccount, readValues, readCsvByLink, sheetFromLink } from '../google_sheets.js';
+import { refreshFares } from '../card_fares.js';
 const sheetFromLinkSafe = (l) => { try { return sheetFromLink(l); } catch { return null; } };
+/* CARD-3: the fares the payments are measured against, summed per account and
+   day (src/card_fares.js). They come from the trips, not the sheet, so they
+   are refreshed after every read whether the read worked or not — a sheet
+   that stops answering must not freeze the cash side too. A failure here is
+   logged and never costs the read. */
+async function faresAfterRead(db, now, log) {
+  const fares = await refreshFares(db, { now, log }).catch((e) => ({ error: String(e.message || e).slice(0, 200) }));
+  if (fares.error) log.warn(SOURCE, 'fares refresh failed', { err: fares.error });
+  return fares;
+}
 
 export const SOURCE = 'network_cards';
 export const KEEP_SHARE = 0.9;
@@ -251,7 +262,8 @@ export async function collect({ db, now = Date.now(), fetchImpl = fetch, log = d
     await logRun({ source: SOURCE, fleet_id: null, mode: 'sheet', status: imp.status === 'ok' ? 'ok' : imp.status === 'held' ? 'partial' : 'error',
       rows_written: imp.status === 'ok' ? imp.rows_kept : 0, error: imp.why || null }, db);
     log.info(SOURCE, 'read', { status: imp.status, kept: imp.rows_kept, skipped: imp.rows_skipped, from: imp.day_from, to: imp.day_to });
-    return { status: imp.status, kept: imp.rows_kept, skipped: parsed.skipped, from: imp.day_from, to: imp.day_to, why: imp.why || null };
+    const fares = await faresAfterRead(db, now, log);
+    return { status: imp.status, kept: imp.rows_kept, skipped: parsed.skipped, from: imp.day_from, to: imp.day_to, why: imp.why || null, fares };
   } catch (e) {
     const msg = String(e.message || e).slice(0, 300);
     if (e.credential || /service account key|GOOGLE_SERVICE_ACCOUNT_JSON|NETWORK_SHEET_LINK/.test(msg)) {
@@ -260,6 +272,6 @@ export async function collect({ db, now = Date.now(), fetchImpl = fetch, log = d
     await db.query(`INSERT INTO card_import (sheet_range, status, why) VALUES ($1, 'error', $2)`, [via, msg]).catch(() => {});
     await logRun({ source: SOURCE, fleet_id: null, mode: 'sheet', status: 'error', rows_written: 0, error: msg }, db).catch(() => {});
     log.warn(SOURCE, 'read failed', { err: msg.slice(0, 200) });
-    return { error: msg };
+    return { error: msg, fares: await faresAfterRead(db, now, log) };
   }
 }

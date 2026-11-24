@@ -423,4 +423,9 @@ export const SCHEMA_FILES = [
      Emirates-ID-to-driver decisions, and the card_id_person view (link first,
      then the HR export). Filled by src/sources/network_cards.js. */
   'schema_v127.sql',
+  /* v128: card_fare_day — the fares a driver collects on (cash trips and the
+     hotel's pos-driver fares) per account per Dubai day, summed by
+     src/card_fares.js after each card-payments read, so phase 3's cash in
+     notes reads a small table instead of the trip views (FIX-STATUS CARD-3). */
+  'schema_v128.sql',
 ];
