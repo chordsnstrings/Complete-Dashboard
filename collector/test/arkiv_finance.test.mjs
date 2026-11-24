@@ -64,7 +64,7 @@ if (want('finance')) {
     check('six tiles in one band, Money in the hero with the kpis answer\'s accounted total',
       s.glance === 6 && s.glanceBands === 1 && s.hero === 'Money in' && s.values['Money in'] === aed(K.accounted), JSON.stringify(s.values));
     check('Platform payouts, On-trip revenue and Cash collected carry the old page\'s figures exactly',
-      ['Platform payouts', 'On-trip revenue', 'Cash collected — measured portion']
+      ['Platform payouts', 'On-trip revenue', 'Cash trips (including POS) — measured portion']
         .every((l) => s.values[l] && s.values[l] === classic[l]), JSON.stringify([s.values, classic]));
     check('Trip value booked is the daily answer\'s fares total, and never called Money in',
       s.values['Trip value booked'] === aed(F.totals.fares) && /never added to Money in/.test(s.subs['Trip value booked']), s.subs['Trip value booked']);

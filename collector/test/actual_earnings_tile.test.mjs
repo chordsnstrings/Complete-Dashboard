@@ -53,14 +53,14 @@ console.log('\n1 · not a re-labelled Platform earnings');
   const t = actualEarningsTile(OCT, W);
   check('the value is day_money, not the payout beside it', t.value === 'AED 21,699.83', t.value);
   check('…and the label is the one the operator asked for, with a handle for tests',
-    t.label === 'Actual earnings' && t.key === 'actual-earnings', JSON.stringify([t.label, t.key]));
+    t.label === 'Net earnings' && t.key === 'actual-earnings', JSON.stringify([t.label, t.key]));
   check('the sub-line names Platform earnings as the payout report and refuses the sum',
-    /Platform earnings is the payout report, for Uber the bank transfer after the cash already taken, so the two are not added/.test(t.sub), t.sub);
+    /Bank collection is the payout report, for Uber the bank transfer after the cash already taken, so the two are not added/.test(t.sub), t.sub);
   /* A payout report from a channel that is not Uber is not claimed to be a
      bank transfer: nothing here has measured what Yango's payout is net of. */
   const y = actualEarningsTile({ ...OCT, reported_payout_platforms: ['yango'] }, W);
   check('a payout from another channel is only "a different record"',
-    /Platform earnings is the payout report, a different record/.test(y.sub) && !/bank transfer/.test(y.sub), y.sub);
+    /Bank collection is the payout report, a different record/.test(y.sub) && !/bank transfer/.test(y.sub), y.sub);
 }
 
 console.log('\n2 · the page\'s existing figure');
@@ -135,7 +135,7 @@ console.log('\n5 · absent with the true reason, never nought');
   const a = actualEarningsTile({ ...OCT, day_money: null, day_stmt_net: null, day_cash: null }, { worked: true, bookingsN: 9 });
   check('worked, nothing valued: a dash, never AED 0', a.value === '—' && !/AED 0/.test(a.value), a.value);
   check('…with the reason, and the payout beside it named as not the earnings',
-    /^no platform statement and no priced booking covers this window, so what their 9 bookings earned is not measured — the AED 18,177\.30 under Platform earnings is the payout report, for Uber the bank transfer after the cash already taken, and not what the work earned$/.test(a.sub), a.sub);
+    /^no platform statement and no priced booking covers this window, so what their 9 bookings earned is not measured — the AED 18,177\.30 under Bank collection is the payout report, for Uber the bank transfer after the cash already taken, and not what the work earned$/.test(a.sub), a.sub);
   const b = actualEarningsTile({ window_days: 16 }, { worked: false });
   check('did not work, nothing reported: the wider fact, no payout clause',
     b.value === '—' && b.sub === 'no booking of any kind in this window and no platform statement covering it, so there are no earnings to measure', JSON.stringify(b));
@@ -153,7 +153,7 @@ console.log('\n6 · on the Earnings tab, directly after Platform earnings');
      the source order, so a reshuffle of EARN_TILES fails here first.
      REVERSION: delete the actualEarningsTile(...) line from driver.js. */
   const src = readFileSync(new URL('../api/public/driver.js', import.meta.url), 'utf8');
-  const a = src.indexOf("{ label: 'Platform earnings'");
+  const a = src.indexOf("{ label: 'Bank collection'");
   const b = src.indexOf('actualEarningsTile(k, { worked, bookingsN })');
   const c = src.indexOf("{ label: 'Tips'");
   check('EARN_TILES: Platform earnings, then Actual earnings, then Tips', a > 0 && b > a && c > b, JSON.stringify([a, b, c]));

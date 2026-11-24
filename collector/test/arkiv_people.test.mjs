@@ -307,8 +307,8 @@ if (want('driver-earnings')) {
        still draw this skin, so the old row carries it too. REVERSION: delete
        the actualEarningsTile(...) line from driver.js. */
     check('old skin: seven tiles, Actual earnings directly after Platform earnings',
-      r.labels.length === 7 && r.labels.indexOf('Actual earnings') === r.labels.indexOf('Platform earnings') + 1
-      && r.labels.indexOf('Platform earnings') >= 0, JSON.stringify(r.labels));
+      r.labels.length === 7 && r.labels.indexOf('Net earnings') === r.labels.indexOf('Bank collection') + 1
+      && r.labels.indexOf('Bank collection') >= 0, JSON.stringify(r.labels));
     await ctx.close();
   }
   {
@@ -321,16 +321,16 @@ if (want('driver-earnings')) {
        REVERSION: delete the actualEarningsTile(...) line from driver.js and
        the count, the order and the value all fail; read k.reported_earnings
        for its value and the third fails. */
-    check('00: the seven tiles, booked revenue the hero, the same figures, untoned', s.glance === 7 && s.hero === 'Booked revenue'
-      && s.values['Booked revenue'] === aedOf(k.revenue) && (await toned(page)).length === 0, JSON.stringify(s.values));
+    check('00: the seven tiles, booked revenue the hero, the same figures, untoned', s.glance === 7 && s.hero === 'Gross revenue'
+      && s.values['Gross revenue'] === aedOf(k.revenue) && (await toned(page)).length === 0, JSON.stringify(s.values));
     check('00: Actual earnings sits directly after Platform earnings',
-      s.labels.indexOf('Platform earnings') >= 0 && s.labels.indexOf('Actual earnings') === s.labels.indexOf('Platform earnings') + 1,
+      s.labels.indexOf('Bank collection') >= 0 && s.labels.indexOf('Net earnings') === s.labels.indexOf('Bank collection') + 1,
       JSON.stringify(s.labels));
     check('…reading day_money (Money in\'s figure), not the payout, and saying what is in it',
-      s.values['Actual earnings'] === aedOf(k.day_money) && s.values['Actual earnings'] !== aedOf(k.reported_earnings)
-      && /the driver\u2019s cash in hand included, not netted off/.test(s.subs['Actual earnings'] || '')
-      && /It is Money in on the Overview, the same figure/.test(s.subs['Actual earnings'] || ''),
-      JSON.stringify([s.values['Actual earnings'], aedOf(k.day_money), (s.subs['Actual earnings'] || '').slice(0, 90)]));
+      s.values['Net earnings'] === aedOf(k.day_money) && s.values['Net earnings'] !== aedOf(k.reported_earnings)
+      && /the driver\u2019s cash in hand included, not netted off/.test(s.subs['Net earnings'] || '')
+      && /It is Money in on the Overview, the same figure/.test(s.subs['Net earnings'] || ''),
+      JSON.stringify([s.values['Net earnings'], aedOf(k.day_money), (s.subs['Net earnings'] || '').slice(0, 90)]));
     const mix = answer('/api/driver/mix');
     const bar = await page.evaluate(() => { const p = [...document.querySelectorAll('#view .panel')].find((x) => /How riders paid/.test(x.querySelector('h3')?.textContent || ''));
       const segs = p ? [...p.querySelectorAll('svg rect[data-share], svg rect')].map((r) => r.getAttribute('fill') || r.style.fill) : [];
@@ -355,8 +355,8 @@ if (want('driver-earnings')) {
       '/api/driver/kpis': (_q, real) => ({ ...real, day_money: null, day_stmt_net: null, day_cash: null }) } });
     const s = await shape(page);
     check('no money record: Actual earnings absent with the true reason, not nought',
-      /^no platform statement and no priced booking covers this window, so what their \d[\d,]* bookings earned is not measured — the AED [\d,.]+ under Platform earnings is the payout report/.test(s.na['Actual earnings'] || '')
-      && !/AED 0/.test(s.values['Actual earnings'] || ''), JSON.stringify([s.na['Actual earnings'], s.values['Actual earnings']]));
+      /^no platform statement and no priced booking covers this window, so what their \d[\d,]* bookings earned is not measured — the AED [\d,.]+ under Bank collection is the payout report/.test(s.na['Net earnings'] || '')
+      && !/AED 0/.test(s.values['Net earnings'] || ''), JSON.stringify([s.na['Net earnings'], s.values['Net earnings']]));
     await ctx.close();
   }
 }

@@ -448,7 +448,7 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
   rm.blank();
   rm.text('The sheets', 'bold');
   const guide = [
-    ...(person ? [['Driver', 'This driver as their own page shows them for these dates: bookings, booked revenue, platform earnings, money, cash collected, km and days.']] : []),
+    ...(person ? [['Driver', 'This driver as their own page shows them for these dates: bookings, gross revenue, bank collection, money, cash trips (including POS), km and days.']] : []),
     ['Cash to collect', 'One row per driver: cash from trips, advanced, handed in, and to hand in, with the mobile.'],
     ['Cash by day', 'The same, per driver per day, with a running total to hand in across the dates.'],
     ['Cash trips', 'Every trip on which a driver took cash: when, which car, how much, and how the amount was valued.'],
@@ -490,8 +490,8 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
        so this is empty, never a 0.00 that looks measured. */
     const cashTaken = cashTrips && cashUnpriced === cashTrips ? null : r2(es.reduce((a, e) => a + e.cashTaken, 0));
     const sd = wb.sheet('Driver', { widths: [34, 10, 10, 16, 10, 14, 18, 14, 18, 10, 12, 10, 10] });
-    sd.header(['Driver', 'Bookings', 'Completed', 'Booked revenue (AED)', 'Priced', 'Average fare (AED)', 'Platform earnings (AED)',
-      'Money (AED)', 'Cash collected (AED)', 'Cash trips', 'Not priced yet', 'Km', 'Days worked'],
+    sd.header(['Driver', 'Bookings', 'Completed', 'Gross revenue (AED)', 'Priced', 'Average fare (AED)', 'Bank collection (AED)',
+      'Money (AED)', 'Cash trips (including POS) (AED)', 'Cash trips', 'Not priced yet', 'Km', 'Days worked'],
     ['text', 'int', 'int', 'money', 'int', 'money', 'money', 'money', 'money', 'int', 'int', 'int', 'int']);
     const priced = Number(mine?.priced_trips) || 0;
     sd.row([h('ID', person.name || person.account || mine?.driver_name || ''), Number(mine?.trips) || 0, Number(mine?.completed) || 0,

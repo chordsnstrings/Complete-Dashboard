@@ -2230,12 +2230,12 @@ async function tabEarnings(root, id, prof) {
        the fare twice. The sentence says so rather than leaving the tile to be
        read as earnings. */
     (k.priced_trips
-      ? { label: 'Booked revenue', value: money(k.revenue),
+      ? { label: 'Gross revenue', value: money(k.revenue),
           sub: `the gross the riders were charged, over ${fmt(k.priced_trips)} of `
             + `${fmt(k.trips)} trips that report a fare — the payout below is what was left `
             + 'of it after the platform’s commission, not an addition to it',
           tone: k.trips && k.priced_trips / k.trips < 0.5 ? 'warn' : null }
-      : { label: 'Booked revenue', value: k.statement_fares ? money(k.statement_fares) : '—',
+      : { label: 'Gross revenue', value: k.statement_fares ? money(k.statement_fares) : '—',
           sub: k.statement_fares
             ? `no trip of theirs reports a fare — this is the statement's own fare line, over `
               + `${countOf(k.statement_fare_periods, 'period')}, and the payout below came out of it`
@@ -2257,7 +2257,7 @@ async function tabEarnings(root, id, prof) {
             + `is nothing to average — ${UBER_FARE_WHY}, and an average over the statement would be `
             + 'a week divided by trips it does not count'
           : 'no booking of any kind in this window, so there is no fare to average' },
-    { label: 'Platform earnings', value: money(k.reported_earnings), sub: 'as the platform reported it' },
+    { label: 'Bank collection', value: money(k.reported_earnings), sub: 'as the platform reported it' },
     /* WHAT ACTUALLY CAME IN, directly after the payout the operator reads as
        "platform share" (2026-11-16). Platform earnings is driver_payout_day —
        for Uber the bank transfer, after the cash the driver already took — so
@@ -2299,7 +2299,7 @@ async function tabEarnings(root, id, prof) {
        in scope: `k` is /api/driver/kpis, fetched by this same Promise.all. A
        count of nought is still a true count \u2014 TRIPS 0 stays 0 on the overview
        \u2014 but a MONEY figure over an empty population is not a figure. */
-    { label: 'Cash collected', value: (() => {
+    { label: 'Cash trips (including POS)', value: (() => {
       /* CASH TAKEN, AS THE MONEY WORKBOOK STATES IT (2026-10-20).
          ─────────────────────────────────────────────────────────────────
          Completed cash trips at the platform's own cash-collected figure,

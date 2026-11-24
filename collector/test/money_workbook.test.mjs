@@ -272,8 +272,8 @@ console.log('\n4. the Drivers sheet is the Drivers page (DR1-DR3, 2026-10-20)');
   const d1 = table(one.file, 'Driver');
   const pa = page.find((r) => r.driver_name === 'Test Driver A');
   check('one driver\u2019s file opens with their page\u2019s figures', d1.length === 1 && d1[0].Driver === 'Test Driver A'
-    && d1[0].Bookings === pa.trips && d1[0]['Booked revenue (AED)'] === Number(pa.revenue) && d1[0]['Platform earnings (AED)'] === 98.76
-    && d1[0]['Money (AED)'] === 123.45 && d1[0]['Cash collected (AED)'] === 97 && d1[0]['Cash trips'] === 4 && d1[0]['Days worked'] === 4,
+    && d1[0].Bookings === pa.trips && d1[0]['Gross revenue (AED)'] === Number(pa.revenue) && d1[0]['Bank collection (AED)'] === 98.76
+    && d1[0]['Money (AED)'] === 123.45 && d1[0]['Cash trips (including POS) (AED)'] === 97 && d1[0]['Cash trips'] === 4 && d1[0]['Days worked'] === 4,
   JSON.stringify(d1));
   const named = await make({ person: { id: 1, name: 'Test Driver A As Their Page Names Them' } });
   check('…under the name their page prints, on every sheet of it', table(named.file, 'Driver')[0]?.Driver === 'Test Driver A As Their Page Names Them'
@@ -296,7 +296,7 @@ console.log('\n4. the Drivers sheet is the Drivers page (DR1-DR3, 2026-10-20)');
     H && H['Cash trips'] === 1 && H['Cash from trips (AED)'] == null && H['Cash not priced yet'] === 1, JSON.stringify(H));
   const h1 = table((await make({ person: { id: 8, name: 'Test Driver H' } })).file, 'Driver')[0];
   check('…and their own file says the same: no Cash collected figure, one trip not priced yet',
-    h1 && h1['Cash collected (AED)'] == null && h1['Not priced yet'] === 1 && h1['Cash trips'] === 1, JSON.stringify(h1));
+    h1 && h1['Cash trips (including POS) (AED)'] == null && h1['Not priced yet'] === 1 && h1['Cash trips'] === 1, JSON.stringify(h1));
   check('A, partly priced: the priced part, and the one waiting named beside it',
     A?.['Cash from trips (AED)'] === 97 && A?.['Cash not priced yet'] === 1, JSON.stringify(A));
   let threw = false;
