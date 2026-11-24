@@ -3328,8 +3328,8 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        driver touched in vehicle_driver_day, and the map said "Stationary here
        across N five-minute fixes". Four things were wrong with it: a shared
        car's whole day was counted, the night man's parked hours included; a
-       fix is not a minute (CABMAN reports every 20 s, FMS every 6 min, so the
-       same hour was 180 "fixes" in one car and 10 in the other); a car with
+       fix is not a minute (a parked CABMAN unit reports about hourly, FMS every 6 min, so the
+       same parked hour was 1 "fix" in one car and 10 in the other); a car with
        both trackers was counted twice, the two a median 12–25 km apart; and
        FMS sent no speed for a stopped car, so every FMS fix with no speed —
        moving ones too — read as stationary.
@@ -3341,7 +3341,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        online and parked with no working status. */
     const who = await personIdOf(d);
     const idle = who.id == null ? [] : await q(
-      `SELECT round((c.cell_lat * 0.005)::numeric, 4) AS lat, round((c.cell_lng * 0.005)::numeric, 4) AS lng,
+      `SELECT round((c.cell_lat * 0.005)::numeric, 4)::float AS lat, round((c.cell_lng * 0.005)::numeric, 4)::float AS lng,
               pc.area, round(sum(c.stopped_min))::int AS stopped_min, round(sum(c.wait_min))::int AS wait_min,
               round(sum(c.stopped_ontrip_min))::int AS ontrip_min,
               /* Parked with no working status — its own column, never stopped
@@ -3397,10 +3397,16 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        the calendar dates. */
     const [from, to] = [isoDay(p[0]), isoDay(p[1])];
     const who = await personIdOf(d);
-    const [state] = await q(`SELECT value FROM source_state WHERE source = 'movement_rollup' AND fleet_id = '-' AND key = 'backfilled_to'`);
-    const [span] = await q(`SELECT to_char(min(day), 'YYYY-MM-DD') AS first, to_char(max(day), 'YYYY-MM-DD') AS last,
-                                   max(built_at) AS built_at FROM driver_move_day`);
-    const builtFrom = [state?.value, span?.first].filter(Boolean).sort()[0] || null;
+    /* A day counts as built only once a pass has COMPLETED it — the rollup
+       records `day:<date>` at the end of each day's pass. Rows alone are not
+       proof: mid-pass, some people's rows exist and others' do not yet. */
+    const doneRows = await q(
+      `SELECT substr(key, 5) AS day, value AS at FROM source_state
+        WHERE source = 'movement_rollup' AND fleet_id = '-' AND key LIKE 'day:%'`);
+    const done = new Map(doneRows.map((r) => [r.day, r.at]));
+    const [span] = await q(`SELECT max(built_at) AS built_at FROM driver_move_day`);
+    const doneDays = [...done.keys()].sort();
+    const builtFrom = doneDays[0] || null;
     const today = dubaiToday();
     const dayCount = (a, b) => (a > b ? 0 : Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000) + 1);
     const dayBefore = (x) => dubaiDay(new Date(Date.parse(`${x}T00:00:00Z`) - 86400000));
@@ -3410,11 +3416,13 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        the backfill (not built YET), and the rest (built for everyone who
        worked them — a day with no row is a day this person did not work). */
     const lo = maxOf(from, MOVEMENT_FLOOR_DAY); const hi = minOf(to, today);
+    let notBuilt = 0;
+    for (let x = lo; x <= hi; x = dubaiDay(new Date(Date.parse(`${x}T00:00:00Z`) + 86400000))) if (!done.has(x)) notBuilt += 1;
     const coverage = {
-      from, to, floor: MOVEMENT_FLOOR_DAY, built_from: builtFrom, built_to: span?.last || null,
-      built_at: span?.built_at || null, days_in_window: dayCount(from, to),
+      from, to, floor: MOVEMENT_FLOOR_DAY, built_from: builtFrom, built_to: doneDays[doneDays.length - 1] || null,
+      built_at: span?.built_at || null, today_built_at: done.get(today) || null, days_in_window: dayCount(from, to),
       days_before_floor: dayCount(from, minOf(to, dayBefore(MOVEMENT_FLOOR_DAY))),
-      days_not_built: builtFrom ? dayCount(lo, minOf(hi, dayBefore(builtFrom))) : dayCount(lo, hi),
+      days_not_built: notBuilt,
       days_after_today: dayCount(maxOf(from, dubaiDay(new Date(Date.parse(`${today}T00:00:00Z`) + 86400000))), to),
     };
     if (who.id == null) {
@@ -3475,6 +3483,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       coverage.days_before_floor ? `${nDays(coverage.days_before_floor)} of this window ${coverage.days_before_floor === 1 ? 'is' : 'are'} before ${MOVEMENT_FLOOR_DAY}, when live collection began` : null,
       coverage.days_not_built ? `${nDays(coverage.days_not_built)} ${coverage.days_not_built === 1 ? 'has' : 'have'} not been built yet (it is built back from today, eighteen days a night)` : null,
       failedDays.length ? `${nDays(failedDays.length)} could not be built — ${failedDays[0].absent.replace(/^the movement for this day could not be built: /, '')}` : null,
+      /* Today is rebuilt every hour, so a day with no row for this person may
+         only mean the last pass came before their first booking or status. */
+      from <= today && today <= to && done.has(today) && !days.some((r) => r.day === today)
+        ? `today is rebuilt every hour — last at ${new Date(Date.parse(done.get(today)) + 4 * 3600000).toISOString().slice(11, 16)} Dubai — so anything of theirs after that is not in it yet` : null,
     ].filter(Boolean);
     const absent = totals?.days_moving ? null
       : days.some((r) => !r.failed)
@@ -3502,6 +3514,16 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
      person: the address names it, or exactly one live link on the spine. */
   async function personIdOf(d) {
     if (d.person_id != null) return { id: Number(d.person_id), why: null };
+    /* The account the page is addressed by first: a fold can join accounts
+       the spine files under two people (measured on production 2026-11-24 —
+       a busy driver's page read "on more than one person"), but the account
+       in the address belongs to one, and that person's rows are built over
+       the same fold (src/movement_rollup.js personsForDay). */
+    if (d.id) {
+      const own = await q(`SELECT DISTINCT driver_id::text AS p FROM driver_platform_id
+                            WHERE external_id = $1 AND detached_at IS NULL AND driver_id IS NOT NULL`, [String(d.id)]).catch(() => []);
+      if (own.length === 1) return { id: Number(own[0].p), why: null };
+    }
     const pr = await q(`SELECT DISTINCT driver_id::text AS p FROM driver_platform_id
                          WHERE external_id = ANY($1::text[]) AND detached_at IS NULL AND driver_id IS NOT NULL`, [d.ids || []])
       .catch((e) => ({ err: String(e.message || e).slice(0, 120) }));
