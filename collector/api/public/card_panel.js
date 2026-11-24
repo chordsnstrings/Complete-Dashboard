@@ -53,6 +53,9 @@ const statusCell = (r) => {
    card machine) where there are any. */
 const cashCell = (r) => (r.cash == null ? money(null)
   : `${esc(aed(r.cash))} <span class="dim">· ${fmt(r.cash_trips)} cash</span>`
+    /* CARD-3 review: a cash trip with no fare on record is counted, never
+       valued as AED 0 — the cash shown is then a floor. */
+    + (r.cash_unvalued ? ` <span class="dim">(${fmt(r.cash_unvalued)} with no fare on record yet)</span>` : '')
     + (r.pos_trips ? `<br>${esc(aed(r.pos))} <span class="dim">· ${fmt(r.pos_trips)} on the card machine (hotel)</span>` : ''));
 /* Driver cells go through entity() inline (test/interlinking.test.mjs rule 3):
    a driver with no id degrades to plain text, never to a broken link; a
@@ -102,8 +105,13 @@ export async function cardMachineDriver(host, prof) {
         { label: 'Check', key: 'status', render: statusCell },
         /* CARD-3: the part of the day's cash fares paid by card, and what is
            left in notes (a preview: no other figure uses it yet). */
+        /* Booked on the fare's day (the review of 2026-11-24): fares − paid
+           by card = in notes on every row; card that paid the day before's
+           fares is said as such, never as paying this day's. */
         { label: 'In notes', key: 'notes', num: true, render: (r) => (r.notes == null ? money(null)
-          : `${esc(aed(r.notes))}${r.on_cash ? ` <span class="dim">· ${esc(aed(r.on_cash))} paid by card</span>` : ''}`) },
+          : `${esc(aed(r.notes))}${r.on_cash ? ` <span class="dim">· ${esc(aed(r.on_cash))} paid by card`
+            + `${r.paid_next_day ? ` (${esc(aed(r.paid_next_day))} of it the next day)` : ''}</span>` : ''}`
+            + (r.paid_prev_day ? `<br><span class="dim">${esc(aed(r.paid_prev_day))} of this day's card paid the day before's fares</span>` : '')) },
       ], { cards: true, cardLead: 'day' }));
     }
     host.append(el('h4', 'subhead', 'Payments'));
@@ -276,26 +284,42 @@ async function notesPreview(host) {
   const t = n.totals || {};
   host.append(kpiRow([
     { label: 'Cash fares', value: t.cash == null ? '—' : aed(t.cash), sub: `${fmt(t.drivers)} drivers with card payments` },
-    { label: 'Paid by card', value: t.on_cash == null ? '—' : aed(t.on_cash), sub: 'card payments that settled cash fares' },
+    { label: 'Paid by card', value: t.on_cash == null ? '—' : aed(t.on_cash), sub: 'of those cash fares, settled by card that day or the next' },
     { label: 'Cash in notes', value: t.notes == null ? '—' : aed(t.notes), sub: 'cash fares less the part paid by card' },
     { label: 'Not taken off', value: t.unexplained == null ? '—' : aed(t.unexplained),
       sub: `card money beyond the fares; ${t.on_pos == null ? '—' : aed(t.on_pos)} paid hotel card-machine fares (never cash)` },
   ]));
+  /* The true reasons a figure is not the whole of it (the review of
+     2026-11-24): trips with no fare on record are counted, not valued; card
+     on the first day that paid the day before's fares is in neither column. */
+  if (t.cash_unvalued) {
+    host.append(note(`${fmt(t.cash_unvalued)} cash trips in this window have no fare on record yet, so Cash fares and Cash in notes are floors: `
+      + 'those trips\' cash is not counted, and card that paid them shows under Not taken off.', 'warn'));
+  }
+  if (t.paid_before_window) {
+    host.append(note(`${aed(t.paid_before_window)} of card on ${n.from} paid fares from the day before this window, so it is in neither Paid by card nor Not taken off.`));
+  }
   if ((n.drivers || []).length) {
     host.append(tableFrom(n.drivers, [
       { label: 'Driver', key: 'name', render: (r) => entity('driver', r.person_id != null ? `p${r.person_id}` : null, r.name || `person ${r.person_id}`) },
-      { label: 'Cash fares', key: 'cash', num: true, render: (r) => money(r.cash) },
+      { label: 'Cash fares', key: 'cash', num: true, render: (r) => `${money(r.cash)}${r.cash_unvalued
+        ? ` <span class="dim">+ ${fmt(r.cash_unvalued)} trips with no fare</span>` : ''}` },
       { label: 'Paid by card', key: 'on_cash', num: true, render: (r) => money(r.on_cash) },
       { label: 'In notes', key: 'notes', num: true, render: (r) => money(r.notes) },
       { label: 'Share by card', key: 'cash', num: true, render: (r) => (r.cash ? esc(`${Math.round((100 * r.on_cash) / r.cash)}%`) : '<span class="dim">—</span>') },
       { label: `On ${n.latest_day || 'the latest day'}`, key: 'latest', num: true, render: (r) => (r.latest?.cash
-        ? `${esc(aed(r.latest.notes))} <span class="dim">in notes of ${esc(aed(r.latest.cash))}</span>` : '<span class="dim">no cash fares</span>') },
+        ? `${esc(aed(r.latest.notes))} <span class="dim">in notes of ${esc(aed(r.latest.cash))}</span>`
+        : r.latest?.cash_unvalued ? `<span class="dim">${fmt(r.latest.cash_unvalued)} cash trips with no fare on record yet</span>`
+          : '<span class="dim">no cash fares</span>') },
       { label: 'Not taken off', key: 'unexplained', num: true, render: (r) => money(r.unexplained) },
     ], { cards: true, cardLead: 'name' }));
   }
   host.append(el('p', 'cap', esc('A preview for review: nothing else on this page uses it yet, and the cash-fare ceiling above still counts every cash fare. '
     + 'Card payments pay the hotel\'s pos-driver fares first (those were never cash), then that day\'s cash fares, then the day before\'s (a fare paid after midnight). '
     + 'Card money beyond the fares is not taken off anything, and a chargeback does not put cash back (the fare comes back). '
-    + `Once approved, the ceiling would drop by the ${t.on_cash == null ? '—' : aed(t.on_cash)} paid by card.`)));
+    + (n.whole_span
+      ? `Once approved, the ceiling would drop by the ${t.on_cash == null ? '—' : aed(t.on_cash)} paid by card.`
+      : `This window is not every card payment on record: over it, ${t.on_cash == null ? '—' : aed(t.on_cash)} of cash fares were paid by card; `
+        + 'what approval would take off the ceiling is the same figure over every card payment.'))));
 }
 

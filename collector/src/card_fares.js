@@ -16,7 +16,15 @@
 
    The state 'fares_full_at' says a full rebuild has finished; until then the
    API reads live (api/card_routes.js), so a page is never answered from a
-   half-built table. */
+   half-built table. 'fares_from' is the first day that rebuild covered: a
+   range starting earlier is read live, and a first card payment moved earlier
+   (a sheet that grew backwards) forces a full rebuild at the next read rather
+   than up to a day later (the review of 2026-11-24: days before the table
+   read as no fares at all).
+
+   A trip with no fare on record (trip_cash.cash_amount NULL — no price and no
+   payments figure) is counted in cash_unvalued, never as AED 0 of cash: the
+   page says the cash figure is a floor. */
 import { log as defaultLog } from './log.js';
 
 export const RECENT_DAYS = 14;
@@ -28,18 +36,19 @@ const addDays = (day, n) => iso(new Date(Date.parse(`${day}T12:00:00Z`) + n * 86
 const dubaiToday = (now) => iso(new Date(now + 4 * 3600e3));
 
 const SUM = `
-  INSERT INTO card_fare_day (platform, driver_ext_id, day, cash, cash_trips, pos, pos_trips, refreshed_at)
-  SELECT platform, driver_ext_id, day, sum(cash), sum(cash_n)::int, sum(pos), sum(pos_n)::int, now()
+  INSERT INTO card_fare_day (platform, driver_ext_id, day, cash, cash_trips, cash_unvalued, pos, pos_trips, refreshed_at)
+  SELECT platform, driver_ext_id, day, sum(cash), sum(cash_n)::int, sum(cash_nv)::int, sum(pos), sum(pos_n)::int, now()
     FROM (
       SELECT tc.platform, tc.driver_ext_id, (tc.requested_at AT TIME ZONE 'Asia/Dubai')::date AS day,
-             coalesce(tc.cash_amount, 0) AS cash, 1 AS cash_n, 0::numeric AS pos, 0 AS pos_n
+             coalesce(tc.cash_amount, 0) AS cash, 1 AS cash_n,
+             CASE WHEN tc.cash_amount IS NULL THEN 1 ELSE 0 END AS cash_nv, 0::numeric AS pos, 0 AS pos_n
         FROM trip_cash tc
        WHERE tc.driver_ext_id IS NOT NULL
          AND tc.requested_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Dubai')
          AND tc.requested_at <  (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
       UNION ALL
       SELECT te.platform, te.driver_ext_id, (te.requested_at AT TIME ZONE 'Asia/Dubai')::date,
-             0, 0, coalesce(te.price, 0), 1
+             0, 0, 0, coalesce(te.price, 0), 1
         FROM trip_ext te
        WHERE te.driver_ext_id IS NOT NULL AND lower(coalesce(te.payment_type, '')) = 'pos-driver'
          AND te.outcome = 'completed'
@@ -77,7 +86,8 @@ export async function refreshFares(db, { now = Date.now(), full = null, log = de
   if (!first?.d) return { skipped: 'no card payments yet' };
   const today = dubaiToday(now);
   const lastFull = await state(db, 'fares_full_at');
-  const doFull = full ?? (!lastFull || now - Date.parse(lastFull) > FULL_EVERY_MS);
+  const builtFrom = await state(db, 'fares_from');
+  const doFull = full ?? (!lastFull || !builtFrom || builtFrom > addDays(first.d, -1) || now - Date.parse(lastFull) > FULL_EVERY_MS);
   const started = Date.now();
   let rows = 0; let from;
   if (doFull) {
@@ -93,6 +103,7 @@ export async function refreshFares(db, { now = Date.now(), full = null, log = de
     /* Anything stored before the span (a first card payment moved later)
        is no longer measured against. */
     await db.query('DELETE FROM card_fare_day WHERE day < $1', [from]);
+    await setState(db, 'fares_from', from);
     await setState(db, 'fares_full_at', new Date(now).toISOString());
   } else {
     from = addDays(today, -(RECENT_DAYS - 1));

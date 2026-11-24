@@ -12471,6 +12471,15 @@ pages say the sheet has not been read. The worker also reads once three minutes 
   payments paid (CARD-3).
   - **The rule:** chargebacks are left out. Card pays pos-driver fares first, then that day's cash, then the
     day before's leftover (one day back). The rest is "not taken off", never deducted.
+  - **Book what card paid on the FARE's day, not the card's** (the review of 2026-11-24). Booked on the card's
+    day, a window starting the day after a carry showed more paid by card than there was cash (200%), because
+    the cut in notes had landed on the day outside the window. On the fare's day, cash − paid by card = in notes
+    over any window. Card that paid the day before is a figure of its own (`paid_prev_day`,
+    `paid_before_window`).
+  - **Any allocation over a window needs the card of the day before the window**, not only its cash (the same
+    trap as CARD-2's cross-check, test §9). Without it that day's whole cash looks free to carry. The driver
+    route made this mistake once, through its 90-row LIMIT. Read the day before for the carry only: a driver
+    whose only card payment falls there is not in the window.
   - **Status:** a preview (`/api/card/notes`, the Deposits panel). Every answer still says
     `in_cash_position: false` until the operator approves the per-driver figures.
 * **`card_fare_day` is as fresh as the last card read, not the last trip** (CARD-3). It is refreshed after
@@ -12478,6 +12487,11 @@ pages say the sheet has not been read. The worker also reads once three minutes 
   trip collected after a read shows at the next one. A trip more than 14 days back shows at the next full
   rebuild. Until the first full rebuild sets `fares_full_at`, the pages read the trip views live (19 s for
   a year).
+  - **The table covers `fares_from` (the day before the first card payment at the last full rebuild)
+    onwards, no earlier.** A range starting before it is read live. A first card payment that moves earlier
+    forces a full rebuild at the next read.
+  - **A cash trip with no fare on record** (`trip_cash.cash_amount` NULL) is counted in `cash_unvalued`,
+    never valued as 0. Where there are any, the cash shown is a floor, and the page says so.
   - **In tests:** any `collect()` call sums the fares and sets `fares_full_at`. A suite that seeds trips
     afterwards must clear the table and that state, or call `refreshFares` (test §9 vs §10).
 

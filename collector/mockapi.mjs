@@ -9363,9 +9363,9 @@ app.get('/api/card/driver', (req, r) => {
     currency: 'AED', placed_by: { hr_export: has ? 1 : 0, linked: 0 },
     totals: { payments: payments.length, card: has ? 160 : 0, chargebacks: has ? -25 : 0, chargeback_n: has ? 1 : 0, net: has ? 135 : 0,
       first_day: has ? '2026-11-18' : null, last_day: has ? '2026-11-21' : null },
-    days: has ? [{ day: '2026-11-21', payments: 1, net: -25, chargebacks: 1, terminals: ['10389537'], cash_trips: 2, cash: 140.5, pos_trips: 0, pos: 0, status: 'covered', over_by: null, pay: 0, on_cash: 0, on_pos: 0, unexplained: 0, notes: 140.5, paid_next_day: 0 },
-      { day: '2026-11-20', payments: 1, net: 60, chargebacks: 0, terminals: ['10389537'], cash_trips: 1, cash: 9.5, pos_trips: 0, pos: 0, status: 'over', over_by: 50.5, pay: 60, on_cash: 9.5, on_pos: 0, unexplained: 50.5, notes: 0, paid_next_day: 0 },
-      { day: '2026-11-18', payments: 1, net: 100, chargebacks: 0, terminals: ['10401871'], cash_trips: 0, cash: 0, pos_trips: 1, pos: 0, status: 'no_cash_trips', over_by: 100, pay: 100, on_cash: 0, on_pos: 0, unexplained: 100, notes: 0, paid_next_day: 0 }] : [],
+    days: has ? [{ day: '2026-11-21', payments: 1, net: -25, chargebacks: 1, terminals: ['10389537'], cash_trips: 2, cash: 140.5, cash_unvalued: 0, pos_trips: 0, pos: 0, status: 'covered', over_by: null, pay: 0, on_cash: 0, on_pos: 0, unexplained: 0, notes: 140.5, paid_next_day: 0, paid_prev_day: 0 },
+      { day: '2026-11-20', payments: 1, net: 60, chargebacks: 0, terminals: ['10389537'], cash_trips: 1, cash: 9.5, cash_unvalued: 1, pos_trips: 0, pos: 0, status: 'over', over_by: 50.5, pay: 60, on_cash: 9.5, on_pos: 0, unexplained: 50.5, notes: 0, paid_next_day: 0, paid_prev_day: 0 },
+      { day: '2026-11-18', payments: 1, net: 100, chargebacks: 0, terminals: ['10401871'], cash_trips: 0, cash: 0, cash_unvalued: 0, pos_trips: 1, pos: 0, status: 'no_cash_trips', over_by: 100, pay: 100, on_cash: 0, on_pos: 0, unexplained: 100, notes: 0, paid_next_day: 0, paid_prev_day: 0 }] : [],
     allowance_aed: 5,
     payments,
     terminals: has ? [{ terminal_id: '10389537', payments: 2, net: 35, first_day: '2026-11-20', last_day: '2026-11-21' },
@@ -9374,12 +9374,13 @@ app.get('/api/card/driver', (req, r) => {
 });
 app.get('/api/card/notes', (_req, r) => {
   r.json({ from: '2026-01-01', to: '2026-11-22', ...CARD_READ(), currency: 'AED', fares_summarised_at: new Date(Date.now() - 36e5).toISOString(), why: null,
-    totals: { drivers: 2, cash: 15240.5, card: 9890.25, on_cash: 8120.25, on_pos: 1530, unexplained: 240, notes: 7120.25, chargebacks: -25 },
+    totals: { drivers: 2, cash: 15240.5, cash_unvalued: 3, card: 9890.25, on_cash: 8120.25, on_pos: 1530, unexplained: 240, notes: 7120.25, paid_before_window: 0, chargebacks: -25 },
+    whole_span: true,
     latest_day: '2026-11-22',
-    drivers: [{ person_id: '401', name: 'Card Driver One', cash: 9800, card: 6200.25, on_cash: 5480.25, on_pos: 520, unexplained: 200, notes: 4319.75, chargebacks: -25,
-      card_days: 120, latest: { day: '2026-11-22', cash: 210.5, on_cash: 150, notes: 60.5 } },
-    { person_id: '402', name: 'Card Driver Two', cash: 5440.5, card: 3690, on_cash: 2640, on_pos: 1010, unexplained: 40, notes: 2800.5, chargebacks: 0,
-      card_days: 88, latest: { day: '2026-11-22', cash: 0, on_cash: 0, notes: 0 } }],
+    drivers: [{ person_id: '401', name: 'Card Driver One', cash: 9800, cash_unvalued: 3, card: 6200.25, on_cash: 5480.25, on_pos: 520, unexplained: 200, notes: 4319.75,
+      paid_before_window: 0, chargebacks: -25, card_days: 120, latest: { day: '2026-11-22', cash: 210.5, cash_unvalued: 0, on_cash: 150, notes: 60.5 } },
+    { person_id: '402', name: 'Card Driver Two', cash: 5440.5, cash_unvalued: 0, card: 3690, on_cash: 2640, on_pos: 1010, unexplained: 40, notes: 2800.5,
+      paid_before_window: 0, chargebacks: 0, card_days: 88, latest: { day: '2026-11-22', cash: 0, cash_unvalued: 0, on_cash: 0, notes: 0 } }],
     in_cash_position: false,
     note: 'a preview: cash fares less the card payments that paid for them; no other figure uses it yet.' });
 });

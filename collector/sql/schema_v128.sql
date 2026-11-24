@@ -17,6 +17,8 @@
 --   cash, cash_trips  trip_cash: completed trips the driver holds cash for,
 --                     valued by Uber's own cash_collected where its payments
 --                     report has it, else the fare (the cash text's figure)
+--   cash_unvalued     of those, trips with no fare on record (cash_amount NULL):
+--                     counted, never valued as AED 0 — the cash is then a floor
 --   pos, pos_trips    trip_ext: completed hotel fares filed 'pos-driver'
 --                     (pos-supervisor / cash-supervisor are not the driver's)
 --
@@ -29,6 +31,7 @@ CREATE TABLE IF NOT EXISTS card_fare_day (
   day            DATE NOT NULL,
   cash           NUMERIC(12,2) NOT NULL DEFAULT 0,
   cash_trips     INT NOT NULL DEFAULT 0,
+  cash_unvalued  INT NOT NULL DEFAULT 0,
   pos            NUMERIC(12,2) NOT NULL DEFAULT 0,
   pos_trips      INT NOT NULL DEFAULT 0,
   refreshed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),

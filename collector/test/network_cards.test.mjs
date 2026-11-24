@@ -52,6 +52,13 @@
      · cashByDay reading the trip views even when the table is built → §10 "the pages read the table" fails
      · the hourly refresh rebuilding everything → §10 "the last 14 days only" fails
      · the fares refreshed only after a read that worked → §10 "a read that fails" fails
+     after the review of 2026-11-24:
+     · on_cash booked on the card's day → §10 "a window starting the day after a carry" and "from the 2nd" fail
+     · the driver's card taken from the rows shown only → §10 "a window from the 16th" fails
+     · a driver whose only card is the day before the window listed → §10 "the 22nd alone" fails
+     · the table read for a range before 'fares_from' → §10 "one reaching before it is read live" fails
+     · a table starting after the first card payment not forcing a full rebuild → §10 "grew backwards" fails
+     · a trip with no fare counted as cash 0 and not said → §10 "no fare on record" fails
      · the link's precedence over the HR export dropped (CASE order) → §5 fails
      · the review serving an ambiguous HR ID → §8 fails
      · the stranded-link fallback dropped → §5 "removed person" fails
@@ -477,8 +484,12 @@ console.log('\n§10 cash in notes (CARD-3)');
   check('card pays the hotel\'s pos-driver fare first, then cash: 80 = 50 pos + 30 cash, 70 left in notes',
     a1[0].on_pos === 50 && a1[0].on_cash === 30 && a1[0].notes === 70 && a1[0].unexplained === 0, JSON.stringify(a1));
   const a2 = allocate([{ day: '2026-11-01', cash: 100, pay: 0 }, { day: '2026-11-02', cash: 0, pay: 60 }]);
-  check('a fare taken before midnight, paid by card after: the 1st keeps 40 in notes, the 2nd\'s 60 settles it',
-    a2[0].notes === 40 && a2[0].paid_next_day === 60 && a2[1].on_cash === 60 && a2[1].unexplained === 0, JSON.stringify(a2));
+  check('a fare taken before midnight, paid by card after: booked on the fare\'s day — the 1st 60 paid by card (the next day), 40 in notes; the 2nd\'s card paid the day before',
+    a2[0].notes === 40 && a2[0].on_cash === 60 && a2[0].paid_next_day === 60 && a2[1].on_cash === 0 && a2[1].paid_prev_day === 60
+    && a2[1].unexplained === 0, JSON.stringify(a2));
+  const edge = allocate([{ day: '2026-11-09', cash: 80, pay: 0 }, { day: '2026-11-10', cash: 50, pay: 100 }]).filter((r) => r.day >= '2026-11-10');
+  check('…so a window starting the day after a carry still adds up: cash 50, 50 paid by card, 0 in notes, 50 paid the day before (not "200% by card")',
+    edge[0].cash === 50 && edge[0].on_cash === 50 && edge[0].notes === 0 && edge[0].paid_prev_day === 50, JSON.stringify(edge));
   const a3 = allocate([{ day: '2026-11-01', cash: 100, pay: 0 }, { day: '2026-11-03', cash: 0, pay: 60 }]);
   check('…one day back, never further: the 3rd\'s 60 is not explained, the 1st keeps its 100', a3[0].notes === 100 && a3[1].unexplained === 60,
     JSON.stringify(a3));
@@ -534,9 +545,53 @@ console.log('\n§10 cash in notes (CARD-3)');
   check('…and it says it is a preview no other figure uses yet', n.in_cash_position === false && /a preview/.test(n.note || ''));
   const d1 = ((await B(`/api/card/driver?person=${PA}`)).body?.days || []);
   const dy = (day) => d1.find((r) => r.day === day) || {};
-  check('the driver\'s day table: the 1st paid 100 by card and 150 the next day, 50 left in notes; the 16th paid 70, 30 not taken off',
-    dy('2026-11-01').on_cash === 100 && dy('2026-11-01').paid_next_day === 150 && dy('2026-11-01').notes === 50
-    && dy('2026-11-16').on_cash === 70 && dy('2026-11-16').unexplained === 30, JSON.stringify([dy('2026-11-01'), dy('2026-11-16')]));
+  check('the driver\'s day table, booked on the fare\'s day: the 1st 250 of its 300 paid by card (150 the next day), 50 in notes; the 2nd\'s card paid 150 of the 1st\'s',
+    dy('2026-11-01').on_cash === 250 && dy('2026-11-01').paid_next_day === 150 && dy('2026-11-01').notes === 50
+    && dy('2026-11-02').on_cash === 50 && dy('2026-11-02').paid_prev_day === 150, JSON.stringify([dy('2026-11-01'), dy('2026-11-02')]));
+  check('…the 16th: its 50 paid, 20 of its card paid the 15th\'s leftover, 30 not taken off', dy('2026-11-16').on_cash === 50
+    && dy('2026-11-16').paid_prev_day === 20 && dy('2026-11-16').unexplained === 30 && dy('2026-11-16').notes === 0, JSON.stringify(dy('2026-11-16')));
+  const w16 = ((await B(`/api/card/driver?person=${PA}&from=2026-11-16`)).body?.days || []).find((r) => r.day === '2026-11-16') || {};
+  check('a window from the 16th still reads the 15th\'s card: only 20 was left, so 30 is not taken off (not booked as paying the 15th)',
+    w16.paid_prev_day === 20 && w16.unexplained === 30, JSON.stringify(w16));
+
+  /* A window that does not start on the first card day (the review of
+     2026-11-24). */
+  const n2 = (await B('/api/card/notes?from=2026-11-02')).body || {};
+  const a2w = (n2.drivers || []).find((r) => r.person_id === String(PA)) || {};
+  check('from the 2nd: cash − paid by card = in notes, and the 150 of the 2nd\'s card that paid the 1st is said apart',
+    Math.round((a2w.cash - a2w.on_cash) * 100) / 100 === a2w.notes && a2w.paid_before_window === 150 && a2w.on_cash <= a2w.cash
+    && Math.round((a2w.on_pos + a2w.on_cash + a2w.paid_before_window + a2w.unexplained) * 100) / 100 === a2w.card, JSON.stringify(a2w));
+  check('…and it is not every card payment, so the page is not told the ceiling would drop by it', n.whole_span === true && n2.whole_span === false,
+    JSON.stringify([n.whole_span, n2.whole_span]));
+  const n22 = (await B('/api/card/notes?from=2026-11-22&to=2026-11-22')).body || {};
+  check('the 22nd alone: the 21st\'s card is read for the carry only — no driver listed, and the true reason', (n22.drivers || []).length === 0
+    && /No card payment in this window/.test(n22.why || ''), JSON.stringify([n22.drivers, n22.why]));
+
+  /* The table covers what its last full rebuild covered, no more. */
+  await q(`UPDATE card_fare_day SET cash = 9999 WHERE platform = 'uber' AND driver_ext_id = 'u-alpha' AND day = '2026-11-05'`);
+  const inT = ((await B('/api/card/notes')).body?.drivers || []).find((r) => r.person_id === String(PA)) || {};
+  const before25 = ((await B('/api/card/notes?from=2026-10-25')).body?.drivers || []).find((r) => r.person_id === String(PA)) || {};
+  check('a range inside the table reads it (the planted 9999 shows); one reaching before it is read live (878)', inT.cash === 878 - 80 + 9999
+    && before25.cash === 878, JSON.stringify([inT.cash, before25.cash]));
+  await q(`UPDATE source_state SET value = '2026-11-05' WHERE source = 'network_cards' AND fleet_id = '-' AND key = 'fares_from'`);
+  const grew = await refreshFares(db, { now: Date.parse('2026-11-23T10:00:00Z') });
+  const [ff] = await q(`SELECT value FROM source_state WHERE source = 'network_cards' AND fleet_id = '-' AND key = 'fares_from'`);
+  check('a sheet that grew backwards (the table starts after the first card payment) forces a full rebuild at the next read',
+    grew.full === true && ff.value === '2026-10-31', JSON.stringify([grew, ff]));
+
+  /* A cash trip with no fare on record is counted, never valued as 0. */
+  await q(`INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, requested_at, status, payment_type, price, currency)
+           VALUES ('uber', 'ct-nv1', 'ecosine', 'u-alpha', 'Card Test', '2026-11-10T13:00:00+04:00', 'completed', 'cash', NULL, 'AED')`);
+  const live = ((await B('/api/card/notes?from=2026-10-25')).body?.drivers || []).find((r) => r.person_id === String(PA)) || {};
+  await refreshFares(db, { full: true, now: Date.parse('2026-11-23T10:00:00Z') });
+  const [t10] = await q(`SELECT cash::float AS cash, cash_trips, cash_unvalued FROM card_fare_day WHERE platform = 'uber' AND driver_ext_id = 'u-alpha' AND day = '2026-11-10'`);
+  const nv = (await B('/api/card/notes')).body || {};
+  const nva = (nv.drivers || []).find((r) => r.person_id === String(PA)) || {};
+  const d10 = ((await B(`/api/card/driver?person=${PA}`)).body?.days || []).find((r) => r.day === '2026-11-10') || {};
+  check('a cash trip with no fare on record: counted in cash_unvalued (live and summed), the cash unchanged at 98 / 878, never a fare of 0',
+    live.cash_unvalued === 1 && live.cash === 878 && t10?.cash === 98 && t10.cash_trips === 2 && t10.cash_unvalued === 1
+    && nva.cash_unvalued === 1 && nva.cash === 878 && nv.totals?.cash_unvalued === 1 && d10.cash_unvalued === 1 && d10.cash === 98,
+  JSON.stringify([live.cash_unvalued, t10, nva.cash_unvalued, nv.totals?.cash_unvalued, d10.cash_unvalued]));
 }
 
 bare.server?.close?.(); gated.server?.close?.();
