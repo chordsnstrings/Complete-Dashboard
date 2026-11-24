@@ -12480,8 +12480,28 @@ pages say the sheet has not been read. The worker also reads once three minutes 
     trap as CARD-2's cross-check, test §9). Without it that day's whole cash looks free to carry. The driver
     route made this mistake once, through its 90-row LIMIT. Read the day before for the carry only: a driver
     whose only card payment falls there is not in the window.
-  - **Status:** a preview (`/api/card/notes`, the Deposits panel). Every answer still says
-    `in_cash_position: false` until the operator approves the per-driver figures.
+  - **Status:** a preview (`/api/card/notes`, the Deposits panel), live since 7636e5f. Every answer still
+    says `in_cash_position: false` until the operator approves the per-driver figures.
+  - **Measured on production, month by month (2026-11-24; AED, rounded):**
+
+    | month | drivers | cash fares | card | settled cash | hotel machine | not taken off | in notes |
+    |---|---|---|---|---|---|---|---|
+    | 2026-01 | 48 | 128,751 | 61,542 | 43,697 | 0 | 17,646 (29%) | 85,054 |
+    | 2026-02 | 48 | 105,969 | 63,210 | 41,970 | 0 | 21,138 (33%) | 63,998 |
+    | 2026-03 | 35 | 18,889 | 13,614 | 5,786 | 0 | 7,752 (57%) | 13,102 |
+    | 2026-04 | 23 | 14,712 | 14,785 | 6,058 | 0 | 8,726 (59%) | 8,654 |
+    | 2026-05 | 31 | 26,911 | 19,253 | 7,449 | 0 | 11,799 (61%) | 19,462 |
+    | 2026-06 | 33 | 33,407 | 23,155 | 11,175 | 0 | 11,979 (52%) | 22,232 |
+    | 2026-07 | 43 | 50,072 | 26,163 | 13,286 | 3,990 | 8,887 (34%) | 36,787 |
+    | 2026-08 | 49 | 64,317 | 26,378 | 16,190 | 6,285 | 3,902 (15%) | 48,127 |
+    | 2026-09 | 50 | 88,540 | 43,300 | 31,203 | 7,270 | 4,827 (11%) | 57,337 |
+    | 2026-10 | 66 | 133,870 | 50,044 | 36,734 | 8,345 | 4,708 (9%) | 97,136 |
+    | 2026-11 | 66 | 111,888 | 47,283 | 31,978 | 10,335 | 4,917 (10%) | 79,910 |
+
+    The hotel's card-machine fares first appear in July: there is no pos-driver fare in what we hold before
+    then. Cash fares fall from 106k in February to 19k in March (Uber's own trip count fell the same way:
+    the table at the top of this file). So January to July carry card money with no fare to set it against,
+    29–61% a month. It is not taken off, so it never lowers notes. From August the fares explain 85–91%.
 * **`card_fare_day` is as fresh as the last card read, not the last trip** (CARD-3). It is refreshed after
   each read, hourly at :33, whether the sheet answered or not: the last 14 days, and once a day in full. A
   trip collected after a read shows at the next one. A trip more than 14 days back shows at the next full
