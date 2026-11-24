@@ -2271,7 +2271,7 @@ export function cashOnHandTile(k) {
           + 'files a cash figure either way' };
   }
   const share = Number.isFinite(p.gross) && p.gross > 0
-    ? ` — ${pct((p.cash / p.gross) * 100, 1)} of money in` : '';
+    ? ` — ${pct((p.cash / p.gross) * 100, 1)} of net earnings` : '';
   /* Cash is a line ON A STATEMENT. Where part of the money came from prices on
      the bookings instead, no feed says whether the rider paid that in cash, and
      a card that stays silent about it is quietly claiming they did not. */

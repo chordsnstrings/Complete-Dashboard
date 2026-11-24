@@ -498,7 +498,7 @@ export async function renderPerformance(root, periodParam) {
     + 'is not charged to the individual — each driver’s expected figure is scaled by how '
     + 'the median driver moved over the same periods.');
   li(`<b>${d.movement.why}</b>`);
-  li('<b>Gross revenue is gross.</b> It is what riders were charged, before any platform commission '
+  li('<b>Gross revenue is before commission.</b> It is what riders were charged, before any platform commission '
     + 'and before the cash a driver has already taken. What the fleet actually receives is on the '
     + 'Revenue page and on each driver’s Earnings tab.');
   how.body.innerHTML = '';

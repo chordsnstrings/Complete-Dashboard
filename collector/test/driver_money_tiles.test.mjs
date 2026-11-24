@@ -177,7 +177,7 @@ console.log('\ncash on hand: what the driver already has');
   check('it says the money is already theirs',
     /already in the driver's hand/.test(c.sub), c.sub);
   check('…and what share of the money in it is',
-    /14\.3% of money in/.test(c.sub), c.sub);
+    /14\.3% of net earnings/.test(c.sub), c.sub);
   /* Cash is a line ON A STATEMENT. Where part of the money was priced from
      bookings instead, no feed says whether the rider paid that in cash, and
      silence there quietly claims they did not. */

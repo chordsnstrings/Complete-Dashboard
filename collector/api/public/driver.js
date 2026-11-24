@@ -1415,7 +1415,7 @@ function overviewAbsence(root, k, prof) {
       why: trips > priced ? `${UBER_FARE_WHY}; Net earnings takes the statement where a channel filed one.`
         : trips ? 'Every booking in this window carries a fare.' : 'No booking in this window.' },
     { label: 'The bank transfer itself', fig: null, none: 'Not read',
-      why: 'Bank deposit is what is left of Money in after the cash the driver already holds — a remainder, not a receipt. No bank statement is read here.' },
+      why: 'Bank deposit is what is left of Net earnings after the cash the driver already holds — a remainder, not a receipt. No bank statement is read here.' },
     { label: 'Licence and ID numbers', fig: withheld ? `${fmt(withheld)} withheld` : null, none: 'None withheld',
       why: withheld ? (prof.identity_withheld_reason || 'withheld from an unauthenticated response') : 'Nothing on the identity card was withheld.' },
     { label: 'When a pickup happened', fig: null, none: 'Not sent',
