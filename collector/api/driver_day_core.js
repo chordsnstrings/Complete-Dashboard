@@ -13,6 +13,7 @@
    Nothing here was rewritten: the three blocks are the route's own, with the
    route's long comments kept beside the code they explain. */
 import { onlineSpansSql } from './online_span_sql.js';
+import { REAL_FIX } from './telemetry_sql.js';
 import { SPANS_SQL, STALE_AFTER_MIN } from './status_routes.js';
 import { seatOf } from './where_routes.js';
 import { statusSpans, custodyWindows, carRuns, movementSegments, movementTotals } from './day_movement.js';
@@ -251,7 +252,10 @@ export async function dayMovement(q, { d, day, trips, online, PKEY, now = null }
         WHERE s.plate = ANY($1) AND s.source <> 'uber'
           AND s.captured_at >= (($2::date)::timestamp AT TIME ZONE 'Asia/Dubai')
           AND s.captured_at <  (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
-          AND s.lat IS NOT NULL AND s.lng IS NOT NULL
+          /* A real position only: a tracker with no lock files 0,0 (FIXLIST
+             V11), which drew a cell in the Gulf of Guinea and zoomed the map
+             to the world (review, 2026-11-24). */
+          AND ${REAL_FIX('s.')}
         ORDER BY s.captured_at`, [plates, day]) : []).map((f) => ({
       plate: f.plate, source: f.source, at: new Date(f.at).toISOString(), time: f.time, m: f.m,
       lat: Number(f.lat), lng: Number(f.lng), speed: f.speed == null ? null : Number(f.speed),
@@ -259,7 +263,11 @@ export async function dayMovement(q, { d, day, trips, online, PKEY, now = null }
          FMS's passenger count at 1 or more; null where the fix has none. */
       passenger: seatOf(f), area: f.area || null, area_votes: f.area_votes ?? null, area_seen: f.area_seen ?? null,
     }));
-    let fixes = plateFixes.filter((f) => windows.some((w) => w.plate === f.plate && f.m >= w.from && f.m <= w.to));
+    /* Each kept fix carries the index of the custody window it sits in, so
+       two fixes either side of another driver's hours in the same car are
+       never read as one interval (api/day_movement.js sameWindow). */
+    let fixes = plateFixes.map((f) => ({ ...f, w: windows.findIndex((w) => w.plate === f.plate && f.m >= w.from && f.m <= w.to) }))
+      .filter((f) => f.w >= 0);
     const outsideFixes = plateFixes.length - fixes.length;
     /* ONE TRACKER PER CAR. Where a car carries both CABMAN and FMS they put it
        a median 12.7–25.6 km apart at the same minute (the trap "Check the

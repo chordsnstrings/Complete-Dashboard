@@ -2005,13 +2005,17 @@ async function tabTerritory(root, id) {
        and a fix is not a minute. */
     const maxStop = Math.max(1, ...(terr.idle || []).map((s) => s.stopped_min || 0));
     (terr.idle || []).forEach((s) => {
-      const share = s.stopped_min ? (s.wait_min || 0) / s.stopped_min : 0;
+      /* Grey only where parked with no working status outweighs waiting —
+         a stop on a job (a red light, the pickup wait) is neither, and is
+         said apart rather than counted as parked (review, 2026-11-24). */
+      const parked = (s.offline_min || 0) > (s.wait_min || 0);
       L.circleMarker([s.lat, s.lng], {
         radius: 4 + 12 * Math.sqrt((s.stopped_min || 0) / maxStop), weight: 1, color: css('--pin-ring'),
-        fillColor: css(share >= 0.5 ? '--s1' : '--grey'), fillOpacity: ak ? 0.75 : 0.6, className: 'terr-still',
+        fillColor: css(parked ? '--grey' : '--s1'), fillOpacity: ak ? 0.75 : 0.6, className: 'terr-still',
       }).addTo(layers.wait).bindTooltip(`<b>${esc(s.area || 'Unnamed ground')}</b><br>`
-        + `Waited online ${durWords(s.wait_min)} · stopped ${durWords(s.stopped_min)} in all`
-        + `${s.offline_min ? ` · ${durWords(s.offline_min)} with no working status` : ''}<br>on ${countOf(s.days, 'day')}`, { direction: 'top' });
+        + `Waited online ${durWords(s.wait_min)}`
+        + `${s.offline_min ? ` · parked, not working ${durWords(s.offline_min)}` : ''}`
+        + `${s.ontrip_min ? ` · stopped on a job ${durWords(s.ontrip_min)}` : ''}<br>on ${countOf(s.days, 'day')}`, { direction: 'top' });
       pts.wait.push([s.lat, s.lng]);
     });
     const movingCells = (mv?.cells || []).filter((c) => (c.moving_empty_min + c.moving_seat_unknown_min + c.with_passenger_min) > 0);
@@ -2105,7 +2109,7 @@ async function tabTerritory(root, id) {
     byArea.body.append(tableFrom(mv.areas.slice(0, 15), [
       { label: 'Area', key: 'area', render: (r) => (r.area ? esc(r.area) : '<span class="ent-off" title="no trip address has ever named this ground">Unnamed ground</span>') },
       { label: 'Waiting online', key: 'wait_min', num: true, render: (r) => durWords(r.wait_min) },
-      { label: 'Parked', key: 'stopped_min', num: true, render: (r) => durWords(Math.max(0, r.stopped_min - r.wait_min)) },
+      { label: 'Parked, not working', key: 'parked_offline_min', num: true, render: (r) => durWords(r.parked_offline_min) },
       { label: 'Driving', key: 'moving_empty_min', num: true, render: (r) => durWords(r.moving_empty_min + r.moving_seat_unknown_min + r.with_passenger_min) },
       { label: 'With passenger', key: 'with_passenger_min', num: true, render: (r) => durWords(r.with_passenger_min) },
       { label: 'km', key: 'km', num: true, render: (r) => fmt(r.km, 1) },
@@ -2123,7 +2127,7 @@ async function tabTerritory(root, id) {
       { label: 'Online', key: 'online_min', num: true, render: (r) => durWords(r.online_min) },
       { label: 'Waiting', key: 'wait_min', num: true, render: (r) => (r.fixes ? durWords(r.wait_min) : '<span class="ent-off">—</span>') },
       { label: 'With passenger', key: 'with_passenger_min', num: true, render: (r) => (r.fixes ? durWords(r.with_passenger_min) : '<span class="ent-off">—</span>') },
-      { label: 'km', key: 'km', num: true, render: (r) => (r.fixes ? fmt(r.km, 1) : `<span class="ent-off" title="${esc(r.absent || 'no position in their hours')}">—</span>`) },
+      { label: 'km', key: 'km', num: true, render: (r) => (r.fixes ? fmt(r.km, 1) : `<span class="ent-off" title="${esc(r.absent || 'no position in their hours')}">${r.failed ? 'not built' : '—'}</span>`) },
       { label: 'Pickups placed', key: 'pickups_placed', num: true, render: (r) => (r.pickups ? `${fmt(r.pickups_placed)} of ${fmt(r.pickups)}` : '—') },
     ], { compact: true }));
   }

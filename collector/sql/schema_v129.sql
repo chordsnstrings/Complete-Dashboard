@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS driver_move_day (
   dropoffs_placed        int         NOT NULL DEFAULT 0,
   absent                 text,
   partial                boolean     NOT NULL DEFAULT false,
+  -- true when the day could not be built for this person; absent says why
+  failed                 boolean     NOT NULL DEFAULT false,
   built_at               timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (person_id, day)
 );
@@ -70,6 +72,10 @@ CREATE TABLE IF NOT EXISTS driver_move_cell (
   online_min              real   NOT NULL DEFAULT 0,
   ontrip_min              real   NOT NULL DEFAULT 0,
   wait_min                real   NOT NULL DEFAULT 0,
+  -- of stopped_min: on a job (red lights, the pickup wait) and with no
+  -- working status at all; wait + on-job + parked_offline = stopped
+  stopped_ontrip_min      real   NOT NULL DEFAULT 0,
+  parked_offline_min      real   NOT NULL DEFAULT 0,
   offline_min             real   NOT NULL DEFAULT 0,
   km                      real   NOT NULL DEFAULT 0,
   km_with_passenger       real   NOT NULL DEFAULT 0,

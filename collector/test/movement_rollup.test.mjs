@@ -19,7 +19,8 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
-import { minuteStatus, rollupMovement, placePoints, buildDay, personsForDay } from '../src/movement_rollup.js';
+import { minuteStatus, rollupMovement, placePoints, buildDay, buildPersonDay, personsForDay, movementRollupTick } from '../src/movement_rollup.js';
+import { driverScope } from '../api/driver_routes.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -78,6 +79,18 @@ console.log('\n§2 minutes and km, per cell');
     status: minuteStatus({ statusAll: [{ s: 0, e: 1440, status: 'online' }] }) });
   check('a CABMAN unit quiet and parked for 66 minutes is a stop, inferred, with no km', cab.day.stopped_min === 66
     && cab.day.parked_quiet_min === 66 && cab.day.km === 0 && cab.day.wait_min === 66, JSON.stringify(cab.day));
+  /* The review of 2026-11-24. */
+  const jump = rollupMovement({ fixes: [F('10:00', 25.10, 55.20), F('10:06', 0.0001, 0.0001), F('10:12', 25.1001, 55.2001)],
+    status: minuteStatus({ statusAll: [{ s: 0, e: 1440, status: 'online' }] }) });
+  const nullIsland = jump.cells.find((c) => c.cell_lat === 0 && c.cell_lng === 0);
+  check('a fix at 0,0 adds no kilometres and no minutes anywhere', jump.day.km < 1 && (!nullIsland || (nullIsland.stopped_min === 0
+    && nullIsland.moving_empty_min === 0 && nullIsland.km === 0)), JSON.stringify({ day: jump.day, nullIsland }));
+  const job = rollupMovement({ fixes: [F('09:00', ...A), F('09:15', ...A), F('09:30', ...A)],
+    status: minuteStatus({ statusAll: [{ s: mm('09:00'), e: mm('10:00'), status: 'online' }], trips: [{ s: mm('09:00'), e: mm('09:15') }] }) });
+  const jc = job.cells[0];
+  check('a stop on a job is neither waiting nor parked: the stop splits three ways and the three add up to it',
+    Math.round(jc.stopped_ontrip_min) === 15 && Math.round(jc.wait_min) === 15 && jc.parked_offline_min === 0
+    && Math.round(jc.wait_min + jc.stopped_ontrip_min + jc.parked_offline_min) === Math.round(jc.stopped_min), JSON.stringify(jc));
   const lone = rollupMovement({ fixes: [F('08:00', ...A)], status: minuteStatus({ statusAll: [{ s: mm('07:00'), e: mm('09:00'), status: 'online' }] }) });
   check('online for two hours with one fix: 120 online minutes, all unseen', lone.day.online_min === 120 && lone.day.unseen_online_min === 120,
     JSON.stringify(lone.day));
@@ -148,6 +161,7 @@ await fx('08:06', [25.105, 55.395], 0, 40); await fx('08:12', [25.112, 55.388], 
 for (const hm of ['08:20', '08:30', '08:40', '08:50', '09:00']) await fx(hm, DSO);
 await fx('09:05', DSO, 1, 0); await fx('09:12', [25.19, 55.36], 1, 55); await fx('09:20', GAR, 1, 0);
 for (const hm of ['09:30', '09:40', '09:50', '10:00']) await fx(hm, GAR);
+await fx('09:45', [0, 0]);                                                         // a lost lock, in his hours
 const cell = (p, area) => q(`INSERT INTO place_cell (cell_lat, cell_lng, area, n, distinct_names, observations) VALUES ($1,$2,$3,50,1,50)
   ON CONFLICT DO NOTHING`, [Math.round(p[0] / 0.005), Math.round(p[1] / 0.005), area]);
 await cell(EMI, 'Emirates Rd'); await cell(DSO, 'Dubai Silicon Oasis'); await cell(GAR, 'Al Garhoud');
@@ -180,6 +194,43 @@ const byPerson = (await get(`/api/driver/movement?person=${PID}&from=2026-10-01&
 check('addressed by person, the same answer', byPerson.totals?.wait_min === mv.totals.wait_min);
 const nobody = (await get(`/api/driver/movement?id=no-such-driver&from=2026-10-01&to=2026-10-31`));
 check('an unknown driver is a 404, not an empty movement', nobody.status === 404, String(nobody.status));
+
+/* A lost-lock fix inside his hours never reaches the rollup (REAL_FIX). */
+const [{ n: island }] = await q(`SELECT count(*)::int n FROM driver_move_cell WHERE person_id = $1 AND abs(cell_lat) < 200 AND abs(cell_lng) < 200`, [PID]);
+check('a 0,0 fix in his hours draws no cell in the Gulf of Guinea and no thousands of km', island === 0 && Number(row.km) < 100, `${island} cells near 0,0, ${row.km} km`);
+
+/* A person-day that cannot be built is recorded as such, with the true
+   reason, and the range view says so — never a day he did not work. */
+const D2 = '2026-10-12';
+await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name, requested_at, ended_at, status, price, distance_km)
+         VALUES ('uber','k-2','ecosine','L30001',$1,'Test Driver Kilo',$2::timestamptz,$3::timestamptz,'completed',30,5)`,
+[K, `${D2}T10:00:00+04:00`, `${D2}T10:20:00+04:00`]);
+const failedBuild = await buildDay(q, { day: D2, resolve: async () => ({ unresolvable: 'spine-unreadable' }) });
+const [frow] = await q(`SELECT failed, absent FROM driver_move_day WHERE person_id = $1 AND day = $2::date`, [PID, D2]);
+check('an unresolvable person-day is counted as failed and written with its reason, not skipped in silence',
+  failedBuild.failed === 1 && failedBuild.built === 0 && frow?.failed === true && /person register could not be read/.test(frow.absent || ''),
+  JSON.stringify({ failedBuild, frow }));
+const fv = (await get(`/api/driver/movement?id=${K}&from=${D2}&to=${D2}`)).body;
+check('…and the range view says the day could not be built, not that he did not work',
+  /could not be built/.test(fv.coverage.absent || '') && !/no booking and no working status/.test(fv.coverage.absent || ''), JSON.stringify(fv.coverage));
+
+/* The writes are one transaction: a failure part-way leaves the old day whole. */
+const pgTx = async (fn) => { await q('BEGIN'); try { const r = await fn(q); await q('COMMIT'); return r; } catch (e) { await q('ROLLBACK'); throw e; } };
+const breakPoints = async (fn) => pgTx((w) => fn((t, p) => (/INSERT INTO driver_move_point/.test(t) ? Promise.reject(new Error('disk full')) : w(t, p))));
+const [{ n: cellsBefore }] = await q(`SELECT count(*)::int n FROM driver_move_cell WHERE person_id = $1 AND day = $2::date`, [PID, D]);
+const resolve = driverScope({ q, wrap: (f) => f }).resolve;
+let threw = false;
+try { await buildPersonDay(q, { personId: Number(PID), day: D, resolve, now: Date.parse(`${D}T23:30:00+04:00`) + 86400000, tx: breakPoints }); } catch { threw = true; }
+const [{ n: cellsAfterFail }] = await q(`SELECT count(*)::int n FROM driver_move_cell WHERE person_id = $1 AND day = $2::date`, [PID, D]);
+check('a write that fails part-way rolls back: the day keeps its cells', threw && cellsBefore > 0 && cellsAfterFail === cellsBefore,
+  `${cellsBefore} before, ${cellsAfterFail} after`);
+
+/* The first pass after deploy at 04:47 Dubai still builds yesterday. */
+await q(`DELETE FROM driver_move_day WHERE day = $1::date`, [D]);
+await q(`DELETE FROM source_state WHERE source = 'movement_rollup'`);
+await movementRollupTick(q, { now: Date.parse('2026-10-12T04:47:00+04:00'), backfillDays: 1 });
+const [again] = await q(`SELECT day FROM driver_move_day WHERE person_id = $1 AND day = $2::date`, [PID, D]);
+check('a first pass at 04:47 leaves no day out: the backfill starts at yesterday when there is no cursor yet', !!again);
 
 const terr = (await get(`/api/driver/territory?id=${K}&from=2026-10-01&to=2026-10-31`)).body;
 const dso = terr.idle.find((s) => s.area === 'Dubai Silicon Oasis');

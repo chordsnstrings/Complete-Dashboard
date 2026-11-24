@@ -2220,9 +2220,9 @@ app.get('/api/driver/territory', (req, r) => {
       unplaced: [{ reason: 'no_address+no_fix', label: 'no address, and no tracker fix within 5 minutes', n: 3 }] },
     /* Waiting spots from the movement rollup (2026-11-24): minutes in the
        driver's own hours, split waiting online / parked, named. */
-    idle: [{ lat: 25.253, lng: 55.365, area: 'Dubai International Airport', stopped_min: 412, wait_min: 371, offline_min: 41, days: 9 },
-      { lat: 25.078, lng: 55.139, area: 'Dubai Marina', stopped_min: 205, wait_min: 120, offline_min: 85, days: 6 },
-      { lat: 25.196, lng: 55.276, area: 'Downtown Dubai', stopped_min: 64, wait_min: 64, offline_min: 0, days: 3 }],
+    idle: [{ lat: 25.253, lng: 55.365, area: 'Dubai International Airport', stopped_min: 412, wait_min: 351, ontrip_min: 20, offline_min: 41, days: 9 },
+      { lat: 25.078, lng: 55.139, area: 'Dubai Marina', stopped_min: 205, wait_min: 60, ontrip_min: 10, offline_min: 135, days: 6 },
+      { lat: 25.196, lng: 55.276, area: 'Downtown Dubai', stopped_min: 64, wait_min: 64, ontrip_min: 0, offline_min: 0, days: 3 }],
     idle_absent: null,
     /* One cluster on a map beside a table of 139 pickups across 25 areas is not
        a contradiction — most channels report no coordinate — but the page could
@@ -2245,7 +2245,8 @@ app.get('/api/driver/movement', (req, r) => {
     for (let k = 0; k < 6; k += 1) {
       const w = Math.max(0, 300 - i * 45 - k * 40);
       cells.push({ lat: +(lat + (k % 3) * 0.005).toFixed(4), lng: +(lng + Math.floor(k / 3) * 0.005).toFixed(4), area,
-        stopped_min: Math.round(w * 0.8), wait_min: Math.round(w * 0.6), moving_empty_min: 30 + k * 5, moving_seat_unknown_min: k * 3,
+        stopped_min: Math.round(w * 0.8), wait_min: Math.round(w * 0.6), stopped_ontrip_min: Math.round(w * 0.05),
+        parked_offline_min: Math.round(w * 0.8) - Math.round(w * 0.6) - Math.round(w * 0.05), moving_empty_min: 30 + k * 5, moving_seat_unknown_min: k * 3,
         with_passenger_min: 50 + i * 4, online_min: w + 80, ontrip_min: 60, offline_min: Math.round(w * 0.2),
         km: +(12 + k * 2.5).toFixed(1), km_with_passenger: +(6 + k).toFixed(1), fixes: 40 + k * 8, days: 4 + (k % 3) });
     }
@@ -2256,7 +2257,7 @@ app.get('/api/driver/movement', (req, r) => {
       unseen_online_min: 40 + (i % 3) * 10, stopped_min: 260, parked_quiet_min: i % 2 ? 66 : 0, moving_empty_min: 120,
       moving_seat_unknown_min: 10, with_passenger_min: 210, wait_min: 150 + seed * 3, parked_offline_min: 40,
       km: 210 + i * 4, km_with_passenger: 120 + i * 2, fixes: 1400, pickups: 14, pickups_placed: 12, dropoffs: 14, dropoffs_placed: 13,
-      absent: null, partial: i === 9 };
+      absent: null, partial: i === 9, failed: false };
   });
   const sum = (k) => days.reduce((a, d) => a + d[k], 0);
   const points = [];
@@ -2270,15 +2271,16 @@ app.get('/api/driver/movement', (req, r) => {
   });
   r.json({
     coverage: { from: req.query.from || '2026-11-12', to: req.query.to || '2026-11-21', floor: '2026-08-21', built_from: '2026-09-01',
-      built_to: '2026-11-21', built_at: '2026-11-21T10:47:00Z', days_in_window: 10, days_before_floor: 0, days_not_built: 0, absent: null },
+      built_to: '2026-11-21', built_at: '2026-11-21T10:47:00Z', days_in_window: 10, days_before_floor: 0, days_not_built: 0, days_after_today: 0, absent: null },
     totals: Object.fromEntries(['online_min', 'ontrip_min', 'seen_min', 'unseen_online_min', 'stopped_min', 'parked_quiet_min',
       'moving_empty_min', 'moving_seat_unknown_min', 'with_passenger_min', 'wait_min', 'parked_offline_min', 'fixes', 'pickups',
       'pickups_placed', 'dropoffs', 'dropoffs_placed'].map((k) => [k, sum(k)])
-      .concat([['km', Math.round(sum('km') * 10) / 10], ['km_with_passenger', Math.round(sum('km_with_passenger') * 10) / 10], ['days', 10], ['days_moving', 10]])),
+      .concat([['km', Math.round(sum('km') * 10) / 10], ['km_with_passenger', Math.round(sum('km_with_passenger') * 10) / 10], ['days', 10], ['days_moving', 10], ['days_failed', 0]])),
     points_summary: { pickups: 140, pickups_placed: 120, pickups_by: { uber_stage: 90, seat: 30 },
       dropoffs: 140, dropoffs_placed: 130, dropoffs_by: { uber_stage: 87, booking: 43 } },
     cells,
-    areas: places.map(([area], i) => ({ area, stopped_min: 900 - i * 120, wait_min: 700 - i * 100, moving_empty_min: 200, moving_seat_unknown_min: 20,
+    areas: places.map(([area], i) => ({ area, stopped_min: 900 - i * 120, wait_min: 700 - i * 100, stopped_ontrip_min: 40, parked_offline_min: 160 - i * 20,
+      moving_empty_min: 200, moving_seat_unknown_min: 20,
       with_passenger_min: 300 - i * 20, online_min: 1200 - i * 100, ontrip_min: 400, offline_min: 90, km: 120 - i * 10, km_with_passenger: 60,
       fixes: 900, days: 8, cells: 6 })),
     points, days,

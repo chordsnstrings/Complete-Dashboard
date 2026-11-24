@@ -96,6 +96,18 @@ const F = (hm, lat, lng, extra = {}) => ({ plate: 'L1', source: 'fms', at: at(hm
   check('a quiet parked gap never reads as moving, whatever its endpoints say',
     intervalState(C('10:00', 25.20, 55.30, { speed: 30 }), C('11:00', 25.2004, 55.3004, { speed: 30 }))?.state === 'idle'
     && quietParked(C('10:00', 25.20, 55.30), C('10:15', 25.20, 55.30)) === false);
+  /* The review of 2026-11-24. A quiet parked gap's seat is not read; two
+     fixes from two custody windows of the same car are never one interval;
+     a step of 60 km or more is a bad fix, never a drive. */
+  check('a parked CABMAN car with the seat flagged at both ends of a quiet hour is a stop, not an hour with a passenger',
+    intervalState(C('10:00', 25.20, 55.30, { passenger: true }), C('11:05', 25.2002, 55.3002, { passenger: true }))?.state === 'idle'
+    && intervalState(C('10:00', 25.20, 55.30, { passenger: true }), C('11:05', 25.2002, 55.3002, { passenger: true }))?.seat === null);
+  check('two fixes either side of another driver\'s hours in the same car are not one interval',
+    intervalState(F('10:00', 25.20, 55.30, { w: 0 }), F('10:10', 25.2001, 55.3001, { w: 1 })) === null
+    && intervalState(F('10:00', 25.20, 55.30, { w: 1 }), F('10:10', 25.2001, 55.3001, { w: 1 }))?.state === 'idle');
+  check('a lost-lock fix at 0,0 between two real ones is not 13,000 km of driving',
+    intervalState(F('10:00', 25.10, 55.20), F('10:06', 0, 0)) === null && intervalState(F('10:06', 0, 0), F('10:12', 25.11, 55.21)) === null
+    && distanceBySeat([F('10:00', 25.10, 55.20), F('10:06', 0, 0), F('10:12', 25.11, 55.21)]).km < 1);
   /* FMS's 0 is now a reading. An instant at a red light after a real drive
      is still a drive; a 0 with the car where it was is a stop. */
   check('a reported 0 at the end of a 2 km interval is still a drive; a reported 0 on the spot is a stop',

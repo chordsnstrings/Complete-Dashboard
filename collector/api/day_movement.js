@@ -199,7 +199,13 @@ export function quietParked(a, b) {
   const gap = (ms(b.at) - ms(a.at)) / 60000;
   return gap > SILENCE_MIN && gap <= (PARKED_CADENCE_MIN[b.source] ?? 30) && km(a, b) < STAY_RADIUS_KM;
 }
-const watched = (a, b) => (ms(b.at) - ms(a.at)) / 60000 <= SILENCE_MIN || quietParked(a, b);
+/* Two fixes from two different custody windows of the same car are never
+   one interval (review, 2026-11-24): the gap between the windows is another
+   driver's evidence, and the parked-tracker rule would otherwise hand up to
+   70 minutes of it to this one. `w` is the window index the day route sets
+   on each fix; a fix without one (a test, the vehicle page) is unrestricted. */
+const sameWindow = (a, b) => a.w == null || b.w == null || a.w === b.w;
+const watched = (a, b) => sameWindow(a, b) && ((ms(b.at) - ms(a.at)) / 60000 <= SILENCE_MIN || quietParked(a, b));
 
 /* One interval between two fixes of the same car and tracker: its state
    ('engaged' a passenger aboard, 'available' moving with none, 'idle'
@@ -209,8 +215,15 @@ const watched = (a, b) => (ms(b.at) - ms(a.at)) / 60000 <= SILENCE_MIN || quietP
    and this page classify the same minute the same way. */
 export function intervalState(a, b) {
   if (a.plate !== b.plate || a.source !== b.source || !watched(a, b)) return null;
+  /* A step of HOP_KM or more is a bad fix, not a drive — the rule
+     distanceBySeat and /api/map/journey already use. Without it one lost-lock
+     fix at 0,0 between two real ones was 13,096 km (review, 2026-11-24). */
+  if (km(a, b) >= HOP_KM) return null;
   const quiet = quietParked(a, b);
-  const seat = seatOn(a, b);
+  /* A quiet parked gap's seat is not read — the tracker said nothing for an
+     hour; a bag on a seat flagged at both ends is not an hour with a
+     passenger (review, 2026-11-24; seatMinutes below already said so). */
+  const seat = quiet ? null : seatOn(a, b);
   const state = seat === true ? 'engaged' : (!quiet && movingOn(a, b)) ? 'available' : 'idle';
   return { state, seat, inferred: quiet };
 }

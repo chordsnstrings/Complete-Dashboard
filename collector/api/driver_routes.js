@@ -3343,7 +3343,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const idle = who.id == null ? [] : await q(
       `SELECT round((c.cell_lat * 0.005)::numeric, 4) AS lat, round((c.cell_lng * 0.005)::numeric, 4) AS lng,
               pc.area, round(sum(c.stopped_min))::int AS stopped_min, round(sum(c.wait_min))::int AS wait_min,
-              round(sum(c.offline_min) FILTER (WHERE c.stopped_min > 0))::int AS offline_min,
+              round(sum(c.stopped_ontrip_min))::int AS ontrip_min,
+              /* Parked with no working status — its own column, never stopped
+                 minus waiting (that counted a job's stops as parked) nor the
+                 cell's offline minutes (those include driving). */
+              round(sum(c.parked_offline_min))::int AS offline_min,
               count(DISTINCT c.day)::int AS days
          FROM driver_move_cell c
          LEFT JOIN place_cell pc ON pc.cell_lat = c.cell_lat AND pc.cell_lng = c.cell_lng
@@ -3411,6 +3415,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       built_at: span?.built_at || null, days_in_window: dayCount(from, to),
       days_before_floor: dayCount(from, minOf(to, dayBefore(MOVEMENT_FLOOR_DAY))),
       days_not_built: builtFrom ? dayCount(lo, minOf(hi, dayBefore(builtFrom))) : dayCount(lo, hi),
+      days_after_today: dayCount(maxOf(from, dubaiDay(new Date(Date.parse(`${today}T00:00:00Z`) + 86400000))), to),
     };
     if (who.id == null) {
       return res.json({ coverage: { ...coverage, absent: who.why }, totals: null, cells: [], areas: [], points: [], days: [] });
@@ -3420,17 +3425,19 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       `SELECT to_char(day, 'YYYY-MM-DD') AS day, plates, sources, online_min, ontrip_min, seen_min, unseen_online_min,
               stopped_min, parked_quiet_min, moving_empty_min, moving_seat_unknown_min, with_passenger_min, wait_min,
               parked_offline_min, km::float AS km, km_with_passenger::float AS km_with_passenger, fixes,
-              pickups, pickups_placed, dropoffs, dropoffs_placed, absent, partial
+              pickups, pickups_placed, dropoffs, dropoffs_placed, absent, partial, failed
          FROM driver_move_day WHERE person_id = $1 AND day BETWEEN $2::date AND $3::date ORDER BY day`, P);
     const sum = (k) => days.reduce((a, r) => a + Number(r[k] || 0), 0);
     const totals = days.length ? Object.fromEntries(['online_min', 'ontrip_min', 'seen_min', 'unseen_online_min', 'stopped_min',
       'parked_quiet_min', 'moving_empty_min', 'moving_seat_unknown_min', 'with_passenger_min', 'wait_min', 'parked_offline_min',
       'fixes', 'pickups', 'pickups_placed', 'dropoffs', 'dropoffs_placed'].map((k) => [k, sum(k)])
       .concat([['km', Math.round(sum('km') * 10) / 10], ['km_with_passenger', Math.round(sum('km_with_passenger') * 10) / 10],
-        ['days', days.length], ['days_moving', days.filter((r) => r.fixes > 0).length]])) : null;
+        ['days', days.filter((r) => !r.failed).length], ['days_moving', days.filter((r) => r.fixes > 0).length],
+        ['days_failed', days.filter((r) => r.failed).length]])) : null;
     const CELL_COLS = `round(sum(c.stopped_min))::int AS stopped_min, round(sum(c.wait_min))::int AS wait_min,
               round(sum(c.moving_empty_min))::int AS moving_empty_min, round(sum(c.moving_seat_unknown_min))::int AS moving_seat_unknown_min,
               round(sum(c.with_passenger_min))::int AS with_passenger_min, round(sum(c.online_min))::int AS online_min,
+              round(sum(c.stopped_ontrip_min))::int AS stopped_ontrip_min, round(sum(c.parked_offline_min))::int AS parked_offline_min,
               round(sum(c.ontrip_min))::int AS ontrip_min, round(sum(c.offline_min))::int AS offline_min,
               round(sum(c.km)::numeric, 1)::float AS km, round(sum(c.km_with_passenger)::numeric, 1)::float AS km_with_passenger,
               sum(c.fixes)::int AS fixes, count(DISTINCT c.day)::int AS days`;
@@ -3458,13 +3465,25 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
         ORDER BY day, at NULLS LAST LIMIT 3000`, P);
     const byBasis = (kind) => Object.fromEntries(['uber_stage', 'booking', 'seat', 'trip_end']
       .map((b) => [b, points.filter((x) => x.kind === kind && x.basis === b).length]).filter(([, n]) => n));
-    const absent = days.length ? (totals.days_moving ? null
-      : 'on every day in this window the driver worked, no car was on record as theirs with a tracker reporting — '
-        + (days.find((r) => r.absent)?.absent || 'the tracker reported no position in their hours'))
-      : coverage.days_in_window === coverage.days_before_floor
-        ? `positions are kept from ${MOVEMENT_FLOOR_DAY}, when live collection began; this window is before it`
-        : coverage.days_not_built
-          ? `the movement for ${coverage.days_not_built === 1 ? 'one day' : `${coverage.days_not_built} days`} of this window has not been built yet (it is built back from today, a few days each night)`
+    /* The reason, from what was checked (review, 2026-11-24): days before the
+       floor were never examined, days not reached by the backfill are not
+       built yet, a day whose build failed says so — and only the days that
+       remain, built and without a row, are days this person did not work. */
+    const nDays = (n) => (n === 1 ? 'one day' : `${n} days`);
+    const failedDays = days.filter((r) => r.failed);
+    const unexamined = [
+      coverage.days_before_floor ? `${nDays(coverage.days_before_floor)} of this window ${coverage.days_before_floor === 1 ? 'is' : 'are'} before ${MOVEMENT_FLOOR_DAY}, when live collection began` : null,
+      coverage.days_not_built ? `${nDays(coverage.days_not_built)} ${coverage.days_not_built === 1 ? 'has' : 'have'} not been built yet (it is built back from today, eighteen days a night)` : null,
+      failedDays.length ? `${nDays(failedDays.length)} could not be built — ${failedDays[0].absent.replace(/^the movement for this day could not be built: /, '')}` : null,
+    ].filter(Boolean);
+    const absent = totals?.days_moving ? null
+      : days.some((r) => !r.failed)
+        ? 'on every day in this window the driver worked, no car was on record as theirs with a tracker reporting — '
+          + (days.find((r) => !r.failed && r.absent)?.absent || 'the tracker reported no position in their hours')
+          + (unexamined.length ? `; ${unexamined.join('; ')}` : '')
+        : unexamined.length
+          ? `${unexamined.join('; ')}${coverage.days_in_window > coverage.days_before_floor + coverage.days_not_built + failedDays.length + coverage.days_after_today
+            ? ', and on the rest this driver has no booking and no working status from Uber' : ''}`
           : 'this driver has no booking and no working status from Uber on any day in this window';
     res.json({
       coverage: { ...coverage, absent },

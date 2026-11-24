@@ -4650,7 +4650,17 @@ The renames cover tiles, panels, columns, captions, the phone screens, the Excel
 - Pickups and drop-offs (completed bookings only), each with its rung: Uber's own DJ_PICKUP / DJ_COMPLETED with the nearest fix within 5 min (`uber_stage`), the booking's coordinates, the first/last fix with the seat occupied, or (drop-offs only) the end time with the nearest fix. A request time is never used as a pickup time.
 - Scheduled hourly at :47 (today); yesterday at 00:47 and 03:47 Dubai; three older days of backfill a pass from 00:47 to 05:47 (eighteen a night) to 2026-08-21 (`source_state` movement_rollup / backfilled_to). A day is ~250 people at 2–4 s each (measured 2026-11-24 on four drivers' day pages).
 - `GET /api/driver/movement`: coverage (days before the floor, days not built yet — never read as no movement), totals, cells and areas with names, points, days. Territory: a "Where the time went" panel, map layers (waiting and parked / where it drove / pickups and drop-offs / booked addresses), Time by area, Day by day.
-- Tests: `test/movement_rollup.test.mjs` (31, three rules revert-proven). **Written; not yet on production.**
+- **Independent review (2026-11-24) found seven defects, all fixed and each revert-proven:**
+  - a 0,0 fix made 13,096 km and a cell in the Gulf of Guinea; the fixes query now uses `REAL_FIX`, and a step of 60 km or more is never an interval;
+  - an unresolvable or failing person-day was skipped in silence, and the cursor moved past it; it is now written as `failed` with its reason, retried up to three nights, and the range view says "could not be built";
+  - the writes were not atomic; each person-day is now one transaction;
+  - on-job stops and driving minutes read as "parked, not working"; stops now split into waiting, on a job and parked offline, which add up to the stop;
+  - a quiet parked hour read its seat, so 65 minutes of a bag counted as a passenger; that seat is no longer read;
+  - a first pass at 04:47 or 05:47 left yesterday unbuilt; the walk now starts at yesterday;
+  - two custody windows of one car were bridged; fixes carry their window index.
+
+  The persons built per day also take in the register fold (`person_key`), so the range view agrees with each person's own day page.
+- Tests: `test/movement_rollup.test.mjs` (38), `test/driver_day_movement.test.mjs` (41). **Written; not yet on production.**
 | CARD-3c | **Cash Trips (including POS), POS payments, Cash in hand, and Bank Collection with POS** (the operator, 2026-11-24: "POS directly comes to our bank. So it should be deducted from the Cash held with the driver… Cash In Hand which is Cash Trips - POS deposits"; "driver page should have POS payment as a separate modal"; "Bank Collection should add POS payment as well, as that comes into the bank").
 - **Cash Trips (including POS)** is the cash trips (`trip_cash`, gross) plus the hotel's fares paid on the driver's own card machine (`pos-driver`). It appears on the driver Earnings tile, the driver Excel, and the Finance tile (`/api/settlement/mix` `pos_driver`).
 - **POS payments** is a tile of its own: those hotel fares plus the card payments (Network International) that paid cash trips from 1 Aug 2026. Card on the sheet that matched no fare is said beside it, never counted.

@@ -90,14 +90,15 @@ export function minuteStatus({ statusAll = [], online = [], trips = [], limit = 
     page keeps (custody-filtered, one tracker per car). Pure. */
 export function rollupMovement({ fixes = [], status }) {
   const zero = () => ({ stopped_min: 0, moving_empty_min: 0, moving_seat_unknown_min: 0, with_passenger_min: 0,
-    online_min: 0, ontrip_min: 0, wait_min: 0, offline_min: 0, km: 0, km_with_passenger: 0, fixes: 0 });
+    online_min: 0, ontrip_min: 0, wait_min: 0, stopped_ontrip_min: 0, parked_offline_min: 0, offline_min: 0,
+    km: 0, km_with_passenger: 0, fixes: 0 });
   const cells = new Map();
   const cell = (f) => {
     const [la, ln] = cellOf(f); const k = `${la}:${ln}`;
     if (!cells.has(k)) cells.set(k, { cell_lat: la, cell_lng: ln, ...zero() });
     return cells.get(k);
   };
-  const t = { ...zero(), parked_quiet_min: 0, parked_offline_min: 0 };
+  const t = { ...zero(), parked_quiet_min: 0 };
   const seen = new Array(1440).fill(false);
   const byCar = new Map();
   for (const f of fixes) {
@@ -134,13 +135,21 @@ export function rollupMovement({ fixes = [], status }) {
         o.online_min += dur * w * ((on + trip) / n);
         o.ontrip_min += dur * w * (trip / n);
         o.offline_min += dur * w * (off / n);
-        if (kind === 'stopped_min') o.wait_min += dur * w * (on / n);
+        /* A stop splits three ways and the three add up to it: waiting
+           (online, no job), on a job (a red light, the pickup wait), and
+           parked with no working status. A cell's "parked" is the last one
+           only — never stopped minus waiting, which counted the job's stops
+           as parked (review, 2026-11-24). */
+        if (kind === 'stopped_min') {
+          o.wait_min += dur * w * (on / n);
+          o.stopped_ontrip_min += dur * w * (trip / n);
+          o.parked_offline_min += dur * w * (off / n);
+        }
         o.km += dist * w;
         if (kind === 'with_passenger_min') o.km_with_passenger += dist * w;
       };
       add(cell(a), 0.5); add(cell(b), 0.5); add(t, 1);
       if (iv.inferred) t.parked_quiet_min += dur;
-      if (kind === 'stopped_min') t.parked_offline_min += dur * (off / n);
     }
   }
   const seenMin = seen.filter(Boolean).length;
@@ -228,18 +237,41 @@ export async function personsForDay(q, day) {
         WHERE at >= (($1::date)::timestamp AT TIME ZONE 'Asia/Dubai')
           AND at <  (($1::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
           AND status <> 'offline')
+     /* Every spine person whose day page would show this day, not only the
+        one each active account is filed under: the day page resolves a
+        person through the register's fold (person_key), which can join
+        accounts the spine keeps as two people, and a range view that skipped
+        the second would disagree with that person's own day page (review,
+        2026-11-24). */
+     , fold AS (
+       SELECT DISTINCT t.driver_ext_id AS id FROM trip t
+        WHERE t.person_key IN (SELECT DISTINCT person_key FROM trip
+                                WHERE driver_ext_id IN (SELECT id FROM ids) AND person_key IS NOT NULL)
+          AND coalesce(btrim(t.driver_ext_id), '') <> ''
+       UNION SELECT id FROM ids)
      SELECT DISTINCT p.driver_id AS person_id
-       FROM ids JOIN driver_platform_id p ON p.external_id = ids.id AND p.detached_at IS NULL
+       FROM fold JOIN driver_platform_id p ON p.external_id = fold.id AND p.detached_at IS NULL
       WHERE p.driver_id IS NOT NULL
       ORDER BY 1`, [day]);
   return rows.map((r) => Number(r.person_id));
 }
 
-/** Build and store one person-day. Returns the day row, or null where the
-    person could not be resolved. */
-export async function buildPersonDay(q, { personId, day, resolve, now = null }) {
+/* The reason a person-day could not be resolved, in the reader's words. */
+const UNRESOLVED = {
+  'spine-unreadable': 'the person register could not be read when this day was built',
+  'not-a-person-id': 'the person id was not one the register accepts',
+};
+
+/** Build and store one person-day. Returns the day row. A person who cannot
+    be resolved throws, so the caller records the day as failed with the true
+    reason rather than skipping it in silence (review, 2026-11-24). `tx` runs
+    the writes in one transaction where the caller has one. */
+export async function buildPersonDay(q, { personId, day, resolve, now = null, tx = null }) {
   const d = await resolve({ query: { person: String(personId) } });
-  if (!d || d.unresolvable || !(d.keys || []).length) return null;
+  if (!d || d.unresolvable || !(d.keys || []).length) {
+    throw new Error(d?.unresolvable ? UNRESOLVED[d.unresolvable] || d.unresolvable
+      : !d ? 'the person is not on the register' : 'the person has no platform account to read');
+  }
   const trips = await dayTrips(q, d.keys, day, PKEY);
   const online = await dayOnline(q, d.keys, day);
   const mv = await dayMovement(q, { d, day, trips, online, PKEY, now });
@@ -262,12 +294,20 @@ export async function buildPersonDay(q, { personId, day, resolve, now = null }) 
     trips: trips.map((t) => ({ ...t, ...(co.get(`${t.platform}|${t.external_id}`) || {}) })), stages, fixes: mv.fixes });
   const plates = [...new Set(mv.fixes.map((f) => f.plate))].sort();
   const sources = [...new Set(mv.fixes.map((f) => f.source))].sort();
-  const full = { ...row, ...counts, plates, sources, absent: mv.movement.absent || null, partial: !!mv.isToday };
+  const full = { ...row, ...counts, plates, sources, absent: mv.movement.absent || null, partial: !!mv.isToday, failed: false };
+  await (tx || ((fn) => fn(q)))((w) => writePersonDay(w, { personId, day, full, cells, points }));
+  return full;
+}
+
+/* Replace one person-day: the old cells and points go and the new ones come
+   in together, so a failure part-way leaves the old day whole (inside the
+   caller's transaction) rather than a day row with no cells. */
+async function writePersonDay(q, { personId, day, full, cells, points }) {
   await q(`DELETE FROM driver_move_cell WHERE person_id = $1 AND day = $2::date`, [personId, day]);
   await q(`DELETE FROM driver_move_point WHERE person_id = $1 AND day = $2::date`, [personId, day]);
   if (cells.length) {
     const cols = ['cell_lat', 'cell_lng', 'stopped_min', 'moving_empty_min', 'moving_seat_unknown_min', 'with_passenger_min',
-      'online_min', 'ontrip_min', 'wait_min', 'offline_min', 'km', 'km_with_passenger', 'fixes'];
+      'online_min', 'ontrip_min', 'wait_min', 'stopped_ontrip_min', 'parked_offline_min', 'offline_min', 'km', 'km_with_passenger', 'fixes'];
     for (let i = 0; i < cells.length; i += 200) {
       const chunk = cells.slice(i, i + 200);
       const vals = []; const params = [personId, day];
@@ -284,25 +324,34 @@ export async function buildPersonDay(q, { personId, day, resolve, now = null }) 
   }
   const dcols = ['plates', 'sources', 'online_min', 'ontrip_min', 'seen_min', 'unseen_online_min', 'stopped_min', 'parked_quiet_min',
     'moving_empty_min', 'moving_seat_unknown_min', 'with_passenger_min', 'wait_min', 'parked_offline_min', 'km', 'km_with_passenger',
-    'fixes', 'pickups', 'pickups_placed', 'dropoffs', 'dropoffs_placed', 'absent', 'partial'];
+    'fixes', 'pickups', 'pickups_placed', 'dropoffs', 'dropoffs_placed', 'absent', 'partial', 'failed'];
   await q(
     `INSERT INTO driver_move_day (person_id, day, ${dcols.join(', ')}, built_at)
      VALUES ($1, $2::date, ${dcols.map((_, i) => `$${i + 3}`).join(', ')}, now())
      ON CONFLICT (person_id, day) DO UPDATE SET ${dcols.map((k) => `${k} = EXCLUDED.${k}`).join(', ')}, built_at = now()`,
-    [personId, day, ...dcols.map((k) => full[k])]);
-  return full;
+    [personId, day, ...dcols.map((k) => full[k] ?? (k === 'plates' || k === 'sources' ? [] : k === 'absent' ? null : k === 'partial' || k === 'failed' ? false : 0))]);
+}
+
+/* A person-day that could not be built is written as such — its old cells
+   and points removed, the reason kept — so the range view says "could not be
+   built" instead of reading the day as one this person did not work. */
+async function writeFailedDay(q, { personId, day, why, tx = null }) {
+  await (tx || ((fn) => fn(q)))((w) => writePersonDay(w, { personId, day, cells: [], points: [],
+    full: { absent: `the movement for this day could not be built: ${why}`, failed: true, partial: false } }));
 }
 
 /** Every person who worked `day`, one at a time (the database is shared with
     the collectors; one person-day is a handful of indexed reads). */
-export async function buildDay(q, { day, now = null, resolve = null }) {
+export async function buildDay(q, { day, now = null, resolve = null, tx = null }) {
   const r = resolve || driverScope({ q, wrap: (f) => f }).resolve;
   const persons = await personsForDay(q, day);
   let built = 0; let failed = 0;
   for (const personId of persons) {
-    try { if (await buildPersonDay(q, { personId, day, resolve: r, now })) built += 1; } catch (e) {
+    try { await buildPersonDay(q, { personId, day, resolve: r, now, tx }); built += 1; } catch (e) {
       failed += 1;
-      log.warn('movement', `person-day failed`, { person: personId, day, err: String(e.message || e).slice(0, 160) });
+      const why = String(e.message || e).slice(0, 160);
+      log.warn('movement', 'person-day failed', { person: personId, day, err: why });
+      await writeFailedDay(q, { personId, day, why, tx }).catch(() => {});
     }
   }
   return { day, persons: persons.length, built, failed };
@@ -316,21 +365,37 @@ const prevDay = (d) => new Date(Date.parse(`${d}T00:00:00Z`) - 86400000).toISOSt
     only, `backfillDays` older days per pass walking back from the cursor to
     FLOOR_DAY — eighteen a night, so the ~95 days to the floor take about
     five nights. */
-export async function movementRollupTick(q, { now = Date.now(), backfillDays = 3 } = {}) {
+const STATE = (key) => q0 => q0(`SELECT value FROM source_state WHERE source = 'movement_rollup' AND fleet_id = '-' AND key = $1`, [key]);
+const setState = (q, key, value) => q(`INSERT INTO source_state (source, fleet_id, key, value, updated_at) VALUES ('movement_rollup', '-', $1, $2, now())
+  ON CONFLICT (source, fleet_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [key, value]);
+
+export async function movementRollupTick(q, { now = Date.now(), backfillDays = 3, tx = null } = {}) {
   const today = dubaiDay(now);
   const hour = new Date(now + 4 * 3600000).getUTCHours();
   const done = [];
-  done.push(await buildDay(q, { day: today, now }));
+  done.push(await buildDay(q, { day: today, now, tx }));
   if (hour <= 5) {
-    if (hour === 0 || hour === 3) done.push(await buildDay(q, { day: prevDay(today), now }));
-    const [cur] = await q(`SELECT value FROM source_state WHERE source = 'movement_rollup' AND fleet_id = '-' AND key = 'backfilled_to'`);
-    let next = cur?.value ? prevDay(cur.value) : prevDay(prevDay(today));
+    if (hour === 0 || hour === 3) done.push(await buildDay(q, { day: prevDay(today), now, tx }));
+    /* Days that had a failed person-day are tried again on later nights, up
+       to three times each, before the cursor's progress is trusted for them. */
+    const [rv] = await STATE('retry')(q);
+    const retry = new Map(String(rv?.value || '').split(',').filter(Boolean).map((x) => { const [d, n] = x.split(':'); return [d, Number(n) || 0]; }));
+    for (const [d, n] of [...retry.entries()].slice(0, 1)) {
+      const r = await buildDay(q, { day: d, now, tx }); done.push(r);
+      if (!r.failed || n + 1 >= 3) retry.delete(d); else retry.set(d, n + 1);
+    }
+    const [cur] = await STATE('backfilled_to')(q);
+    /* With no cursor yet the walk starts at yesterday, so a first pass at
+       04:47 or 05:47 (when yesterday is not otherwise built) leaves no day
+       out (review, 2026-11-24). */
+    let next = cur?.value ? prevDay(cur.value) : prevDay(today);
     for (let i = 0; i < backfillDays && next >= FLOOR_DAY; i += 1) {
-      done.push(await buildDay(q, { day: next, now }));
-      await q(`INSERT INTO source_state (source, fleet_id, key, value, updated_at) VALUES ('movement_rollup', '-', 'backfilled_to', $1, now())
-               ON CONFLICT (source, fleet_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [next]);
+      const r = await buildDay(q, { day: next, now, tx }); done.push(r);
+      if (r.failed && !retry.has(next)) retry.set(next, 0);
+      await setState(q, 'backfilled_to', next);
       next = prevDay(next);
     }
+    await setState(q, 'retry', [...retry.entries()].map(([d, n]) => `${d}:${n}`).join(','));
   }
   return done;
 }

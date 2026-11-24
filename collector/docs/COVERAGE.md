@@ -1070,7 +1070,9 @@ the builder's matcher on the review's vocabulary.
   fix still carry null for 0. And never count fixes as minutes: CABMAN reports every ~20 s moving and
   ~66 min parked, FMS every ~6 min, so the same parked hour is 1 CABMAN fix and 10 FMS fixes. Time
   comes from the interval between two fixes of ONE tracker (`api/day_movement.js` `intervalState`),
-  inside the hours the car was the driver's (custody), never from the plate-day.
+  inside the hours the car was the driver's (custody), never from the plate-day. And every new reader of
+  `telemetry_snapshot` needs `REAL_FIX` (`api/telemetry_sql.js`) and the 60 km hop rule (`HOP_KM`): the
+  movement rollup shipped without them in review and one lost-lock 0,0 fix was 13,096 km.
 * **The chat's stored answer is shaped AGAIN on every reload, by a different route** (2026-11-23, AG-17 review).
   A live answer streams as NDJSON and is never re-shaped; the same tables come back later through
   `GET /api/agent/state`, which the gate shapes by key name at the reader's own levels. Anything a tool was

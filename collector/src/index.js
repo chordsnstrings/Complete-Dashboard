@@ -289,7 +289,19 @@ async function main() {
     cron.schedule('47 * * * *', () => {
       if (movementBusy) { log.warn('scheduler', 'movement rollup still running; this hour skipped'); return; }
       movementBusy = true;
-      movementRollupTick(sq)
+      /* Each person-day's replace (delete + insert) in one transaction on one
+         client: pool.query hands each statement to any client, so a BEGIN
+         there would not hold the writes together. */
+      const pgTx = async (fn) => {
+        const c = await pool.connect();
+        try {
+          await c.query('BEGIN');
+          const r = await fn((t, p) => c.query(t, p).then((x) => x.rows));
+          await c.query('COMMIT');
+          return r;
+        } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+      };
+      movementRollupTick(sq, { tx: pgTx })
         .then((r) => log.info('scheduler', 'movement rollup', { days: r.map((x) => `${x.day}:${x.built}/${x.persons}${x.failed ? ` (${x.failed} failed)` : ''}`).join(' ') }))
         .catch((e) => log.error('scheduler', 'movement rollup', { err: String(e) }))
         .finally(() => { movementBusy = false; });
