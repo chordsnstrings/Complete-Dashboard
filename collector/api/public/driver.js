@@ -2123,8 +2123,12 @@ async function tabTerritory(root, id) {
       }
       const rows = chosen ? all : all.slice().sort((a, b) => b.minutes - a.minutes).slice(0, 40);
       stopP.body.append(tableFrom(rows.map((x, i) => ({ ...x, n: i + 1 })), [
-        ...(chosen ? [{ label: '#', key: 'n', num: true }] : [{ label: 'Day', key: 'day', render: (x) => esc(dayWord(x.day)) }]),
-        { label: 'From–to', key: 's_min', render: (x) => `${hhmm(x.s_min)}–${hhmm(x.e_min)}` },
+        /* The stop's number — the one on its map marker — rides inside the
+           time cell as a rank stamped on the row (test/pinned_identity: a
+           column that is only a position spends the pinned column on a
+           counter, and a number taken from the array renumbers on a sort). */
+        ...(chosen ? [] : [{ label: 'Day', key: 'day', render: (x) => esc(dayWord(x.day)) }]),
+        { label: 'From–to', key: 's_min', render: (x) => `${chosen ? `<span class="rk">${x.n}</span> ` : ''}${hhmm(x.s_min)}–${hhmm(x.e_min)}` },
         { label: 'For', key: 'minutes', num: true, render: (x) => `${durWords(x.minutes)}${x.inferred ? ' <span class="dim" title="the tracker was quiet; the stop is inferred from two positions at one place">inferred</span>' : ''}` },
         { label: 'Where', key: 'area', render: (x) => (x.area ? esc(x.area) : '<span class="ent-off">Unnamed ground</span>') },
         { label: 'Doing', key: 'wait_min', render: (x) => { const w = what(x); return `<span title="${esc(w.detail)}">${esc(w.word)}</span>`; } },
