@@ -2343,6 +2343,8 @@
      "cash_booking_platforms",
      "cash_trips",
      "cash_taken",
+     "cash_taken_gross",
+     "cash_taken_card",
      "cash_unvalued"
     ]
    },

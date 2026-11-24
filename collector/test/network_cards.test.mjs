@@ -59,6 +59,11 @@
      · the table read for a range before 'fares_from' → §10 "one reaching before it is read live" fails
      · a table starting after the first card payment not forcing a full rebuild → §10 "grew backwards" fails
      · a trip with no fare counted as cash 0 and not said → §10 "no fare on record" fails
+     CARD-3b (approved from August):
+     · the exposure route not taking card off → §11 "the ceiling" fails
+     · the money tab tile not taking it off → §11 "the money tab tile" fails
+     · the overview tile not taking it off → §11 "the overview tile" fails
+     · the history not netted → §11 "weekly line" fails
      · the link's precedence over the HR export dropped (CASE order) → §5 fails
      · the review serving an ambiguous HR ID → §8 fails
      · the stranded-link fallback dropped → §5 "removed person" fails
@@ -321,7 +326,8 @@ const B = fetchVia(bare.port);
   check('by day, and the read\'s coverage', b.days?.[0]?.day === '2026-11-12' && b.days[1].net === 160 && b.covers_to === '2026-11-13' && b.read_at,
     JSON.stringify([b.days, b.covers_to]));
   check('placed by the HR export, said; no Emirates ID anywhere in the answer', b.placed_by?.hr_export === 1 && !JSON.stringify(b).includes(E1));
-  check('…and it says the cash position is not yet changed', b.in_cash_position === false && /not yet taken off/.test(b.note || ''));
+  check('…and it says card is taken off the ceiling from August (CARD-3b)', b.in_cash_position === true && b.in_cash_position_from === '2026-08-01'
+    && /taken off the cash-fare ceiling/.test(b.note || ''), JSON.stringify([b.in_cash_position, b.note]));
   const none = await B(`/api/card/driver?person=${PC}`);
   check('no Emirates ID known: the true reason, not "no payments"', /No Emirates ID is known for this driver/.test(none.body?.why || ''), none.body?.why);
   const d4 = await B(`/api/card/driver?person=${PD}`);
@@ -542,7 +548,8 @@ console.log('\n§10 cash in notes (CARD-3)');
   check('…the whole span by default once the fares are summed, with the totals', n.from === '2026-11-01' && n.to === '2026-11-21' && n.fares_summarised_at
     && n.totals?.drivers === 2 && n.totals.cash === 878 && n.totals.on_cash === 828 && n.totals.notes === 50 && n.totals.unexplained === 278,
   JSON.stringify([n.from, n.to, n.totals]));
-  check('…and it says it is a preview no other figure uses yet', n.in_cash_position === false && /a preview/.test(n.note || ''));
+  check('…and it says it is taken off the ceiling from August, shown only before', n.in_cash_position === true && n.in_cash_position_from === '2026-08-01'
+    && /From 2026-08-01 this is taken off/.test(n.note || ''), JSON.stringify([n.in_cash_position, n.note]));
   const d1 = ((await B(`/api/card/driver?person=${PA}`)).body?.days || []);
   const dy = (day) => d1.find((r) => r.day === day) || {};
   check('the driver\'s day table, booked on the fare\'s day: the 1st 250 of its 300 paid by card (150 the next day), 50 in notes; the 2nd\'s card paid 150 of the 1st\'s',
@@ -592,6 +599,55 @@ console.log('\n§10 cash in notes (CARD-3)');
     live.cash_unvalued === 1 && live.cash === 878 && t10?.cash === 98 && t10.cash_trips === 2 && t10.cash_unvalued === 1
     && nva.cash_unvalued === 1 && nva.cash === 878 && nv.totals?.cash_unvalued === 1 && d10.cash_unvalued === 1 && d10.cash === 98,
   JSON.stringify([live.cash_unvalued, t10, nva.cash_unvalued, nv.totals?.cash_unvalued, d10.cash_unvalued]));
+}
+
+console.log('\n§11 approved from August: the ceiling, the tiles and the history (CARD-3b)');
+/* The operator, 2026-11-24: "approve from August". What card settled of the
+   cash fares from 1 Aug 2026 comes off the ceiling, the driver's two cash
+   tiles and the ceiling's weekly history, with both parts kept beside it.
+   ONE definition (src/card_notes.js), so each is checked against the notes
+   route over the same days. */
+{
+  const today = new Date(Date.now() + 4 * 3600e3).toISOString().slice(0, 10);
+  const mine = (b) => (b?.drivers || []).find((r) => r.person_id === String(PA)) || {};
+  const r2_ = (v) => Math.round(v * 100) / 100;
+  const nAug = mine((await B(`/api/card/notes?from=2026-08-01&to=${today}`)).body);
+  const ow = ((await B(`/api/ledger/exposure?person_id=${PA}`)).body?.people || [])[0]?.owes || {};
+  check('the ceiling: every cash fare on record less what card settled of the fares from 1 Aug, both parts kept beside it',
+    nAug.on_cash > 0 && ow.cash_taken_card === nAug.on_cash && ow.cash_taken === r2_(ow.cash_taken_gross - ow.cash_taken_card)
+    && ow.cash_taken_card_from === '2026-08-01' && ow.cash_taken_card_absent_reason === null
+    && /less AED [\d,.]+ that card payments settled of the fares from 1 Aug 2026/.test(ow.cash_taken_means || ''), JSON.stringify([nAug.on_cash, ow]));
+  const { cardNet, applyCardNet } = await import('../src/card_notes.js');
+  const early = await cardNet(q, [PA], { to: '2026-07-31' });
+  check('a window that ends before August takes nothing off, and says why', /end before then/.test(early.absent || ''), JSON.stringify(early));
+  const never = applyCardNet({ cash_taken: 100 }, { from: '2026-08-01', by: new Map(),
+    absent: 'the card payments sheet has never been read, so nothing paid by card is known to take off' }, PA);
+  check('the sheet never read: the ceiling stays every cash fare, the card part absent with its reason (never 0)',
+    never.cash_taken === 100 && never.cash_taken_card === null && /never been read/.test(never.cash_taken_means), JSON.stringify(never));
+
+  const nNov = mine((await B('/api/card/notes?from=2026-11-01&to=2026-11-30')).body);
+  const tw = (await B(`/api/driver/register?person=${PA}&from=2026-11-01&to=2026-11-30`)).body?.over_window || {};
+  const t = tw.cash_taken_terms || {};
+  check('the money tab tile: the window\'s cash fares less what card settled of them, the part said',
+    t.card_paid === nNov.on_cash && t.card_paid > 0 && tw.cash_taken === r2_(t.cash_fares + t.cash_advance + t.cash_deposit - t.card_paid)
+    && /Less what card payments settled/.test(tw.cash_taken_means || ''), JSON.stringify([nNov.on_cash, tw.cash_taken, t]));
+  const k = (await B(`/api/driver/kpis?person=${PA}&from=2026-11-01&to=2026-11-30`)).body || {};
+  check('the overview tile: the same part off the same cash', k.cash_taken_card === nNov.on_cash && k.cash_taken === r2_(k.cash_taken_gross - k.cash_taken_card),
+    JSON.stringify([k.cash_taken, k.cash_taken_gross, k.cash_taken_card, k.cash_taken_card_absent_reason]));
+
+  const { refreshCashFareDay } = await import('../src/history_rollup.js');
+  await refreshCashFareDay(db);
+  const hs = (await B('/api/history?page=deposits')).body?.series?.cash_ceiling || {};
+  const last = (hs.points || []).filter((x) => x.v != null).at(-1) || {};
+  const [g] = await q(`SELECT coalesce(sum(cf.value), 0)::float AS v FROM cash_fare_day cf
+      JOIN driver_platform_id a ON a.external_id = cf.driver_ext_id AND a.detached_at IS NULL
+      JOIN driver dr ON dr.id = a.driver_id AND coalesce(dr.full_name, '') <> '' WHERE cf.day <= $1`, [last.as_of || today]);
+  const offAll = ((await B(`/api/card/notes?from=2026-08-01&to=${today}`)).body?.drivers || []).filter((r) => r.name).reduce((a, r) => a + r.on_cash, 0);
+  check('the ceiling\'s weekly line comes down by the same card, cumulative by fare day', hs.card_taken_off_from === '2026-08-01'
+    && offAll > 0 && last.v === r2_(g.v - offAll), JSON.stringify([last, g.v, offAll, hs.card_not_taken_off]));
+  const hf = (await B('/api/history?page=deposits&fleet=ecosine')).body?.series?.cash_ceiling || {};
+  check('…but asked for one fleet it is not netted, and says why (a card payment is placed on a person)', hf.card_taken_off_from === null
+    && /placed on a person/.test(hf.card_not_taken_off || ''), JSON.stringify([hf.card_taken_off_from, hf.card_not_taken_off]));
 }
 
 bare.server?.close?.(); gated.server?.close?.();

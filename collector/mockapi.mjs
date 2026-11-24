@@ -1621,7 +1621,12 @@ app.get('/api/driver/kpis', (req, r) => {
        44 bookings paid in cash: 41 of them completed, at Uber's own figure
        (the fare plus tolls the rider paid in cash). */
     cash_trips: i === 4 ? 7 : 41,
-    cash_taken: i === 4 ? 268.4 : 1642.5,
+    cash_taken: i === 4 ? 268.4 : 1542.5,
+    /* CARD-3b: net of what card settled of the fares from 1 Aug 2026. */
+    cash_taken_gross: i === 4 ? 268.4 : 1642.5,
+    cash_taken_card: i === 4 ? 0 : 100,
+    cash_taken_card_from: '2026-08-01',
+    cash_taken_card_absent_reason: null,
     cash_unvalued: i === 4 ? 1 : 0,
     day_stmt_days: i === 4 ? 0 : 7,
     day_cash_days: i === 4 ? 0 : 7,
@@ -8871,7 +8876,8 @@ app.get('/api/driver/register', (req, r) => {
         cash_taken: 67.13,
         cash_taken_terms: { cash_fares: 67.13, cash_fare_trips: 1,
           cash_advance: 0, cash_advance_rows: 0,
-          cash_deposit: 0, cash_deposit_rows: 0, deposit_is_already_negative: true },
+          cash_deposit: 0, cash_deposit_rows: 0, deposit_is_already_negative: true,
+          card_paid: 0, card_paid_from: '2026-08-01', card_absent_reason: null },
         cash_taken_means: 'cash fares over this window. No cash advance and no deposit is '
           + 'recorded between these dates, so there is nothing to add or take off — this is '
           + 'what the trips put in their hand, not a balance net of hand-ins nobody has '
@@ -8928,7 +8934,8 @@ app.get('/api/driver/register', (req, r) => {
       cash_taken: 417.13,
       cash_taken_terms: { cash_fares: 67.13, cash_fare_trips: 1,
         cash_advance: 500, cash_advance_rows: 1,
-        cash_deposit: -150, cash_deposit_rows: 1, deposit_is_already_negative: true },
+        cash_deposit: -150, cash_deposit_rows: 1, deposit_is_already_negative: true,
+        card_paid: 0, card_paid_from: '2026-08-01', card_absent_reason: null },
       cash_taken_means: 'cash fares over this window, plus cash advanced to them, less what '
         + 'they handed back. A flow over these dates — not what they are holding today.',
     },
@@ -8988,8 +8995,10 @@ const LEDGER_FLEET_EXPOSURE = ({
       owes: {
         /* ALWAYS PRESENT, even where cash-in-hand is not: the trips measure it
            and nobody has to type anything. */
-        cash_taken: 18636.69, cash_taken_trips: 120,
+        cash_taken: 18136.69, cash_taken_trips: 120,
         cash_taken_from: '2024-12-28', cash_taken_to: '2026-09-22',
+        /* CARD-3b: the ceiling less what card settled of the fares from 1 Aug. */
+        cash_taken_gross: 18636.69, cash_taken_card: 500, cash_taken_card_from: '2026-08-01', cash_taken_card_absent_reason: null,
         cash_taken_means: 'every cash fare on record went into this driver\'s hand. It is a '
           + 'CEILING on what they could still be holding, not a balance.', advance: 2500, deduction: 0, cash: 1000, cash_absent_reason: null,
         /* EVERY TERM, because the cash figure is the one number on the money
@@ -9370,7 +9379,7 @@ app.get('/api/card/driver', (req, r) => {
     payments,
     terminals: has ? [{ terminal_id: '10389537', payments: 2, net: 35, first_day: '2026-11-20', last_day: '2026-11-21' },
       { terminal_id: '10401871', payments: 1, net: 100, first_day: '2026-11-18', last_day: '2026-11-18' }] : [],
-    in_cash_position: false, note: 'card payments are shown beside the cash position, not yet taken off it — that change waits for the operator\'s review' });
+    in_cash_position: true, in_cash_position_from: '2026-08-01', note: 'card payments that settled cash fares from 2026-08-01 are taken off the cash-fare ceiling and the driver\'s cash-taken tiles; before then they are shown beside them' });
 });
 app.get('/api/card/notes', (_req, r) => {
   r.json({ from: '2026-01-01', to: '2026-11-22', ...CARD_READ(), currency: 'AED', fares_summarised_at: new Date(Date.now() - 36e5).toISOString(), why: null,
@@ -9381,8 +9390,8 @@ app.get('/api/card/notes', (_req, r) => {
       paid_before_window: 0, chargebacks: -25, card_days: 120, latest: { day: '2026-11-22', cash: 210.5, cash_unvalued: 0, on_cash: 150, notes: 60.5 } },
     { person_id: '402', name: 'Card Driver Two', cash: 5440.5, cash_unvalued: 0, card: 3690, on_cash: 2640, on_pos: 1010, unexplained: 40, notes: 2800.5,
       paid_before_window: 0, chargebacks: 0, card_days: 88, latest: { day: '2026-11-22', cash: 0, cash_unvalued: 0, on_cash: 0, notes: 0 } }],
-    in_cash_position: false,
-    note: 'a preview: cash fares less the card payments that paid for them; no other figure uses it yet.' });
+    in_cash_position: true, in_cash_position_from: '2026-08-01',
+    note: 'cash fares less the card payments that paid for them. From 2026-08-01 this is taken off the cash-fare ceiling and the driver\'s cash-taken tiles.' });
 });
 app.get('/api/card/crosscheck', (_req, r) => {
   r.json({ from: null, to: null, ...CARD_READ(), currency: 'AED', allowance_aed: 5, why: null,
@@ -9402,8 +9411,8 @@ app.get('/api/card/summary', (_req, r) => {
       { month: '2026-11', fleet_id: 'egari', payments: 298, net: 21185.93, chargebacks: 0, ids: 28, terminals: 28 }],
     no_driver_terminals: [{ terminal_id: '10392911', payments: 41, net: 6120.5, labels: ['Not Found'], first_day: '2026-01-01', last_day: '2026-11-20', ever_mapped: false },
       { terminal_id: '10403949', payments: 12, net: 880, labels: ['N/A'], first_day: '2026-03-02', last_day: '2026-10-11', ever_mapped: true }],
-    no_driver_terminals_total: 2, in_cash_position: false,
-    note: 'card payments are shown beside the cash position, not yet taken off it — that change waits for the operator\'s review' });
+    no_driver_terminals_total: 2, in_cash_position: true, in_cash_position_from: '2026-08-01',
+    note: 'card payments that settled cash fares from 2026-08-01 are taken off the cash-fare ceiling and the driver\'s cash-taken tiles; before then they are shown beside them' });
 });
 app.get('/api/card/review', (_req, r) => {
   r.json({ ...CARD_READ(),

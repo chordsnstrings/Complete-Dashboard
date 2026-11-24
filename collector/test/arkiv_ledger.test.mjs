@@ -322,11 +322,15 @@ if (want('deposits')) {
     formFirst: document.querySelector('[data-panel="deposits"] .depform') != null,
   }));
   check('the order: 00, the form, the twenty largest, the table, three distributions, †', JSON.stringify(s.heads)
-    === JSON.stringify(['At a glance', 'Record a handover', 'Who is carrying the most', 'Who is carrying cash', 'The ceilings, in bands',
+    === JSON.stringify(['At a glance', 'Record a handover', 'Who is carrying the most', 'Who is carrying cash',
+      'Card machine payments — Network International', 'The ceilings, in bands',
       'The month each driver’s last cash fare was taken', 'How concentrated the ceiling is', '† What this page does not know']) && r.formFirst,
   JSON.stringify(s.heads));
   check('the hero is the ceiling, called one and not a balance', s.hero === 'Ceiling on cash outstanding' && s.values[s.hero] === aed(sum)
-    && s.subs[s.hero].startsWith('every cash fare on record, not a balance'), JSON.stringify([s.values[s.hero], s.subs[s.hero]]));
+    /* CARD-3b: the ceiling is net of what card settled of the fares from
+       1 Aug 2026, and the hero says by how much. */
+    && /^cash fares on record, less AED [\d,.]+ card paid of the fares from 2026-08-01, not a balance/.test(s.subs[s.hero]),
+  JSON.stringify([s.values[s.hero], s.subs[s.hero]]));
   check('the cash trips behind it, and their mean said to be derived', s.values['Cash trips behind it'] === trips.toLocaleString('en-US')
     && s.subs['Cash trips behind it'] === `a mean of ${aed(sum / trips)} a trip — derived`, JSON.stringify(s.subs['Cash trips behind it']));
   check('handovers recorded, from the register\'s own count', s.values['Handovers recorded'] === String(hand.totals.rows), s.values['Handovers recorded']);

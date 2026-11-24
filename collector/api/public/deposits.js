@@ -68,11 +68,13 @@ export async function renderDeposits(root) {
      did not load rather than that there is no history. */
   const histP = ak ? api('/api/history?page=deposits').catch(historyFailed) : null;
   /* Card-machine payments (FIX-STATUS CARD-1): the money a driver took on a
-     card machine rather than in notes — beside the cash figures, not yet
-     taken off them (phase 3 waits on the operator's review). */
+     card machine rather than in notes. From 1 Aug 2026 what card paid of the
+     cash fares is taken off the ceiling above (CARD-3b). Placed before the
+     distributions and the † band, which closes the page (it was after it,
+     unseen because the browser suites do not run in CI). */
   const cardP = panel('Card machine payments — Network International', 'What drivers took on card machines rather than in cash, '
-    + 'from the sheet the team keeps. Shown beside the cash figures; not yet taken off them.', 'deposit-card');
-  if (ak) { root.append(AK.band, head.panel, top.panel, listPanel.panel, after, cardP.panel); loading(AK.tiles); }
+    + 'from the sheet the team keeps. From 1 Aug 2026, what card paid of the cash fares is taken off the ceiling above.', 'deposit-card');
+  if (ak) { root.append(AK.band, head.panel, top.panel, listPanel.panel, cardP.panel, after); loading(AK.tiles); }
   else root.append(head.panel, listPanel.panel, cardP.panel);
   loading(listPanel.body);
   loading(cardP.body);
