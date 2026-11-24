@@ -195,7 +195,7 @@ check('a day that could not be built says so, with its reason — never an empty
 /* A day built before the granular view: positions, no log yet. */
 await q(`DELETE FROM driver_move_segment WHERE person_id = $1`, [PID]);
 const pre = (await get(`/api/driver/movement/track?id=${K}&from=2026-10-01&to=2026-10-31`)).body;
-check('a day built before the granular view is named, to be rebuilt overnight', pre.pre_granular_days?.includes(D), JSON.stringify(pre.pre_granular_days));
+check('a day built before the granular view is named, to be rebuilt', pre.pre_granular_days?.includes(D), JSON.stringify(pre.pre_granular_days));
 const v130 = readFileSync(new URL('../sql/schema_v130.sql', import.meta.url), 'utf8');
 check('…and schema_v130 clears the backfill cursor once, so the backfill walks back over those days again',
   /DELETE FROM source_state WHERE source = 'movement_rollup' AND fleet_id = '-' AND key = 'backfilled_to'/.test(v130));

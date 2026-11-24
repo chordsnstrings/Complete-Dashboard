@@ -3599,7 +3599,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const absent = routes.length || stops.length ? null
       : failedDays.length && !silent.length ? `${failedDays.length === 1 ? 'the day' : `${failedDays.length} days`} could not be built — ${failedDays[0].absent.replace(/^the movement for this day could not be built: /, '')}`
       : silent.length ? `the tracker reported no position in this driver’s hours on ${silent.length === 1 ? 'the one day' : `all ${silent.length} days`} built — ${silent[0].absent}`
-        : preGranular.length ? `${preGranular.length === 1 ? 'one day was' : `${preGranular.length} days were`} built before the granular view and ${preGranular.length === 1 ? 'is' : 'are'} rebuilt by the nightly backfill`
+        /* Today is rebuilt every hour, older days overnight — said as such
+           (on production 2026-11-24, today read "rebuilt by the nightly
+           backfill" for the minute before its hourly pass). */
+        : preGranular.length ? `${preGranular.length === 1 ? 'one day was' : `${preGranular.length} days were`} built before the granular view and ${preGranular.length === 1 ? 'is' : 'are'} rebuilt by the movement rollup — today within the hour, older days overnight`
           : 'no day in this window has been built with a car of theirs and a tracker reporting — see Where the time went for why';
     res.json({
       from, to, absent, days, stops, drives, parking: parkingSpots(stops), routes,
