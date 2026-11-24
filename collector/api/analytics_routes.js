@@ -103,6 +103,15 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               min(requested_at) first_at, max(requested_at) last_at
        FROM trip_ext WHERE ${FB}
        GROUP BY 1, 2`, p);
+    /* The hotel's fares paid on the driver's own card machine (pos-driver,
+       classed 'card' above), for the Finance tile "Cash trips (including POS)"
+       (the operator, 2026-11-24: every cash trip, whichever way the rider paid
+       at the car; POS goes straight to the bank). */
+    const [posRow] = await q(
+      `SELECT count(*)::int trips,
+              count(*) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::int priced_trips,
+              sum(price) FILTER (WHERE NOT is_complimentary) AS revenue
+         FROM trip_ext WHERE ${FB} AND lower(coalesce(payment_type, '')) = 'pos-driver'`, p);
 
     const total = rows.reduce((a, r) => a + r.trips, 0);
     const labelled = rows.filter((r) => r.settlement_class);
@@ -123,6 +132,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       total_trips: total,
       unlabelled_trips: rows.filter((r) => !r.settlement_class).reduce((a, r) => a + r.trips, 0),
       unlabelled_platforms: [...new Set(rows.filter((r) => !r.settlement_class).map((r) => r.platform))],
+      pos_driver: { trips: posRow?.trips || 0, priced_trips: posRow?.priced_trips || 0,
+        revenue: posRow?.priced_trips ? round(NUM(posRow.revenue) || 0, 2) : null },
       classes: [...byClass.values()].map((c) => ({
         settlement_class: c.settlement_class,
         label: LABEL[c.settlement_class] || c.settlement_class,

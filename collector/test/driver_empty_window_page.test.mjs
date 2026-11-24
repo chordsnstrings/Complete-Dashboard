@@ -225,7 +225,8 @@ const F = {
       banned_on: [], platform_compliance: [] },
     kpis: { trips: 60, days_worked: 12, bookings: 60, priced_trips: 60, outcome_n: 60,
       revenue: 3640, km: 700, avg_fare: 60.7, reported_earnings: null, cash_earnings: null,
-      statement_fares: null, cash_bookings: 0, cash_trips: 0, cash_taken: null, cash_unvalued: 0 },
+      statement_fares: null, cash_bookings: 0, cash_trips: 0, cash_taken: null, cash_unvalued: 0,
+      pos_trips: 29, pos_fares: 1230, cash_in_hand: null, cash_in_hand_card: null, cash_in_hand_card_absent_reason: null },
     mix: { distance: [], product: [], status: [], platform: [],
       payment: [{ label: 'pos-driver', n: 29, revenue: 1230 }, { label: 'cash-supervisor', n: 9, revenue: 355 },
         { label: 'room-charge', n: 22, revenue: 2055 }] },
@@ -510,11 +511,16 @@ check('…over the 44 completed cash trips, and says the 12 not completed are no
 /* REVERSION (run 2026-10-20): the first cut's guard, `k.cash_trips != null
    && !(+k.cash_trips === 0 && !(+k.cash_bookings) && cashTrips > 0)` — both
    checks fail: AED 1,585.00 over "38 cash trips". */
-const po = tile(await render('posonly', 'earnings'), 'Cash trips (including POS)');
-check('card-terminal and supervisor-collected bookings are not cash the driver took: AED 0.00, as their Excel says',
-  po && po.value === 'AED 0.00', JSON.stringify(po));
-check('…and the sub says why, naming the labels',
-  po && /none of these bookings was cash in the driver/.test(po.sub) && /29 pos-driver/.test(po.sub), po && po.sub);
+/* The operator, 2026-11-24: "Cash Trips (including POS)" counts the hotel's
+   fares paid on the driver's card machine (POS goes straight to the bank);
+   "Cash in hand" beside it is what is left in notes — nothing here. */
+const poPage = await render('posonly', 'earnings');
+const po = tile(poPage, 'Cash trips (including POS)');
+check('card-machine (POS) fares are cash trips including POS: AED 1,230.00 from the 29 pos-driver fares; supervisor cash is not the driver\'s',
+  po && po.value === 'AED 1,230.00' && /plus AED 1,230.00 from 29 hotel fares paid on the driver’s card machine \(POS\)/.test(po.sub), JSON.stringify(po));
+const ih = tile(poPage, 'Cash in hand');
+check('…and cash in hand is AED 0.00: every one was paid on the card machine, which goes to the bank',
+  ih && ih.value === 'AED 0.00' && /card machine, which goes to the bank/.test(ih.sub), JSON.stringify(ih));
 
 console.log('\na population is not coverage: nobody recorded how any of it was paid');
 

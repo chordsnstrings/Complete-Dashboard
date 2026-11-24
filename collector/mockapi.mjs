@@ -1621,12 +1621,17 @@ app.get('/api/driver/kpis', (req, r) => {
        44 bookings paid in cash: 41 of them completed, at Uber's own figure
        (the fare plus tolls the rider paid in cash). */
     cash_trips: i === 4 ? 7 : 41,
-    cash_taken: i === 4 ? 268.4 : 1542.5,
-    /* CARD-3b: net of what card settled of the fares from 1 Aug 2026. */
-    cash_taken_gross: i === 4 ? 268.4 : 1642.5,
-    cash_taken_card: i === 4 ? 0 : 100,
-    cash_taken_card_from: '2026-08-01',
-    cash_taken_card_absent_reason: null,
+    cash_taken: i === 4 ? 268.4 : 1642.5,
+    /* "Cash trips (including POS)" adds the hotel's card-machine fares; "Cash
+       in hand" is the cash trips less what card paid of them from 1 Aug 2026
+       (the operator, 2026-11-24). */
+    pos_trips: i === 4 ? 0 : 3,
+    pos_fares: i === 4 ? null : 270,
+    cash_in_hand: i === 4 ? 268.4 : 1542.5,
+    cash_in_hand_card: i === 4 ? 0 : 100,
+    cash_in_hand_card_from: '2026-08-01',
+    cash_in_hand_card_to: '2026-11-21',
+    cash_in_hand_card_absent_reason: null,
     cash_unvalued: i === 4 ? 1 : 0,
     day_stmt_days: i === 4 ? 0 : 7,
     day_cash_days: i === 4 ? 0 : 7,
@@ -4564,6 +4569,7 @@ const hotels = [
 ];
 app.get('/api/settlement/mix', (_, r) => r.json({
   total_trips: 2140, unlabelled_trips: 96, unlabelled_platforms: ['bolt'],
+  pos_driver: { trips: 190, priced_trips: 190, revenue: 21400 },
   classes: [
     { settlement_class: 'card', label: 'Card', meaning: 'Cleared through a card processor at the end of the ride.',
       trips: 820, trip_share_pct: 38.3, priced_trips: 210, revenue: 24800, avg_fare: 118.1, km: 9800, foc_trips: 0, platforms: ['uber', 'hotel'], last_at: new Date().toISOString() },

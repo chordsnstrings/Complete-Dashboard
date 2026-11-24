@@ -2310,9 +2310,15 @@ async function tabEarnings(root, id, prof) {
          1-20 October where "Excel ⤓ this driver" said AED 2,445.99 over 44,
          and both were right about different things
          (docs/FIXLIST-2026-09-05.md DR3). The older chain below stays for
-         an API that does not yet send cash_trips. */
+         an API that does not yet send cash_trips.
+         "INCLUDING POS" (the operator, 2026-11-24): the hotel's fares paid on
+         the driver's own card machine (pos_fares) are added — every cash trip,
+         whichever way the rider paid at the car. What is still in the
+         driver's hand is the Cash in hand tile beside it. */
       if (cashTakenKnown) {
-        if (+k.cash_trips > 0) return k.cash_taken != null ? money(k.cash_taken) : 'not reported';
+        const pos = +k.pos_trips > 0 ? (+k.pos_fares || 0) : 0;
+        if (+k.cash_trips > 0) return k.cash_taken != null ? money(+k.cash_taken + pos) : 'not reported';
+        if (+k.pos_trips > 0) return money(pos);
         return worked && labelledTrips ? money(0) : '\u2014';
       }
       // The clawback line in the payout breakdown is the same money seen from
@@ -2343,14 +2349,11 @@ async function tabEarnings(root, id, prof) {
     })(),
     /* "73 cash trips across cash" — the label list is usually the single word
        "cash", and naming it after "across" made the sentence eat itself. */
-    sub: cashTakenKnown && (+k.cash_trips > 0 || +k.cash_bookings > 0)
+    sub: cashTakenKnown && (+k.cash_trips > 0 || +k.cash_bookings > 0 || +k.pos_trips > 0)
       ? (() => {
         const open = Math.max(0, (+k.cash_bookings || 0) - (+k.cash_trips || 0));
-        /* CARD-3b: the figure is net of what card payments settled of the
-           cash fares from 1 Aug 2026 (api/driver_routes.js); the part is said. */
         return `${countOf(+k.cash_trips, 'completed cash trip')}`
-          + (+k.cash_taken_card > 0 ? ` \u00b7 after ${money(+k.cash_taken_card)} paid by card (fares from ${k.cash_taken_card_from})` : '')
-          + (k.cash_taken_card == null && k.cash_taken_card_absent_reason ? ` \u00b7 card payments not taken off: ${k.cash_taken_card_absent_reason}` : '')
+          + (+k.pos_trips > 0 ? ` \u00b7 plus ${money(+k.pos_fares || 0)} from ${countOf(+k.pos_trips, 'hotel fare')} paid on the driver\u2019s card machine (POS)` : '')
           + (+k.cash_unvalued ? ` \u00b7 ${countOf(+k.cash_unvalued, 'not valued yet', 'not valued yet')}` : '')
           + (open ? ` \u00b7 ${countOf(open, 'cash booking')} not completed, not counted` : '')
           + ' \u00b7 the platform\u2019s own cash figure where it has filed one, the fare otherwise';
@@ -2391,6 +2394,21 @@ async function tabEarnings(root, id, prof) {
             + (lastWorked ? ` \u2014 this person\u2019s last trip was ${dateStr(lastWorked)}` : ''),
     tone: cashTakenKnown ? (+k.cash_unvalued ? 'warn' : null)
       : (cashTrips && cashKnown.length < cashRows.length ? 'warn' : null) },
+    /* CASH IN HAND (the operator, 2026-11-24): "Cash Trips - POS deposits".
+       POS goes straight to the bank: the hotel's card-machine fares were never
+       cash, and card payments (Network International) that paid cash fares
+       come off — from 1 Aug 2026, as approved (src/card_notes.js). Where the
+       card part cannot be known, the figure is a ceiling and says why. */
+    ...(cashTakenKnown && (k.cash_in_hand !== undefined) ? [{ label: 'Cash in hand',
+      value: +k.cash_trips > 0 ? (k.cash_in_hand != null ? money(k.cash_in_hand) : 'not reported')
+        : (+k.pos_trips > 0 || (worked && labelledTrips) ? money(0) : '\u2014'),
+      sub: !(+k.cash_trips > 0) ? (+k.pos_trips > 0 ? 'no cash trip: every one was paid on the card machine, which goes to the bank' : 'no cash trip in this window')
+        : k.cash_in_hand_card != null
+          ? `cash trips less ${money(+k.cash_in_hand_card)} that card payments (POS) paid of them, fares from ${k.cash_in_hand_card_from}`
+            + `${k.cash_in_hand_card_to ? ` to ${k.cash_in_hand_card_to}` : ''}`
+            + (+k.pos_trips > 0 ? `; the ${money(+k.pos_fares || 0)} of hotel fares on the card machine were never cash` : '')
+          : `at most this: card payments (POS) not taken off \u2014 ${k.cash_in_hand_card_absent_reason || 'not known'}`,
+      tone: +k.cash_trips > 0 && k.cash_in_hand_card == null ? 'warn' : null }] : []),
     // Priced fares over the distance of the priced trips. Dividing by the whole
     // distance mixes two populations and understates it by however much of the
     // work carries no fare.

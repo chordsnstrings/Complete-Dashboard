@@ -62,7 +62,7 @@
      CARD-3b (approved from August):
      · the exposure route not taking card off → §11 "the ceiling" fails
      · the money tab tile not taking it off → §11 "the money tab tile" fails
-     · the overview tile not taking it off → §11 "the overview tile" fails
+     · the overview's cash in hand not taking it off → §11 "the overview" fails
      · the history not netted → §11 "weekly line" fails
      · the link's precedence over the HR export dropped (CASE order) → §5 fails
      · the review serving an ambiguous HR ID → §8 fails
@@ -632,8 +632,12 @@ console.log('\n§11 approved from August: the ceiling, the tiles and the history
     t.card_paid === nNov.on_cash && t.card_paid > 0 && tw.cash_taken === r2_(t.cash_fares + t.cash_advance + t.cash_deposit - t.card_paid)
     && /Less what card payments settled/.test(tw.cash_taken_means || ''), JSON.stringify([nNov.on_cash, tw.cash_taken, t]));
   const k = (await B(`/api/driver/kpis?person=${PA}&from=2026-11-01&to=2026-11-30`)).body || {};
-  check('the overview tile: the same part off the same cash', k.cash_taken_card === nNov.on_cash && k.cash_taken === r2_(k.cash_taken_gross - k.cash_taken_card),
-    JSON.stringify([k.cash_taken, k.cash_taken_gross, k.cash_taken_card, k.cash_taken_card_absent_reason]));
+  /* The operator, 2026-11-24: "Cash Trips (including POS)" is every cash
+     trip plus the hotel's card-machine fares; "Cash in hand" is the cash trips
+     less the POS deposits that paid them. */
+  check('the overview: cash trips gross, the hotel\'s card-machine fares beside them, cash in hand less the card that paid cash fares',
+    k.cash_in_hand_card === nNov.on_cash && k.cash_in_hand === r2_(k.cash_taken - k.cash_in_hand_card) && k.pos_trips === 1 && k.pos_fares === 120,
+    JSON.stringify([k.cash_taken, k.pos_trips, k.pos_fares, k.cash_in_hand, k.cash_in_hand_card, k.cash_in_hand_card_absent_reason]));
 
   const { refreshCashFareDay } = await import('../src/history_rollup.js');
   await refreshCashFareDay(db);
@@ -648,7 +652,7 @@ console.log('\n§11 approved from August: the ceiling, the tiles and the history
   /* The review of 2026-11-24. */
   const kid = (await B('/api/driver/kpis?id=u-alpha&from=2026-11-01&to=2026-11-30')).body || {};
   check('the overview tile asked by ACCOUNT, as the driver page asks: the person is found and card comes off',
-    kid.cash_taken_card === nNov.on_cash && kid.cash_taken_card_absent_reason === null, JSON.stringify([kid.cash_taken_card, kid.cash_taken_card_absent_reason]));
+    kid.cash_in_hand_card === nNov.on_cash && kid.cash_in_hand_card_absent_reason === null, JSON.stringify([kid.cash_in_hand_card, kid.cash_in_hand_card_absent_reason]));
   const one = (await B(`/api/driver/register?person=${PA}&from=2026-11-01&to=2026-11-01`)).body?.over_window?.cash_taken_terms || {};
   check('a window ending on the 1st keeps the 150 the 2nd\'s card paid of the 1st\'s fares (250 off, not 100)', one.card_paid === 250, JSON.stringify(one));
   const future = await cardNet(q, [PA], { from: '2099-01-01', to: '2099-01-31' });

@@ -2152,6 +2152,18 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       : { from: NET_FROM, by: new Map(), absent: kWhy };
     const kPart = cardPartFor(kNet, kPerson);
     const kCard = kPart.card;
+    /* "CASH TRIPS (INCLUDING POS)" AND "CASH IN HAND" (the operator,
+       2026-11-24: "POS directly comes to our bank. So it should be deducted
+       from the Cash held with the driver. Which is why Total Cash trip
+       (including POS) was the rename. We can add another one where Cash In
+       Hand which is Cash Trips - POS deposits"). The hotel channel files a
+       fare paid on the driver's own card machine 'pos-driver', never cash, so
+       it is read here and added to the cash trips; the POS part is those fares
+       plus what card payments paid of the cash fares (from NET_FROM, above);
+       cash in hand is the rest — the cash fares less what card paid of them. */
+    const [posK] = await q(
+      `SELECT count(*)::int AS pos_trips, round(sum(price)::numeric, 2) AS pos_fares
+         FROM trip_ext WHERE ${TW} AND lower(coalesce(payment_type, '')) = 'pos-driver' AND outcome = 'completed'`, p);
 
     const num = (v) => (v == null ? null : Number(v));
     const hoursOnline = num(kept?.online_h);
@@ -2212,12 +2224,14 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       cash_bookings_priced: cashTrips?.cash_bookings_priced ?? 0,
       cash_booking_value: num(cashTrips?.cash_booking_value),
       cash_trips: taken?.cash_trips ?? 0,
-      cash_taken: taken?.cash_taken == null ? null : Math.round((num(taken.cash_taken) - (kCard || 0)) * 100) / 100,
-      cash_taken_gross: num(taken?.cash_taken),
-      cash_taken_card: kCard,
-      cash_taken_card_from: kNet.from,
-      cash_taken_card_to: kCard == null ? null : kNet.card_to,
-      cash_taken_card_absent_reason: kPart.absent,
+      cash_taken: num(taken?.cash_taken),
+      pos_trips: posK?.pos_trips ?? 0,
+      pos_fares: num(posK?.pos_fares),
+      cash_in_hand: taken?.cash_taken == null ? null : Math.round((num(taken.cash_taken) - (kCard || 0)) * 100) / 100,
+      cash_in_hand_card: kCard,
+      cash_in_hand_card_from: kNet.from,
+      cash_in_hand_card_to: kCard == null ? null : kNet.card_to,
+      cash_in_hand_card_absent_reason: kPart.absent,
       cash_unvalued: taken?.cash_unvalued ?? 0,
       cash_booking_platforms: cashTrips?.cash_booking_platforms ?? [],
       hours_online: hoursOnline,

@@ -4070,13 +4070,20 @@ function financeTiles({ k, settle, cash, tipAll, tipTotal, fareTotal, coverage }
       const classified = Number.isFinite(total) ? total - unl
         : (settle.classes || []).reduce((a, c) => a + (+c.trips || 0), 0);
       const any = +k.trips > 0 || classified > 0;
+      /* "INCLUDING POS" (the operator, 2026-11-24): the hotel's fares paid on
+         the driver's own card machine are added (/api/settlement/mix
+         pos_driver) — every cash trip, whichever way the rider paid at the car. */
+      const pos = settle.pos_driver || null;
+      const posRev = pos && pos.revenue != null ? +pos.revenue : 0;
+      const posWords = pos && pos.trips ? ` · plus ${money(posRev)} from ${fmt(pos.trips)} hotel bookings paid on the driver’s card machine (POS)` : '';
       return { label: 'Cash trips (including POS) — measured portion',
-        value: cash ? (cash.revenue == null ? 'not reported' : money(cash.revenue))
-          : (classified > 0 ? money(0) : '\u2014'),
+        value: cash ? (cash.revenue == null ? 'not reported' : money(+cash.revenue + posRev))
+          : (pos && pos.trips ? money(posRev) : (classified > 0 ? money(0) : '\u2014')),
         sub: cash
           ? `the ${fmt(cash.priced_trips)} of ${fmt(cash.trips)} cash bookings that report a fare `
             + `(${pct(cash.trips ? (cash.priced_trips / cash.trips) * 100 : 0, 1)}) — the rest are `
-            + 'real money with no figure attached'
+            + `real money with no figure attached${posWords}`
+          : pos && pos.trips ? `no cash booking; ${fmt(pos.trips)} hotel bookings were paid on the driver’s card machine (POS)`
           : classified > 0
             ? `none of the ${fmt(classified)} bookings in this range whose settlement route is `
               + 'recorded was paid in cash'

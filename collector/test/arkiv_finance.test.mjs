@@ -66,6 +66,11 @@ if (want('finance')) {
     check('Platform payouts, On-trip revenue and Cash collected carry the old page\'s figures exactly',
       ['Platform payouts', 'On-trip revenue', 'Cash trips (including POS) — measured portion']
         .every((l) => s.values[l] && s.values[l] === classic[l]), JSON.stringify([s.values, classic]));
+    /* The operator, 2026-11-24: cash trips INCLUDING POS — the hotel's fares
+       paid on the driver's card machine are added, and said. */
+    check('the cash tile adds the hotel\'s card-machine (POS) fares, and says so',
+      /plus AED 21,400(\.00)? from 190 hotel bookings paid on the driver’s card machine \(POS\)/.test(s.subs['Cash trips (including POS) — measured portion'] || ''),
+      s.subs['Cash trips (including POS) — measured portion']);
     check('Trip value booked is the daily answer\'s fares total, and never called Money in',
       s.values['Trip value booked'] === aed(F.totals.fares) && /never added to Money in/.test(s.subs['Trip value booked']), s.subs['Trip value booked']);
     const derived = F.rows.filter((r) => r.money_derived);
