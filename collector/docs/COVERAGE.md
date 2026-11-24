@@ -12523,6 +12523,9 @@ pages say the sheet has not been read. The worker also reads once three minutes 
   - POS payments = those hotel fares + the card payments that paid cash trips (from 1 Aug 2026).
   - Cash in hand = Cash Trips (including POS) − POS payments.
   - Bank Collection = what the platforms wired + POS payments ("that comes into the bank").
+  - On Finance, Cash in hand is the same definition summed over the fleet (CARD-3d). Its cash is the drivers'
+    completed cash trips, so it does not subtract from the "measured portion" tile beside it, which also
+    counts supervisor-collected cash.
 * **Traps from CARD-3b/CARD-4 (the review of 2026-11-24):**
   - **The driver page asks by ACCOUNT.** `/api/driver/kpis?id=<account>` never carries `?person=`, so
     `d.person_id` is null on every real page. Look the person up on the spine (`driver_platform_id` over

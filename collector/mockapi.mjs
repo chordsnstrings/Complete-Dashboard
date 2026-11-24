@@ -4574,6 +4574,7 @@ app.get('/api/settlement/mix', (_, r) => r.json({
   total_trips: 2140, unlabelled_trips: 96, unlabelled_platforms: ['bolt'],
   pos_driver: { trips: 190, priced_trips: 190, revenue: 21400 },
   pos_card: { on_cash: 1200, from: '2026-08-01', to: '2026-11-21', absent: null },
+  cash_in_hand: { trips: 400, unvalued: 12, cash: 30800, card: 1200, card_from: '2026-08-01', card_to: '2026-11-21', absent: null, value: 29600 },
   classes: [
     { settlement_class: 'card', label: 'Card', meaning: 'Cleared through a card processor at the end of the ride.',
       trips: 820, trip_share_pct: 38.3, priced_trips: 210, revenue: 24800, avg_fare: 118.1, km: 9800, foc_trips: 0, platforms: ['uber', 'hotel'], last_at: new Date().toISOString() },
