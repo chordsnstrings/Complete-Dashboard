@@ -645,6 +645,24 @@ console.log('\n§11 approved from August: the ceiling, the tiles and the history
   const offAll = ((await B(`/api/card/notes?from=2026-08-01&to=${today}`)).body?.drivers || []).filter((r) => r.name).reduce((a, r) => a + r.on_cash, 0);
   check('the ceiling\'s weekly line comes down by the same card, cumulative by fare day', hs.card_taken_off_from === '2026-08-01'
     && offAll > 0 && last.v === r2_(g.v - offAll), JSON.stringify([last, g.v, offAll, hs.card_not_taken_off]));
+  /* The review of 2026-11-24. */
+  const kid = (await B('/api/driver/kpis?id=u-alpha&from=2026-11-01&to=2026-11-30')).body || {};
+  check('the overview tile asked by ACCOUNT, as the driver page asks: the person is found and card comes off',
+    kid.cash_taken_card === nNov.on_cash && kid.cash_taken_card_absent_reason === null, JSON.stringify([kid.cash_taken_card, kid.cash_taken_card_absent_reason]));
+  const one = (await B(`/api/driver/register?person=${PA}&from=2026-11-01&to=2026-11-01`)).body?.over_window?.cash_taken_terms || {};
+  check('a window ending on the 1st keeps the 150 the 2nd\'s card paid of the 1st\'s fares (250 off, not 100)', one.card_paid === 250, JSON.stringify(one));
+  const future = await cardNet(q, [PA], { from: '2099-01-01', to: '2099-01-31' });
+  check('a window that has not happened yet says so, not "before August"', /not happened yet/.test(future.absent || ''), JSON.stringify(future));
+  const { cardPartFor, cardSheet, NO_ID_WHY } = await import('../src/card_notes.js');
+  const [noid] = await q(`INSERT INTO driver (fleet_id, full_name) VALUES ('ecosine', 'Card Test No ID') RETURNING id`);
+  const nn = await cardNet(q, [PA, noid.id], { to: today });
+  check('a driver with no Emirates ID known: the card part unknown with that reason, never 0', cardPartFor(nn, noid.id).card === null
+    && cardPartFor(nn, noid.id).absent === NO_ID_WHY && cardPartFor(nn, PA).card === nAug.on_cash, JSON.stringify([cardPartFor(nn, noid.id), cardPartFor(nn, PA)]));
+  const [imp2] = await q(`SELECT id FROM card_import ORDER BY id DESC LIMIT 1`);
+  await q(`INSERT INTO card_payment (import_id, row_no, txn_day, fleet_id, terminal_id, amount) VALUES ($1, 998, '2099-01-01', 'ecosine', '9', 5)`, [imp2.id]);
+  const sh = await cardSheet(q);
+  check('a row typed with a future date does not move the sheet\'s last day', sh.covers_to === '2026-11-21' && sh.future_rows === 1, JSON.stringify(sh));
+  await q(`DELETE FROM card_payment WHERE row_no = 998`);
   const hf = (await B('/api/history?page=deposits&fleet=ecosine')).body?.series?.cash_ceiling || {};
   check('…but asked for one fleet it is not netted, and says why (a card payment is placed on a person)', hf.card_taken_off_from === null
     && /placed on a person/.test(hf.card_not_taken_off || ''), JSON.stringify([hf.card_taken_off_from, hf.card_not_taken_off]));

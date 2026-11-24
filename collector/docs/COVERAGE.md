@@ -12480,8 +12480,10 @@ pages say the sheet has not been read. The worker also reads once three minutes 
     trap as CARD-2's cross-check, test §9). Without it that day's whole cash looks free to carry. The driver
     route made this mistake once, through its 90-row LIMIT. Read the day before for the carry only: a driver
     whose only card payment falls there is not in the window.
-  - **Status:** a preview (`/api/card/notes`, the Deposits panel), live since 7636e5f. Every answer still
-    says `in_cash_position: false` until the operator approves the per-driver figures.
+  - **Status:** the operator approved it **from August** on 2026-11-24 (CARD-3b). What card settled of cash
+    fares on fare days from 2026-08-01 comes off the ceiling, the driver's two cash-taken tiles and the
+    ceiling's weekly line. The rule lives in ONE place, `src/card_notes.js`. The cash text (CARD-4) asks for
+    the day's cash less card.
   - **Measured on production, month by month (2026-11-24; AED, rounded):**
 
     | month | drivers | cash fares | card | settled cash | hotel machine | not taken off | in notes |
@@ -12514,4 +12516,22 @@ pages say the sheet has not been read. The worker also reads once three minutes 
     never valued as 0. Where there are any, the cash shown is a floor, and the page says so.
   - **In tests:** any `collect()` call sums the fares and sets `fares_full_at`. A suite that seeds trips
     afterwards must clear the table and that state, or call `refreshFares` (test §9 vs §10).
+  - **The cash text reads the trips live** (`notesByPerson({ live: true })`), because its amount comes from
+    live `trip_cash`. The table can be an hour behind a catch-up that lifted a fare to Uber's cash figure.
+* **Traps from CARD-3b/CARD-4 (the review of 2026-11-24):**
+  - **The driver page asks by ACCOUNT.** `/api/driver/kpis?id=<account>` never carries `?person=`, so
+    `d.person_id` is null on every real page. Look the person up on the spine (`driver_platform_id` over
+    `d.ids`), as the register does. A test that calls only `?person=` proves nothing about the page.
+  - **A window needs the day AFTER its end**, for the card just past midnight that paid its last fares.
+    Without it, October and November each asked alone take that card off neither (`notesByPerson` reads
+    to+1, never past today).
+  - **"The sheet has the day"** is: payments dated the day, and the sheet's last real day at or after it.
+    Rows dated after the Dubai day of the read are not counted, because the sheet is typed by hand and one
+    row dated a month ahead would open the text's gate every morning. **A day pasted only in part cannot be
+    told from here.** The text then asks for what it can see.
+  - **The card part is unknown, never 0**, in these cases: no Emirates ID is known for the driver; the
+    window is before August or in the future; the sheet was never read, or its read failed. `cardPartFor`
+    returns `{card: null, absent}`. Days after the sheet's last day are not netted, and the means says so.
+  - **A card ID link moves the netted figures without a run**, so `card_id_link` is in the response cache's
+    version key (`api/cache.js`).
 

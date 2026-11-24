@@ -299,9 +299,13 @@ export async function cashDepositRun({ q, now = new Date(), send = sendSms, cfg 
   /* CARD-4: the card sheet must have the day. "Has the day" is the newest
      payment it holds being dated the day or later; a day pasted only in part
      cannot be told from here. */
-  const sheet = await cardSheet(q);
-  if (sheet.absent || !sheet.covers_to || sheet.covers_to < D) {
-    const detail = { finished: final, card_sheet_to: sheet.covers_to, card_sheet_read_at: sheet.read_at };
+  const sheet = await cardSheet(q, { day: D });
+  /* covers_to ignores rows dated after the day of the read (a mis-typed future
+     date must not open this gate — the review of 2026-11-24), and the day
+     itself must hold payments. A day pasted only in part still cannot be told
+     from here (COVERAGE). */
+  if (sheet.absent || !sheet.covers_to || sheet.covers_to < D || !(sheet.day_rows > 0)) {
+    const detail = { finished: final, card_sheet_to: sheet.covers_to, card_sheet_day_rows: sheet.day_rows, card_sheet_read_at: sheet.read_at };
     await note('held', final ? 'card_sheet_not_ready' : 'waiting_for_card_sheet', detail);
     return { day: D, waiting: !final, gaveUp: final, ...detail };
   }
@@ -344,7 +348,7 @@ export async function cashDepositRun({ q, now = new Date(), send = sendSms, cfg 
      the fare's day: the hotel's pos-driver fares first, then the day's cash
      (src/card_notes.js). The next day's card is not in the sheet yet, so a
      fare paid by card after midnight still counts as notes here. */
-  const cardBy = new Map((persons.length ? await notesByPerson(q, { from: D, to: D, personIds: persons }) : [])
+  const cardBy = new Map((persons.length ? await notesByPerson(q, { from: D, to: D, personIds: persons, live: true, today: dubaiDay(now) }) : [])
     .map((r) => [String(r.person_id), r]));
 
   /* Why a channel is left out of the amount, in the order the whole-message

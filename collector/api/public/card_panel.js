@@ -62,7 +62,7 @@ const cashCell = (r) => (r.cash == null ? money(null)
    person opens at p<id>. */
 
 const sourceLine = (c) => `From the Network International card-payments sheet, last read ${c.read_at ? dtStr(c.read_at) : '—'}`
-  + `${c.covers_to ? `; it runs to ${c.covers_to}` : ''}. Not yet taken off the cash this driver holds — that change waits for review.`;
+  + `${c.covers_to ? `; it runs to ${c.covers_to}` : ''}. From 1 Aug 2026, what card paid of this driver's cash fares is taken off their cash-taken tiles and the ceiling; before then it is shown beside them.`;
 
 export async function cardMachineDriver(host, prof) {
   host.innerHTML = '';
@@ -173,7 +173,7 @@ export async function cardMachineFleet(host) {
   const rev = el('div'); host.append(rev);
   await reviewList(rev);
   host.append(el('p', 'cap', esc(`From the Network International card-payments sheet, last read ${s.read_at ? dtStr(s.read_at) : '—'}. `
-    + 'A negative amount is a chargeback. These payments are not yet taken off the cash any driver holds — that change waits for review.')));
+    + 'A negative amount is a chargeback, and never puts cash back. From 1 Aug 2026, what card paid of the cash fares is taken off the cash-fare ceiling and the driver tiles; before then it is shown beside them.')));
 }
 
 /* THE REVIEW: IDs not placed, and a link for whoever decides same-person

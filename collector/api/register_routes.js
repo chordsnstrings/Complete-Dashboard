@@ -50,7 +50,7 @@
    The register returns its lines and reports both balances as null with the
    reason, rather than starting from an assumed nought. */
 import { personParam } from './driver_routes.js';
-import { cardNet, dubaiToday, NET_FROM } from '../src/card_notes.js';
+import { cardNet, cardPartFor, dubaiToday, NET_FROM } from '../src/card_notes.js';
 
 const LIMIT_MAX = 1000;
 
@@ -547,7 +547,8 @@ export function registerRoutes(app, { q, wrap, winDays }) {
       ? await cardNet(q, [pid], { from, to: [to, dubaiToday()].sort()[0] })
         .catch((e) => ({ from: NET_FROM, by: new Map(), absent: `the card payments could not be read (${String(e.message || e).slice(0, 120)})` }))
       : { from: NET_FROM, by: new Map(), absent: 'this account is on no person, so no card payment can be placed on it' };
-    const cardPaid = net.absent ? null : round2(net.by.get(String(pid))?.on_cash || 0);
+    const part = cardPartFor(net, pid);
+    const cardPaid = part.card;
     const takenWindow = round2(cashFares + cashAdvance + cashDeposit - (cardPaid || 0));
 
     return res.json({
@@ -660,16 +661,18 @@ export function registerRoutes(app, { q, wrap, winDays }) {
           /* CARD-3b: positive, and subtracted. */
           card_paid: cardPaid,
           card_paid_from: net.from,
-          card_absent_reason: net.absent,
+          card_paid_to: cardPaid == null ? null : net.card_to,
+          card_absent_reason: part.absent,
         },
         cash_taken_means: (cashAdvanceRows === 0 && cashDepositRows === 0
           ? 'cash fares over this window. No cash advance and no deposit is recorded between '
             + 'these dates, so there is nothing to add or take off for those — this is what the trips '
-            + 'put in their hand, not a balance net of hand-ins nobody has entered.'
+            + `put in their hand${+cardPaid > 0 ? ' less what card paid of it' : ''}, not a balance net of hand-ins nobody has entered.`
           : 'cash fares over this window, plus cash advanced to them, less what they handed '
             + 'back. A flow over these dates — not what they are holding today.')
-          + (cardPaid != null ? ` Less what card payments settled of the cash fares from ${net.from} on.`
-            : ` Card payments are not taken off: ${net.absent}.`),
+          + (cardPaid != null ? ` Less what card payments settled of the cash fares from ${net.from}`
+            + `${net.card_to && net.card_to < to ? ` to ${net.card_to}, the card sheet's last day (a fare after it has no card figure yet)` : ' on'}.`
+            : ` Card payments are not taken off: ${part.absent}.`),
       },
       totals: {
         fares: sum((l) => l.fare),

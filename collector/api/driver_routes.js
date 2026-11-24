@@ -12,7 +12,7 @@
    is a worse failure than showing the same person twice. */
 
 import { win, winDays } from './window.js';
-import { cardNet, dubaiToday, NET_FROM } from '../src/card_notes.js';
+import { cardNet, cardPartFor, dubaiToday, NET_FROM } from '../src/card_notes.js';
 /* One definition of an online span, shared with /api/supply/heat and with the
    rollup that writes driver_day.online_min. Four private copies of it had
    drifted into the same defect at once; see the module header for the
@@ -2133,11 +2133,25 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        NET_FROM comes off the tile, as it does off the ceiling and the money
        tab (src/card_notes.js). */
     const [kFrom, kTo] = winDays(req);
-    const kNet = d.person_id
-      ? await cardNet(q, [d.person_id], { from: kFrom, to: [kTo, dubaiToday()].sort()[0] })
+    /* The driver page asks by ACCOUNT (?id=), so the person is looked up from
+       the spine for the resolved accounts, as the money tab's register does
+       (the review of 2026-11-24: read only from ?person=, the tile never took
+       card off on a real page and said the account was on no person). */
+    let kPerson = d.person_id ?? null; let kWhy = null;
+    if (kPerson == null) {
+      const pr = await q(`SELECT DISTINCT driver_id::text AS p FROM driver_platform_id
+                           WHERE external_id = ANY($1::text[]) AND detached_at IS NULL`, [d.ids || []])
+        .catch((e) => { kWhy = `the person register could not be read (${String(e.message || e).slice(0, 120)})`; return []; });
+      if (pr.length === 1) kPerson = Number(pr[0].p);
+      else if (!kWhy) kWhy = pr.length ? 'this account is on more than one person, so whose card payments are whose is not settled'
+        : 'this account is on no person, so no card payment can be placed on it';
+    }
+    const kNet = kPerson != null
+      ? await cardNet(q, [kPerson], { from: kFrom, to: [kTo, dubaiToday()].sort()[0] })
         .catch((e) => ({ from: NET_FROM, by: new Map(), absent: `the card payments could not be read (${String(e.message || e).slice(0, 120)})` }))
-      : { from: NET_FROM, by: new Map(), absent: 'this account is on no person, so no card payment can be placed on it' };
-    const kCard = kNet.absent ? null : Math.round((kNet.by.get(String(d.person_id))?.on_cash || 0) * 100) / 100;
+      : { from: NET_FROM, by: new Map(), absent: kWhy };
+    const kPart = cardPartFor(kNet, kPerson);
+    const kCard = kPart.card;
 
     const num = (v) => (v == null ? null : Number(v));
     const hoursOnline = num(kept?.online_h);
@@ -2202,7 +2216,8 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       cash_taken_gross: num(taken?.cash_taken),
       cash_taken_card: kCard,
       cash_taken_card_from: kNet.from,
-      cash_taken_card_absent_reason: kNet.absent,
+      cash_taken_card_to: kCard == null ? null : kNet.card_to,
+      cash_taken_card_absent_reason: kPart.absent,
       cash_unvalued: taken?.cash_unvalued ?? 0,
       cash_booking_platforms: cashTrips?.cash_booking_platforms ?? [],
       hours_online: hoursOnline,

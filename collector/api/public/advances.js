@@ -27,7 +27,7 @@ import { el, esc, panel, note, loading, tableFrom, entity,
 import { fmt, scatter } from './charts.js';
 import { api, href } from './data.js';
 import { ledgerBand, ceiling, ceilingWho, ceilingCol, ceilingRanked, firstReason,
-  booksRecorded } from './ledger_ak.js';
+  booksRecorded , cardWords } from './ledger_ak.js';
 import { entryForm } from './entry_form.js';
 import { aed, loadPeople } from './deposit_core.js';
 
@@ -236,10 +236,13 @@ function advancesContract(AK, after, root, people, ex) {
   const gen = people.filter((p) => p.earned != null && +p.earned > 0);
   const pol = ex.policy;
   glance(AK.tiles, [
-    c.n ? { label: 'Cash fares put in drivers’ hands', value: aed(c.sum), hero: true,
-      sub: `a ceiling, not a balance · ${ceilingWho(c)} · ${fmt(c.trips)} cash fares, ${c.from} → ${c.to}`
+    /* CARD-3b: the ceiling is net of what card settled of the fares from
+       1 Aug 2026 (the review of 2026-11-24: this hero still called it the cash
+       fares themselves). */
+    c.n ? { label: 'Cash fares in drivers’ hands, less card', value: aed(c.sum), hero: true,
+      sub: `a ceiling, not a balance${cardWords(c) ? ` · ${cardWords(c)}` : ''} · ${ceilingWho(c)} · ${fmt(c.trips)} cash fares, ${c.from} → ${c.to}`
         + ` · the largest single driver ${aed(c.top.owes.cash_taken)}` }
-      : { label: 'Cash fares put in drivers’ hands', hero: true,
+      : { label: 'Cash fares in drivers’ hands, less card', hero: true,
         na: c.measured ? 'no cash-marked trip is on record for anyone here' : 'the exposure read did not answer, so no cash fare is measured' },
     { label: 'Recorded on the advance book', value: `${fmt(books)} of ${fmt(n)}`,
       sub: books ? 'with at least one advance row' : 'nobody has an advance row — a balance nobody wrote down, not nought' },
@@ -256,14 +259,14 @@ function advancesContract(AK, after, root, people, ex) {
   after.innerHTML = '';
   const g = el('div', 'grid g2'); after.append(g);
   const sc = panel('Cash taken against what each driver generated', 'One dot per person with both. No lending line is drawn: exposure is judged per person on the server.', 'advances-scatter');
-  const rk = panel('Who has taken the most cash in fares', 'The ceiling, ranked — the thirty largest, and the drivers with none as one count.', 'advances-ceiling');
+  const rk = panel('Who has taken the most cash in fares', 'The ceiling, ranked — cash fares less what card settled of them from 1 Aug 2026 — the thirty largest, and the drivers with none as one count.', 'advances-ceiling');
   g.append(sc.panel, rk.panel);
   const both = people.filter((p) => p.owes?.cash_taken != null && p.earned != null);
   const cashOnly = people.filter((p) => p.owes?.cash_taken != null && p.earned == null).length;
   if (!both.length) sc.body.append(note('Nobody here has both a cash fare on record and a generated figure.'));
   else {
     scatter(sc.body, both.map((p) => ({ name: p.name, ext: p.ext_id, gen: +p.earned, cash: +p.owes.cash_taken })),
-      { x: 'gen', y: 'cash', label: 'name', xLabel: 'generated (AED)', yLabel: 'cash fares taken (AED)',
+      { x: 'gen', y: 'cash', label: 'name', xLabel: 'generated (AED)', yLabel: 'cash fares taken, less card (AED)',
         xFmt: (v) => fmt(v), yFmt: (v) => fmt(v),
         onClick: (d) => { if (d.ext) location.hash = href('driver', d.ext); } });
   }
@@ -285,5 +288,5 @@ function advancesContract(AK, after, root, people, ex) {
       why: pol ? `In force since ${pol.effective_from}${pol.set_by ? `, set by ${pol.set_by}` : ''}.`
         : (ex.policy_absent_reason || 'No threshold has been stored.') },
   ]);
-  pageFoot({ colophon: ['The whole record', `${fmt(n)} people`, c.n ? `${aed(c.sum)} in cash fares — a ceiling` : null] }, root);
+  pageFoot({ colophon: ['The whole record', `${fmt(n)} people`, c.n ? `${aed(c.sum)} in cash fares less card — a ceiling` : null] }, root);
 }

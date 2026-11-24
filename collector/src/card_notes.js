@@ -43,7 +43,7 @@ export const NET_WHY = 'the operator approved taking card off from August on 24 
    Accounts first, then the trips by their account ids, so the read rides the
    (driver_ext_id, requested_at) index rather than the views over every trip
    (the whole year took 4.5–6.6 s joined the other way round). */
-export async function cashByDay(q, personIds, lo, hi) {
+export async function cashByDay(q, personIds, lo, hi, { live = false } = {}) {
   const ids = [...new Set(personIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
   const out = new Map();
   if (!ids.length || !lo || !hi) return out;
@@ -59,7 +59,11 @@ export async function cashByDay(q, personIds, lo, hi) {
      2026-11-24). */
   const st = Object.fromEntries((await q(`SELECT key, value FROM source_state WHERE source = 'network_cards' AND fleet_id = '-'
                                             AND key IN ('fares_full_at', 'fares_from')`)).map((r) => [r.key, r.value]));
-  const ready = !!(st.fares_full_at && st.fares_from && lo >= st.fares_from);
+  /* live: the cash text reads the trip views for its two days, so the card
+     part is worked out against the same figures it asks for (the review of
+     2026-11-24: card_fare_day can be an hour behind a catch-up that lifted a
+     fare to Uber's cash figure). */
+  const ready = !live && !!(st.fares_full_at && st.fares_from && lo >= st.fares_from);
   const rows = ready ? await q(`SELECT platform, driver_ext_id, to_char(day, 'YYYY-MM-DD') AS day, cash::float AS cash, cash_trips,
                                        cash_unvalued, pos::float AS pos, pos_trips
                                   FROM card_fare_day WHERE driver_ext_id = ANY($1::text[]) AND day BETWEEN $2 AND $3`, [exts, lo, hi])
@@ -144,25 +148,31 @@ export function allocate(days) {
    cash − on_cash = notes and on_pos + on_cash + paid_before_window +
    unexplained = card. The day before `from` is read for the carry only: a
    driver whose only card payment is that day is not in the window. */
-export async function notesByPerson(q, { from, to, personIds = null, withDays = false }) {
+export async function notesByPerson(q, { from, to, personIds = null, withDays = false, live = false, today = dubaiToday() }) {
   const ids = personIds == null ? null : [...new Set(personIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
   if (!from || !to || from > to || (ids && !ids.length)) return [];
+  /* THE DAY AFTER `to` IS READ TOO (the review of 2026-11-24): card just after
+     midnight that paid `to`'s last fares is booked on `to` (on_cash), and read
+     only up to `to` it came off no window at all — October asked alone and
+     November asked alone took it off neither. It is read for that carry only:
+     its own card and fares stay out of the window. Never past today. */
+  const after = to < today ? daysBack(to, -1) : to;
   const card = await q(`SELECT m.person_id::text AS person_id, d.full_name AS name, to_char(p.txn_day, 'YYYY-MM-DD') AS day,
            coalesce(sum(p.amount) FILTER (WHERE p.amount > 0), 0)::float AS pay,
            coalesce(sum(p.amount) FILTER (WHERE p.amount < 0), 0)::float AS chargebacks
       FROM card_payment p JOIN card_id_person m ON m.emirates_id = p.emirates_id LEFT JOIN driver d ON d.id = m.person_id
      WHERE m.person_id IS NOT NULL AND p.txn_day BETWEEN $1::date - 1 AND $2
        AND ($3::bigint[] IS NULL OR m.person_id = ANY($3::bigint[]))
-     GROUP BY m.person_id, d.full_name, p.txn_day`, [from, to, ids]);
+     GROUP BY m.person_id, d.full_name, p.txn_day`, [from, after, ids]);
   const people = new Map();
   for (const c of card) {
     const p = people.get(c.person_id) || { person_id: c.person_id, name: c.name || null, pay: new Map(), chargebacks: 0, inWindow: false };
     p.pay.set(c.day, c.pay);
-    if (c.day >= from) { p.chargebacks += c.chargebacks; p.inWindow = true; }
+    if (c.day >= from && c.day <= to) { p.chargebacks += c.chargebacks; p.inWindow = true; }
     people.set(c.person_id, p);
   }
   for (const [k, p] of people) if (!p.inWindow) people.delete(k);
-  const cashMap = await cashByDay(q, [...people.keys()], dayBefore(from), to);
+  const cashMap = await cashByDay(q, [...people.keys()], dayBefore(from), after, { live });
   /* Each person's fare days, in one pass over the map (a year is ~30,000 keys). */
   const fareDays = new Map();
   for (const k of cashMap.keys()) {
@@ -195,10 +205,19 @@ export async function notesByPerson(q, { from, to, personIds = null, withDays = 
    read. Never read, nothing is known to have been paid by card — which is
    not the same as nothing having been (the house rule: absent, with the
    reason). */
-export async function cardSheet(q) {
+export async function cardSheet(q, { day = null } = {}) {
   const [ok] = await q(`SELECT read_at FROM card_import WHERE status = 'ok' ORDER BY read_at DESC, id DESC LIMIT 1`);
-  const [cov] = await q(`SELECT to_char(max(txn_day), 'YYYY-MM-DD') AS last_day FROM card_payment`);
-  return { read_at: ok?.read_at || null, covers_to: cov?.last_day || null,
+  /* THE LAST DAY THE SHEET REALLY HAS (the review of 2026-11-24): a row typed
+     with a future date (the sheet is kept by hand; COVERAGE records one dated
+     a month ahead) must not make every day look covered — the cash text's gate
+     would open each morning before that day's card was in. Rows dated after
+     the Dubai day of the read are not counted. */
+  const readDay = ok?.read_at ? dubaiToday(new Date(ok.read_at).getTime()) : null;
+  const [cov] = readDay ? await q(`SELECT to_char(max(txn_day) FILTER (WHERE txn_day <= $1::date), 'YYYY-MM-DD') AS last_day,
+      count(*) FILTER (WHERE txn_day = $2::date)::int AS day_rows,
+      count(*) FILTER (WHERE txn_day > $1::date)::int AS future_rows
+      FROM card_payment`, [readDay, day]) : [];
+  return { read_at: ok?.read_at || null, covers_to: cov?.last_day || null, day_rows: cov?.day_rows ?? 0, future_rows: cov?.future_rows ?? 0,
     absent: ok ? null : 'the card payments sheet has never been read, so nothing paid by card is known to take off' };
 }
 
@@ -206,17 +225,43 @@ export async function cardSheet(q) {
    the term the ceiling and the tiles take off. by: person_id → {on_cash,
    on_pos, card, unexplained}; a person absent from it had no card payment
    there (0 taken off). absent: the true reason nothing can be taken off. */
-export async function cardNet(q, personIds, { from = null, to }) {
+export async function cardNet(q, personIds, { from = null, to, today = dubaiToday() }) {
   const lo = from && from > NET_FROM ? from : NET_FROM;
-  const out = { from: lo, to, absent: null, by: new Map() };
-  if (!to || to < lo) return { ...out, absent: `card payments are taken off fares from ${dmy(NET_FROM)}, and these dates end before then` };
+  const out = { from: lo, to, card_to: null, absent: null, by: new Map(), noId: new Set() };
+  if (!to || to < NET_FROM) return { ...out, absent: `card payments are taken off fares from ${dmy(NET_FROM)}, and these dates end before then` };
+  if (lo > today) return { ...out, absent: 'these dates have not happened yet' };
+  if (to < lo) return { ...out, absent: 'these dates hold no day to take card off' };
   const sheet = await cardSheet(q);
   if (sheet.absent) return { ...out, absent: sheet.absent };
-  for (const r of await notesByPerson(q, { from: lo, to, personIds })) {
+  /* Only through the sheet's last day: a fare after it has no card figure
+     yet, which is not the same as none (said in the means). */
+  const cardTo = sheet.covers_to && sheet.covers_to < to ? sheet.covers_to : to;
+  if (cardTo < lo) return { ...out, absent: `the card payments sheet runs to ${sheet.covers_to}, before these dates` };
+  out.card_to = cardTo;
+  for (const r of await notesByPerson(q, { from: lo, to: cardTo, personIds, today })) {
     out.by.set(String(r.person_id), { on_cash: r.on_cash, on_pos: r.on_pos, card: r.card, unexplained: r.unexplained });
+  }
+  /* A person with no Emirates ID known (not on the HR export, not linked) can
+     have no card payment placed on them: their card part is unknown, never 0
+     (the review of 2026-11-24). */
+  const ids = (personIds || []).map(Number).filter((n) => Number.isInteger(n) && n > 0);
+  if (ids.length) {
+    const known = new Set((await q(`SELECT DISTINCT person_id::text AS p FROM card_id_person WHERE person_id = ANY($1::bigint[])`, [ids])).map((r) => r.p));
+    for (const id of ids) if (!known.has(String(id))) out.noId.add(String(id));
   }
   return out;
 }
+
+/* One person's card part from a cardNet answer: { card, absent }. card is
+   null exactly when it cannot be known, and absent then says why. */
+export const NO_ID_WHY = 'no Emirates ID is known for this driver (not on the HR export, and nobody has linked one), so no card payment can be placed on them';
+export function cardPartFor(net, personId) {
+  if (net.absent) return { card: null, absent: net.absent };
+  if (net.noId?.has(String(personId))) return { card: null, absent: NO_ID_WHY };
+  return { card: r2(net.by.get(String(personId))?.on_cash || 0), absent: null };
+}
+const thruWords = (net) => (net.card_to && net.to && net.card_to < net.to
+  ? ` to ${dmy(net.card_to)}, the card sheet's last day (a fare after it has no card figure yet)` : '');
 
 /* Take the term off one exposure row's ceiling (owes), keeping both parts
    beside it: cash_taken_gross (every cash fare on record), cash_taken_card
@@ -225,19 +270,20 @@ export async function cardNet(q, personIds, { from = null, to }) {
 export function applyCardNet(owes, net, personId) {
   if (!owes || owes.cash_taken == null) return owes;
   const gross = owes.cash_taken;
-  const card = net.absent ? null : r2(net.by.get(String(personId))?.on_cash || 0);
+  const { card, absent } = cardPartFor(net, personId);
   return Object.assign(owes, {
     cash_taken: card == null ? gross : r2(gross - card),
     cash_taken_gross: gross,
     cash_taken_card: card,
     cash_taken_card_from: net.from,
-    cash_taken_card_absent_reason: net.absent,
+    cash_taken_card_to: card == null ? null : net.card_to,
+    cash_taken_card_absent_reason: absent,
     cash_taken_means: card == null
-      ? `every cash fare on record went into this driver's hand. Card payments are not taken off: ${net.absent}. It is a CEILING on what `
+      ? `every cash fare on record went into this driver's hand. Card payments are not taken off: ${absent}. It is a CEILING on what `
         + 'they could still be holding, not a balance.'
       : `every cash fare on record went into this driver's hand, less ${aedW(card)} that card payments settled of the fares from `
-        + `${dmy(net.from)} (${NET_WHY}). It is a CEILING on what they could still be holding, not a balance — it comes down when a `
-        + 'hand-in is recorded, and none is until somebody records one.',
+        + `${dmy(net.from)}${thruWords(net)} (${NET_WHY}). It is a CEILING on what they could still be holding, not a balance — it comes `
+        + 'down when a hand-in is recorded, and none is until somebody records one.',
   });
 }
 

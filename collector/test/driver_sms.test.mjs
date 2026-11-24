@@ -166,6 +166,7 @@ await q(`INSERT INTO card_import (id, read_at, rows_read, rows_kept, day_from, d
 const pay = (row, day, eid, amount) => q(`INSERT INTO card_payment (import_id, row_no, txn_day, fleet_id, terminal_id, amount, emirates_id)
                                           VALUES (1, $1, $2, 'ecosine', 'T1', $3, $4)`, [row, day, amount, eid]);
 await pay(1, '2026-09-26', null, 10);
+await pay(9, '2026-12-01', null, 5);      // typed with a future date: must not open the gate (the review of 2026-11-24)
 r = await cashDepositRun({ q, now: new Date('2026-09-28T01:45:00Z'), send, cfg: {} });
 const [wc] = await q(`SELECT status, hold_reason, detail FROM sms_outbox WHERE dedupe_key = 'cash-run:2026-09-27'`);
 check('the card sheet ends on the 26th: nobody is texted, the run waits for it, and says why', r.waiting === true && sent.length === 0
@@ -178,6 +179,10 @@ await pay(2, '2026-09-27', '784199000000013', 53);
 await pay(3, '2026-09-27', '784199000000015', 20);
 await pay(4, '2026-09-27', null, 40);
 await pay(5, '2026-09-27', '784199000000013', -15);       // a chargeback: never put back as cash
+/* The summed fares table is built but empty (as if an hour behind): the text
+   must read the trips live, as its amount does (the review of 2026-11-24). */
+await q(`INSERT INTO source_state (source, fleet_id, key, value) VALUES ('network_cards', '-', 'fares_full_at', '2026-09-28T00:00:00Z'),
+           ('network_cards', '-', 'fares_from', '2026-09-01')`);
 r = await cashDepositRun({ q, now: new Date('2026-09-28T12:45:00Z'), send, cfg: {} });
 const toA = sent.find((m) => m.to === '971501111111');
 check('a driver is told Uber’s cash collected, summed — AED 310.50, not the fare (295.00) — the Uber cash, and the day by name',
@@ -251,11 +256,15 @@ check('switched off: nothing is sent', r.off === true && sent.length === n1);
    next day: given up on, said, nobody texted. */
 await T('k1', { driver: 'y-h', platform: 'yango', at: '2026-10-01T08:00:00Z', price: 300 });
 await run({ source: 'yango', at: '2026-10-01T21:40:00Z', to: '2026-10-01', from: '2026-09-01' });
+/* A later read whose sheet runs PAST the day (the 2nd) with no payment dated
+   the day itself: "runs to" is not "has" — the day must hold payments. */
+await q(`INSERT INTO card_import (id, read_at, rows_read, rows_kept, day_from, day_to, status) VALUES (2, '2026-10-02T15:00:00Z', 1, 1, '2026-10-02', '2026-10-02', 'ok')`);
+await q(`INSERT INTO card_payment (import_id, row_no, txn_day, fleet_id, terminal_id, amount) VALUES (2, 1, '2026-10-02', 'ecosine', 'T1', 30)`);
 r = await cashDepositRun({ q, now: new Date('2026-10-02T16:00:00Z'), send, cfg: {}, final: true });
 const [nr] = await q(`SELECT status, hold_reason, detail FROM sms_outbox WHERE dedupe_key = 'cash-run:2026-10-01'`);
-check('the card sheet never has the day: at 20:00 it is given up on, with the reason, and nobody is texted', r.gaveUp === true
-  && nr?.hold_reason === 'card_sheet_not_ready' && nr.detail?.finished === true && nr.detail.card_sheet_to === '2026-09-27' && sent.length === n1,
-  JSON.stringify([r, nr]));
+check('the sheet runs past the day but holds nothing dated it: at 20:00 given up on, with the reason, nobody texted', r.gaveUp === true
+  && nr?.hold_reason === 'card_sheet_not_ready' && nr.detail?.finished === true && nr.detail.card_sheet_to === '2026-10-02'
+  && nr.detail.card_sheet_day_rows === 0 && sent.length === n1, JSON.stringify([r, nr]));
 check('the reasons read in words on the page', /card payments sheet/.test(HOLD_WHY.waiting_for_card_sheet) && /20:00/.test(HOLD_WHY.card_sheet_not_ready)
   && /AED 99/.test(HOLD_WHY.under_threshold));
 

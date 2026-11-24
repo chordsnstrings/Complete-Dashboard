@@ -63,10 +63,16 @@ import { createHash } from 'node:crypto';
    here as "writes no money"; that file says why at its MODE.
    Shared with api/warm.js, so the warmer and the cache agree on when the data
    moved. test/cache.test.mjs "a realtime tick does not move the version". */
+/* l: a card ID link (POST /api/card/link) moves which driver a card payment
+   is on, and so the netted ceiling and tiles (CARD-3b), without touching a
+   run — the review of 2026-11-24 found the cached ceiling showing pre-link
+   figures beside the live card panel. Count and newest decision, so an unlink
+   moves it too. */
 export const VERSION_SQL =
   `SELECT (SELECT max(finished_at) FROM collection_run
             WHERE mode IS DISTINCT FROM 'realtime')     AS c,
-          (SELECT max(finished_at) FROM rollup_state)   AS r`;
+          (SELECT max(finished_at) FROM rollup_state)   AS r,
+          (SELECT count(*)::text || ':' || coalesce(max(decided_at)::text, '') FROM card_id_link) AS l`;
 
 /* Bounded by bytes, not by entry count.
    400 entries was the first guess and it was wrong in both directions: the
@@ -348,7 +354,7 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port, refre
     try {
       const { rows } = await pool.query(VERSION_SQL);
       const iso = (v) => (v?.toISOString ? v.toISOString() : String(v ?? '-'));
-      version = `${iso(rows[0]?.c)}|${iso(rows[0]?.r)}`;
+      version = `${iso(rows[0]?.c)}|${iso(rows[0]?.r)}|${rows[0]?.l ?? '-'}`;
     } catch {
       /* If we cannot tell whether the data moved, assume it did. Serving a
          known-good answer would be faster and might be wrong, and no cache is

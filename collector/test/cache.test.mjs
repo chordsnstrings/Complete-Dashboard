@@ -178,6 +178,20 @@ const rt = await get('/api/thing');
 check('a realtime tick does not move the version', rt.cache === 'hit' && rt.version === settledRt.version,
   `${settledRt.cache}/${settledRt.version} -> ${rt.cache}/${rt.version}`);
 
+/* CARD-3b (the review of 2026-11-24): a card ID link moves which driver a
+   card payment is on, and so the netted ceiling and tiles, without any run —
+   it must move the version, and so must an unlink.
+   REVERSION: drop the card_id_link term from VERSION_SQL — both checks fail. */
+await new Promise((r) => setTimeout(r, 300));
+const beforeLink = await get('/api/thing');
+await db.query(`INSERT INTO card_id_link (emirates_id, person_id) VALUES ('784199000000099', 1)`);
+const afterLink = await get('/api/thing');
+check('a card ID link moves the version', afterLink.version !== beforeLink.version, `${beforeLink.version} -> ${afterLink.version}`);
+await new Promise((r) => setTimeout(r, 300));
+await db.query(`DELETE FROM card_id_link WHERE emirates_id = '784199000000099'`);
+const afterUnlink = await get('/api/thing');
+check('…and so does an unlink', afterUnlink.version !== afterLink.version, `${afterLink.version} -> ${afterUnlink.version}`);
+
 /* A burst of readers on a just-invalidated page must not each start the same
    aggregate — that is the thundering herd the cache exists to prevent,
    arriving one moment later. */

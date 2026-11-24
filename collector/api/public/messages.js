@@ -31,7 +31,7 @@ const TABS = [
 ];
 const KIND = {
   cash_deposit: 'Cash to deposit', trip_register: 'Register a trip',
-  reset_code: 'Staff reset code', phone_code: 'Staff mobile check', cash_run: 'The 05:00 run',
+  reset_code: 'Staff reset code', phone_code: 'Staff mobile check', cash_run: 'The daily cash run',
   target_nudge: 'Trip goal', target_run: 'A goal-text run',
 };
 const FILTERS = [
@@ -108,18 +108,26 @@ function messageCell(r) {
   return `${r.message_text ? `“${esc(r.message_text)}”` : none}${trip}${day}${left}`;
 }
 
-/* The 05:00 run itself: sent to how many, or why it is still waiting. */
+/* The daily cash run itself: sent to how many, or why it is still waiting.
+   CARD-4 (24 Nov 2026): it also waits for the card payments sheet to have the
+   day, from 05:00 to its last try at 20:00 (it was 05:00–09:00). */
 function runLine(r) {
   const d = r.detail || {};
   const day = r.business_day ? dayStr(`${r.business_day}T12:00:00`) : 'a day';
   if (r.hold_reason === 'switched_off') return `${day}: switched off in Settings — nothing was sent.`;
+  if (r.hold_reason === 'waiting_for_card_sheet' || r.hold_reason === 'card_sheet_not_ready') {
+    const sheet = d.card_sheet_to ? `the card payments sheet runs to ${dayStr(`${d.card_sheet_to}T12:00:00`)}` : 'the card payments sheet has not been read';
+    return r.hold_reason === 'waiting_for_card_sheet'
+      ? `${day}: waiting — ${sheet}, and the part paid by card must come off before anyone is asked. It asks again every 15 minutes until 20:00.`
+      : `${day}: not sent — at 20:00 ${sheet}. No driver was asked for cash their card payments may already have settled.`;
+  }
   if (r.hold_reason === 'waiting' || r.hold_reason === 'not_complete') {
     const parts = [];
     if (d.missing_catchup?.length) parts.push(`Uber’s nightly catch-up has not run for ${andList(d.missing_catchup.map(sourceLabel))}`);
     if (d.uber_cash_trips_without_figure) parts.push(`${countOf(d.uber_cash_trips_without_figure, 'Uber cash trip')} still without Uber’s own cash figure`);
     return r.hold_reason === 'waiting'
-      ? `${day}: waiting — ${parts.join('; ') || 'yesterday is not complete yet'}. It asks again every 15 minutes until 09:00.`
-      : `${day}: not sent — at 09:00 yesterday was still not complete (${parts.join('; ') || 'incomplete'}). No driver was told a short amount.`;
+      ? `${day}: waiting — ${parts.join('; ') || 'the day is not complete yet'}. It asks again every 15 minutes until 20:00.`
+      : `${day}: not sent — at the last try the day was still not complete (${parts.join('; ') || 'incomplete'}). No driver was told a short amount.`;
   }
   const holds = Object.entries(d.holds || {}).map(([k, n]) => `${fmt(n)} ${k.replace(/_/g, ' ')}`);
   const unplaced = d.unplaced_trips ? ` ${countOf(d.unplaced_trips, 'cash trip')} (${money(d.unplaced_aed)}) belong to an account not placed on any person, so nobody was texted about them.` : '';
@@ -151,7 +159,7 @@ async function renderLog(root, kind) {
     { label: 'Gateway charge', value: c.cost ? Number(c.cost).toFixed(3) : 'none reported', sub: 'last 7 days, in the gateway account’s own currency' },
   ]));
   const sw = d.switches || {};
-  const off = [sw.sms_cash === 'off' && 'the 05:00 cash reminder', sw.sms_trip === 'off' && 'the trip request',
+  const off = [sw.sms_cash === 'off' && 'the cash reminder', sw.sms_trip === 'off' && 'the trip request',
     sw.sms_target === 'off' && 'the trip-goal texts'].filter(Boolean);
   if (off.length) hold.append(note(`Switched off in Access → Settings: ${andList(off)}. Nothing of that kind is sent until it is switched back on.`, 'warn'));
   if (sw.sms_target === 'dry') hold.append(note('The trip-goal texts (13:00 and 18:00) are a dry run: each is decided and listed here as held “dry run”, and none is sent. Switch them On in Access → Settings.', 'info'));
@@ -159,7 +167,7 @@ async function renderLog(root, kind) {
   const rows = d.rows || [];
   const runs = rows.filter((r) => r.kind === 'cash_run');
   if (!kind && runs.length) {
-    const p = panel('The 05:00 cash run', 'One line per day. The run waits until yesterday is complete, so nobody is told a short amount.', 'msg-runs');
+    const p = panel('The daily cash run', 'One line per day. The run waits until the day is complete and the card payments sheet has it, so nobody is told a wrong amount.', 'msg-runs');
     p.body.append(el('div', 'cap', runs.slice(0, 7).map((r) => `<div>${esc(runLine(r))}</div>`).join('')));
     hold.append(p.panel);
   }
@@ -170,7 +178,7 @@ async function renderLog(root, kind) {
   const p = panel(countOf(list.length, 'message'), 'Newest first. A held message was never sent; its reason is beside it.', 'msg-log');
   p.body.append(bar);
   if (!list.length) {
-    p.body.append(note(kind ? `No message of this kind yet.` : 'No message has been decided yet. The first cash reminder goes at 05:00 Dubai; a trip request as soon as a journey with no booking is found and passes every check.', ''));
+    p.body.append(note(kind ? `No message of this kind yet.` : 'No message has been decided yet. The first cash reminder goes from 05:00 Dubai, once the card payments sheet has the day; a trip request as soon as a journey with no booking is found and passes every check.', ''));
   } else {
     p.body.append(tableFrom(list, [
       { label: 'When', key: 'created_at', render: (r) => esc(dtStr(r.created_at)) },
@@ -213,6 +221,10 @@ async function renderNext(root) {
     if (r.off) { out.append(note('Switched off in Access → Settings: nothing would be sent.', 'warn')); return; }
     if (k === 'cash') {
       if (r.already) { out.append(note(`Yesterday’s run (${dayStr(`${r.day}T12:00:00`)}) has already finished. The Sent and held back tab shows what it did.`, '')); return; }
+      if ((r.waiting || r.gaveUp) && 'card_sheet_to' in r) {
+        out.append(note(`The card payments sheet ${r.card_sheet_to ? `runs to ${dayStr(`${r.card_sheet_to}T12:00:00`)}` : 'has not been read'}, so the part paid by card cannot come off yet. Nobody would be texted now.`, 'warn'));
+        return;
+      }
       if (r.waiting || r.gaveUp) {
         const parts = [];
         if (r.missing_catchup?.length) parts.push(`Uber’s nightly catch-up has not run for ${andList(r.missing_catchup.map(sourceLabel))}`);
@@ -280,7 +292,7 @@ export async function renderMessages(root, param, sub) {
   if (t === 'next') await renderNext(root);
   else got = await renderLog(root, KIND[kind] ? kind : '');
   root.append(el('div', 'cap srcline', [
-    '<div><b>Cash to deposit:</b> at 05:00 Dubai, each driver who took cash yesterday: Uber’s own cash-collected figure, the fare on the other channels, and the message names the channels it covers. A channel that did not collect, has no amount yet, or is a hotel account matched by name is left out and the rest is still sent; held only when nothing certain is left. Sent once Uber’s figures for yesterday are in; given up at 09:00 if they never are.</div>',
+    '<div><b>Cash to deposit:</b> from 05:00 Dubai, each driver who took cash the day before: Uber’s own cash-collected figure, the fare on the other channels, less what card payments paid of them that day; the message names the channels and the day. Only more than AED 99 left is asked for. A channel that did not collect, has no amount yet, or is a hotel account matched by name is left out and the rest is still sent; held only when nothing certain is left. Sent once Uber’s figures for the day are in and the card payments sheet has the day; given up at 20:00 if they never are.</div>',
     '<div><b>Register a trip:</b> a journey with no booking, 4 km or more, no booking within 30 minutes, exactly one driver named — the last driver of the car counts, however long ago their last Uber trip — and both places with a readable name. Never the word “unauthorized”. Found between 23:00 and 07:00, it waits until 07:00, and is checked again before it goes.</div>',
     '<div><b>Whose number:</b> Uber’s first, HR’s second. Never a number on two people’s records, never one of two different numbers, never a record held back as possibly the same person as another.</div>',
     '<div><b>Stopping them:</b> Access → Settings has a switch for each.</div>',
