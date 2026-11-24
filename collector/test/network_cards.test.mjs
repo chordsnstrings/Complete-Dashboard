@@ -672,6 +672,19 @@ console.log('\n§11 approved from August: the ceiling, the tiles and the history
   const sh = await cardSheet(q);
   check('a row typed with a future date does not move the sheet\'s last day', sh.covers_to === '2026-11-21' && sh.future_rows === 1, JSON.stringify(sh));
   await q(`DELETE FROM card_payment WHERE row_no = 998`);
+  /* Finance's Cash in hand (the operator, 2026-11-24: "add Cash In Hand to
+     the Finance page too"): the drivers' cash trips over the range less the
+     card payments (POS) that paid them — the driver tile's figure, summed. */
+  const mix = (await B('/api/settlement/mix?from=2026-11-01&to=2026-11-30')).body?.cash_in_hand || {};
+  const [tcN] = await q(`SELECT coalesce(sum(cash_amount), 0)::float AS v, count(*)::int AS n FROM trip_cash
+      WHERE requested_at >= ('2026-11-01'::date::timestamp AT TIME ZONE 'Asia/Dubai') AND requested_at < ('2026-12-01'::date::timestamp AT TIME ZONE 'Asia/Dubai')`);
+  const offNov = ((await B('/api/card/notes?from=2026-11-01&to=2026-11-30')).body?.drivers || []).reduce((a, r) => a + r.on_cash, 0);
+  check('Finance: the fleet\'s cash in hand is its drivers\' cash trips less the card that paid them, over the same days',
+    mix.trips === tcN.n && mix.cash === r2_(tcN.v) && mix.card === r2_(offNov) && mix.value === r2_(tcN.v - offNov) && mix.absent === null,
+    JSON.stringify([mix, tcN, offNov]));
+  const mixF = (await B('/api/settlement/mix?from=2026-11-01&to=2026-11-30&fleet=ecosine')).body?.cash_in_hand || {};
+  check('…for one fleet the card cannot be split, so it is a ceiling with the reason, never a netted guess', mixF.value === null
+    && /placed on a person/.test(mixF.absent || ''), JSON.stringify(mixF));
   const hf = (await B('/api/history?page=deposits&fleet=ecosine')).body?.series?.cash_ceiling || {};
   check('…but asked for one fleet it is not netted, and says why (a card payment is placed on a person)', hf.card_taken_off_from === null
     && /placed on a person/.test(hf.card_not_taken_off || ''), JSON.stringify([hf.card_taken_off_from, hf.card_not_taken_off]));

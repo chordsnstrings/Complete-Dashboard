@@ -130,6 +130,24 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       posCard = net.absent ? { on_cash: null, from: null, to: null, absent: net.absent }
         : { on_cash: round([...net.by.values()].reduce((a, r) => a + (r.on_cash || 0), 0), 2), from: net.from, to: net.card_to, absent: null };
     }
+    /* CASH IN HAND, the fleet's (the operator, 2026-11-24: "add Cash In Hand
+       to the Finance page too"): the driver tile's definition summed over the
+       fleet — the drivers' own cash trips (trip_cash: completed, cash and
+       cash-driver, the platform's own cash figure where it filed one) less
+       what card payments (POS) paid of them, from 1 Aug 2026. Read from
+       trip_cash itself (it has no local_day, so not through F), over the same
+       Dubai days, platform and fleet. A card part that cannot be split or read
+       leaves it a ceiling, said. */
+    const [chRow] = await q(
+      `SELECT count(*)::int trips, count(*) FILTER (WHERE cash_amount IS NULL)::int unvalued, sum(cash_amount) AS cash
+         FROM trip_cash
+        WHERE requested_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Dubai')
+          AND requested_at <  (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+          AND ($3::text IS NULL OR platform = $3) AND ($4::text IS NULL OR fleet_id = $4)`, p);
+    const chCash = chRow?.trips && chRow.unvalued < chRow.trips ? round(NUM(chRow.cash) || 0, 2) : (chRow?.trips ? null : 0);
+    const cashInHand = { trips: chRow?.trips || 0, unvalued: chRow?.unvalued || 0, cash: chCash,
+      card: posCard.on_cash, card_from: posCard.from, card_to: posCard.to, absent: posCard.absent,
+      value: chCash == null || posCard.on_cash == null ? null : round(chCash - posCard.on_cash, 2) };
 
     const total = rows.reduce((a, r) => a + r.trips, 0);
     const labelled = rows.filter((r) => r.settlement_class);
@@ -153,6 +171,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       pos_driver: { trips: posRow?.trips || 0, priced_trips: posRow?.priced_trips || 0,
         revenue: posRow?.priced_trips ? round(NUM(posRow.revenue) || 0, 2) : null },
       pos_card: posCard,
+      cash_in_hand: cashInHand,
       classes: [...byClass.values()].map((c) => ({
         settlement_class: c.settlement_class,
         label: LABEL[c.settlement_class] || c.settlement_class,

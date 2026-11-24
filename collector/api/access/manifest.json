@@ -6475,7 +6475,9 @@
      "classes[].priced_trips",
      "classes[].foc_trips",
      "pos_driver.trips",
-     "pos_driver.priced_trips"
+     "pos_driver.priced_trips",
+     "cash_in_hand.trips",
+     "cash_in_hand.unvalued"
     ]
    }
   ],

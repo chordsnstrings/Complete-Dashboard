@@ -4108,6 +4108,26 @@ function financeTiles({ k, settle, cash, tipAll, tipTotal, fareTotal, coverage }
               : 'no booking of any kind falls in this range, so no cash was measured either way',
         tone: cash && cash.priced_trips < cash.trips ? 'warn' : null };
     })(),
+    /* CASH IN HAND, the fleet's (the operator, 2026-11-24: "add Cash In Hand
+       to the Finance page too"): the drivers' own cash trips less what card
+       payments (POS) paid of them, from 1 Aug 2026 — the driver page's tile,
+       summed (/api/settlement/mix cash_in_hand). Its cash is the drivers'
+       completed cash trips, so it is not the measured portion beside it, which
+       also counts cash a supervisor collected; the sub says which. */
+    (() => {
+      const ch = settle?.cash_in_hand || null;
+      if (!ch) return { label: 'Cash in hand', na: 'the settlement read did not carry it' };
+      if (!ch.trips) return { label: 'Cash in hand', value: money(0), sub: 'no completed cash trip in a driver’s hand in this range' };
+      if (ch.cash == null) return { label: 'Cash in hand', value: 'not reported', sub: `${fmt(ch.trips)} completed cash trips, none valued yet` };
+      return { label: 'Cash in hand', value: money(ch.value != null ? ch.value : ch.cash),
+        sub: (ch.value != null
+          ? `${money(ch.cash)} of drivers’ cash trips (${fmt(ch.trips)} completed, the platform’s own cash figure where it filed one) `
+            + `less ${money(ch.card)} that card payments (POS) paid of them, fares from ${ch.card_from}${ch.card_to ? ` to ${ch.card_to}` : ''}`
+          : `at most this: ${money(ch.cash)} of drivers’ cash trips, card payments (POS) not taken off — ${ch.absent}`)
+          + (ch.unvalued ? ` · ${fmt(ch.unvalued)} not valued yet` : '')
+          + ' · the hotel’s card-machine fares were never cash',
+        tone: ch.value == null || ch.unvalued ? 'warn' : null };
+    })(),
     { label: 'Tips', value: tipTotal ? money(tipTotal) : '—',
       sub: fareTotal
         ? `${((tipTotal / fareTotal) * 100).toFixed(2)}% of net fare`
@@ -4721,6 +4741,7 @@ async function financeContract(root) {
     { ...base['Bank collection'], delta: fr.length ? finWow(fr, 'payout') : null, spark: fr.length ? spark('payout') : null },
     base['On-trip revenue'],
     base['Cash trips (including POS) — measured portion'],
+    base['Cash in hand'],
     fin ? { label: 'Gross revenue', value: money(ft.fares),
       sub: `gross fare on ${fmt(ft.priced_trips)} priced of ${fmt(ft.bookings)} bookings — what riders were charged, never added to Net earnings`,
       delta: finWow(fr, 'revenue'), spark: spark('revenue') }

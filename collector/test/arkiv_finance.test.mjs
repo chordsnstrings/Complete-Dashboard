@@ -48,8 +48,11 @@ if (want('finance')) {
     classic = await rowTiles(page, '#view .kpis .kpi');
     const r = await page.evaluate(() => ({ band: !!document.querySelector('#view .cband'),
       donut: !!document.querySelector('#view svg.donut'), pills: document.querySelectorAll('#view .pill').length }));
-    check('old skin: the old page — no 00 band, its eight tiles in one row, the payment ring',
-      !r.band && Object.keys(classic).length === 8 && r.donut, JSON.stringify({ ...r, tiles: Object.keys(classic) }));
+    /* Nine since 2026-11-24: Cash in hand (the operator: "add Cash In Hand to
+       the Finance page too"). */
+    check('old skin: the old page — no 00 band, its nine tiles in one row (Cash in hand beside the cash tile), the payment ring',
+      !r.band && Object.keys(classic).length === 9 && r.donut
+      && Object.keys(classic).indexOf('Cash in hand') === Object.keys(classic).indexOf('Cash trips (including POS) — measured portion') + 1, JSON.stringify({ ...r, tiles: Object.keys(classic) }));
     await ctx.close();
   }
   {
@@ -61,13 +64,18 @@ if (want('finance')) {
     check('00 leads and the verdict is its statement (ruling 7)', s.first === 'cband' && s.vdctIn00, s.first);
     const vfig = await txtOf(page, '#view .cband .vdct-fig > b');
     check('no tile repeats the verdict\'s figure (ruling 7)', !Object.values(s.values).includes(vfig) || !vfig, `${vfig} ${JSON.stringify(s.values)}`);
-    check('six tiles in one band, Money in the hero with the kpis answer\'s accounted total',
-      s.glance === 6 && s.glanceBands === 1 && s.hero === 'Net earnings' && s.values['Net earnings'] === aed(K.accounted), JSON.stringify(s.values));
+    check('seven tiles in one band, Net earnings the hero with the kpis answer\'s accounted total',
+      s.glance === 7 && s.glanceBands === 1 && s.hero === 'Net earnings' && s.values['Net earnings'] === aed(K.accounted), JSON.stringify(s.values));
     check('Platform payouts, On-trip revenue and Cash collected carry the old page\'s figures exactly',
       ['Bank collection', 'On-trip revenue', 'Cash trips (including POS) — measured portion']
         .every((l) => s.values[l] && s.values[l] === classic[l]), JSON.stringify([s.values, classic]));
     /* The operator, 2026-11-24: cash trips INCLUDING POS — the hotel's fares
        paid on the driver's card machine are added, and said. */
+    check('Cash in hand: the drivers\' cash trips less the card payments (POS) that paid them, and what each part is',
+      s.values['Cash in hand'] === 'AED 29,600.00'
+      && /AED 30,800\.00 of drivers’ cash trips \(400 completed, the platform’s own cash figure where it filed one\) less AED 1,200\.00 that card payments \(POS\) paid of them, fares from 2026-08-01 to 2026-11-21/
+        .test(s.subs['Cash in hand'] || '') && /12 not valued yet/.test(s.subs['Cash in hand'] || ''),
+      JSON.stringify([s.values['Cash in hand'], s.subs['Cash in hand']]));
     check('Bank collection adds the POS payments, which come into the bank, and says what they are',
       /plus AED 22,600(\.00)? of POS payments: AED 21,400(\.00)? hotel fares on the card machine and AED 1,200(\.00)? of card payments that paid cash trips/
         .test(s.subs['Bank collection'] || ''), s.subs['Bank collection']);
