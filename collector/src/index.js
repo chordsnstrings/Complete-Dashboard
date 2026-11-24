@@ -279,10 +279,10 @@ async function main() {
     /* One driver's movement per day (src/movement_rollup.js, sql/schema_v129.sql)
        for the driver page's range view. Hourly at :47, clear of the :15/:45
        rollups and the :37 incremental tail: today each hour; yesterday at
-       00:47 and 03:47; three older days of backfill a pass (back to 21 Aug)
+       00:47 and 03:47; twelve older days of backfill a pass (back to 21 Aug)
        only between 00:47 and 05:47 Dubai, when the collectors are quiet — a
-       day page is 2–4 s of reads (measured 2026-11-24) and a day is ~250
-       people. One pass at a
+       whole day's pass took ~90 s on production (2026-11-24, 13:47 UTC), so
+       twelve is ~18 minutes, inside the hour. One pass at a
        time: a pass still running when the next is due is skipped, not
        stacked. */
     let movementBusy = false;

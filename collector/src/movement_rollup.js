@@ -388,13 +388,14 @@ const prevDay = (d) => new Date(Date.parse(`${d}T00:00:00Z`) - 86400000).toISOSt
 /** The hourly pass: today always; yesterday at 00:47 and 03:47 Dubai (late
     timeline and tracker rows land after midnight); and from 00:47 to 05:47
     only, `backfillDays` older days per pass walking back from the cursor to
-    FLOOR_DAY — eighteen a night, so the ~95 days to the floor take about
-    five nights. */
+    FLOOR_DAY. A whole day's pass took about 90 s on production (13:47 UTC,
+    2026-11-24), so twelve a pass is ~18 minutes, inside the hour — seventy-
+    two a night, and the ~95 days to the floor take about two nights. */
 const STATE = (key) => q0 => q0(`SELECT value FROM source_state WHERE source = 'movement_rollup' AND fleet_id = '-' AND key = $1`, [key]);
 const setState = (q, key, value) => q(`INSERT INTO source_state (source, fleet_id, key, value, updated_at) VALUES ('movement_rollup', '-', $1, $2, now())
   ON CONFLICT (source, fleet_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [key, value]);
 
-export async function movementRollupTick(q, { now = Date.now(), backfillDays = 3, tx = null } = {}) {
+export async function movementRollupTick(q, { now = Date.now(), backfillDays = 12, tx = null } = {}) {
   const today = dubaiDay(now);
   const hour = new Date(now + 4 * 3600000).getUTCHours();
   const done = [];

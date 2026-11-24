@@ -3483,7 +3483,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const failedDays = days.filter((r) => r.failed);
     const unexamined = [
       coverage.days_before_floor ? `${nDays(coverage.days_before_floor)} of this window ${coverage.days_before_floor === 1 ? 'is' : 'are'} before ${MOVEMENT_FLOOR_DAY}, when live collection began` : null,
-      coverage.days_not_built ? `${nDays(coverage.days_not_built)} ${coverage.days_not_built === 1 ? 'has' : 'have'} not been built yet (it is built back from today, eighteen days a night)` : null,
+      coverage.days_not_built ? `${nDays(coverage.days_not_built)} ${coverage.days_not_built === 1 ? 'has' : 'have'} not been built yet (it is built back from today, about seventy days a night)` : null,
       failedDays.length ? `${nDays(failedDays.length)} could not be built — ${failedDays[0].absent.replace(/^the movement for this day could not be built: /, '')}` : null,
       /* Today is rebuilt every hour, so a day with no row for this person may
          only mean the last pass came before their first booking or status. */
