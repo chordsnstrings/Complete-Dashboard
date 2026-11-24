@@ -5227,6 +5227,22 @@
  },
  {
   "method": "GET",
+  "path": "/api/probe/movement",
+  "subject": "CRED",
+  "carries": [
+   "CRED"
+  ],
+  "grain": "none",
+  "fields": [],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": "collector.probe",
+  "notes": "api/probe_movement.js handler, mounted from probeRoutes in api/probe.js. ?which= one of fms_activity, yango_track, bolt_states, cabman_cadence (anything else 400); optional fleet (ecosine|egari, else 400) and small integers (plates, days, back, limit, calls, interval), all clamped. Body: {which, ran_at, elapsed_ms, asked, fleets[...], notes[], error?} \u2014 field names with fill rates, counts, dates, duration/spacing stats, and enumeration-shaped distributions only (acttype, order_status, state). Cars and orders are indexed (car 1, order 1), drivers a count; no coordinate (fill rates only), id, plate, name, phone, address or credential; every string is scrubbed of configured credentials and of the plates/order ids the request chose. SIDE EFFECTS: calls FMS GetVehicleActivity with each fleet's username AND password in the URL query, Yango's track with the API key pair, Bolt's getFleetStateLogs on a freshly minted fleet-integration token (Egari, and one Ecosine call to record its refusal), or CABMAN GetIVDData up to six times; reads telemetry_snapshot and trip to choose cars and orders. Writes nothing."
+ },
+ {
+  "method": "GET",
   "path": "/api/probe/results",
   "subject": "SYS",
   "carries": [

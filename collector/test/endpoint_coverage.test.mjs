@@ -213,6 +213,10 @@ const EXEMPT = {
   '/api/probe/fms/window': 'operator tool: the same question of FMS, whose history has a 152-day hole. '
     + 'Our records say those windows were asked and answered empty, and an empty list is '
     + 'indistinguishable from a malformed request in a row count — this asks again and reports the shape',
+  '/api/probe/movement': 'operator tool: asks four documented movement surfaces we have never called — FMS '
+    + 'GetVehicleActivity, Yango\u2019s order track, Bolt\u2019s getFleetStateLogs, CABMAN\u2019s fix cadence — and '
+    + 'reports their shape, so whether to collect them is decided on measurements. Asked once per question, '
+    + 'from a terminal; not a page',
   '/api/driver/vehicles': 'the per-vehicle rollup of /api/driver/custody, which is what the page draws; '
     + 'kept because it is an address somebody may have bookmarked, and it now resolves the whole person '
     + 'and honours the window rather than answering about one account and all of history',

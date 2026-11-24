@@ -163,7 +163,7 @@ const BY_ROUTE = {
     'GET /api/export/target-month.xlsx'],
   settings: ['GET /api/settings', 'PUT /api/settings', 'POST /api/settings/paste'],
   run: ['POST /api/analyst/run', 'POST /api/uber/fares/run', 'POST /api/settings/trigger'],
-  probe: ['GET /api/probe/fms/window', 'GET /api/probe/uber/realtime', 'GET /api/probe/uber/rest',
+  probe: ['GET /api/probe/fms/window', 'GET /api/probe/movement', 'GET /api/probe/uber/realtime', 'GET /api/probe/uber/rest',
     'GET /api/probe/uber/window', 'GET /api/probe/yango', 'GET /api/probe/yango/keyapi',
     'GET /api/probe/yango/ledger', 'GET /api/probe/yango/weekly-rebuild', 'GET /api/probe/results'],
   raw: ['GET /api/probe/uber/timeline', 'GET /api/probe/zero-distance', 'GET /api/schema/raw-fields',
