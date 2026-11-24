@@ -2091,6 +2091,20 @@ async function tabTerritory(root, id) {
       layerBar.append(b);
     });
     mapP.body.append(legend, capNote);
+    /* The denominator the booked layer is drawn over, kept whatever layer is
+       showing (FIX-STATUS PLC, 2026-11-16, on production): the table stops at
+       25 areas, so it is over EVERY pickup — `placement.total` — and a
+       one-cluster layer beside a table of 310 pickups must say how few of
+       them carry a position. A response from before PLC falls back to the
+       table's rows. */
+    const areaTrips = Number(terr.placement?.total) || (terr.areas || []).reduce((a, x) => a + (+x.n || 0), 0);
+    const plotted = terr.pickups.reduce((a, x) => a + (+x.n || 0), 0);
+    if (pts.booked.length && areaTrips > plotted) {
+      mapP.body.append(el('p', 'cap',
+        `${fmt(plotted)} of ${fmt(areaTrips)} pickups carry coordinates and are on the Booked addresses layer. The other `
+        + `${fmt(areaTrips - plotted)} have no booking position — the table beside this is over all of them, placed by their `
+        + 'address or the car\'s tracker, so it will name areas the layer does not show.'));
+    }
     /* The map is drawn with nothing on it rather than replaced by a
        paragraph: an empty map of the emirate reads as "nothing to plot",
        and the page keeps its shape between drivers. */
