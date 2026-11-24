@@ -50,9 +50,13 @@ if (want('finance')) {
       donut: !!document.querySelector('#view svg.donut'), pills: document.querySelectorAll('#view .pill').length }));
     /* Nine since 2026-11-24: Cash in hand (the operator: "add Cash In Hand to
        the Finance page too"). */
-    check('old skin: the old page — no 00 band, its nine tiles in one row (Cash in hand beside the cash tile), the payment ring',
-      !r.band && Object.keys(classic).length === 9 && r.donut
-      && Object.keys(classic).indexOf('Cash in hand') === Object.keys(classic).indexOf('Cash trips (including POS) — measured portion') + 1, JSON.stringify({ ...r, tiles: Object.keys(classic) }));
+    /* Ten since 2026-11-24: Cash trips (including POS), POS payments and Cash
+       in hand in a row, on the driver page's definition (the operator: "yes,
+       use the driver page's definition on Finance"). */
+    check('old skin: the old page — no 00 band, its ten tiles in one row (cash trips, POS payments, cash in hand in a row), the payment ring',
+      !r.band && Object.keys(classic).length === 10 && r.donut
+      && Object.keys(classic).indexOf('POS payments') === Object.keys(classic).indexOf('Cash trips (including POS)') + 1
+      && Object.keys(classic).indexOf('Cash in hand') === Object.keys(classic).indexOf('POS payments') + 1, JSON.stringify({ ...r, tiles: Object.keys(classic) }));
     await ctx.close();
   }
   {
@@ -64,10 +68,10 @@ if (want('finance')) {
     check('00 leads and the verdict is its statement (ruling 7)', s.first === 'cband' && s.vdctIn00, s.first);
     const vfig = await txtOf(page, '#view .cband .vdct-fig > b');
     check('no tile repeats the verdict\'s figure (ruling 7)', !Object.values(s.values).includes(vfig) || !vfig, `${vfig} ${JSON.stringify(s.values)}`);
-    check('seven tiles in one band, Net earnings the hero with the kpis answer\'s accounted total',
-      s.glance === 7 && s.glanceBands === 1 && s.hero === 'Net earnings' && s.values['Net earnings'] === aed(K.accounted), JSON.stringify(s.values));
-    check('Platform payouts, On-trip revenue and Cash collected carry the old page\'s figures exactly',
-      ['Bank collection', 'On-trip revenue', 'Cash trips (including POS) — measured portion']
+    check('eight tiles in one band, Net earnings the hero with the kpis answer\'s accounted total',
+      s.glance === 8 && s.glanceBands === 1 && s.hero === 'Net earnings' && s.values['Net earnings'] === aed(K.accounted), JSON.stringify(s.values));
+    check('Bank collection, On-trip revenue and the three cash tiles carry the old page\'s figures exactly',
+      ['Bank collection', 'On-trip revenue', 'Cash trips (including POS)', 'POS payments', 'Cash in hand']
         .every((l) => s.values[l] && s.values[l] === classic[l]), JSON.stringify([s.values, classic]));
     /* The operator, 2026-11-24: cash trips INCLUDING POS — the hotel's fares
        paid on the driver's card machine are added, and said. */
@@ -79,9 +83,14 @@ if (want('finance')) {
     check('Bank collection adds the POS payments, which come into the bank, and says what they are',
       /plus AED 22,600(\.00)? of POS payments: AED 21,400(\.00)? hotel fares on the card machine and AED 1,200(\.00)? of card payments that paid cash trips/
         .test(s.subs['Bank collection'] || ''), s.subs['Bank collection']);
-    check('the cash tile adds the hotel\'s card-machine (POS) fares, and says so',
-      /plus AED 21,400(\.00)? from 190 hotel bookings paid on the driver’s card machine \(POS\)/.test(s.subs['Cash trips (including POS) — measured portion'] || ''),
-      s.subs['Cash trips (including POS) — measured portion']);
+    check('the cash tile is the driver page\'s: the drivers\' completed cash trips plus the hotel\'s card-machine (POS) fares, and says so',
+      s.values['Cash trips (including POS)'] === 'AED 52,200.00'
+      && /AED 30,800\.00 from 400 completed cash trips .* plus AED 21,400\.00 from 190 hotel fares paid on the driver’s card machine \(POS\)/.test(s.subs['Cash trips (including POS)'] || ''),
+      JSON.stringify([s.values['Cash trips (including POS)'], s.subs['Cash trips (including POS)']]));
+    check('…so the three tiles read across: cash trips (including POS) − POS payments = cash in hand (52,200 − 22,600 = 29,600)',
+      s.values['POS payments'] === 'AED 22,600.00' && s.values['Cash in hand'] === 'AED 29,600.00'
+      && /AED 21,400\.00 from 190 hotel fares on the driver’s card machine · AED 1,200\.00 of card payments \(Network International\) that paid cash trips/.test(s.subs['POS payments'] || ''),
+      JSON.stringify([s.values['POS payments'], s.subs['POS payments'], s.values['Cash in hand']]));
     check('Trip value booked is the daily answer\'s fares total, and never called Money in',
       s.values['Gross revenue'] === aed(F.totals.fares) && /never added to Net earnings/.test(s.subs['Gross revenue']), s.subs['Gross revenue']);
     const derived = F.rows.filter((r) => r.money_derived);
