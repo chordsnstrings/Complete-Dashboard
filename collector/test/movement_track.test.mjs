@@ -18,7 +18,8 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
-import { segmentRows, routePieces, parkingSpots } from '../api/movement_track.js';
+import { segmentRows, routePieces, parkingSpots, wholeDays } from '../api/movement_track.js';
+import { readFileSync } from 'node:fs';
 import { minuteStatus, buildDay } from '../src/movement_rollup.js';
 
 let pass = 0, fail = 0;
@@ -47,6 +48,11 @@ console.log('\n§1 the day as rows');
   check('a stop held across a quiet tracker is said as inferred; one watched throughout is not', quiet.inferred === true && st.inferred === false
     && quiet.offline_min === 66, JSON.stringify(quiet));
   check('a silence keeps how far the car moved while nobody was watching', sil.kind === 'silence' && sil.km === 7.2 && sil.area === 'Al Garhoud');
+  /* Review, 2026-11-24: 10:00:50–10:20:10 is 19 minutes over 20 minute-marks. */
+  const [odd] = segmentRows([{ kind: 'stop', s: mm('10:00'), e: mm('10:20'), minutes: 19, lat: 25.2, lng: 55.3, plate: 'L1' }],
+    minuteStatus({ statusAll: [{ s: 0, e: 1440, status: 'online' }] }));
+  check('a stop\'s split always adds up to the stop: 19 minutes, 19 waiting', odd.minutes === 19 && odd.wait_min + odd.ontrip_min + odd.offline_min === 19,
+    JSON.stringify(odd));
 }
 
 /* ── §2 ─────────────────────────────────────────────────────────────────── */
@@ -67,6 +73,8 @@ console.log('\n§2 the path');
   const two = routePieces([F('08:00', 25.20, 55.30, { speed: 40, w: 'a' }), F('08:05', 25.215, 55.31, { speed: 40, w: 'a' }),
     F('08:10', 25.23, 55.32, { speed: 40, w: 'b' }), F('08:15', 25.245, 55.33, { speed: 40, w: 'b' })]);
   check('two custody windows of the same car are never joined by a line', two.length === 2 && two.every((p) => p.points.length === 2), JSON.stringify(two));
+  const bag = routePieces(Array.from({ length: 11 }, (_, i) => F(`08:${String(i * 5).padStart(2, '0')}`, 25.2 + (i % 2) * 0.0002, 55.3, { speed: 0, passenger: true })));
+  check('a parked car with the seat flagged (a bag on the seat) draws no "passenger" line through its stop', bag.length === 0, JSON.stringify(bag));
   const unk = routePieces([F('08:00', 25.20, 55.30, { speed: 40, passenger: null }), F('08:05', 25.215, 55.31, { speed: 40, passenger: null })]);
   check('a drive with the seat unreported is its own state, never "empty"', unk[0]?.state === 'seat_unknown', JSON.stringify(unk));
 }
@@ -85,6 +93,12 @@ console.log('\n§3 where they park');
   const home = spots[0];
   check('two nights 60 m apart are one place: two visits, two nights, the time summed', spots.length === 2 && home.visits === 2
     && home.nights === 2 && home.minutes === 660 && home.days === 2 && home.offline_min === 660, JSON.stringify(home));
+  const split = parkingSpots([S('2026-10-12', 0, 90, 25.1100, 55.2000), S('2026-10-12', 170, 300, 25.1101, 55.2001)]);
+  check('one night split by a missed heartbeat into two stops is one night, not two', split[0].visits === 2 && split[0].nights === 1, JSON.stringify(split));
+  const cut = wholeDays([{ day: '2026-10-12' }, { day: '2026-10-12' }, { day: '2026-10-11' }], 3, ['2026-10-10', '2026-10-11', '2026-10-12']);
+  check('over the read limit, whole days only: the part-day is dropped and every day not drawn is named',
+    cut.rows.length === 2 && cut.rows.every((r) => r.day === '2026-10-12') && cut.notDrawn.join() === '2026-10-10,2026-10-11', JSON.stringify(cut));
+  check('…and under it nothing is dropped', wholeDays([{ day: 'a' }], 3, ['a']).notDrawn.length === 0);
   check('…with the usual hours, and the longest place first', home.usual_from_min === 0 && home.usual_to_min === 330 && spots[1].area === 'Deira'
     && spots[1].wait_min === 40 && spots[1].nights === 0, JSON.stringify(spots));
 }
@@ -157,6 +171,34 @@ check('an unknown driver is a 404, not an empty map', nobody.status === 404, Str
 const empty = (await get(`/api/driver/movement/track?id=${K}&from=2026-07-01&to=2026-07-31`)).body;
 check('a window with nothing built says so, never an empty route as if he never moved', empty.days.length === 0 && /no day in this window/.test(empty.absent || ''),
   JSON.stringify(empty));
+
+/* A day the tracker never saw (review, 2026-11-24): a booking names the car,
+   no fix in his hours. The day page's own reason, never "the car did not
+   stop". */
+const Z = 'zzzzzzzz-3333-4333-8333-000000000077';
+const [{ id: ZID }] = await q(`INSERT INTO driver (fleet_id, full_name) VALUES ('ecosine','Test Driver Zulu') RETURNING id`);
+await q(`INSERT INTO driver_platform_id (platform, external_id, driver_id) VALUES ('uber',$1,$2)`, [Z, ZID]);
+await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name, requested_at, ended_at, status, price, distance_km)
+         VALUES ('uber','z-1','ecosine','L39999',$1,'Test Driver Zulu',$2::timestamptz,$3::timestamptz,'completed',20,4)`, [Z, T('15:00'), T('15:20')]);
+await buildDay(q, { day: D, now: Date.parse(`${D}T23:30:00+04:00`) + 86400000 });
+const zt = (await get(`/api/driver/movement/track?id=${Z}&from=2026-10-01&to=2026-10-31`)).body;
+check('a day the tracker never saw says so, in the day page\'s words — no route, and not "the car did not stop"',
+  zt.routes.length === 0 && zt.days[0]?.absent && /reported no position/.test(zt.absent || '') && zt.days[0].pieces === 0, JSON.stringify(zt).slice(0, 400));
+/* A person-day that could not be built says so on the track too. */
+const D2 = '2026-10-12';
+await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name, requested_at, ended_at, status, price, distance_km)
+         VALUES ('uber','k-2','ecosine','L30001',$1,'Test Driver Kilo',$2::timestamptz,$3::timestamptz,'completed',30,5)`, [K, `${D2}T10:00:00+04:00`, `${D2}T10:20:00+04:00`]);
+await buildDay(q, { day: D2, resolve: async () => ({ unresolvable: 'spine-unreadable' }) });
+const ft = (await get(`/api/driver/movement/track?id=${K}&from=${D2}&to=${D2}`)).body;
+check('a day that could not be built says so, with its reason — never an empty map as if he did not move',
+  ft.days[0]?.failed === true && /could not be built/.test(ft.absent || '') && /person register/.test(ft.absent || ''), JSON.stringify(ft).slice(0, 300));
+/* A day built before the granular view: positions, no log yet. */
+await q(`DELETE FROM driver_move_segment WHERE person_id = $1`, [PID]);
+const pre = (await get(`/api/driver/movement/track?id=${K}&from=2026-10-01&to=2026-10-31`)).body;
+check('a day built before the granular view is named, to be rebuilt overnight', pre.pre_granular_days?.includes(D), JSON.stringify(pre.pre_granular_days));
+const v130 = readFileSync(new URL('../sql/schema_v130.sql', import.meta.url), 'utf8');
+check('…and schema_v130 clears the backfill cursor once, so the backfill walks back over those days again',
+  /DELETE FROM source_state WHERE source = 'movement_rollup' AND fleet_id = '-' AND key = 'backfilled_to'/.test(v130));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

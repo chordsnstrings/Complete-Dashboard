@@ -58,6 +58,7 @@ import { km } from '../api/where_routes.js';
 import { dayTrips, dayOnline, dayMovement, MOVEMENT_FLOOR_DAY } from '../api/driver_day_core.js';
 import { driverScope, PKEY } from '../api/driver_routes.js';
 import { log } from './log.js';
+import { clearPersonMapCache } from '../api/person_map.js';
 
 export const CELL_DEG = 0.005;
 export const POINT_TOLERANCE_S = 300;
@@ -363,6 +364,10 @@ async function writeFailedDay(q, { personId, day, why, tx = null }) {
 /** Every person who worked `day`, one at a time (the database is shared with
     the collectors; one person-day is a handful of indexed reads). */
 export async function buildDay(q, { day, now = null, resolve = null, tx = null }) {
+  /* The person register is cached for 30 s (api/person_map.js); a pass
+     reads it fresh, or a person created in those 30 s fails as "not on the
+     register" for the day (found in test, 2026-11-24). */
+  clearPersonMapCache();
   const r = resolve || driverScope({ q, wrap: (f) => f }).resolve;
   const persons = await personsForDay(q, day);
   let built = 0; let failed = 0;

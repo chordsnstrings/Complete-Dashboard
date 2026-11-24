@@ -21,7 +21,7 @@ import { onlineSpansSql } from './online_span_sql.js';
 import { SPANS_SQL, STALE_AFTER_MIN } from './status_routes.js';
 import { seatOf } from './where_routes.js';
 import { REAL_FIX } from './telemetry_sql.js';
-import { routePieces, parkingSpots } from './movement_track.js';
+import { routePieces, parkingSpots, wholeDays, TRACK_FIX_CAP } from './movement_track.js';
 import { dayTrips, dayOnline, dayMovement, MOVEMENT_FLOOR_DAY } from './driver_day_core.js';
 /* "L1 and L2" for a sentence; the page's own helper lives in the browser. */
 const listWordsPlain = (xs) => (xs.length < 2 ? (xs[0] || '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
@@ -3546,12 +3546,17 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          FROM driver_move_window w
          JOIN telemetry_snapshot s ON s.plate = w.plate AND s.source = w.source
           AND s.captured_at >= (w.day::timestamp AT TIME ZONE 'Asia/Dubai') + w.from_min * interval '1 minute'
-          AND s.captured_at <  (w.day::timestamp AT TIME ZONE 'Asia/Dubai') + (w.to_min + 1) * interval '1 minute'
+          /* A window ending at midnight stops at midnight: the next day's
+             00:00 fixes are that day's (review, 2026-11-24). */
+          AND s.captured_at <  (w.day::timestamp AT TIME ZONE 'Asia/Dubai') + LEAST(w.to_min + 1, 1440) * interval '1 minute'
         WHERE w.person_id = $1 AND w.day BETWEEN $2::date AND $3::date AND ${REAL_FIX('s.')}
-        ORDER BY w.day, s.captured_at
-        LIMIT 40000`, P) : [];
+        ORDER BY w.day DESC, s.captured_at
+        LIMIT ${TRACK_FIX_CAP}`, P) : [];
+    /* Over the cap, whole days only, newest first; the days not drawn are
+       named (api/movement_track.js wholeDays). */
+    const trimmed = wholeDays(fixRows, TRACK_FIX_CAP, wins.filter((w) => w.source).map((w) => w.day));
     const byDay = new Map();
-    for (const r of fixRows) {
+    for (const r of trimmed.rows) {
       if (!byDay.has(r.day)) byDay.set(r.day, []);
       byDay.get(r.day).push({ plate: r.plate, source: r.source, at: new Date(r.at).toISOString(), m: r.m,
         lat: Number(r.lat), lng: Number(r.lng), speed: r.speed == null ? null : Number(r.speed),
@@ -3559,23 +3564,47 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     }
     const routes = [];
     for (const [day, fs] of byDay) for (const piece of routePieces(fs)) routes.push({ day, ...piece });
+    routes.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : a.s - b.s));
+    /* The day rows, for what each day's own reading said: a day the tracker
+       never saw keeps the day page's sentence (review, 2026-11-24 — a silent
+       day read "the car did not stop"), and a day built before the granular
+       view has a row with positions but no log yet. */
+    const dayRows = await q(
+      `SELECT to_char(day, 'YYYY-MM-DD') AS day, fixes, absent, failed FROM driver_move_day
+        WHERE person_id = $1 AND day BETWEEN $2::date AND $3::date`, P);
+    const dayRow = new Map(dayRows.map((r) => [r.day, r]));
+    const segDays = new Set(segs.map((g) => g.day));
+    const preGranular = dayRows.filter((r) => !r.failed && r.fixes > 0 && !segDays.has(r.day)).map((r) => r.day).sort();
     const stops = segs.filter((g) => g.kind === 'stop');
     const drives = segs.filter((g) => g.kind === 'drive');
-    const days = [...new Set(segs.map((g) => g.day).concat(wins.map((w) => w.day)))].sort().map((day) => {
+    const failedRows = dayRows.filter((r) => r.failed);
+    const days = [...new Set(segs.map((g) => g.day).concat(wins.map((w) => w.day), failedRows.map((r) => r.day)))].sort().map((day) => {
       const sd = segs.filter((g) => g.day === day);
       const st = sd.filter((g) => g.kind === 'stop');
+      const dr = dayRow.get(day);
       return { day, stops: st.length, drives: sd.filter((g) => g.kind === 'drive').length,
+        pieces: routes.filter((r) => r.day === day).length, fixes: (byDay.get(day) || []).length,
+        not_drawn: trimmed.notDrawn.includes(day),
+        failed: !!dr?.failed,
+        absent: dr && !(dr.fixes > 0) ? (dr.absent || 'the tracker reported no position in their hours') : null,
         silences: sd.filter((g) => g.kind === 'silence').length,
         km: Math.round(sd.filter((g) => g.kind === 'drive').reduce((a, g) => a + (g.km || 0), 0) * 10) / 10,
         stopped_min: st.reduce((a, g) => a + g.minutes, 0),
         first_min: sd.length ? Math.min(...sd.map((g) => g.s_min)) : null, last_min: sd.length ? Math.max(...sd.map((g) => g.e_min)) : null,
         plates: [...new Set(wins.filter((w) => w.day === day).map((w) => w.plate))] };
     });
+    /* The reason there is nothing to draw, from what was checked. */
+    const silent = days.filter((x) => x.absent && !x.failed);
+    const failedDays = days.filter((x) => x.failed);
+    const absent = routes.length || stops.length ? null
+      : failedDays.length && !silent.length ? `${failedDays.length === 1 ? 'the day' : `${failedDays.length} days`} could not be built — ${failedDays[0].absent.replace(/^the movement for this day could not be built: /, '')}`
+      : silent.length ? `the tracker reported no position in this driver’s hours on ${silent.length === 1 ? 'the one day' : `all ${silent.length} days`} built — ${silent[0].absent}`
+        : preGranular.length ? `${preGranular.length === 1 ? 'one day was' : `${preGranular.length} days were`} built before the granular view and ${preGranular.length === 1 ? 'is' : 'are'} rebuilt by the nightly backfill`
+          : 'no day in this window has been built with a car of theirs and a tracker reporting — see Where the time went for why';
     res.json({
-      from, to, absent: segs.length || wins.length ? null
-        : 'no day in this window has been built with a car of theirs and a tracker reporting — see Where the time went for why',
-      days, stops, drives, parking: parkingSpots(stops), routes,
-      fixes_read: fixRows.length, fixes_capped: fixRows.length >= 40000,
+      from, to, absent, days, stops, drives, parking: parkingSpots(stops), routes,
+      pre_granular_days: preGranular, not_drawn_days: trimmed.notDrawn,
+      fixes_read: trimmed.rows.length, fixes_capped: fixRows.length >= TRACK_FIX_CAP,
       basis: 'The path is the tracker’s own fixes inside the hours the car was the driver’s, one tracker per car; '
         + 'a line is never drawn across a silence. A stop is 10 minutes or more within 250 m; a parking spot groups '
         + 'stops within 150 m of each other. What the driver was doing at a stop comes from their bookings and Uber’s '

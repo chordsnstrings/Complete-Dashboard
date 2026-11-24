@@ -2066,7 +2066,8 @@ async function tabTerritory(root, id) {
           color: css(x.nights ? '--ink' : '--pin-ring'), fillColor: css(STILL[w.key] || '--grey'), fillOpacity: 0.7, className: 'terr-still' })
           .addTo(groups.parking).bindTooltip(`<b>${esc(x.area || 'Unnamed ground')}</b><br>${countOf(x.visits, 'stop')} · ${durWords(x.minutes)} in all`
             + `${x.nights ? ` · ${countOf(x.nights, 'night')}` : ''}<br>${esc(w.detail)}`
-            + `${x.usual_from_min != null ? `<br>usually ${hhmm(x.usual_from_min)}–${hhmm(x.usual_to_min)}` : ''}`, { direction: 'top' });
+            /* "usually" only over a range; one day's spot says its own times. */
+            + `${x.usual_from_min != null ? `<br>${chosen ? '' : 'usually '}${hhmm(x.usual_from_min)}–${hhmm(x.usual_to_min)}` : ''}`, { direction: 'top' });
         pts.parking.push([x.lat, x.lng]);
       });
       (mv?.points || []).filter(inDay).forEach((x) => {
@@ -2093,11 +2094,21 @@ async function tabTerritory(root, id) {
         on.points ? `<span><i style="background:var(${ak ? '--ink' : '--s1'})"></i>pickups</span><span><i style="background:var(--s3)"></i>drop-offs</span>` : '',
       ].join('');
       const day = chosen ? (tk?.days || []).find((x) => x.day === chosen) : null;
+      /* Every sentence from what was checked (review, 2026-11-24): a day the
+         tracker never saw says the day page's own reason, a day over the read
+         limit says so, and only days with a line drawn count as "with a route". */
+      const routed = (tk?.days || []).filter((x) => x.pieces > 0);
+      const notDrawn = tk?.not_drawn_days || [];
       capNote.textContent = !tk ? 'The routes and stops could not be read from the server; the tables below do not depend on them.'
-        : !(tk.days || []).length ? `No route or stop to show: ${tk.absent || cov.absent || 'nothing was built for this window'}.`
-          : day ? `${dayWord(day.day)}: ${countOf(day.drives, 'drive')} (${fmt(day.km, 1)} km), ${countOf(day.stops, 'stop')} (${durWords(day.stopped_min)} stopped)`
-              + `${day.silences ? `, ${countOf(day.silences, 'silence')} in the tracker` : ''}, from ${hhmm(day.first_min)} to ${hhmm(day.last_min)}${day.plates.length ? ` in ${day.plates.join(', ')}` : ''}. ${tk.basis}`
-            : `${countOf((tk.days || []).length, 'day')} with a route${tk.fixes_capped ? ' (the first 40,000 positions — choose a day for the rest)' : ''}. ${tk.basis}`;
+        : !(tk.days || []).length || (tk.absent && !routed.length && !(tk.stops || []).length) ? `No route or stop to show: ${tk.absent || cov.absent || 'nothing was built for this window'}.`
+          : day ? (day.absent ? `${dayWord(day.day)}: nothing to draw — ${day.absent}.`
+            : day.not_drawn ? `${dayWord(day.day)}: the route is not drawn over a window this long (more than ${fmt(40000)} positions) — choose a shorter window to see it.`
+              : `${dayWord(day.day)}: ${countOf(day.drives, 'drive')} (${fmt(day.km, 1)} km), ${countOf(day.stops, 'stop')} (${durWords(day.stopped_min)} stopped)`
+              + `${day.silences ? `, ${countOf(day.silences, 'silence')} in the tracker` : ''}, from ${hhmm(day.first_min)} to ${hhmm(day.last_min)}${day.plates.length ? ` in ${day.plates.join(', ')}` : ''}. ${tk.basis}`)
+            : `${countOf(routed.length, 'day')} with a route drawn`
+              + `${notDrawn.length ? `; ${countOf(notDrawn.length, 'older day')} not drawn (over ${fmt(40000)} positions — choose a shorter window)` : ''}`
+              + `${(tk.days || []).filter((x) => x.absent).length ? `; ${countOf(tk.days.filter((x) => x.absent).length, 'day')} the tracker did not see` : ''}`
+              + `${(tk.pre_granular_days || []).length ? `; ${countOf(tk.pre_granular_days.length, 'day')} built before this view, rebuilt overnight` : ''}. ${tk.basis}`;
       renderStops();
     };
     /* One day's spots, grouped the server's way (api/movement_track.js
@@ -2108,17 +2119,25 @@ async function tabTerritory(root, id) {
         const near = out.find((sp) => Math.hypot((sp.lat - x.lat) * 111, (sp.lng - x.lng) * 101) <= 0.15);
         if (near) { near.visits += 1; near.minutes += x.minutes; near.wait_min += x.wait_min || 0; near.ontrip_min += x.ontrip_min || 0; near.offline_min += x.offline_min || 0; }
         else out.push({ lat: x.lat, lng: x.lng, area: x.area, visits: 1, minutes: x.minutes, wait_min: x.wait_min || 0, ontrip_min: x.ontrip_min || 0,
-          offline_min: x.offline_min || 0, nights: 0, usual_from_min: x.s_min, usual_to_min: x.e_min });
+          offline_min: x.offline_min || 0, night_min: 0, usual_from_min: x.s_min, usual_to_min: x.e_min });
+        const sp = near || out[out.length - 1];
+        sp.night_min += Math.max(0, Math.min(x.e_min, 300) - Math.max(x.s_min, 0));
       });
-      return out;
+      /* One day: a night there if its stops cover an hour of 00:00–05:00, as
+         the server counts it (api/movement_track.js NIGHT_MIN). */
+      return out.map((sp) => ({ ...sp, nights: sp.night_min >= 60 ? 1 : 0 }));
     }
     /* The stops table: the chosen day in order, or the longest over the window. */
     function renderStops() {
       stopP.body.innerHTML = '';
       const all = (tk?.stops || []).filter((x) => chosen == null || x.day === chosen);
       if (!all.length) {
-        stopP.body.append(note(chosen ? 'The car did not stop for ten minutes or more in this driver’s hours on this day.'
-          : `No stop to list: ${tk?.absent || cov.absent || 'nothing was built for this window'}.`));
+        const d = chosen ? (tk?.days || []).find((x) => x.day === chosen) : null;
+        stopP.body.append(note(!tk ? 'The stops could not be read from the server.'
+          : d?.absent ? `No stop to list for this day: ${d.absent}.`
+            : chosen ? 'The car did not stop for ten minutes or more in this driver’s hours on this day.'
+              : !(tk.days || []).length || tk.absent ? `No stop to list: ${tk.absent || cov.absent || 'nothing was built for this window'}.`
+                : 'The car did not stop for ten minutes or more in this driver’s hours in this window.'));
         return;
       }
       const rows = chosen ? all : all.slice().sort((a, b) => b.minutes - a.minutes).slice(0, 40);
@@ -2188,8 +2207,8 @@ async function tabTerritory(root, id) {
     parkP.body.innerHTML = '';
     const spots = tk?.parking || [];
     if (!spots.length) {
-      parkP.body.append(note(tk ? `No parking spot to list: ${tk.absent || 'the car did not stop for ten minutes or more in this driver’s hours'}.`
-        : 'The stops could not be read from the server.'));
+      parkP.body.append(note(!tk ? 'The stops could not be read from the server.'
+        : `No parking spot to list: ${tk.absent || 'the car did not stop for ten minutes or more in this driver’s hours'}.`));
     } else {
       parkP.body.append(tableFrom(spots.slice(0, 20), [
         { label: 'Where', key: 'area', render: (x) => (x.area ? esc(x.area) : '<span class="ent-off">Unnamed ground</span>') },

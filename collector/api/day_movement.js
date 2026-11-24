@@ -178,7 +178,7 @@ const seatOn = (a, b) => (b.passenger != null ? b.passenger : a.passenger != nul
    fmsSpeed, where it used to arrive as null and fall through to displacement).
    Short hops under MIN_DRIVE_KM on a reported 0 stay stopped: that is GPS
    jitter between two fixes a few minutes apart, not a drive. */
-const movingOn = (a, b) => {
+export const movingOn = (a, b) => {
   if (b.speed != null && Number(b.speed) > 3) return true;
   const h = (ms(b.at) - ms(a.at)) / 3600000;
   const d = km(a, b);

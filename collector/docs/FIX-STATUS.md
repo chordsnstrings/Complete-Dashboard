@@ -4682,7 +4682,17 @@ The renames cover tiles, panels, columns, captions, the phone screens, the Excel
   - layers that can be on together: routes (with a passenger, without, seat not reported), stops (numbered on a chosen day), parking spots (a dark ring for overnight), pickups and drop-offs, booked addresses;
   - new tables: "Where they park" and "Stops";
   - the half-km cell layers are replaced by the route and the stops. "Time by area" still reads the cells.
-- Tests: `test/movement_track.test.mjs` (18), with four rules revert-proven. `arkiv_people` (the territory contract on the new panel; a route line is not a hollow ring) and the re-recorded old-skin territory page. **Written; not yet on production.**
+- **Independent review (2026-11-24): nine findings, all fixed.** Each fix below has a test that fails when the fix is reverted, except the first-pass cursor reset (schema v130, checked against the source) and the midnight bound:
+  - A day the tracker never saw counted as "a day with a route", and the stops said "the car did not stop". The track now carries per-day pieces, fixes and the day page's own reason.
+  - Days built before v130 would never get a log. v130 clears the backfill cursor once, and the route names those days.
+  - A bag on a parked car's seat drew a "passenger" line through the stop. A piece now needs the car to move (`movingOn`).
+  - `nights` counted stops, not nights. It is now per day, with an hour inside 00:00–05:00.
+  - "Choose a day for the rest" was false at the 40,000-position cap. The read is now newest-first, whole days only (`wholeDays`), and the days not drawn are named.
+  - Wrong empty-state reasons on the Stops table and the one-day parking view are corrected.
+  - A stop's split could exceed its minutes by one. The difference now goes to the largest part.
+  - A window ending at midnight read the next day's first minute. The bound is now `LEAST(to_min + 1, 1440)`.
+- **Found while testing the review fixes:** the person register's 30-second cache made a pass fail anyone created in the last 30 seconds. Each pass now reads it fresh, and a failed day says so on the track.
+- Tests: `test/movement_track.test.mjs` (27). `arkiv_people`: the territory contract on the new panel; a route line is not a hollow ring. The old-skin territory page is re-recorded. **Written; not yet on production.**
 | CARD-3c | **Cash Trips (including POS), POS payments, Cash in hand, and Bank Collection with POS** (the operator, 2026-11-24: "POS directly comes to our bank. So it should be deducted from the Cash held with the driver… Cash In Hand which is Cash Trips - POS deposits"; "driver page should have POS payment as a separate modal"; "Bank Collection should add POS payment as well, as that comes into the bank").
 - **Cash Trips (including POS)** is the cash trips (`trip_cash`, gross) plus the hotel's fares paid on the driver's own card machine (`pos-driver`). It appears on the driver Earnings tile, the driver Excel, and the Finance tile (`/api/settlement/mix` `pos_driver`).
 - **POS payments** is a tile of its own: those hotel fares plus the card payments (Network International) that paid cash trips from 1 Aug 2026. Card on the sheet that matched no fare is said beside it, never counted.

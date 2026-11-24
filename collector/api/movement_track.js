@@ -25,13 +25,15 @@
    Positions are never stored twice: the rollup keeps which car was the
    driver's and when (driver_move_window), and the route reads the tracker's
    own fixes for those hours. */
-import { intervalState } from './day_movement.js';
+import { intervalState, movingOn } from './day_movement.js';
 import { km } from './where_routes.js';
 import { STAY_RADIUS_KM } from './whereabouts.js';
 
 /* A stop that covers this much of 00:00–05:00 Dubai is a night parked. */
 export const NIGHT_END_MIN = 300;
 export const NIGHT_MIN = 60;
+/* The most positions one read of the track draws. */
+export const TRACK_FIX_CAP = 40000;
 
 const r1 = (x) => (x == null ? null : Math.round(Number(x) * 10) / 10);
 
@@ -47,8 +49,20 @@ export function segmentRows(segments = [], status = []) {
         if (st === 'ontrip') job += 1; else if (st === 'online') wait += 1; else off += 1;
       }
     }
+    const minutes = Math.max(0, Math.round(g.minutes ?? (g.e - g.s)));
+    /* The split is counted by minute of day and the stop's own minutes from
+       its timestamps, so the two can differ by one (10:00:50–10:20:10 is 19
+       minutes over 20 minute-marks; review, 2026-11-24). The difference goes
+       to the largest part, so the three always add up to the stop. */
+    if (g.kind === 'stop') {
+      const diff = minutes - (wait + job + off);
+      if (diff) {
+        if (wait >= job && wait >= off) wait = Math.max(0, wait + diff);
+        else if (job >= off) job = Math.max(0, job + diff); else off = Math.max(0, off + diff);
+      }
+    }
     return {
-      seq, kind: g.kind, s_min: g.s, e_min: g.e, minutes: Math.max(0, Math.round(g.minutes ?? (g.e - g.s))),
+      seq, kind: g.kind, s_min: g.s, e_min: g.e, minutes,
       plate: g.plate || null, source: g.source || null,
       lat: g.lat ?? null, lng: g.lng ?? null, area: g.kind === 'drive' ? (g.from_area || null) : (g.area || g.from_area || null),
       to_lat: g.to_lat ?? null, to_lng: g.to_lng ?? null, to_area: g.to_area || null,
@@ -82,7 +96,10 @@ export function routePieces(fixes = []) {
     for (let i = 1; i < fs.length; i += 1) {
       const a = fs[i - 1]; const b = fs[i];
       const iv = intervalState(a, b);
-      const state = !iv || iv.state === 'idle' ? null
+      /* A passenger flag on a parked car (a bag on the seat) is not a drive:
+         a piece needs the car to move, so the line never runs through a stop
+         (review, 2026-11-24 — 60 minutes at one spot drew a "passenger" leg). */
+      const state = !iv || iv.state === 'idle' || (iv.state === 'engaged' && !movingOn(a, b)) ? null
         : iv.state === 'engaged' ? 'passenger' : iv.seat === false ? 'empty' : 'seat_unknown';
       if (!state) { cur = null; continue; }
       if (cur && cur.state === state && cur.last === a) {
@@ -114,7 +131,15 @@ export function parkingSpots(stops = [], { radiusKm = STAY_RADIUS_KM, minMinutes
     const sum = (k) => sp.stops.reduce((a, x) => a + (x[k] || 0), 0);
     const areas = new Map();
     for (const x of sp.stops) if (x.area) areas.set(x.area, (areas.get(x.area) || 0) + x.minutes);
-    const nights = sp.stops.filter((x) => Math.min(x.e_min, NIGHT_END_MIN) - Math.max(x.s_min, 0) >= NIGHT_MIN).length;
+    /* Nights, not stops: one night split by a missed heartbeat into two stops
+       is still one night (review, 2026-11-24). A day counts when its stops
+       here cover NIGHT_MIN of 00:00–05:00 between them. */
+    const nightMin = new Map();
+    for (const x of sp.stops) {
+      const o = Math.min(x.e_min, NIGHT_END_MIN) - Math.max(x.s_min, 0);
+      if (o > 0) nightMin.set(x.day, (nightMin.get(x.day) || 0) + o);
+    }
+    const nights = [...nightMin.values()].filter((v) => v >= NIGHT_MIN).length;
     const med = (xs) => { const v = [...xs].sort((a, b) => a - b); return v.length ? v[Math.floor((v.length - 1) / 2)] : null; };
     const days = [...new Set(sp.stops.map((x) => x.day))].sort();
     return {
@@ -127,4 +152,16 @@ export function parkingSpots(stops = [], { radiusKm = STAY_RADIUS_KM, minMinutes
       inferred_visits: sp.stops.filter((x) => x.inferred).length,
     };
   }).sort((a, b) => b.minutes - a.minutes);
+}
+
+/** A capped read of the track keeps whole days only. Rows come newest day
+    first; when the cap was hit the oldest day kept may be cut part-way, so it
+    is dropped too, and every day not drawn is named rather than shown as a day
+    without a route (review, 2026-11-24). Pure. */
+export function wholeDays(rows = [], cap = TRACK_FIX_CAP, windowDays = []) {
+  if (rows.length < cap) return { rows, notDrawn: [] };
+  const last = rows[rows.length - 1]?.day;
+  const kept = rows.filter((r) => r.day !== last);
+  const drawn = new Set(kept.map((r) => r.day));
+  return { rows: kept, notDrawn: [...new Set(windowDays)].filter((d) => !drawn.has(d)).sort() };
 }
