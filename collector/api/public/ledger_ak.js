@@ -61,6 +61,12 @@ export function ceiling(people) {
     n: carriers.length,
     none: measured.length - carriers.length,
     sum: r2(carriers.reduce((a, p) => a + (+p.owes.cash_taken || 0), 0)),
+    /* CARD-3b: what card settled of the fares from cash_taken_card_from, already
+       taken off `sum`; null when no row could take it off (the reason rides on
+       each row). */
+    card: carriers.some((p) => p.owes.cash_taken_card != null)
+      ? r2(carriers.reduce((a, p) => a + (+p.owes.cash_taken_card || 0), 0)) : null,
+    card_from: carriers.find((p) => p.owes.cash_taken_card_from)?.owes.cash_taken_card_from || null,
     trips: carriers.reduce((a, p) => a + (+p.owes.cash_taken_trips || 0), 0),
     from: froms[0] || null,
     to: tos[tos.length - 1] || null,
@@ -80,11 +86,14 @@ export function ceilingWho(c) {
 
 /* The table column the plan adds to #opening, #advances and #deposits. */
 export const ceilingCol = () => ({
-  label: 'Cash fares on record (ceiling)', key: 'ak_ceiling', num: true,
+  label: 'Cash ceiling, less card', key: 'ak_ceiling', num: true,
   sortValue: (p) => (p.owes?.cash_taken == null ? -1 : +p.owes.cash_taken),
   render: (p) => (p.owes?.cash_taken != null
     ? `${esc(aed(p.owes.cash_taken))}${p.owes.cash_taken_from
       ? ` <span class="dim">since ${esc(p.owes.cash_taken_from)}</span>` : ''}`
+      /* CARD-3b: the part card took off, beside the figure (the operator: "keep
+         the card part beside them"). */
+      + (+p.owes.cash_taken_card > 0 ? `<br><span class="dim">after ${esc(aed(p.owes.cash_taken_card))} paid by card</span>` : '')
     : `<span class="dash" title="${esc(p.owes ? (p.owes.cash_taken_means || 'no cash-marked trip is on record for this person')
       : 'this person is not on the exposure read, so no cash fare has been measured for them')}">—</span>`),
 });

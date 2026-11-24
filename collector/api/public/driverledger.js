@@ -390,6 +390,8 @@ export async function renderDriverLedger(root, id, prof) {
     winP.body.append(el('p', 'cap', `Cash taken is ${esc(aed(t.cash_fares))} of cash fares`
       + (t.cash_advance_rows ? `, plus ${esc(aed(t.cash_advance))} advanced` : '')
       + (t.cash_deposit_rows ? `, less ${esc(aed(Math.abs(Number(t.cash_deposit))))} handed back` : '')
+      /* CARD-3b: what card payments settled of the cash fares from 1 Aug 2026. */
+      + (+t.card_paid > 0 ? `, less ${esc(aed(t.card_paid))} that card payments settled of the fares from ${esc(t.card_paid_from)}` : '')
       + `, over ${esc(midSentence(windowLabel()))}. It is what moved between these dates — not a balance, and `
       + 'not what they are holding now, which is the Still held tile above.'));
     if (!t.cash_advance_rows && !t.cash_deposit_rows) {

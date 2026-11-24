@@ -56,8 +56,8 @@ export async function renderDeposits(root) {
      band. One extra GET: the handovers on record. */
   const ak = contract();
   const AK = ak ? ledgerBand() : null;
-  const top = ak ? panel('Who is carrying the most', 'The cash-fare ceiling — every cash fare on record in a driver’s hand, '
-    + 'never a balance. The twenty largest; the drivers with none as one count.', 'deposit-top') : null;
+  const top = ak ? panel('Who is carrying the most', 'The cash-fare ceiling — every cash fare on record in a driver’s hand, less what '
+    + 'card payments settled of the fares from 1 Aug 2026 — never a balance. The twenty largest; the drivers with none as one count.', 'deposit-top') : null;
   const after = ak ? el('div') : null;
   const handP = ak ? api('/api/ledger/entries?type_code=cash_deposit').catch(() => null) : null;
   /* The ceiling and its carriers, cut at each of the last twelve weeks' ends
@@ -170,7 +170,8 @@ function depositsContract(AK, top, after, root, people, d, hand, hist) {
   const handed = hand?.totals ? hand.totals.rows : null;
   glance(AK.tiles, [
     c.n ? { label: 'Ceiling on cash outstanding', value: aed(c.sum), hero: true,
-      sub: `every cash fare on record, not a balance · ${ceilingWho(c)} · ${fmt(c.trips)} cash trips, ${c.from} to ${c.to}`,
+      sub: `cash fares on record${c.card ? `, less ${aed(c.card)} card paid of the fares from ${c.card_from}` : ''}, not a balance · `
+        + `${ceilingWho(c)} · ${fmt(c.trips)} cash trips, ${c.from} to ${c.to}`,
       ...(hist ? lineFor(hist, 'cash_ceiling') : {}) }
       : { label: 'Ceiling on cash outstanding', hero: true, na: 'no cash-marked trip is on record for anyone here' },
     known ? { label: 'Cash actually in hand', value: `${fmt(known)} of ${fmt(n)} known`,

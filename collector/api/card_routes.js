@@ -28,6 +28,12 @@
    these payments are shown beside it, and every answer says so. */
 import crypto from 'node:crypto';
 import { deciderOf } from './charging_routes.js';
+/* CARD-3: the fares, the allocation and the per-person sums live in
+   src/card_notes.js, so the preview, the ceiling (api/ledger_routes.js), the
+   driver's tile (api/register_routes.js), the ceiling's history and the cash
+   text (src/driver_sms.js) all read ONE definition. */
+import { allocate, cashByDay, NONE, dayBefore, daysBack, notesByPerson, NET_FROM } from '../src/card_notes.js';
+export { allocate };
 
 const r2 = (v) => (v == null ? null : Math.round(Number(v) * 100) / 100);
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -46,7 +52,10 @@ const REF_KEY = crypto.createHash('sha256')
   .update(`card-ref:${process.env.SETTINGS_KEY || process.env.DATABASE_URL || 'fleet-dev-key'}`).digest();
 export const refOf = (eid) => crypto.createHmac('sha256', REF_KEY).update(String(eid)).digest('hex').slice(0, 16);
 
-export const NOT_IN_POSITION = 'card payments are shown beside the cash position, not yet taken off it — that change waits for the operator\'s review';
+/* CARD-3b (the operator, 2026-11-24: "approve from August"): card payments
+   that settled cash fares from NET_FROM come off the cash-fare ceiling and the
+   driver tiles; before then they are shown beside them. */
+export const NOT_IN_POSITION = `card payments that settled cash fares from ${NET_FROM} are taken off the cash-fare ceiling and the driver's cash-taken tiles; before then they are shown beside them`;
 
 /* WHEN THE SHEET WAS LAST READ — and whether the latest attempt failed or
    was held after it, so a page never passes old payments off as current. */
@@ -101,115 +110,7 @@ export function statusOf({ card, cash, prevCash = 0, prevCard = 0, cashTrips = 0
   return { status: 'over', over_by: r2(card - cash - spare) };
 }
 
-/* The fares a driver collects on, per person per Dubai day, over [lo, hi]:
-   CASH trips (trip_cash) and the hotel channel's POS-DRIVER trips — the
-   hotel's own word for a fare paid on the driver's card machine. Measured on
-   production the day CARD-2 went live: the three drivers with the most card
-   money "not explained" each had ~135 card days and no cash trip on any —
-   they drive the hotel channel, where the card-machine fares are filed
-   'pos-driver', never 'cash'. Against cash + pos-driver, their November days
-   matched to the fils on 6 of 12 and 7 of 19. ('pos-supervisor' is the
-   supervisor's machine, 'cash-supervisor' cash paid to the supervisor:
-   neither is the driver's.)
-
-   Accounts first, then the trips by their account ids, so the read rides the
-   (driver_ext_id, requested_at) index rather than the views over every trip
-   (the whole year took 4.5–6.6 s joined the other way round). */
-async function cashByDay(q, personIds, lo, hi) {
-  const ids = [...new Set(personIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
-  const out = new Map();
-  if (!ids.length || !lo || !hi) return out;
-  const accts = await q(`SELECT platform, external_id, driver_id::text AS person_id FROM driver_platform_id
-                          WHERE detached_at IS NULL AND driver_id = ANY($1::bigint[])`, [ids]);
-  if (!accts.length) return out;
-  const who = new Map(accts.map((a) => [`${a.platform}|${a.external_id}`, a.person_id]));
-  const exts = [...new Set(accts.map((a) => a.external_id))];
-  /* CARD-3: the collector's per-account-day sums (sql/schema_v128.sql) once a
-     full rebuild has finished AND the range starts on or after the first day
-     it covered ('fares_from'); the trip views, live, otherwise — a range
-     reaching before the table read as no fares at all (the review of
-     2026-11-24). */
-  const st = Object.fromEntries((await q(`SELECT key, value FROM source_state WHERE source = 'network_cards' AND fleet_id = '-'
-                                            AND key IN ('fares_full_at', 'fares_from')`)).map((r) => [r.key, r.value]));
-  const ready = !!(st.fares_full_at && st.fares_from && lo >= st.fares_from);
-  const rows = ready ? await q(`SELECT platform, driver_ext_id, to_char(day, 'YYYY-MM-DD') AS day, cash::float AS cash, cash_trips,
-                                       cash_unvalued, pos::float AS pos, pos_trips
-                                  FROM card_fare_day WHERE driver_ext_id = ANY($1::text[]) AND day BETWEEN $2 AND $3`, [exts, lo, hi])
-    : await q(`SELECT platform, driver_ext_id, day, sum(cash)::float AS cash, sum(cash_n)::int AS cash_trips,
-                               sum(cash_nv)::int AS cash_unvalued, sum(pos)::float AS pos, sum(pos_n)::int AS pos_trips
-                          FROM (
-                            SELECT tc.platform, tc.driver_ext_id, to_char((tc.requested_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
-                                   coalesce(tc.cash_amount, 0) AS cash, 1 AS cash_n,
-                                   CASE WHEN tc.cash_amount IS NULL THEN 1 ELSE 0 END AS cash_nv, 0::numeric AS pos, 0 AS pos_n
-                              FROM trip_cash tc
-                             WHERE tc.driver_ext_id = ANY($1::text[])
-                               AND tc.requested_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Dubai')
-                               AND tc.requested_at <  (($3::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
-                            UNION ALL
-                            SELECT te.platform, te.driver_ext_id, to_char((te.requested_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD'),
-                                   0, 0, 0, coalesce(te.price, 0), 1
-                              FROM trip_ext te
-                             WHERE te.driver_ext_id = ANY($1::text[]) AND lower(coalesce(te.payment_type, '')) = 'pos-driver'
-                               AND te.outcome = 'completed'
-                               AND te.requested_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Dubai')
-                               AND te.requested_at <  (($3::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
-                          ) x GROUP BY 1, 2, 3`, [exts, lo, hi]);
-  for (const r of rows) {
-    const pid = who.get(`${r.platform}|${r.driver_ext_id}`);
-    if (!pid) continue;                     // the same id on another platform is someone else's
-    const k = `${pid}|${r.day}`;
-    const cur = out.get(k) || { cash: 0, cash_trips: 0, cash_unvalued: 0, pos: 0, pos_trips: 0 };
-    cur.cash += r.cash; cur.cash_trips += r.cash_trips; cur.cash_unvalued += r.cash_unvalued || 0; cur.pos += r.pos; cur.pos_trips += r.pos_trips;
-    out.set(k, cur);
-  }
-  return out;
-}
-/* What a day's card may be measured against: cash + card-machine fares. */
-const NONE = { cash: 0, cash_trips: 0, cash_unvalued: 0, pos: 0, pos_trips: 0 };
-
-/* CASH IN NOTES (FIX-STATUS CARD-3; the operator chose it 2026-11-24: "net
-   card off cash fares"). For one driver, day by day in order:
-     · the day's card payments — chargebacks left out: "the fare isn't lost,
-       it usually comes back", so a chargeback never puts cash back in a hand;
-     · settle the hotel's pos-driver fares first (paid on the driver's own
-       card machine — never counted as cash, so never taken off cash);
-     · the rest settles that day's cash fares, then the day before's (a fare
-       taken before midnight, paid after it — one day back, never further);
-     · whatever is left is NOT EXPLAINED and is not taken off anything: card
-       money beyond the fares collected is a ride on no platform or a payment
-       the sheet put on the wrong driver, never cash the driver did not take.
-   Booked on the FARE's day: on_cash is the part of THIS day's cash fares paid
-   by card — its own card, plus the next day's (paid_next_day) — so over any
-   run of days Σcash − Σon_cash = Σnotes. Card on a day that paid the day
-   before's fares is paid_prev_day. (The review of 2026-11-24: booked on the
-   card's day, a window starting the day after a carry showed cash 50, paid
-   by card 100, "200% by card".) Per row, card = on_pos + (on_cash −
-   paid_next_day) + paid_prev_day + unexplained. */
-export function allocate(days) {
-  const out = []; let prev = null;
-  for (const d of [...days].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0))) {
-    const cash = d.cash || 0; const pos = d.pos || 0;
-    const pay = Math.max(0, d.pay || 0);
-    const onPos = Math.min(pay, pos);
-    let rest = pay - onPos;
-    const useOwn = Math.min(rest, cash); rest -= useOwn;
-    let useCarry = 0;
-    if (rest > 0 && prev && prev.day === dayBefore(d.day) && prev.leftover > 0) {
-      useCarry = Math.min(rest, prev.leftover);
-      prev.leftover -= useCarry; prev.row.on_cash += useCarry; prev.row.notes -= useCarry; prev.row.paid_next_day += useCarry;
-      rest -= useCarry;
-    }
-    const row = { day: d.day, cash, cash_unvalued: d.cash_unvalued || 0, pos, card: pay, on_pos: onPos, on_cash: useOwn,
-      paid_next_day: 0, paid_prev_day: useCarry, unexplained: rest, notes: cash - useOwn };
-    out.push(row);
-    prev = { day: d.day, leftover: cash - useOwn, row };
-  }
-  return out.map((r) => ({ ...r, cash: r2(r.cash), pos: r2(r.pos), card: r2(r.card), on_pos: r2(r.on_pos), on_cash: r2(r.on_cash),
-    unexplained: r2(r.unexplained), paid_next_day: r2(r.paid_next_day), paid_prev_day: r2(r.paid_prev_day), notes: r2(r.notes) }));
-}
 const collect = (k) => ({ amount: k.cash + k.pos, trips: k.cash_trips + k.pos_trips });
-const daysBack = (d, n) => new Date(Date.parse(`${d}T12:00:00Z`) - n * 864e5).toISOString().slice(0, 10);
-const dayBefore = (d) => new Date(Date.parse(`${d}T00:00:00Z`) - 864e5).toISOString().slice(0, 10);
 
 export function cardRoutes(app, { q, wrap }) {
   app.get('/api/card/driver', wrap(async (req, res) => {
@@ -301,7 +202,7 @@ export function cardRoutes(app, { q, wrap }) {
       allowance_aed: ALLOWANCE,
       payments: payments.map((p) => ({ ...p, amount: r2(p.amount), chargeback: p.amount < 0 })),
       terminals: terminals.map((x) => ({ ...x, net: r2(x.net) })),
-      in_cash_position: false, note: NOT_IN_POSITION });
+      in_cash_position: true, in_cash_position_from: NET_FROM, note: NOT_IN_POSITION });
   }));
 
   /* THE FLEET'S CROSS-CHECK (CARD-2): every placed driver-day with card
@@ -324,54 +225,8 @@ export function cardRoutes(app, { q, wrap }) {
       return res.json({ from, to, ...s, currency: 'AED', fares_summarised_at: ready, why: s.why || 'No card payment is on record yet.',
         totals: null, drivers: [], latest_day: null });
     }
-    const card = await q(`SELECT m.person_id::text AS person_id, d.full_name AS name, to_char(p.txn_day, 'YYYY-MM-DD') AS day,
-             coalesce(sum(p.amount) FILTER (WHERE p.amount > 0), 0)::float AS pay,
-             coalesce(sum(p.amount) FILTER (WHERE p.amount < 0), 0)::float AS chargebacks
-        FROM card_payment p JOIN card_id_person m ON m.emirates_id = p.emirates_id LEFT JOIN driver d ON d.id = m.person_id
-       WHERE m.person_id IS NOT NULL AND p.txn_day BETWEEN $1::date - 1 AND $2
-       GROUP BY m.person_id, d.full_name, p.txn_day`, [from, to]);
-    const people = new Map();
-    for (const c of card) {
-      const p = people.get(c.person_id) || { person_id: c.person_id, name: c.name || null, pay: new Map(), chargebacks: 0, inWindow: false };
-      p.pay.set(c.day, c.pay);
-      if (c.day >= from) { p.chargebacks += c.chargebacks; p.inWindow = true; }
-      people.set(c.person_id, p);
-    }
-    /* The day before `from` is read only for the carry: a driver whose only
-       card payment is that day is not in this window (the review of
-       2026-11-24: they were counted as a driver with card payments, their
-       window's cash added to the totals, and the true "none in this window"
-       reason suppressed). */
-    for (const [k, p] of people) if (!p.inWindow) people.delete(k);
-    const cashMap = await cashByDay(q, [...people.keys()], dayBefore(from), to);
+    const rows = await notesByPerson(q, { from, to });
     const latest = to;
-    /* Each person's fare days, in one pass over the map (a year is ~30,000 keys). */
-    const fareDays = new Map();
-    for (const k of cashMap.keys()) {
-      const [pid, day] = k.split('|');
-      if (!fareDays.has(pid)) fareDays.set(pid, []);
-      fareDays.get(pid).push(day);
-    }
-    const rows = [];
-    for (const p of people.values()) {
-      const days = new Set([...p.pay.keys(), ...(fareDays.get(p.person_id) || [])]);
-      const alloc = allocate([...days].map((day) => {
-        const k = cashMap.get(`${p.person_id}|${day}`) || NONE;
-        return { day, cash: k.cash, cash_unvalued: k.cash_unvalued, pos: k.pos, pay: p.pay.get(day) || 0 };
-      })).filter((r) => r.day >= from && r.day <= to);
-      const sum = (k) => r2(alloc.reduce((a, r) => a + (r[k] || 0), 0));
-      const last = alloc.find((r) => r.day === latest) || null;
-      /* Card on `from` that paid the day before's fares: card in the window
-         that settled cash outside it — in neither on_cash nor unexplained, so
-         card = on_pos + on_cash + paid_before_window + unexplained. */
-      const first = alloc.find((r) => r.day === from);
-      rows.push({ person_id: p.person_id, name: p.name, cash: sum('cash'), cash_unvalued: alloc.reduce((a, r) => a + (r.cash_unvalued || 0), 0),
-        card: sum('card'), on_cash: sum('on_cash'), on_pos: sum('on_pos'),
-        unexplained: sum('unexplained'), notes: sum('notes'), paid_before_window: r2(first?.paid_prev_day || 0), chargebacks: r2(p.chargebacks),
-        card_days: alloc.filter((r) => r.card > 0).length,
-        latest: last ? { day: last.day, cash: last.cash, cash_unvalued: last.cash_unvalued, on_cash: last.on_cash, notes: last.notes }
-          : { day: latest, cash: 0, cash_unvalued: 0, on_cash: 0, notes: 0 } });
-    }
     rows.sort((a, b) => b.on_cash - a.on_cash || b.cash - a.cash);
     const tot = (k) => r2(rows.reduce((a, r) => a + (r[k] || 0), 0));
     return res.json({ from, to, ...s, currency: 'AED', fares_summarised_at: ready,
@@ -383,8 +238,11 @@ export function cardRoutes(app, { q, wrap }) {
          on_cash what approval would take off the all-time ceiling. */
       whole_span: !!(span?.lo && from <= span.lo && to >= span.hi),
       latest_day: latest, drivers: rows,
-      in_cash_position: false,
-      note: 'a preview: cash fares less the card payments that paid for them; no other figure uses it yet. Card money beyond the fares is not explained and is not taken off; chargebacks are not put back (the fare comes back); the hotel\'s pos-driver fares were never cash.' });
+      /* Approved from August (CARD-3b): the ceiling and the tiles take off
+         on_cash for fare days from NET_FROM; a window before then is shown
+         only. */
+      in_cash_position: to >= NET_FROM, in_cash_position_from: NET_FROM,
+      note: `cash fares less the card payments that paid for them. From ${NET_FROM} this is taken off the cash-fare ceiling and the driver's cash-taken tiles (the operator approved it from August on 24 Nov 2026); before then it is shown only. Card money beyond the fares is not explained and is not taken off; chargebacks are not put back (the fare comes back); the hotel's pos-driver fares were never cash.` });
   }));
 
   app.get('/api/card/crosscheck', wrap(async (req, res) => {
@@ -474,7 +332,7 @@ export function cardRoutes(app, { q, wrap }) {
       months: months.map((m) => ({ ...m, net: r2(m.net), chargebacks: r2(m.chargebacks) })),
       no_driver_terminals: noDriver.map((x) => ({ ...x, net: r2(x.net), labels: (x.labels || []).filter(Boolean) })),
       no_driver_terminals_total: ndT.n,
-      in_cash_position: false, note: NOT_IN_POSITION });
+      in_cash_position: true, in_cash_position_from: NET_FROM, note: NOT_IN_POSITION });
   }));
 
   app.get('/api/card/review', wrap(async (_req, res) => {

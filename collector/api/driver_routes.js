@@ -12,6 +12,7 @@
    is a worse failure than showing the same person twice. */
 
 import { win, winDays } from './window.js';
+import { cardNet, dubaiToday, NET_FROM } from '../src/card_notes.js';
 /* One definition of an online span, shared with /api/supply/heat and with the
    rollup that writes driver_day.online_min. Four private copies of it had
    drifted into the same defect at once; see the module header for the
@@ -2128,6 +2129,15 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               round(sum(cash_amount)::numeric, 2) AS cash_taken,
               count(*) FILTER (WHERE cash_amount IS NULL)::int AS cash_unvalued
          FROM trip_cash WHERE ${TW}`, p);
+    /* CARD-3b: what card payments settled of this window's cash fares from
+       NET_FROM comes off the tile, as it does off the ceiling and the money
+       tab (src/card_notes.js). */
+    const [kFrom, kTo] = winDays(req);
+    const kNet = d.person_id
+      ? await cardNet(q, [d.person_id], { from: kFrom, to: [kTo, dubaiToday()].sort()[0] })
+        .catch((e) => ({ from: NET_FROM, by: new Map(), absent: `the card payments could not be read (${String(e.message || e).slice(0, 120)})` }))
+      : { from: NET_FROM, by: new Map(), absent: 'this account is on no person, so no card payment can be placed on it' };
+    const kCard = kNet.absent ? null : Math.round((kNet.by.get(String(d.person_id))?.on_cash || 0) * 100) / 100;
 
     const num = (v) => (v == null ? null : Number(v));
     const hoursOnline = num(kept?.online_h);
@@ -2188,7 +2198,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       cash_bookings_priced: cashTrips?.cash_bookings_priced ?? 0,
       cash_booking_value: num(cashTrips?.cash_booking_value),
       cash_trips: taken?.cash_trips ?? 0,
-      cash_taken: num(taken?.cash_taken),
+      cash_taken: taken?.cash_taken == null ? null : Math.round((num(taken.cash_taken) - (kCard || 0)) * 100) / 100,
+      cash_taken_gross: num(taken?.cash_taken),
+      cash_taken_card: kCard,
+      cash_taken_card_from: kNet.from,
+      cash_taken_card_absent_reason: kNet.absent,
       cash_unvalued: taken?.cash_unvalued ?? 0,
       cash_booking_platforms: cashTrips?.cash_booking_platforms ?? [],
       hours_online: hoursOnline,

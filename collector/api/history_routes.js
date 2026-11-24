@@ -61,6 +61,7 @@
    simply never send them. */
 import { winDays } from './window.js';
 import { dubaiIso } from '../src/util.js';
+import { onCashByDay, cardSheet, NET_FROM } from '../src/card_notes.js';
 import { startMinutes } from './online_routes.js';
 import { TIMELINE_FROM } from './online_hours_routes.js';
 
@@ -126,7 +127,7 @@ export const METRICS = {
   money: { grain: 'week', cls: 'EARN', label: 'Money', unit: 'AED', source: 'driver_day',
     basis: 'This person’s money per Monday-to-Sunday week from the driver-day record (driver_day.money): the platform statement’s net where a statement covers the day, the trip fares where none does — every account folded into the person. The hero figure above is the economics ledger’s choice per channel, so a week it counts on a payout can differ from this line. Whole weeks only.' },
   cash_ceiling: { grain: 'week', cls: 'CASH', label: 'Ceiling on cash outstanding', unit: 'AED', source: 'cash_fare_day',
-    basis: 'Every cash fare on record by the end of each week, over the people the ledger lists — the ceiling the hero states, cut at each week’s end (the last point is as of the roll-up’s last build). A running total: it only rises, and how steeply is how much cash came in.' },
+    basis: 'Every cash fare on record by the end of each week, over the people the ledger lists, less what card payments settled of the fares from 1 Aug 2026 — the ceiling the hero states, cut at each week’s end (the last point is as of the roll-up’s last build). A running total: it rises with cash fares, and from August by less where card paid them. Asked for one fleet or one platform, card is not taken off: a card payment is placed on a person, not on a fleet or a platform, and the series says so.' },
   cash_carriers: { grain: 'week', cls: 'CASH', label: 'Drivers carrying a ceiling', unit: 'drivers', source: 'cash_fare_day',
     basis: 'People on the ledger with a valued cash fare on record by the end of each week — the tile’s count, cut at each week’s end.' },
 };
@@ -458,6 +459,24 @@ async function cashSeries(q, metrics, { from, to, today, fleet, platform }) {
             (SELECT count(DISTINCT c.driver_id) FROM c
               WHERE c.value IS NOT NULL AND c.day <= least(w.wk + 6, $5::date))::int AS carriers
        FROM w ORDER BY w.wk`, [mondayOf(from), mondayOf(to), fleet, platform, today]);
+  /* CARD-3b: the hero's ceiling is net of what card settled of the fares from
+     NET_FROM, so its line is too — cumulative, by fare day, over the same
+     named people (src/card_notes.js). For one fleet or one platform it is
+     not: a card payment is placed on a person, and splitting it across a
+     person's fleets or platforms would be invented. */
+  let cardOff = null; let cardWhy = null;
+  if (metrics.includes('cash_ceiling')) {
+    if (fleet || platform) cardWhy = 'card payments are not taken off for one fleet or one platform: a card payment is placed on a person, not on a fleet or a platform';
+    else {
+      try {
+        const sheet = await cardSheet(q);
+        if (sheet.absent) throw Object.assign(new Error(sheet.absent), { plain: true });
+        const byDay = await onCashByDay(q, { from: NET_FROM, to: today });
+        const days = [...byDay.keys()].sort();
+        cardOff = (asOf) => days.reduce((a, d) => (d <= asOf ? a + byDay.get(d) : a), 0);
+      } catch (e) { cardWhy = e.plain ? e.message : `the card payments could not be read (${String(e.message || e).slice(0, 120)})`; }
+    }
+  }
   const out = {};
   for (const metric of metrics) {
     const points = rows.map((r) => {
@@ -466,10 +485,11 @@ async function cashSeries(q, metrics, { from, to, today, fleet, platform }) {
          last read, drawn flat — which would claim no cash came in. */
       if (r.as_of > readDay) p.why = `the cash-fare roll-up was last built on ${ddmmm(readDay)}, before this week's end`;
       else if (r.ceiling == null) p.why = `no valued cash fare is on record for anyone here by ${ddmmm(r.as_of)}`;
-      else p.v = metric === 'cash_ceiling' ? r2(r.ceiling) : Number(r.carriers);
+      else p.v = metric === 'cash_ceiling' ? r2(Number(r.ceiling) - (cardOff ? cardOff(r.as_of) : 0)) : Number(r.carriers);
       return p;
     });
-    out[metric] = finish(metric, points, { as_of: build.read_at, built: { cash_fare_day: build.read_at } });
+    out[metric] = finish(metric, points, { as_of: build.read_at, built: { cash_fare_day: build.read_at },
+      ...(metric === 'cash_ceiling' ? { card_taken_off_from: cardOff ? NET_FROM : null, card_not_taken_off: cardOff ? null : cardWhy } : {}) });
   }
   return out;
 }

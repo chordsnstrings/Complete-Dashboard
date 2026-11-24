@@ -35,7 +35,14 @@
    figures for the day to be complete, and texts nobody until they are. So
    at 08:00 the email goes if that run has finished; if not, it waits for it
    on each quarter hour and at 09:15 goes whatever the state, saying why the
-   list is empty or short. One address gets one day's list once. */
+   list is empty or short. One address gets one day's list once.
+
+   SINCE CARD-4 (24 November 2026) the text also waits for the card payments
+   sheet to have the day, which lands later in the day (it had the 22nd by
+   16:49 on the 23rd, and not the 23rd by 08:33 on the 24th). So the run tries
+   until 20:00, the email waits for it until 20:15, and "08:00" above is the
+   earliest it can go, no longer when it usually does. Each amount is the cash
+   fares less what card paid of them, and the email shows that line. */
 import { http as realHttp } from './http.js';
 import { get } from './settings.js';
 import { log } from './log.js';
@@ -50,9 +57,10 @@ const platformName = (p) => PLATFORM[p] || p;
 const byOrder = (a, b) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99) || String(a).localeCompare(String(b));
 const round2 = (v) => Math.round(Number(v) * 100) / 100;
 
-/* The last try: 09:15 Dubai the morning after the cash day, a quarter hour
-   after the cash run's own 09:00 final. */
-export const lastCall = (day) => new Date(dubaiStart(addDays(day, 1)).getTime() + (9 * 60 + 15) * 60_000);
+/* The last try: 20:15 Dubai the day after the cash day, a quarter hour after
+   the cash run's own 20:00 final (CARD-4: the run waits for the card payments
+   sheet; it was 09:15 after a 09:00 final until 24 November 2026). */
+export const lastCall = (day) => new Date(dubaiStart(addDays(day, 1)).getTime() + (20 * 60 + 15) * 60_000);
 
 /** +971 50 123 4567 from the stored 971501234567; anything else as stored. */
 export const readablePhone = (p) => {
@@ -105,9 +113,12 @@ export async function cashEmailFacts(q, day) {
     const leftOut = (d.left_out || []).filter((x) => x.trips > 0).map((x) => ({
       platform: x.platform, trips: x.trips, known_aed: x.known_aed ? round2(x.known_aed) : null, why: x.why }));
     const dlr = r.provider_status == null ? null : String(r.provider_status);
+    /* CARD-4: the split is the day's cash fares per platform BEFORE card;
+       card_paid is what card took off them, so split − card = amount. */
+    const cardPaid = d.card_paid ? round2(d.card_paid) : 0;
     return {
       name: r.full_name || null, person_id: r.person_id == null ? null : Number(r.person_id),
-      phone: r.destination, amount, platforms: split ? split.map((c) => c.platform) : named, split,
+      phone: r.destination, amount, card_paid: cardPaid, platforms: split ? split.map((c) => c.platform) : named, split,
       left_out: leftOut, sent_at: r.sent_at,
       delivery: dlr == null ? 'not_reported' : (/^deliver/i.test(dlr) ? 'delivered' : dlr),
     };
@@ -116,9 +127,11 @@ export async function cashEmailFacts(q, day) {
   return {
     day,
     run: run ? { status: run.status, reason: run.hold_reason, finished: run.detail?.finished === true,
-      missing_catchup: run.detail?.missing_catchup || [], without_figure: run.detail?.uber_cash_trips_without_figure ?? null } : null,
+      missing_catchup: run.detail?.missing_catchup || [], without_figure: run.detail?.uber_cash_trips_without_figure ?? null,
+      card_sheet_to: run.detail?.card_sheet_to ?? null } : null,
     drivers,
     total: drivers.length ? round2(drivers.reduce((s, x) => s + (x.amount || 0), 0)) : 0,
+    card_total: round2(drivers.reduce((s, x) => s + (x.card_paid || 0), 0)),
     by_platform: [...totals.entries()].sort((a, b) => byOrder(a[0], b[0])).map(([platform, amount]) => ({ platform, amount })),
     unsplit,
     not_texted: others.map((o) => ({ status: o.status, reason: o.hold_reason, n: o.n })),
@@ -129,18 +142,23 @@ export async function cashEmailFacts(q, day) {
 export function runNote(f) {
   const r = f.run;
   if (!r) {
-    return 'The cash text run did not record finishing for this day — between 05:00 and 09:00 it either did not run or '
+    return 'The cash text run did not record finishing for this day — between 05:00 and 20:00 it either did not run or '
       + 'stopped part-way (the collector log says which)'
       + `${f.drivers?.length ? ', so this list is only the drivers it had texted before it stopped.' : ', and nobody was texted.'}`;
   }
-  if (r.reason === 'switched_off') return 'The 05:00 cash text is switched off on the Access page, so nobody was texted for this day.';
+  if (r.reason === 'switched_off') return 'The cash text is switched off on the Access page, so nobody was texted for this day.';
+  /* CARD-4: the run waits for the card payments sheet to have the day. */
+  if (r.reason === 'waiting_for_card_sheet' || r.reason === 'card_sheet_not_ready') {
+    return `${r.finished ? 'Nobody was texted for this day' : 'The cash text run was still waiting when this email went'}: the card payments sheet `
+      + `${r.card_sheet_to ? `ended on ${r.card_sheet_to}` : 'had not been read'}, and a text with that day’s card payments left in would ask drivers for cash they no longer hold.`;
+  }
   if (!r.finished) {
     return 'The cash text run was still waiting for Uber’s figures for this day when this email went'
       + `${r.missing_catchup.length ? ` (Uber ${r.missing_catchup.map((x) => FLEET[x] || x).join(' and ')} had not caught up)` : ''}`
       + ', so the drivers it had not reached yet are not here.';
   }
   if (r.status === 'held' && (r.reason === 'not_complete' || r.reason === 'waiting')) {
-    return 'Nobody was texted for this day: Uber’s figures for it were still not complete at 09:00'
+    return 'Nobody was texted for this day: Uber’s figures for it were still not complete at the run’s last try'
       + `${r.missing_catchup.length ? ` (Uber ${r.missing_catchup.map((x) => FLEET[x] || x).join(' and ')} had not caught up)` : ''}`
       + `${r.without_figure ? `, and ${int(r.without_figure)} Uber cash trip${r.without_figure === 1 ? ' was' : 's were'} still without Uber’s own amount` : ''}.`;
   }
@@ -162,9 +180,10 @@ export function renderCashEmail(f, { dashboard = null } = {}) {
   const deliveryWords = (x) => (x.delivery === 'delivered' ? null
     : x.delivery === 'not_reported' ? 'The gateway has not reported delivery yet.'
       : `The gateway reported it “${x.delivery}” — it may not have reached the driver.`);
+  const cardLine = (x) => (x.card_paid ? `<br>less card&nbsp;&nbsp;<span class="n">${aed(x.card_paid)}</span>` : '');
   const splitCell = (x) => {
-    if (x.split) return x.split.map((c) => `${esc(platformName(c.platform))}&nbsp;&nbsp;<span class="n">${aed(c.amount)}</span>`).join('<br>');
-    return `${esc(x.platforms.map(platformName).join(', '))}<br><span class="n">split not recorded for this text</span>`;
+    if (x.split) return x.split.map((c) => `${esc(platformName(c.platform))}&nbsp;&nbsp;<span class="n">${aed(c.amount)}</span>`).join('<br>') + cardLine(x);
+    return `${esc(x.platforms.map(platformName).join(', '))}<br><span class="n">split not recorded for this text</span>${cardLine(x)}`;
   };
   const rowsHtml = f.drivers.map((x, i) => {
     const notes = [
@@ -180,13 +199,14 @@ export function renderCashEmail(f, { dashboard = null } = {}) {
       <td class="td r b" valign="top" align="right">${x.amount == null ? '—' : aed(x.amount)}</td>
     </tr>`;
   }).join('');
-  const platformLine = f.by_platform.map((p) => `${platformName(p.platform)} AED ${aed(p.amount)}`).join(' · ');
+  const platformLine = [...f.by_platform.map((p) => `${platformName(p.platform)} AED ${aed(p.amount)}`),
+    ...(f.card_total ? [`less card payments AED ${aed(f.card_total)}`] : [])].join(' · ');
   const warning = note ? `
     <tr><td style="padding:0 0 20px 0">
       <div style="font:400 14px/1.55 ${SANS};color:${T.ink};border-left:2px solid ${T.neg};padding:2px 0 2px 12px">${esc(note)}</div>
     </td></tr>` : '';
   const lead = f.drivers.length
-    ? `${int(f.drivers.length)} driver${f.drivers.length === 1 ? ' was' : 's were'} texted this morning to deposit the cash they took on ${esc(wd)} — AED ${esc(aed(f.total))} in all.`
+    ? `${int(f.drivers.length)} driver${f.drivers.length === 1 ? ' was' : 's were'} texted to deposit the cash they took on ${esc(wd)} — AED ${esc(aed(f.total))} in all.`
     : `Nobody was texted to deposit cash taken on ${esc(wd)}.`;
   const foot = nNot ? `${int(nNot)} more driver${nNot === 1 ? '' : 's'} took cash on ${wd} and ${nNot === 1 ? 'was' : 'were'} not texted: `
     + `${f.not_texted.map((o) => `${o.n} — ${notTextedWords(o)}`).join('; ')}.` : null;
@@ -222,7 +242,7 @@ ${f.drivers.length ? `<tr><td class="pad" style="padding:8px 36px 8px 36px">
 </td></tr>` : ''}
 <tr><td class="pad" style="padding:24px 36px 36px 36px;font:400 12px/1.6 ${SANS};color:${T.grey}">
   ${foot ? `${esc(foot)}<br><br>` : ''}
-  Each amount is the one in the driver’s text: Uber’s own cash-collected figure where Uber reports it, the fare on the other platforms, for the Dubai day ${esc(f.day)}.
+  Each amount is the one in the driver’s text: Uber’s own cash-collected figure where Uber reports it, the fare on the other platforms, for the Dubai day ${esc(f.day)}, less what card payments (Network International) paid of those fares that day. Only drivers with more than AED 99 left are texted.
   Cash on a platform the text did not name is not in it and is listed under the driver.
   ${dashboard ? `<br><a href="${esc(dashboard)}/#messages" style="color:${T.ink}">Every text, and every one held back, on the dashboard</a>` : ''}
 </td></tr>
@@ -234,7 +254,8 @@ ${f.drivers.length ? `<tr><td class="pad" style="padding:8px 36px 8px 36px">
     platformLine || null, '',
     ...f.drivers.map((x, i) => [
       `${i + 1}. ${x.name || `Driver #${x.person_id}`} — ${readablePhone(x.phone)} — AED ${x.amount == null ? '—' : aed(x.amount)}`,
-      `   ${x.split ? x.split.map((c) => `${platformName(c.platform)} ${aed(c.amount)}`).join(', ') : `${x.platforms.map(platformName).join(', ')} (split not recorded)`}`,
+      `   ${x.split ? x.split.map((c) => `${platformName(c.platform)} ${aed(c.amount)}`).join(', ') : `${x.platforms.map(platformName).join(', ')} (split not recorded)`}`
+        + (x.card_paid ? `, less card ${aed(x.card_paid)}` : ''),
       ...x.left_out.map((l) => `   Not in this amount: ${platformName(l.platform)}, ${l.trips} cash trip${l.trips === 1 ? '' : 's'} — ${LEFT_OUT_WHY[l.why] || l.why}`),
       deliveryWords(x) ? `   ${deliveryWords(x)}` : null,
     ].filter(Boolean).join('\n')),

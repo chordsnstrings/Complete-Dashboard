@@ -2346,7 +2346,11 @@ async function tabEarnings(root, id, prof) {
     sub: cashTakenKnown && (+k.cash_trips > 0 || +k.cash_bookings > 0)
       ? (() => {
         const open = Math.max(0, (+k.cash_bookings || 0) - (+k.cash_trips || 0));
+        /* CARD-3b: the figure is net of what card payments settled of the
+           cash fares from 1 Aug 2026 (api/driver_routes.js); the part is said. */
         return `${countOf(+k.cash_trips, 'completed cash trip')}`
+          + (+k.cash_taken_card > 0 ? ` \u00b7 after ${money(+k.cash_taken_card)} paid by card (fares from ${k.cash_taken_card_from})` : '')
+          + (k.cash_taken_card == null && k.cash_taken_card_absent_reason ? ` \u00b7 card payments not taken off: ${k.cash_taken_card_absent_reason}` : '')
           + (+k.cash_unvalued ? ` \u00b7 ${countOf(+k.cash_unvalued, 'not valued yet', 'not valued yet')}` : '')
           + (open ? ` \u00b7 ${countOf(open, 'cash booking')} not completed, not counted` : '')
           + ' \u00b7 the platform\u2019s own cash figure where it has filed one, the fare otherwise';

@@ -1340,7 +1340,7 @@ export function toolbox({ fetchApi, now = () => Date.now(), fileUrl = (rid) => `
       for (const r of rows) delete r.__reasons;
       const columns = [col('driver', 'Driver', 'text'), col('advance_owed_aed', 'Advances owed', 'aed'),
         col('deductions_owed_aed', 'Deductions owed', 'aed'), col('cash_held_aed', 'Cash held', 'aed'),
-        col('cash_taken_aed', 'Cash taken (ceiling)', 'aed'), col('cash_trips', 'Cash trips', 'int'),
+        col('cash_taken_aed', 'Cash taken (ceiling, less card from 1 Aug 2026)', 'aed'), col('cash_trips', 'Cash trips', 'int'),
         col('total_owed_aed', 'Total owed', 'aed'), col('pay_owed_to_driver_aed', 'Pay owed to driver', 'aed'),
         col('earned_aed', 'Earned', 'aed'), col('exposure_pct', 'Exposure', 'pct'), col('against_line', 'Against the line', 'text'),
         col('driver_id', 'Driver id', 'text')];

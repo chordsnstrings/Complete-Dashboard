@@ -142,12 +142,15 @@ async function main() {
     // CABMAN realtime GPS — every 5 minutes, saved to the database
     cron.schedule(config.cabmanCron, () => cabmanTick());
     /* DRIVER MESSAGES BY SMS, on Dubai's clock.
-       05:00, then every fifteen minutes until yesterday is complete; 09:00 is
-       the last try and says so. Trip requests twelve minutes after each
-       half-hourly incremental (its reconcile has written the verdicts by
-       then). Messages waiting for 07:00 go out on the five-minute tick. */
-    cron.schedule('*/15 5-8 * * *', smsJob('cash', (cfg) => cashDepositRun({ q: sq, cfg })), { timezone: 'Asia/Dubai' });
-    cron.schedule('0 9 * * *', smsJob('cash-final', (cfg) => cashDepositRun({ q: sq, cfg, final: true })), { timezone: 'Asia/Dubai' });
+       The cash text: 05:00, then every fifteen minutes until yesterday is
+       complete AND the card payments sheet has it (CARD-4: the sheet gets a
+       day later in the day — "Once the sheet has it", the operator,
+       2026-11-24); 20:00 is the last try and says so. It was 05:00–09:00
+       until then. Trip requests twelve minutes after each half-hourly
+       incremental (its reconcile has written the verdicts by then). Messages
+       waiting for 07:00 go out on the five-minute tick. */
+    cron.schedule('*/15 5-19 * * *', smsJob('cash', (cfg) => cashDepositRun({ q: sq, cfg })), { timezone: 'Asia/Dubai' });
+    cron.schedule('0 20 * * *', smsJob('cash-final', (cfg) => cashDepositRun({ q: sq, cfg, final: true })), { timezone: 'Asia/Dubai' });
     cron.schedule('12,42 * * * *', smsJob('trips', (cfg) => tripRegisterRun({ q: sq, cfg })));
     /* The goal texts (src/target_sms.js): due at 13:00 and 18:00 Dubai, asked
        again at :15 if the data was stale, and given up at :30. */
@@ -161,11 +164,12 @@ async function main() {
     cron.schedule('*/15 7-9 * * *', () => withPinnedSettings(() => dailyReportRun({ q: sq }))
       .catch((e) => log.error('report', 'daily', { err: String(e?.message || e).slice(0, 200) })),
     { timezone: 'Asia/Dubai' });
-    /* The cash email: 08:00 Dubai, the drivers texted that morning to deposit
-       the day before's cash, to the cash desk (CASH_REPORT_RECIPIENTS). It
-       waits, each quarter hour, for the cash text run to finish, and at 09:15
-       goes whatever the state (src/cash_sms_email.js). */
-    cron.schedule('0,15,30,45 8-9 * * *', () => withPinnedSettings(() => cashEmailRun({ q: sq }))
+    /* The cash email: the drivers texted to deposit the day before's cash, to
+       the cash desk (CASH_REPORT_RECIPIENTS). From 08:00 it waits, each quarter
+       hour, for the cash text run to finish — which now waits for the card
+       sheet (CARD-4) — and at 20:15 goes whatever the state
+       (src/cash_sms_email.js). */
+    cron.schedule('0,15,30,45 8-20 * * *', () => withPinnedSettings(() => cashEmailRun({ q: sq }))
       .catch((e) => log.error('cash-email', 'daily', { err: String(e?.message || e).slice(0, 200) })),
     { timezone: 'Asia/Dubai' });
     /* The low-trips email: 08:00 Dubai, every active driver under the
