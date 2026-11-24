@@ -4648,7 +4648,7 @@ The renames cover tiles, panels, columns, captions, the phone screens, the Excel
 - `sql/schema_v129.sql`: `driver_move_day`, `driver_move_cell` (half-km cells, the `place_cell` grid), `driver_move_point`. Built by `src/movement_rollup.js` from the day page's own functions (`api/driver_day_core.js`, extracted verbatim from the day route), so a range and a day classify each minute the same way.
 - What a minute was: on a job (a booking, request to end), else Uber's live status, else the log-in record before the live feed's first word. Waiting = stopped while online and on no job; parked offline = stopped with no working status. A moving car with the seat unreported is never "empty". Online minutes the tracker did not cover are counted (`unseen_online_min`).
 - Pickups and drop-offs (completed bookings only), each with its rung: Uber's own DJ_PICKUP / DJ_COMPLETED with the nearest fix within 5 min (`uber_stage`), the booking's coordinates, the first/last fix with the seat occupied, or (drop-offs only) the end time with the nearest fix. A request time is never used as a pickup time.
-- Scheduled hourly at :47 (today); yesterday at 00:47 and 03:47 Dubai; three older days of backfill a pass from 00:47 to 05:47 (eighteen a night) to 2026-08-21 (`source_state` movement_rollup / backfilled_to). A day is ~250 people at 2–4 s each (measured 2026-11-24 on four drivers' day pages).
+- Scheduled hourly at :47 (today); yesterday at 00:47 and 03:47 Dubai; twelve older days of backfill a pass from 00:47 to 05:47 (seventy-two a night; three until the 90-second pass was measured on production) to 2026-08-21 (`source_state` movement_rollup / backfilled_to). A day is ~250 people at 2–4 s each (measured 2026-11-24 on four drivers' day pages).
 - `GET /api/driver/movement`: coverage (days before the floor, days not built yet — never read as no movement), totals, cells and areas with names, points, days. Territory: a "Where the time went" panel, map layers (waiting and parked / where it drove / pickups and drop-offs / booked addresses), Time by area, Day by day.
 - **Independent review (2026-11-24) found seven defects, all fixed and each revert-proven:**
   - a 0,0 fix made 13,096 km and a cell in the Gulf of Guinea; the fixes query now uses `REAL_FIX`, and a step of 60 km or more is never an interval;
@@ -4667,7 +4667,32 @@ The renames cover tiles, panels, columns, captions, the phone screens, the Excel
   - **Mid-pass reason.** Read mid-pass, a driver not yet reached read "no booking and no working status", because the route took any row for the day as proof the day was built. Each pass now records `day:<date>` in `source_state` when it completes, and only a completed day counts as built. Today's reason also says it is rebuilt hourly, and when last.
   - **Addressed account.** A busy driver's page read "on more than one person", because the fold joins a same-name account the spine files under a second person. The page now answers for the person the ADDRESSED account is on.
   - **Waiting-spot coordinates** are numbers now, not strings.
-  - Tests: `test/movement_rollup.test.mjs` (42), each fix revert-proven. **LIVE since 784e044 (PR #68), 2026-11-24 13:10 UTC; verified on production:** the driver who read "on more than one person" now answers (3 h 23 waiting, 144.8 km), and waiting-spot coordinates are numbers. Not yet seen live: the first `day:<date>` completion record, written at the end of the 13:47 UTC pass. Until then, today reads "not built yet" beside its own figures.
+  - Tests: `test/movement_rollup.test.mjs` (42), each fix revert-proven. **LIVE since 784e044 (PR #68), 2026-11-24 13:10 UTC; verified on production:** the driver who read "on more than one person" now answers (3 h 23 waiting, 144.8 km), and waiting-spot coordinates are numbers. The first `day:<date>` completion record was written at 13:48:34 UTC by the 13:47 pass, verified the same hour: today counts as built (`days_not_built` 0), and the whole pass took about 90 s, not the 8 minutes estimated.
+| MOV-3 | **Territory, granular: the car's own route, every stop, and where they park** (the operator, 2026-11-24: "in territory let's focus on granular view. we need to see territory where they move around, where they park everything").
+- **Storage:** `sql/schema_v130.sql` adds two tables, written by the movement rollup in the same transaction:
+  - `driver_move_segment`: the day as a log, with every stop, drive and silence in order. Each stop is split into waiting online, on a job and no working status, and a drive keeps both ends.
+  - `driver_move_window`: which car was the driver's and when, with the one tracker kept for it.
+- **Logic:** `api/movement_track.js`:
+  - `segmentRows`;
+  - `routePieces`: the path, cut at every change of state, never drawn across a silence or between two custody windows, never through a stop;
+  - `parkingSpots`: stops within 150 m grouped, with visits, time, what the driver was doing, nights (60+ minutes inside 00:00–05:00) and the usual hours.
+- **Route:** `GET /api/driver/movement/track` draws the path from the tracker's own fixes inside the car-hours. Positions are never stored twice, and the read is capped at 40,000 fixes, said when hit.
+- **Territory:**
+  - a full-width map, with day chips for every day or one day followed in order;
+  - layers that can be on together: routes (with a passenger, without, seat not reported), stops (numbered on a chosen day), parking spots (a dark ring for overnight), pickups and drop-offs, booked addresses;
+  - new tables: "Where they park" and "Stops";
+  - the half-km cell layers are replaced by the route and the stops. "Time by area" still reads the cells.
+- **Independent review (2026-11-24): nine findings, all fixed.** Each fix below has a test that fails when the fix is reverted, except the first-pass cursor reset (schema v130, checked against the source) and the midnight bound:
+  - A day the tracker never saw counted as "a day with a route", and the stops said "the car did not stop". The track now carries per-day pieces, fixes and the day page's own reason.
+  - Days built before v130 would never get a log. v130 clears the backfill cursor once, and the route names those days.
+  - A bag on a parked car's seat drew a "passenger" line through the stop. A piece now needs the car to move (`movingOn`).
+  - `nights` counted stops, not nights. It is now per day, with an hour inside 00:00–05:00.
+  - "Choose a day for the rest" was false at the 40,000-position cap. The read is now newest-first, whole days only (`wholeDays`), and the days not drawn are named.
+  - Wrong empty-state reasons on the Stops table and the one-day parking view are corrected.
+  - A stop's split could exceed its minutes by one. The difference now goes to the largest part.
+  - A window ending at midnight read the next day's first minute. The bound is now `LEAST(to_min + 1, 1440)`.
+- **Found while testing the review fixes:** the person register's 30-second cache made a pass fail anyone created in the last 30 seconds. Each pass now reads it fresh, and a failed day says so on the track.
+- Tests: `test/movement_track.test.mjs` (27). `arkiv_people`: the territory contract on the new panel; a route line is not a hollow ring. The old-skin territory page is re-recorded. **Written; not yet on production.**
 | CARD-3c | **Cash Trips (including POS), POS payments, Cash in hand, and Bank Collection with POS** (the operator, 2026-11-24: "POS directly comes to our bank. So it should be deducted from the Cash held with the driver… Cash In Hand which is Cash Trips - POS deposits"; "driver page should have POS payment as a separate modal"; "Bank Collection should add POS payment as well, as that comes into the bank").
 - **Cash Trips (including POS)** is the cash trips (`trip_cash`, gross) plus the hotel's fares paid on the driver's own card machine (`pos-driver`). It appears on the driver Earnings tile, the driver Excel, and the Finance tile (`/api/settlement/mix` `pos_driver`).
 - **POS payments** is a tile of its own: those hotel fares plus the card payments (Network International) that paid cash trips from 1 Aug 2026. Card on the sheet that matched no fare is said beside it, never counted.

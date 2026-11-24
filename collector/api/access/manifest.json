@@ -2837,6 +2837,25 @@
  },
  {
   "method": "GET",
+  "path": "/api/driver/movement/track",
+  "subject": "ID",
+  "carries": [
+   "ID",
+   "LOC"
+  ],
+  "grain": "record",
+  "fields": [],
+  "whole": [
+   "LOC"
+  ],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js /api/driver/movement/track (2026-11-24, the granular Territory view). One person's movement over the window from the movement rollup (sql/schema_v130.sql) and the tracker's own fixes inside the hours the car was theirs: {from, to, absent, days[]{day, stops, drives, silences, km, stopped_min, first_min, last_min, plates}, stops[] and drives[] (driver_move_segment rows: day, seq, kind, s_min, e_min, minutes, plate, source, lat, lng, area, to_lat, to_lng, to_area, km, km_with_passenger, passenger, passenger_min, wait_min, ontrip_min, offline_min, inferred), parking[]{lat, lng, area, visits, days, minutes, wait_min, ontrip_min, offline_min, nights, usual_from_min, usual_to_min}, routes[]{day, state, plate, s, e, km, points[[lat, lng]]}, fixes_read, fixes_capped, basis}. LOC is whole: every list is a place or a car; without it nothing remains."
+ },
+ {
+  "method": "GET",
   "path": "/api/driver/trips",
   "subject": "BK",
   "carries": [

@@ -53,10 +53,12 @@
    Pickups and drop-offs are counted over COMPLETED bookings — a booking
    nobody rode has neither. */
 import { intervalState } from '../api/day_movement.js';
+import { segmentRows } from '../api/movement_track.js';
 import { km } from '../api/where_routes.js';
 import { dayTrips, dayOnline, dayMovement, MOVEMENT_FLOOR_DAY } from '../api/driver_day_core.js';
 import { driverScope, PKEY } from '../api/driver_routes.js';
 import { log } from './log.js';
+import { clearPersonMapCache } from '../api/person_map.js';
 
 export const CELL_DEG = 0.005;
 export const POINT_TOLERANCE_S = 300;
@@ -296,14 +298,32 @@ export async function buildPersonDay(q, { personId, day, resolve, now = null, tx
   const plates = [...new Set(mv.fixes.map((f) => f.plate))].sort();
   const sources = [...new Set(mv.fixes.map((f) => f.source))].sort();
   const full = { ...row, ...counts, plates, sources, absent: mv.movement.absent || null, partial: !!mv.isToday, failed: false };
-  await (tx || ((fn) => fn(q)))((w) => writePersonDay(w, { personId, day, full, cells, points }));
+  /* The granular view's two (sql/schema_v130.sql): the day as a log, each
+     stop split by what the driver was doing; and which car was theirs when,
+     with the one tracker kept for it. */
+  const segments = segmentRows(mv.movement.segments, status);
+  const keptSource = (plate) => mv.secondTracker.get(plate)?.kept || mv.fixes.find((f) => f.plate === plate)?.source || null;
+  const windows = mv.windows.map((w) => ({ plate: w.plate, source: keptSource(w.plate), from_min: w.from, to_min: w.to }));
+  await (tx || ((fn) => fn(q)))((w) => writePersonDay(w, { personId, day, full, cells, points, segments, windows }));
   return full;
 }
 
 /* Replace one person-day: the old cells and points go and the new ones come
    in together, so a failure part-way leaves the old day whole (inside the
    caller's transaction) rather than a day row with no cells. */
-async function writePersonDay(q, { personId, day, full, cells, points }) {
+async function writePersonDay(q, { personId, day, full, cells, points, segments = [], windows = [] }) {
+  await q(`DELETE FROM driver_move_segment WHERE person_id = $1 AND day = $2::date`, [personId, day]);
+  await q(`DELETE FROM driver_move_window WHERE person_id = $1 AND day = $2::date`, [personId, day]);
+  const many = async (table, cols, rows) => {
+    for (let i = 0; i < rows.length; i += 150) {
+      const chunk = rows.slice(i, i + 150); const params = [personId, day];
+      const vals = chunk.map((r) => `($1, $2::date, ${cols.map((k) => { params.push(r[k] ?? null); return `$${params.length}`; }).join(', ')})`);
+      await q(`INSERT INTO ${table} (person_id, day, ${cols.join(', ')}) VALUES ${vals.join(', ')} ON CONFLICT DO NOTHING`, params);
+    }
+  };
+  await many('driver_move_segment', ['seq', 'kind', 's_min', 'e_min', 'minutes', 'plate', 'source', 'lat', 'lng', 'area', 'to_lat', 'to_lng',
+    'to_area', 'km', 'km_with_passenger', 'passenger', 'passenger_min', 'wait_min', 'ontrip_min', 'offline_min', 'inferred'], segments);
+  await many('driver_move_window', ['plate', 'source', 'from_min', 'to_min'], windows);
   await q(`DELETE FROM driver_move_cell WHERE person_id = $1 AND day = $2::date`, [personId, day]);
   await q(`DELETE FROM driver_move_point WHERE person_id = $1 AND day = $2::date`, [personId, day]);
   if (cells.length) {
@@ -344,6 +364,10 @@ async function writeFailedDay(q, { personId, day, why, tx = null }) {
 /** Every person who worked `day`, one at a time (the database is shared with
     the collectors; one person-day is a handful of indexed reads). */
 export async function buildDay(q, { day, now = null, resolve = null, tx = null }) {
+  /* The person register is cached for 30 s (api/person_map.js); a pass
+     reads it fresh, or a person created in those 30 s fails as "not on the
+     register" for the day (found in test, 2026-11-24). */
+  clearPersonMapCache();
   const r = resolve || driverScope({ q, wrap: (f) => f }).resolve;
   const persons = await personsForDay(q, day);
   let built = 0; let failed = 0;
@@ -369,13 +393,14 @@ const prevDay = (d) => new Date(Date.parse(`${d}T00:00:00Z`) - 86400000).toISOSt
 /** The hourly pass: today always; yesterday at 00:47 and 03:47 Dubai (late
     timeline and tracker rows land after midnight); and from 00:47 to 05:47
     only, `backfillDays` older days per pass walking back from the cursor to
-    FLOOR_DAY — eighteen a night, so the ~95 days to the floor take about
-    five nights. */
+    FLOOR_DAY. A whole day's pass took about 90 s on production (13:47 UTC,
+    2026-11-24), so twelve a pass is ~18 minutes, inside the hour — seventy-
+    two a night, and the ~95 days to the floor take about two nights. */
 const STATE = (key) => q0 => q0(`SELECT value FROM source_state WHERE source = 'movement_rollup' AND fleet_id = '-' AND key = $1`, [key]);
 const setState = (q, key, value) => q(`INSERT INTO source_state (source, fleet_id, key, value, updated_at) VALUES ('movement_rollup', '-', $1, $2, now())
   ON CONFLICT (source, fleet_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, [key, value]);
 
-export async function movementRollupTick(q, { now = Date.now(), backfillDays = 3, tx = null } = {}) {
+export async function movementRollupTick(q, { now = Date.now(), backfillDays = 12, tx = null } = {}) {
   const today = dubaiDay(now);
   const hour = new Date(now + 4 * 3600000).getUTCHours();
   const done = [];

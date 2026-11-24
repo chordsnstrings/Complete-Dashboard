@@ -147,7 +147,7 @@ const BY_ROUTE = {
   person: ['GET /api/driver/custody', 'GET /api/driver/daily', 'GET /api/driver/day', 'GET /api/driver/days',
     'GET /api/driver/earnings', 'GET /api/driver/heatmap', 'GET /api/driver/kpis', 'GET /api/driver/mix',
     'GET /api/driver/photo/:platform/:id', 'GET /api/driver/profile', 'GET /api/driver/quality',
-    'GET /api/driver/shift', 'GET /api/driver/standing', 'GET /api/driver/territory', 'GET /api/driver/movement', 'GET /api/driver/trips',
+    'GET /api/driver/shift', 'GET /api/driver/standing', 'GET /api/driver/territory', 'GET /api/driver/movement', 'GET /api/driver/movement/track', 'GET /api/driver/trips',
     'GET /api/driver/unauthorized', 'GET /api/driver/vehicles', 'GET /api/performer', 'GET /api/status/driver'],
   cash: ['GET /api/driver/register', 'GET /api/ledger/cash-position', 'GET /api/ledger/entries',
     'GET /api/ledger/exposure', 'GET /api/ledger/people', 'GET /api/ledger/receipt/:sha',
