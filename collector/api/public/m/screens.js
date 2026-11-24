@@ -415,7 +415,7 @@ async function today(deck, ctx) {
           const tv = tripValue(now, fmt, sourceLabel);
           /* `na`: with no amount, today.js's sub IS the reason ("no booking
              carries a price yet, and no settled day to value them from"). */
-          return { label: 'Trip value', href: href('day', now.day), sub: tv.sub,
+          return { label: 'Gross revenue', href: href('day', now.day), sub: tv.sub,
             na: tv.amount == null ? tv.sub : null,
             value: tv.amount == null ? '\u2014'
               : (tv.estimated ? `\u2248 ${money(tv.amount)}` : money(tv.amount)) };
@@ -438,7 +438,7 @@ async function today(deck, ctx) {
            against AED 6,110 of fares. The sub-line names the two halves so the
            reader can see which is which rather than wondering why one tile
            disagrees with the one beside it. */
-        { label: 'Money in', value: now.money != null ? money(now.money) : '\u2014',
+        { label: 'Net earnings', value: now.money != null ? money(now.money) : '\u2014',
           sub: now.money == null
             ? (now.moneyAnswered
               ? 'no channel has been credited yet today'
@@ -605,7 +605,7 @@ async function today(deck, ctx) {
        shown only the second: "we should get the trip value overall which was
        35k yesterday which gives us better indication than what is there at
        the moment." */
-    { label: 'Trip value', value: n(k.revenue) != null ? money(n(k.revenue)) : '\u2014',
+    { label: 'Gross revenue', value: n(k.revenue) != null ? money(n(k.revenue)) : '\u2014',
       sub: n(k.priced_trips)
         ? `on ${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings priced`
         : 'no booking in this range carries a price',
@@ -613,7 +613,7 @@ async function today(deck, ctx) {
       /* A window that includes today is understated here by construction and
          has to say so rather than read as a bad week. */
       tone: n(k.priced_pct) != null && n(k.priced_pct) < 60 ? 'warn' : null },
-    { label: 'Money in', value: money(n(k.accounted) ?? n(k.revenue)),
+    { label: 'Net earnings', value: money(n(k.accounted) ?? n(k.revenue)),
       sub: n(k.accounted) ? 'each channel counted once, on its own report'
         : 'fares on record' },
     /* THE COUNT, with the rate under it — not the rate alone.
@@ -754,7 +754,7 @@ async function today(deck, ctx) {
     absenceBand(deck, [
       { label: 'Bookings not yet priced', fig: noPrice == null ? null : fmt(noPrice), hl: true, none: 'Not counted',
         why: noPrice == null ? 'The kpis answer carries no priced count for this window.'
-          : `${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings carry a price, and Trip value is over those alone. `
+          : `${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings carry a price, and Gross revenue is over those alone. `
             + `${UBER_FARE_WHY}, so the newest Uber bookings are priced only after it; a booking cancelled `
             + 'without a fee has no price to carry.' },
       { label: 'Bookings carrying no distance', fig: noKm == null ? null : fmt(noKm), none: 'Not counted',
@@ -836,8 +836,8 @@ async function moneyScreen(deck, ctx) {
          gap to attribute. Each figure now states what it is and what it was
          measured over, and the sentence draws no relation it cannot prove. */
       + (inAll
-        ? `Trip value is ${money(total)} — what riders paid, on the ${fmt(priced)} of `
-          + `${fmt(k.trips)} bookings that carry a price. Money in is ${money(inAll)}, `
+        ? `Gross revenue is ${money(total)} — what riders paid, on the ${fmt(priced)} of `
+          + `${fmt(k.trips)} bookings that carry a price. Net earnings is ${money(inAll)}, `
           + 'each channel counted once on the best report it files: '
           + [n(k.accounted_statements) ? `${money(n(k.accounted_statements))} on platform statements` : null,
             n(k.accounted_fares) ? `${money(n(k.accounted_fares))} in fares` : null,
@@ -848,17 +848,17 @@ async function moneyScreen(deck, ctx) {
     tone: routed && owed / routed >= 0.3 ? 'warn' : null,
   });
 
-  const c = card('Trip value a day', (priced
+  const c = card('Gross revenue a day', (priced
     ? `${fmt(priced)} of ${fmt(k.trips)} bookings carry a price` : 'no booking carries a price')
     + (partialDay ? ' · today excluded, it is still filling' : ''));
   c.body.append(spark(rev, { h: 46, tone: 'var(--s3)' }));
   deck.append(c.card);
 
   const moneyTiles = stats(deck, [
-    { label: 'Trip value', value: money(total),
+    { label: 'Gross revenue', value: money(total),
       sub: priced ? `what riders paid on ${fmt(priced)} of ${fmt(k.trips)} bookings`
         : 'no booking carries a price', long: true },
-    { label: 'Money in', value: money(inAll ?? total),
+    { label: 'Net earnings', value: money(inAll ?? total),
       sub: inAll ? 'each channel counted once, on its own report' : 'fares only' },
     { label: 'Per priced booking',
       value: total && priced ? money(total / priced, 'AED', 0) : '\u2014',
@@ -932,15 +932,15 @@ async function moneyScreen(deck, ctx) {
     absenceBand(deck, [
       { label: 'Bookings not yet priced', fig: noPrice == null ? null : fmt(noPrice), hl: true, none: 'Not counted',
         why: noPrice == null ? 'The kpis answer carries no booking count for this window.'
-          : `${fmt(priced)} of ${fmt(k.trips)} bookings carry a price, and Trip value is over those alone. `
+          : `${fmt(priced)} of ${fmt(k.trips)} bookings carry a price, and Gross revenue is over those alone. `
             + `${UBER_FARE_WHY}, so the newest Uber bookings are priced only after it; a booking cancelled `
             + 'without a fee has no price to carry.' },
-      { label: 'Money in, day by day', fig: null, none: 'No series',
+      { label: 'Net earnings, day by day', fig: null, none: 'No series',
         why: n(k.accounted_statements)
           ? `${money(n(k.accounted_statements))} of the ${money(n(k.accounted))} is payout statements, which a platform `
-            + 'files a week at a time, so Money in has no day-by-day figure. Trip value is the daily money line: '
+            + 'files a week at a time, so Net earnings has no day-by-day figure. Gross revenue is the daily money line: '
             + 'what riders paid, booking by booking.'
-          : 'Money in has no day-by-day series on this page; Trip value, what riders paid per booking, is the daily money line.' },
+          : 'Net earnings has no day-by-day series on this page; Gross revenue, what riders paid per booking, is the daily money line.' },
       settle?.unlabelled_trips ? { label: 'Bookings with no settlement route', fig: fmt(settle.unlabelled_trips),
         why: `They record no route at all${settle.unlabelled_platforms?.length
           ? ` (${settle.unlabelled_platforms.join(', ')})` : ''}, so How fares settle can say nothing about them.` }
@@ -1030,14 +1030,14 @@ async function people(deck, ctx) {
       value: sort === 'money'
         ? (moneyOf(d) == null ? '\u2014' : money(moneyOf(d)))
         : fmt(KEY[sort](d)),
-      note: { trips: 'bookings', km: 'km', money: 'money in' }[sort],
+      note: { trips: 'bookings', km: 'km', money: 'net earnings' }[sort],
       to: href('driver', d.driver_ext_id),
     })));
     if (!term) cut(list, board, 'people who drove');
   };
   search(bar, 'Search people', (v) => { term = v; draw(); });
   seg(bar, [{ id: 'trips', label: 'Bookings' }, { id: 'km', label: 'Distance' },
-    { id: 'money', label: 'Money in' }], sort, (id) => { sort = id; draw(); });
+    { id: 'money', label: 'Net earnings' }], sort, (id) => { sort = id; draw(); });
   draw();
 }
 

@@ -1412,7 +1412,7 @@ function overviewAbsence(root, k, prof) {
   const absHost = el('div'); root.append(absHost);
   absenceBand(absHost, [
     { label: 'A fare on every booking', hl: trips > priced, fig: trips ? `${fmt(priced)} of ${fmt(trips)}` : null, none: 'No booking',
-      why: trips > priced ? `${UBER_FARE_WHY}; Money in takes the statement where a channel filed one.`
+      why: trips > priced ? `${UBER_FARE_WHY}; Net earnings takes the statement where a channel filed one.`
         : trips ? 'Every booking in this window carries a fare.' : 'No booking in this window.' },
     { label: 'The bank transfer itself', fig: null, none: 'Not read',
       why: 'Bank deposit is what is left of Money in after the cash the driver already holds — a remainder, not a receipt. No bank statement is read here.' },
@@ -2232,13 +2232,13 @@ async function tabEarnings(root, id, prof) {
     (k.priced_trips
       ? { label: 'Gross revenue', value: money(k.revenue),
           sub: `the gross the riders were charged, over ${fmt(k.priced_trips)} of `
-            + `${fmt(k.trips)} trips that report a fare — the payout below is what was left `
+            + `${fmt(k.trips)} trips that report a fare — the Bank collection below is what was left `
             + 'of it after the platform’s commission, not an addition to it',
           tone: k.trips && k.priced_trips / k.trips < 0.5 ? 'warn' : null }
       : { label: 'Gross revenue', value: k.statement_fares ? money(k.statement_fares) : '—',
           sub: k.statement_fares
             ? `no trip of theirs reports a fare — this is the statement's own fare line, over `
-              + `${countOf(k.statement_fare_periods, 'period')}, and the payout below came out of it`
+              + `${countOf(k.statement_fare_periods, 'period')}, and the Bank collection below came out of it`
             : 'no trip of theirs reports a fare, and no statement reports one either' }),
     /* The only tile in this row with no sub-line at all: `sub: … : null`, so a
        driver with no priced trip got a bare em dash while its five siblings

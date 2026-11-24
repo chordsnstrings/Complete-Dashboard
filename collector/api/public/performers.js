@@ -79,7 +79,7 @@ const MONEY_BASIS = {
   verb: (top) => (top ? 'earned most' : 'earned least'),
   tile: (top) => (top ? 'Best per day' : 'Lowest per day'),
   column: 'Per day',
-  caption: 'Money in per day worked',
+  caption: 'Net earnings per day worked',
   why: null,
 };
 const WORK_BASIS = {
@@ -129,7 +129,7 @@ export async function renderPerformers(root, band) {
     top ? 'Share of the week\u2019s bookings run by the busiest people, busiest first' : 'People by days worked, one to seven', 'perf-shape') : null;
   if (ak) root.append(heroP.panel, shapeP2.panel);
   const listP = panel(top ? 'Ranked highest' : 'Ranked lowest',
-    `Money in per day worked, over the last complete week. At least ${MIN_DAYS} days `
+    `Net earnings per day worked, over the last complete week. At least ${MIN_DAYS} days `
     + `and ${MIN_BOOKINGS} bookings — click any row for the week in detail.`);
   root.append(listP.panel);
   const compP = ak && !top ? panel('Completion against bookings', `One dot per ranked person with at least ${SHOW_AT} bookings`, 'perf-comp') : null;
@@ -334,7 +334,7 @@ export async function renderPerformers(root, band) {
       /* `absent` rather than a column of dashes: on a week the statements do
          not reach, every money cell is empty and the reader is owed the reason
          once, above the table, instead of eleven rows of "—". */
-      { label: 'Money in', key: 'money', num: true, absent: NO_MONEY,
+      { label: 'Net earnings', key: 'money', num: true, absent: NO_MONEY,
         render: (r) => (r.money == null ? '—'
           : `${money(r.money)}<span class="dim" title="payout where the channel pays one, fare where it prices the trip"> ${
             r.payouts && r.fares ? 'both' : r.payouts ? 'payout' : 'fare'}</span>`) },
@@ -410,7 +410,7 @@ export async function renderPerformers(root, band) {
         render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
       { label: 'Days', key: 'days_worked', num: true },
       { label: 'Bookings', key: 'bookings', num: true },
-      { label: 'Money in', key: 'money', num: true, absent: NO_MONEY,
+      { label: 'Net earnings', key: 'money', num: true, absent: NO_MONEY,
         render: (r) => money(r.money) },
       { label: 'Why not ranked', key: 'why' },
     ]));

@@ -174,7 +174,7 @@ function positionTiles(p) {
         ? `${ordinal(jp.percentile)} percentile · fleet median ${fmt(jp.median)}`
           + (jp.tied > 1 ? ` · level with ${fmt(jp.tied - 1)} others` : '')
         : 'not active in this period, so not placed against people who were' },
-    { key: 'rec-value', label: 'Trip value',
+    { key: 'rec-value', label: 'Gross revenue',
       value: p?.value == null ? 'not measured' : money(p.value),
       sub: p?.value == null
         ? 'no fare is on record for any completed trip in this period'
@@ -252,7 +252,7 @@ function recordTable(host, rec) {
         return `<span class="${cls}">${arrow} ${esc(fmt(Math.abs(r.change)))}</span>`
           + `${r.changed ? '' : ' <span class="dim">within range</span>'}`;
       } },
-    { label: 'Trip value', key: 'value', num: true, render: (r) => (r.value == null ? '' : money(r.value)),
+    { label: 'Gross revenue', key: 'value', num: true, render: (r) => (r.value == null ? '' : money(r.value)),
       absent: 'no fare is on record for any completed trip in these periods — a value is not '
         + 'zero, it is a fare that has not arrived' },
     { label: 'Value position', key: 'value_pos',
@@ -318,7 +318,7 @@ export async function renderDriverRecord(root, id, prof) {
        measured" and the fleet median is measured. */
     `Their own bars against the fleet median of the same ${L}, drawn as ${drawnNoun('behind')} behind each`);
   root.append(jobs.panel);
-  const val = panel(`Trip value, ${L} by ${L}`,
+  const val = panel(`Gross revenue, ${L} by ${L}`,
     'Gross — what riders were charged, before any platform commission and before the cash the driver already took');
   root.append(val.panel);
   /* WHERE THEY SAT AMONG THE PEOPLE WHO WERE THERE, period by period.
@@ -423,7 +423,7 @@ export async function renderDriverRecord(root, id, prof) {
   const priced = rec.periods.filter((p) => p.value != null);
   if (!priced.length) {
     val.body.append(note('No completed trip of this driver’s carries a fare in any period on '
-      + 'this page, so there is no trip value to draw. That is a gap in what the channel reports, '
+      + 'this page, so there is no gross revenue to draw. That is a gap in what the channel reports, '
       + 'not a driver who earned nothing.'));
   } else {
     gapBars(val.body, rec.periods.map((p) => ({
@@ -436,7 +436,7 @@ export async function renderDriverRecord(root, id, prof) {
       valueFmt: (v) => money(v), axisFmt: (v) => fmt(v),
       secondary: 'fleet', secondaryLabel: `the fleet median that ${L}`,
       inProgress: false,
-      aria: `Gross trip value each ${L}, with the fleet median behind`,
+      aria: `Gross revenue each ${L}, with the fleet median behind`,
     });
     const short = rec.periods.filter((p) => p.completed > 0 && !p.value_rankable);
     val.body.append(el('p', 'cap',
@@ -474,7 +474,7 @@ export async function renderDriverRecord(root, id, prof) {
       x: 'period', y: 'pctl', label: 'percentile on jobs done',
       gapKey: 'unplaced',
       gapLabel: 'they accepted no work, so they are not placed against the people who did',
-      secondary: 'vpctl', secondaryLabel: 'their percentile on trip value',
+      secondary: 'vpctl', secondaryLabel: 'their percentile on gross revenue',
       max: 100, inProgress: false,
       /* Plain numbers up the side, the word in the tooltip. "0th" is not an
          axis label anybody reads, and "32nd percentile" is exactly what the
@@ -518,7 +518,7 @@ export async function renderDriverRecord(root, id, prof) {
   li(`<b>Position is out of the drivers who were active in that ${L}</b> — a driver who `
     + 'accepted no work is not in the column at all. Ranking somebody’s day off is how a list '
     + 'of the worst performers fills up with people who were not there.');
-  li('<b>Jobs and trip value are ranked separately and never blended.</b> Where the two disagree, '
+  li('<b>Jobs and gross revenue are ranked separately and never blended.</b> Where the two disagree, '
     + 'that is the finding: high on jobs and low on value is a driver working short hops.');
   li(`<b>"Against their usual" compares them with their own previous `
     + `${countOf(rec.baseline_periods, L)}</b>, after the fleet’s own movement over the same `

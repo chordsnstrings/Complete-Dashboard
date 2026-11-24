@@ -147,9 +147,9 @@ if (want('vehicle-overview')) {
     const rows = await page.evaluate(() => [...document.querySelectorAll('#view .cband .kpis.glance')]
       .map((g) => [...g.querySelectorAll(':scope > .kpi .l')].map((l) => l.textContent.trim())));
     check('00 in two rows: what the car did (five, the hero spanning two), then Utilisation, Fares, Idle days, Completion', JSON.stringify(rows) === JSON.stringify([
-      ['Money in', 'Bookings', 'Distance', 'Fare per priced km', 'Harsh events per 100 km'], ['Utilisation', 'Fares', 'Idle days', 'Completion']]), JSON.stringify(rows));
-    check('Money in the one hero, the reconciled figure exact', s.hero === 'Money in' && s.values['Money in'] === aedOf(k.accounted)
-      && (await page.evaluate(() => document.querySelectorAll('#view .cband .kpi.is-hero').length)) === 1, JSON.stringify([s.values['Money in'], k.accounted]));
+      ['Net earnings', 'Bookings', 'Distance', 'Fare per priced km', 'Harsh events per 100 km'], ['Utilisation', 'Fares', 'Idle days', 'Completion']]), JSON.stringify(rows));
+    check('Money in the one hero, the reconciled figure exact', s.hero === 'Net earnings' && s.values['Net earnings'] === aedOf(k.accounted)
+      && (await page.evaluate(() => document.querySelectorAll('#view .cband .kpi.is-hero').length)) === 1, JSON.stringify([s.values['Net earnings'], k.accounted]));
     check('Bookings and Distance are the endpoint\'s', s.values.Bookings === n(k.trips) && s.values.Distance === `${n(k.km)} km`, JSON.stringify([s.values.Bookings, s.values.Distance, k.trips, k.km]));
     const d = await txtOf(page, '#view .cband .kpi:nth-child(4) .t-d');
     check('fare per priced km, set against the fleet\'s own rate as a worded gap', s.values['Fare per priced km'] === aedOf(k.revenue_per_km)
@@ -182,7 +182,7 @@ if (want('vehicle-overview')) {
     const fsum = daily.reduce((a, r) => a + (r.revenue != null ? +r.revenue : 0), 0);
     const earnTxt = await txtOf(page, '[data-panel="veh-earned"]');
     check('fares day by day: the caption names the window\'s fares on every channel and says they are not Money in, nor the Fares tile\'s basis',
-      earnTxt.includes(`before commission — ${aedOf(fsum)} over the window`) && /not Money in/.test(earnTxt) && /not yet ruled/.test(earnTxt), earnTxt.slice(-400));
+      earnTxt.includes(`before commission — ${aedOf(fsum)} over the window`) && /not Net earnings/.test(earnTxt) && /not yet ruled/.test(earnTxt), earnTxt.slice(-400));
     const pp = await bars(page, 'veh-persons');
     const rated = (sf.by_driver || []).filter((r) => r.per_100km != null && r.driver_ext_id && +(r.booked_km ?? r.km) >= 200)
       .sort((a, b) => +b.per_100km - +a.per_100km);

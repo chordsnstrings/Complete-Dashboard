@@ -163,7 +163,7 @@ export function actualEarningsTile(k, { worked = false, bookingsN = 0 } = {}) {
     sub: `${floor}${floor ? 'What' : 'what'} the work earned, the driver\u2019s cash in hand `
       + `included, not netted off${stmt ? ', the statements\u2019 tips not' : ''}: ${parts}`
       + `${grainClause(p, 'what was earned', { alignment: true })}. `
-      + 'It is Money in on the Overview, the same figure'
+      + 'It is Net earnings on the Overview, the same figure'
       + (Number.isFinite(payout) ? `; Bank collection is ${payoutIs}, so the two are not added` : '')
       + `.${reach}` };
 }

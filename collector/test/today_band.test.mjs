@@ -119,7 +119,7 @@ check('code revalidates before use, so the module graph cannot run mixed version
   'js/css must not carry stale-while-revalidate');
 
 check('both shells print money in, from the one module',
-  /label: 'Money in'/.test(phone) && /fact\('money in'/.test(app),
+  /label: 'Net earnings'/.test(phone) && /fact\('net earnings'/.test(app),
   'the phone and the desktop disagreeing about today is what this module exists to prevent');
 /* The builder no longer takes the caller's fmt (2026-09-23): the halves are
    money, printed to the fils through ui.js fils(), and fmt() drops decimals. */

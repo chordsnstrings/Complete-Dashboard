@@ -2121,7 +2121,7 @@ export const grainClause = (p, what, { alignment = false } = {}) => (p.shared
       + 'up with one'
     : '');
 
-export function moneyInTile(k, { label = 'Money in' } = {}) {
+export function moneyInTile(k, { label = 'Net earnings' } = {}) {
   const p = moneyParts(k);
   if (!Number.isFinite(p.gross)) {
     return { label, value: '—',
@@ -2418,14 +2418,14 @@ export function faresTile(k) {
      relationship the arithmetic contradicts. */
   const bigger = !Number.isFinite(p.gross) || !Number.isFinite(priced) || priced >= p.gross;
   const alsoIn = p.shared
-    ? ` — Money in beside it is a weekly statement shared across its days, so on a window `
+    ? ` — Net earnings beside it is a weekly statement shared across its days, so on a window `
       + 'this short the two do not line up'
     : !bigger
-      ? ' — the same rides as Money in, measured on the trip feed instead of the statement'
+      ? ' — the same rides as Net earnings, measured on the trip feed instead of the statement'
       : Number.isFinite(p.priced) && p.priced > 0
-        ? ` — ${money(p.priced)} of it is money no statement covered and is inside Money in; `
+        ? ` — ${money(p.priced)} of it is money no statement covered and is inside Net earnings; `
           + 'the rest is the same money, before the platform took its commission'
-        : ' — the same money as Money in, before the platform took its commission';
+        : ' — the same money as Net earnings, before the platform took its commission';
   if (Number.isFinite(priced) && priced > 0) {
     const on = (k.priced_trips != null && k.trips != null
       && Number(k.priced_trips) !== Number(k.trips))
@@ -2441,7 +2441,7 @@ export function faresTile(k) {
     return { label: 'Fares', value: money(k.statement_fares), long: true,
       sub: `the platform's own fare line, over ${countOf(k.statement_fare_periods, 'weekly statement')}`
         + ' — the gross the riders were charged, before the commission that '
-        + 'makes it the Money in beside it' };
+        + 'makes it the Net earnings beside it' };
   }
   return { label: 'Fares', value: '—',
     sub: 'no trip carries a fare and no statement reports a fare line' };

@@ -561,7 +561,7 @@ export function compareRoutes(app, { q, wrap }) {
           + 'each unpriced booking valued at what a booking on that channel was worth over the settled days '
           + `behind the day (up to ${PRICING_LOOKBACK_DAYS}), spread over the hours those bookings were requested in. `
           + (fleet ? 'Decided on this fleet’s own bookings and valued at its own rate.'
-            : 'The same estimate the day page shows as its trip value.'),
+            : 'The same estimate the day page shows as its gross revenue.'),
       },
       platforms: plats,
       drivers,

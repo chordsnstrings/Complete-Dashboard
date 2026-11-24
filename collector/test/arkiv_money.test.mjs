@@ -157,7 +157,7 @@ console.log('\n#unit/assets');
     .find((x) => /per km/.test(x)) || '');
   check('the tab bar, then 00 with the coverage note in it', r.order[0].includes('tabs') && r.order[1] === 'cband' && r.cov, JSON.stringify(r.order));
   check('all six tiles, Money in the hero with the answer\'s total, none toned',
-    s.glance === 6 && s.hero === 'Money in' && s.values['Money in'] === aed(t.money) && (await toned(page)).length === 0,
+    s.glance === 6 && s.hero === 'Net earnings' && s.values['Net earnings'] === aed(t.money) && (await toned(page)).length === 0,
     JSON.stringify(s.values));
   check('Moved, no money / Never moved / Insured and idle still open their cohorts',
     ['Moved, no money', 'Never moved', 'Insured and idle'].every((l) => s.hrefs[l]?.startsWith('#cohort/')), JSON.stringify(s.hrefs));

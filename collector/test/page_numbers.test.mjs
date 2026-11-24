@@ -104,7 +104,7 @@ check('…and the vehicles tile likewise',
    publishes none, so a money tile fed from it describes the hotel channel and
    calls it the fleet. The tile must be the ACCOUNTED figure — fares plus
    platform payouts — not the fares alone. */
-const moneyTile = tile(/^Money in/i);
+const moneyTile = tile(/^Net earnings/i);
 check('the money tile is money IN, not the fares alone',
   near(moneyTile, Math.round(+api.accounted)), `${moneyTile} vs accounted ${api.accounted}`);
 check('…and is therefore NOT the fares figure',

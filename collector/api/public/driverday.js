@@ -756,7 +756,7 @@ async function dayGlance(AKB, { id, day, trips, onJob, share, medianGap, km }) {
           : 'Uber availability has not been collected for this day, so the waiting cannot be split into online and offline' },
       tripTile,
       { label: 'Distance', value: `${fmt(km, 1)} km`,
-        sub: priced.length ? `trip value ${money(value)} over ${fmt(priced.length)} priced · ${fmt(km / trips.length, 2)} km a job`
+        sub: priced.length ? `gross revenue ${money(value)} over ${fmt(priced.length)} priced · ${fmt(km / trips.length, 2)} km a job`
           : `${fmt(km / trips.length, 2)} km a job · no job here carries a fare` },
     ]).tiles);
   };

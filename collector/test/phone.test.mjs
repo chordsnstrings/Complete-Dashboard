@@ -478,7 +478,7 @@ check('…with countOf in scope, since it is the shared helper',
    So both are shown, and the test pins the thing that actually matters — that
    neither can be read as a second opinion about the other. */
 check('the phone shows what the fleet is credited with',
-  /label: 'Money in'/.test(scr));
+  /label: 'Net earnings'/.test(scr));
 check('…sourced from accounted, each channel counted once on its own report',
   /k\.accounted/.test(scr) && /each channel counted once, on its own report/.test(scr));
 check('…and no tile is labelled Revenue over the fares figure',
@@ -488,10 +488,10 @@ check('…and no tile is labelled Revenue over the fares figure',
    Today card three hundred lines above carries the same label — proved by
    reverting the overview tile alone and watching the suite stay green. */
 check('…while gross trip value is shown beside it on the window overview',
-  /label: 'Trip value'[\s\S]{0,240}no booking in this range carries a price/.test(scr),
+  /label: 'Gross revenue'[\s\S]{0,240}no booking in this range carries a price/.test(scr),
   'AED 744,136 of work against AED 585,058 credited is two facts, not one figure twice');
 check('…and on the money screen, which is where a reader goes to reconcile it',
-  /label: 'Trip value'[\s\S]{0,200}what riders paid on \$\{fmt\(priced\)\}/.test(scr));
+  /label: 'Gross revenue'[\s\S]{0,200}what riders paid on \$\{fmt\(priced\)\}/.test(scr));
 check('…and it always carries the share of bookings that carry a price',
   /of \$\{fmt\(k\.trips\)\} bookings priced/.test(scr),
   'a window that includes today is understated here by construction and has to say so');
@@ -504,11 +504,11 @@ check('…and it always carries the share of bookings that carry a price',
 {
   const rendered = scr.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   check('no screen claims money in is a part of trip value',
-    !/of that is money in/.test(rendered) && !/gap is what the platforms keep/.test(rendered),
+    !/of that is net earnings/.test(rendered) && !/gap is what the platforms keep/.test(rendered),
     'money in exceeded trip value on 2026-09-08 and the sentence would have been nonsense');
   check('…each is stated with the base it was measured over instead',
-    /Trip value is \$\{money\(total\)\}/.test(rendered)
-    && /Money in is \$\{money\(inAll\)\}/.test(rendered)
+    /Gross revenue is \$\{money\(total\)\}/.test(rendered)
+    && /Net earnings is \$\{money\(inAll\)\}/.test(rendered)
     && /counted once on the best report it files/.test(rendered));
 }
 
