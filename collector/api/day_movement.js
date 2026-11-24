@@ -177,7 +177,7 @@ const seatOn = (a, b) => (b.passenger != null ? b.passenger : a.passenger != nul
    last instant said (2026-11-24: FMS's 0 is now kept as 0, src/sources/fms.js
    fmsSpeed, where it used to arrive as null and fall through to displacement).
    Short hops under MIN_DRIVE_KM on a reported 0 stay stopped: that is GPS
-   jitter at CABMAN's 20-second cadence, not a drive. */
+   jitter between two fixes a few minutes apart, not a drive. */
 const movingOn = (a, b) => {
   if (b.speed != null && Number(b.speed) > 3) return true;
   const h = (ms(b.at) - ms(a.at)) / 3600000;

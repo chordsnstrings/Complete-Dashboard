@@ -187,6 +187,16 @@ check('the range view answers over the kept days: totals, cells with their area 
 check('…and by area, most time first', mv.areas[0]?.area && mv.areas.some((a) => a.area === 'Al Garhoud'), JSON.stringify(mv.areas));
 check('the night man\'s hour at JLT is not in it — positions outside his hours are the car\'s, not his',
   !mv.cells.some((c) => Math.abs(c.lat - JLT[0]) < 0.003 && Math.abs(c.lng - JLT[1]) < 0.003));
+/* Mid-pass (production, 2026-11-24 12:47 UTC): some people's rows written,
+   his not yet, the day not completed — "not built yet", never "did not work". */
+await q(`DELETE FROM source_state WHERE source = 'movement_rollup' AND key = $1`, [`day:${D}`]);
+await q(`DELETE FROM driver_move_day WHERE person_id = $1 AND day = $2::date`, [PID, D]);
+const mid = (await get(`/api/driver/movement?id=${K}&from=${D}&to=${D}`)).body;
+check('read mid-pass, before his row and before the day is complete: "not built yet", never "no booking"',
+  /not been built yet/.test(mid.coverage.absent || '') && !/no booking/.test(mid.coverage.absent || ''), JSON.stringify(mid.coverage));
+await buildDay(q, { day: D, now: Date.parse(`${D}T23:30:00+04:00`) + 86400000 });
+const [doneRow] = await q(`SELECT value FROM source_state WHERE source = 'movement_rollup' AND key = $1`, [`day:${D}`]);
+check('…and a completed pass records the day as built', !!doneRow?.value);
 const before = (await get(`/api/driver/movement?id=${K}&from=2026-07-01&to=2026-07-31`)).body;
 check('a window before live collection began says so, rather than showing a driver who never moved',
   before.totals === null && /when live collection began/.test(before.coverage.absent || ''), JSON.stringify(before.coverage));
@@ -231,6 +241,21 @@ await q(`DELETE FROM source_state WHERE source = 'movement_rollup'`);
 await movementRollupTick(q, { now: Date.parse('2026-10-12T04:47:00+04:00'), backfillDays: 1 });
 const [again] = await q(`SELECT day FROM driver_move_day WHERE person_id = $1 AND day = $2::date`, [PID, D]);
 check('a first pass at 04:47 leaves no day out: the backfill starts at yesterday when there is no cursor yet', !!again);
+
+/* One name, two spine people (production 2026-11-24: a busy driver's page
+   read "on more than one person"). The fold — person_key — joins a second
+   account of the same name that the spine files under another person. */
+const K2 = 'yango-kilo-0002';
+const [{ id: QID }] = await q(`INSERT INTO driver (fleet_id, full_name) VALUES ('ecosine','Test Driver Kilo') RETURNING id`);
+await q(`INSERT INTO driver_platform_id (platform, external_id, driver_id) VALUES ('yango',$1,$2)`, [K2, QID]);
+await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name, requested_at, ended_at, status, price, distance_km)
+         VALUES ('yango','y-1','ecosine','L30001',$1,'Test Driver Kilo','2026-10-05T10:00:00+04:00','2026-10-05T10:20:00+04:00','complete',20,4)`, [K2]);
+const persons = await personsForDay(q, D);
+check('the day is built for every spine person whose day page shows it — the second record of the same fold too',
+  persons.includes(Number(PID)) && persons.includes(Number(QID)), JSON.stringify(persons));
+const both = (await get(`/api/driver/movement?id=${K}&from=2026-10-01&to=2026-10-31`)).body;
+check('…and the page addressed by one account answers for the person that account is on, not "on more than one person"',
+  both.totals?.days >= 1 && !/more than one person/.test(both.coverage.absent || ''), JSON.stringify(both.coverage));
 
 const terr = (await get(`/api/driver/territory?id=${K}&from=2026-10-01&to=2026-10-31`)).body;
 const dso = terr.idle.find((s) => s.area === 'Dubai Silicon Oasis');

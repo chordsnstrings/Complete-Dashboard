@@ -1061,14 +1061,67 @@ Uber (≈ 4 of 5,550) and 0.7 for Bolt (≈ 1–2 of 199) — the figures above 
 builder's 436 / 40 used a vocabulary the review could not exactly rebuild; the 440 / 47 baseline is
 the builder's matcher on the review's vocabulary.
 
+## Driver movement surfaces — probed on production 2026-11-24 (`GET /api/probe/movement`)
+
+Four surfaces that could tell us more about where a driver was. Each was read once, live, by the
+shape-only probe (`api/probe_movement.js`). It reports counts, fill rates and spacing, and never a
+coordinate, id, plate or name. Results are as measured at 12:36 UTC on deploy `70da21c`.
+
+**FMS `GetVehicleActivity`: today only, so there is no history to backfill.**
+- **Calls:** three cars per fleet, both fleets.
+- **Today:** a window of yesterday→today and a 7-day window both returned exactly the same rows, all
+  dated today (earliest = latest = 2026-11-24).
+- **Older windows:** 90 days back and 400 days back were answered `{"error":"Authentication failed"}`
+  with HTTP 200. That is FMS's refusal wording, here for a date it will not serve, not for the
+  password: the same login read today a second earlier.
+- **Rows:** one per segment, with `acttype` TRAVEL / IDLE / STOP. 8–24 segments per car by 16:36
+  Dubai; median segment 12 min (p90 33–316, max ~250–355 for an overnight stop).
+- **Fields filled 100%:** `StartTime`, `EndTime`, `Duration`, start/end lat-lon, `StartLocation` /
+  `EndLocation` (named), and `distancetravelled` (median 0–2 per segment).
+- **Fields filled 0%:** `Driver Name`.
+- **Worth it?** Our own 6-minute FMS fixes already give this, inside custody. Collecting it would need
+  a pass before midnight every day, for FMS's own segmentation and place names only. Not collected.
+
+**Yango `/v1/parks/orders/track`: a full GPS track per order, kept at least 60 days.**
+- **Calls:** POST with the key pair and body `{}` (Ecosine). Three orders from yesterday answered 200
+  with 44, 50 and 47 points; one order 60 days old still answered 32 points.
+- **Points:** spacing median 10–14 s (p90 37–102 s); a span of 10–26 min, which is the order itself.
+- **Fields filled 100%:** `location.lat` / `location.lon`, `speed`, `direction`, `tracked_at`, and
+  `order_status` per point (`driving` → `waiting` → `transporting`).
+- **What it gives:** the pickup is the first `transporting` point, the drop-off the last, and the
+  route lies between them. No other source has real positions for a Yango ride.
+- **Status:** not collected yet. It is the best next source for Yango pickups and drop-offs; order
+  ids are in `trip.external_id`.
+
+**Bolt `getFleetStateLogs`: each driver's online state with a position, for Egari, at least 90 days back.**
+- **Egari:** the last 24 h gave 170 rows for 19 drivers. A day 30 days back gave 219 rows / 21
+  drivers; a day 90 days back gave 156 rows / 18 drivers. Every page was under the limit, so the
+  counts are whole.
+- **States:** `waiting_orders`, `inactive`, `has_order`, `busy`.
+- **Fields:** `created` 100%; lat/lng 89–94%; `driver_uuid` and `vehicle_uuid` 100%; `active_order`
+  (pickup and destination address) 4–6%.
+- **Spacing:** one row per state change, a median of ~35–38 min apart per driver.
+- **Ecosine:** refused with `{"code":503,"message":"NOT_AUTHORIZED","error_hint":"COMPANIES_NOT_ALLOWED"}`,
+  as for every Ecosine Bolt call.
+- **What it gives:** Bolt online and offline spells with a position, which Bolt supplies nowhere else
+  we read (FIXLIST #77). Not collected yet.
+
+**CABMAN `GetIVDData`: the device's fix is minutes old, so a faster poll buys nothing.**
+- **Calls:** five, 15 s apart, both fleets: 46 Ecosine and 6 Egari vehicles, 10 and 1 moving.
+- **Result:** of 44 moving-vehicle pairs, none advanced its device fix time between calls. The fix
+  age of moving vehicles was 147–643 s (median ~9–10 min), rising by exactly the interval each call.
+- **What it means:** CABMAN serves a position that is minutes old even for a moving car. Our 5-minute
+  poll is as fine as CABMAN's data. Stored CABMAN fixes are ~5 min apart moving and ~66 min parked;
+  an earlier note here that CABMAN "reports every 20 s" was wrong and is corrected.
+
 ## Traps that have cost time more than once
 
 * **FMS's speed 0 was stored as null, and a stationary-fix count is not time** (2026-11-24, MOV-1).
   `parseFloat(v.speed) || null` made every parked FMS car "no speed", so any rule of the form
   `coalesce(speed, 0) < 2` read every FMS fix with no speed — moving ones included — as stopped, and
   any rule of the form `speed IS NULL → use displacement` had to infer every FMS stop. Rows before the
-  fix still carry null for 0. And never count fixes as minutes: CABMAN reports every ~20 s moving and
-  ~66 min parked, FMS every ~6 min, so the same parked hour is 1 CABMAN fix and 10 FMS fixes. Time
+  fix still carry null for 0. And never count fixes as minutes: a parked CABMAN unit reports about every
+  66 min and FMS every ~6 min, so the same parked hour is 1 CABMAN fix and 10 FMS fixes. Time
   comes from the interval between two fixes of ONE tracker (`api/day_movement.js` `intervalState`),
   inside the hours the car was the driver's (custody), never from the plate-day. And every new reader of
   `telemetry_snapshot` needs `REAL_FIX` (`api/telemetry_sql.js`) and the 60 km hop rule (`HOP_KM`): the

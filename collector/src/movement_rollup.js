@@ -32,9 +32,10 @@
    ─────
    Every interval is split half to the cell of its first fix and half to the
    cell of its second, on the half-kilometre grid place_cell names
-   (round(lat/0.005)). At CABMAN's 20 seconds both ends are the same cell; at
-   FMS's six minutes a drive crosses several and the halves are an honest
-   approximation, said in the route's basis.
+   (round(lat/0.005)). A parked car's two ends are the same cell; at the
+   five or six minutes between two fixes of a moving car (CABMAN's stored
+   cadence is our 5-minute poll, FMS's about 6) a drive crosses several, and
+   the halves are an honest approximation, said in the route's basis.
 
    Pickups and drop-offs, placed
    ─────────────────────────────
@@ -354,6 +355,11 @@ export async function buildDay(q, { day, now = null, resolve = null, tx = null }
       await writeFailedDay(q, { personId, day, why, tx }).catch(() => {});
     }
   }
+  /* The day is COMPLETE only now: a range view read mid-pass must not take
+     the rows already written for some people as proof that a person with no
+     row did not work (measured on production 2026-11-24, 12:47 UTC: a driver
+     not yet reached read "no booking and no working status"). */
+  await setState(q, `day:${day}`, new Date().toISOString());
   return { day, persons: persons.length, built, failed };
 }
 
