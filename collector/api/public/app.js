@@ -3906,13 +3906,18 @@ function funnelGlance(root, FUNNEL_TILES, K, live) {
 V.finance = async (root) => (contract() ? financeContract(root) : financeClassic(root));
 
 /* The verdict, as data, for both orders of #finance. */
-function financeVerdict(cash, k) {
-    const held = +cash?.revenue || 0;
+function financeVerdict(cash, k, settle = null) {
+    /* What has to be handed in is the cash in drivers' hands: their cash
+       trips less what card payments paid of them (CARD-3d; the operator,
+       2026-11-24: Finance uses the driver page's definition). The settlement
+       class only when the read predates it. */
+    const ch = settle?.cash_in_hand || null;
+    const held = ch ? (+(ch.value ?? ch.cash) || 0) : (+cash?.revenue || 0);
     const accounted = +k?.accounted || 0;
     const pct = accounted ? Math.round((held / accounted) * 100) : 0;
     return {
       claim: held
-        ? `${money(held)} was collected in cash and has to be handed in`
+        ? `${money(held)} of cash is in drivers’ hands and has to be handed in`
         : accounted ? `${money(accounted)} accounted for, none of it in cash`
           : 'No money accounted for in this window',
       figure: held ? `${pct}%` : (accounted ? money(accounted) : '—'),
@@ -4077,47 +4082,73 @@ function financeTiles({ k, settle, cash, tipAll, tipTotal, fareTotal, coverage }
        cash is a measurement and stays AED 0. Bookings none of which carries a
        route is an absence with its own reason. No booking at all is the third,
        and keeps the sentence the first repair gave it. */
+    /* CASH TRIPS (INCLUDING POS), the driver page's definition summed over
+       the fleet (the operator, 2026-11-24: "yes, use the driver page's
+       definition on Finance"): the drivers' completed cash trips (trip_cash,
+       the platform's own cash figure where it filed one) plus the hotel's
+       completed fares paid on the driver's own card machine — so on Finance,
+       as on a driver's page, Cash trips (including POS) − POS payments = Cash
+       in hand. It was the settlement class 'cash': every priced cash booking,
+       cash a supervisor collected included. */
     (() => {
-      const total = Number(settle.total_trips);
-      const unl = Number(settle.unlabelled_trips) || 0;
-      const classified = Number.isFinite(total) ? total - unl
-        : (settle.classes || []).reduce((a, c) => a + (+c.trips || 0), 0);
-      const any = +k.trips > 0 || classified > 0;
-      /* "INCLUDING POS" (the operator, 2026-11-24): the hotel's fares paid on
-         the driver's own card machine are added (/api/settlement/mix
-         pos_driver) — every cash trip, whichever way the rider paid at the car. */
-      const pos = settle.pos_driver || null;
+      const label = 'Cash trips (including POS)';
+      const ch = settle?.cash_in_hand || null;
+      const pos = settle?.pos_driver || null;
       const posRev = pos && pos.revenue != null ? +pos.revenue : 0;
-      const posWords = pos && pos.trips ? ` · plus ${money(posRev)} from ${fmt(pos.trips)} hotel bookings paid on the driver’s card machine (POS)` : '';
-      return { label: 'Cash trips (including POS) — measured portion',
-        value: cash ? (cash.revenue == null ? 'not reported' : money(+cash.revenue + posRev))
-          : (pos && pos.trips ? money(posRev) : (classified > 0 ? money(0) : '\u2014')),
-        sub: cash
-          ? `the ${fmt(cash.priced_trips)} of ${fmt(cash.trips)} cash bookings that report a fare `
-            + `(${pct(cash.trips ? (cash.priced_trips / cash.trips) * 100 : 0, 1)}) — the rest are `
-            + `real money with no figure attached${posWords}`
-          : pos && pos.trips ? `no cash booking; ${fmt(pos.trips)} hotel bookings were paid on the driver’s card machine (POS)`
-          : classified > 0
-            ? `none of the ${fmt(classified)} bookings in this range whose settlement route is `
-              + 'recorded was paid in cash'
-              + (unl ? `; the other ${fmt(unl)} record none and are left out rather than counted as `
-                + 'not-cash' : '')
+      if (!ch) return { label, na: 'the settlement read did not carry the drivers’ cash trips' };
+      /* None: three states, not two (the house rule, kept from the tile this
+         replaced). AED 0 only over bookings whose settlement route was
+         recorded; a booking that records none cannot be said not to be cash;
+         and a range with no booking at all measured nothing. */
+      if (!ch.trips && !(pos && pos.trips)) {
+        const total = Number(settle.total_trips);
+        const unl = Number(settle.unlabelled_trips) || 0;
+        const classified = Number.isFinite(total) ? total - unl : (settle.classes || []).reduce((a, c) => a + (+c.trips || 0), 0);
+        const any = +k.trips > 0 || classified > 0;
+        return { label, value: classified > 0 ? money(0) : '\u2014',
+          sub: classified > 0
+            ? `none of the ${fmt(classified)} bookings in this range whose settlement route is recorded was a completed cash trip `
+              + 'or a fare on the driver’s card machine' + (unl ? `; the other ${fmt(unl)} record none and are left out rather than counted as not-cash` : '')
             : any
-              ? `not one of the ${fmt(total || k.trips)} bookings in this range records how it was `
-                + 'settled, so whether any of it was cash is not something anybody measured'
-              : 'no booking of any kind falls in this range, so no cash was measured either way',
-        tone: cash && cash.priced_trips < cash.trips ? 'warn' : null };
+              ? `not one of the ${fmt(total || k.trips)} bookings in this range records how it was settled, so whether any of it was cash is not something anybody measured`
+              : 'no booking of any kind falls in this range, so no cash was measured either way' };
+      }
+      if (ch.trips && ch.cash == null && !posRev) return { label, value: 'not reported', sub: `${fmt(ch.trips)} completed cash trips, none valued yet` };
+      return { label, value: money((ch.cash || 0) + posRev),
+        sub: `${money(ch.cash || 0)} from ${countOf(ch.trips, 'completed cash trip')} (the platform’s own cash figure where it filed one)`
+          + (pos && pos.trips ? ` · plus ${money(posRev)} from ${fmt(pos.trips)} hotel fares paid on the driver’s card machine (POS)` : '')
+          + (ch.unvalued ? ` · ${fmt(ch.unvalued)} not valued yet` : ''),
+        tone: ch.unvalued ? 'warn' : null };
+    })(),
+    /* POS PAYMENTS, the fleet's (as the driver page's tile): the hotel's
+       card-machine fares plus the card payments (Network International) that
+       paid cash trips, from 1 Aug 2026. They go straight to the bank, and are
+       in Bank collection. */
+    (() => {
+      const label = 'POS payments';
+      const pos = settle?.pos_driver || null; const pc = settle?.pos_card || null;
+      if (!pos && !pc) return { label, na: 'the settlement read did not carry them' };
+      const posRev = pos && pos.revenue != null ? +pos.revenue : 0;
+      const card = pc && pc.on_cash != null ? +pc.on_cash : null;
+      return { label, value: money(posRev + (card || 0)),
+        sub: [pos && pos.trips ? `${money(posRev)} from ${fmt(pos.trips)} hotel fares on the driver’s card machine` : null,
+          card != null ? `${money(card)} of card payments (Network International) that paid cash trips, fares from ${pc.from}${pc.to ? ` to ${pc.to}` : ''}`
+            : (pc?.absent ? `card payments not added: ${pc.absent}` : null)].filter(Boolean).join(' · ')
+          + ' · they go straight to the bank, and are in Bank collection',
+        tone: card == null && pc?.absent ? 'warn' : null };
     })(),
     /* CASH IN HAND, the fleet's (the operator, 2026-11-24: "add Cash In Hand
        to the Finance page too"): the drivers' own cash trips less what card
        payments (POS) paid of them, from 1 Aug 2026 — the driver page's tile,
-       summed (/api/settlement/mix cash_in_hand). Its cash is the drivers'
-       completed cash trips, so it is not the measured portion beside it, which
-       also counts cash a supervisor collected; the sub says which. */
+       summed (/api/settlement/mix cash_in_hand): Cash trips (including POS)
+       less POS payments, the two tiles beside it. */
     (() => {
       const ch = settle?.cash_in_hand || null;
       if (!ch) return { label: 'Cash in hand', na: 'the settlement read did not carry it' };
-      if (!ch.trips) return { label: 'Cash in hand', value: money(0), sub: 'no completed cash trip in a driver’s hand in this range' };
+      if (!ch.trips) {
+        return { label: 'Cash in hand', value: +k.trips > 0 ? money(0) : '\u2014',
+          sub: +k.trips > 0 ? 'no completed cash trip in a driver’s hand in this range' : 'no booking of any kind falls in this range, so no cash was measured either way' };
+      }
       if (ch.cash == null) return { label: 'Cash in hand', value: 'not reported', sub: `${fmt(ch.trips)} completed cash trips, none valued yet` };
       return { label: 'Cash in hand', value: money(ch.value != null ? ch.value : ch.cash),
         sub: (ch.value != null
@@ -4548,7 +4579,7 @@ async function financeClassic(root) {
      that. It is how much of it the fleet is still CHASING: cash a driver
      collected is money the fleet has not got yet, and it is the one figure on
      this page that is a task rather than a fact. */
-  verdict(vfHost, financeVerdict(cash, k));
+  verdict(vfHost, financeVerdict(cash, k, settle));
   /* Tolerant of both shapes. The backend audit gave /api/earnings/tips the
      {rows, total, shown, truncated} envelope every other list route carries —
      the same change it made to /api/driver/custody and /api/funnel/drivers.
@@ -4726,7 +4757,7 @@ async function financeContract(root) {
     : 'no priced trips in this range';
 
   /* ── 00 ──────────────────────────────────────────────────────────────── */
-  const vd = financeVerdict(cash, k);
+  const vd = financeVerdict(cash, k, settle);
   verdict(vHost, vd);
   const base = Object.fromEntries(financeTiles({ k, settle, cash, tipAll, tipTotal, fareTotal, coverage })
     .map((t) => [t.label, t]));
@@ -4740,7 +4771,8 @@ async function financeContract(root) {
       spark: fr.length ? spark('money', derived) : null },
     { ...base['Bank collection'], delta: fr.length ? finWow(fr, 'payout') : null, spark: fr.length ? spark('payout') : null },
     base['On-trip revenue'],
-    base['Cash trips (including POS) — measured portion'],
+    base['Cash trips (including POS)'],
+    base['POS payments'],
     base['Cash in hand'],
     fin ? { label: 'Gross revenue', value: money(ft.fares),
       sub: `gross fare on ${fmt(ft.priced_trips)} priced of ${fmt(ft.bookings)} bookings — what riders were charged, never added to Net earnings`,

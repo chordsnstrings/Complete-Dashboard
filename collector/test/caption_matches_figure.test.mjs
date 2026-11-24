@@ -251,9 +251,13 @@ check('the tile is on the page', !!payTile, finTiles.map((k) => k.label).join(' 
    of saying how much of it is counted as income here. The rule the block
    defends is unchanged: every name and number in the caption must describe the
    figure above it. */
-check('the figure is what the platforms wired, across every channel that wired',
+/* Since 2026-11-24 Bank collection adds the POS payments, which come into
+   the bank (the operator): the AED 38,194.57 the platforms wired plus the
+   AED 22,600 of POS payments in the mock's settlement mix, and its caption
+   names both parts. */
+check('the figure is what the platforms wired, across every channel that wired, plus the POS payments',
   // Was 'AED 38,195'; every money figure now carries its fils (ruling of 2026-09-23).
-  payTile?.value === 'AED 38,194.57', `reads "${payTile?.value}"`);
+  payTile?.value === 'AED 60,794.57' && /plus AED 22,600\.00 of POS payments/.test(payTile?.sub || ''), `reads "${payTile?.value}" / "${payTile?.sub}"`);
 check('…so naming both platforms over it is correct rather than misleading',
   /Uber, Yango/.test(payTile?.sub || ''), `sub "${payTile?.sub}"`);
 check('…and the caption says what that figure is',

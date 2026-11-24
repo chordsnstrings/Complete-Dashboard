@@ -682,6 +682,13 @@ console.log('\n§11 approved from August: the ceiling, the tiles and the history
   check('Finance: the fleet\'s cash in hand is its drivers\' cash trips less the card that paid them, over the same days',
     mix.trips === tcN.n && mix.cash === r2_(tcN.v) && mix.card === r2_(offNov) && mix.value === r2_(tcN.v - offNov) && mix.absent === null,
     JSON.stringify([mix, tcN, offNov]));
+  /* POS fares on Finance are the driver page's: COMPLETED hotel card-machine
+     fares only (a cancelled one collected nothing). */
+  await q(`INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, driver_name, requested_at, status, payment_type, price, currency)
+           VALUES ('hotel', 'ct-posx', 'ecosine', 'h-alpha', 'Card Test', '2026-11-22T09:00:00+04:00', 'rider_cancelled', 'pos-driver', 77, 'AED')`);
+  const mixP = (await B('/api/settlement/mix?from=2026-11-01&to=2026-11-30')).body?.pos_driver || {};
+  check('Finance counts the hotel\'s card-machine fares as the driver page does: completed only (120, not 197)', mixP.trips === 1 && mixP.revenue === 120,
+    JSON.stringify(mixP));
   const mixF = (await B('/api/settlement/mix?from=2026-11-01&to=2026-11-30&fleet=ecosine')).body?.cash_in_hand || {};
   check('…for one fleet the card cannot be split, so it is a ceiling with the reason, never a netted guess', mixF.value === null
     && /placed on a person/.test(mixF.absent || ''), JSON.stringify(mixF));
