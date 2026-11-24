@@ -660,7 +660,7 @@ console.log('\nthe one money tile that still drew a nought, and why it stays one
    REVERSION THAT PROVES THIS: remove the `if (p.gross === 0)` branch from
    moneyInTile in api/public/ui.js. The value is unchanged and the second
    assertion fails, which is the point: the number was never the bug. */
-const mi = tile(ov, 'Money in');
+const mi = tile(ov, 'Net earnings');
 // Was 'AED 0': a published nought now carries its fils like every money figure.
 check('a nought the platforms published is still a number',
   mi && mi.value === 'AED 0.00', JSON.stringify(mi));

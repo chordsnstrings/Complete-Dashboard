@@ -545,7 +545,7 @@ console.log('\n4.1 · Today: the livebar, 00 at a glance, the sections, † what
       liveIdx: live ? getComputedStyle(live.querySelector('h2'), '::before').content : null,
       liveCap: live?.querySelector('.m-cap')?.textContent,
       latest: lt ? lt.querySelector('.n').textContent : null,
-      tripDeco: live ? getComputedStyle(tile(live, 'Trip value').querySelector('.n')).textDecorationThickness : null,
+      tripDeco: live ? getComputedStyle(tile(live, 'Gross revenue').querySelector('.n')).textDecorationThickness : null,
       head: deck.querySelector('.sechd')?.innerText.replace(/\s+/g, ' '),
       hero: hero ? { label: hero.querySelector('.l').textContent, value: hero.querySelector('.n').textContent,
         hl: !!hero.querySelector('.n .hl') } : null,
@@ -604,7 +604,7 @@ console.log('\n4.1 · Today: the livebar, 00 at a glance, the sections, † what
      the two from drifting. */
   const appJs = read('app.js');
   const scr = read('m/screens.js');
-  for (const s of ['bookings carry a price, and Trip value is over those alone. ',
+  for (const s of ['bookings carry a price, and Gross revenue is over those alone. ',
     ', so the newest Uber bookings are priced only after it; a booking cancelled ',
     'without a fee has no price to carry.',
     'The channel filed these bookings with no distance on them. The Distance tile\'s mean is over the ',
@@ -633,7 +633,7 @@ console.log('\n4.2 · Money: 00 at a glance, the day line, how fares settle, by 
   const p = await phonePage(browser, { skin: 'arkiv', fixture });
   await p.open('money');
   const o = await outline(p.page);
-  const want = ['head:At a glance', 'statement', 'glance', 'card:Trip value a day', 'card:How fares settle',
+  const want = ['head:At a glance', 'statement', 'glance', 'card:Gross revenue a day', 'card:How fares settle',
     'sec:By channel', 'm-rows', 'absence', 'foot'];
   check('00 (statement, tiles) above the day line, then the sections, †, the footer',
     JSON.stringify(o.filter((x) => want.includes(x))) === JSON.stringify(want), o.join(' → '));
@@ -651,7 +651,7 @@ console.log('\n4.2 · Money: 00 at a glance, the day line, how fares settle, by 
     };
   });
   check(`the hero is Trip value, ${moneyOf(KP.revenue)} as /api/kpis answered, highlighted`,
-    m.hero && m.hero.label === 'Trip value' && m.hero.value === moneyOf(KP.revenue) && m.hero.hl, JSON.stringify(m.hero));
+    m.hero && m.hero.label === 'Gross revenue' && m.hero.value === moneyOf(KP.revenue) && m.hero.hl, JSON.stringify(m.hero));
   const KEY = { Uber: 'uber', Bolt: 'bolt', Yango: 'yango', Hotel: 'hotel', 'FMS telematics': 'fms', Cabman: 'cabman' };
   check('each channel carries its own swatch beside its name, and the name stays ink',
     m.chans.length > 0 && m.chans.every((c) => c.sw === `sw ch-${KEY[c.name]}` && c.ink === 'rgb(10, 10, 11)'),
@@ -662,12 +662,12 @@ console.log('\n4.2 · Money: 00 at a glance, the day line, how fares settle, by 
   check(`† the bookings Trip value is not over: ${f0(KP.trips - pricedSum)} (trips − the priced days’ sum this screen captions)`,
     np?.fig === f0(KP.trips - pricedSum) && (np?.why || '').startsWith(`${f0(pricedSum)} of ${f0(KP.trips)} bookings carry a price`),
     JSON.stringify(np));
-  const mi = m.cells.find((c) => c.label === 'Money in, day by day');
+  const mi = m.cells.find((c) => c.label === 'Net earnings, day by day');
   check('† Money in has no day-by-day series, said as "No series" with the desktop’s reason',
     mi?.fig === 'No series' && (KP.accounted_statements
       ? (mi.why || '').startsWith(`${moneyOf(KP.accounted_statements)} of the ${moneyOf(KP.accounted)} is payout statements`)
-      : /^Money in has no day-by-day series/.test(mi?.why || '')), JSON.stringify(mi));
-  for (const s of ['files a week at a time, so Money in has no day-by-day figure. Trip value is the daily money line: ',
+      : /^Net earnings has no day-by-day series/.test(mi?.why || '')), JSON.stringify(mi));
+  for (const s of ['files a week at a time, so Net earnings has no day-by-day figure. Gross revenue is the daily money line: ',
     'what riders paid, booking by booking.']) {
     check(`…the same words as the desktop: "${s.slice(0, 40)}…"`, read('app.js').includes(s) && read('m/screens.js').includes(s));
   }

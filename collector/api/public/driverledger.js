@@ -354,7 +354,7 @@ export async function renderDriverLedger(root, id, prof) {
          channels are in it and which are missing from it, and the value
          carries "at least" when any channel is silent, because a figure that
          omits a channel the driver worked is a floor and not a total. */
-      { label: 'Income',
+      { label: 'Net earnings',
         value: ow.earned == null ? '—'
           : ((ow.accounts_silent || []).length ? 'at least ' : '') + aed(ow.earned),
         sub: ow.earned == null ? ow.earned_absent_reason

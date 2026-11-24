@@ -28,7 +28,7 @@ export const CLASSES = Object.freeze([
   { code: 'ACCUSE', name: 'Accusations', plain: 'who is named as a likely culprit', group: 'People',
     desc: 'Pages that name a person as the likely culprit, such as unbooked-trip attribution' },
   { code: 'REV', name: 'Revenue', plain: 'company revenue', group: 'Company',
-    desc: 'Fleet-level trip value and money in' },
+    desc: 'Fleet-level gross revenue and net earnings' },
   { code: 'PAY', name: 'Payouts', plain: 'platform payouts', group: 'Company',
     desc: 'Platform payouts, bank transfers and reconciliation' },
   { code: 'BK', name: 'Bookings', plain: 'individual bookings', group: 'Company',

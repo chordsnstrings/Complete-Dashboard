@@ -64,7 +64,7 @@ export const PROPERTY_TABS = [
 ];
 
 export const UNIT_TABS = [
-  { id: 'overview', label: 'Money in', ic: '◆' },
+  { id: 'overview', label: 'Net earnings', ic: '◆' },
   { id: 'assets', label: 'Every vehicle', ic: '▤' },
   { id: 'drivers', label: 'Every driver', ic: '◧' },
 ];

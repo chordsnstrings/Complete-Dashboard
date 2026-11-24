@@ -90,7 +90,7 @@ export async function renderDay(root, day, onDetail) {
        a statement is the operator's own import and the tile above it is what
        the platforms reported, and a reader who cannot tell which is which
        cannot reconcile either. */
-    { label: 'Money in', value: h.accounted ? money(h.accounted) : '—',
+    { label: 'Net earnings', value: h.accounted ? money(h.accounted) : '—',
       sub: h.accounted
         ? [h.accounted_statements ? `${money(h.accounted_statements)} in statement net` : null,
           h.accounted_fares ? `${money(h.accounted_fares)} in fares` : null,

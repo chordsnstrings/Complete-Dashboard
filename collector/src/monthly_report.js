@@ -534,7 +534,7 @@ ${section('Vehicles', `Every vehicle with a completed trip in ${esc(monthName(f.
 ${section('Drivers', `Every driver with a completed trip in ${esc(monthName(f.month))}, by fares; one person across platforms is one row.`, listTable(f.drivers, MAX_ROWS.drivers, 'Driver'))}
 <tr><td class="pad" style="padding:28px 36px 36px 36px;font:400 12px/1.6 ${SANS};color:${T.grey}">
   Fares are what riders paid on priced trips, before the platforms’ commission; they are the only money every month here carries, so every year-on-year comparison is made on them.
-  Earned after commission is the dashboard’s money in: each platform counted once, on its statement where one is filed, its payout or its fares otherwise.
+  Earned after commission is the dashboard’s net earnings: each platform counted once, on its statement where one is filed, its payout or its fares otherwise.
   Paid into the bank is what Uber and Yango say they paid; Bolt and the hotel channel file no payout there.
   Cash taken by drivers is the cash riders handed over — Uber’s own figure, the fare elsewhere.
   Active vehicles and drivers had at least one completed trip in the month. Months are Dubai calendar months.

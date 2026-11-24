@@ -72,7 +72,7 @@ console.log('\n2 · the page\'s existing figure');
   check('the same value Money in prints on the Overview',
     actualEarningsTile(k, W).value === moneyInTile(k).value,
     `${actualEarningsTile(k, W).value} vs ${moneyInTile(k).value}`);
-  check('…and the sub-line says so', /It is Money in on the Overview, the same figure/.test(actualEarningsTile(k, W).sub));
+  check('…and the sub-line says so', /It is Net earnings on the Overview, the same figure/.test(actualEarningsTile(k, W).sub));
 }
 
 console.log('\n3 · its parts are said');

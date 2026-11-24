@@ -418,7 +418,7 @@ console.log('\n5 · the livebar, and freshness on one line');
     l.scope === 'Both fleets, every channel — this strip does not follow the filters above.', l.scope);
   check('every figure is a cell: the value, and its label as an element', l.figs.length >= 5
     && l.figs.every((f) => f.v && f.l), JSON.stringify(l.figs));
-  check('trip value carries the chrome emphasis — a rule, no wash', l.hl === 'trip value' && l.hlRule === '3px'
+  check('trip value carries the chrome emphasis — a rule, no wash', l.hl === 'gross revenue' && l.hlRule === '3px'
     && /rgba\(0, 0, 0, 0\)|transparent/.test(l.hlBg), `${l.hl} ${l.hlRule} ${l.hlBg}`);
   check('the notes that lived only in host.title are on the page, in a <details> that starts closed',
     l.open === false && l.notes.length >= 1 && /^\d+ notes? on these figures$/.test(l.summary)

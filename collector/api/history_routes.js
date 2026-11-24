@@ -120,7 +120,7 @@ export const METRICS = {
     basis: 'Bookings that did not complete (outcome not_completed), per Dubai day, from the day roll-up — the outcome /api/cancellations totals over its window. Complete days only.' },
   km: { grain: 'day', cls: 'BK', label: 'Distance', unit: 'km', source: 'rollup_day', col: 'km',
     basis: 'Booked distance per Dubai day over the bookings that carry one, from the day roll-up. Complete days only.' },
-  revenue: { grain: 'day', cls: 'REV', label: 'Trip value', unit: 'AED', source: 'rollup_day', col: 'revenue',
+  revenue: { grain: 'day', cls: 'REV', label: 'Gross revenue', unit: 'AED', source: 'rollup_day', col: 'revenue',
     basis: 'Fares on priced bookings per Dubai day, from the day roll-up. Complete days only.' },
   late: { grain: 'day', cls: 'COND', label: 'Late', unit: 'people', source: 'driver_first_online',
     basis: 'People whose first ONLINE event on Uber’s timeline that day came after the expected start — counted the way /api/online-time counts its Late tile: everyone holding an Uber account on the roster plus anyone who drove Uber that day, folded to the person, judged on the minute. From driver_first_online, built after each collection. Complete days only.' },

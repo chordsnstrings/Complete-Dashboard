@@ -329,7 +329,7 @@ console.log('\nFares: the trip-side view of the same money, said so');
     /the same money, before the platform took its commission/.test(f.sub), f.sub);
   check('…and names the part that IS money in',
     // Was "AED 503" — to the fils since the money ruling of 2026-09-23.
-    /AED 503\.00 of it is money no statement covered and is inside Money in/.test(f.sub), f.sub);
+    /AED 503\.00 of it is money no statement covered and is inside Net earnings/.test(f.sub), f.sub);
   check('…with the denominator it was priced over',
     /priced on 86 of 95 bookings/.test(f.sub), f.sub);
   /* Uber's trip export carries no fare column, so revenue is null for most of
@@ -339,7 +339,7 @@ console.log('\nFares: the trip-side view of the same money, said so');
     // Was /12,639/ — the fixture's 12,638.71 is printed as it is since 2026-09-23.
     /AED 12,638\.71/.test(stmt.value) && /weekly statement/.test(stmt.sub), stmt.value);
   check('…and is named as the gross before commission',
-    /before the commission that makes it the Money in beside it/.test(stmt.sub), stmt.sub);
+    /before the commission that makes it the Net earnings beside it/.test(stmt.sub), stmt.sub);
   check('neither present, and it is a dash with a reason',
     faresTile({}).value === '—'
       && /no trip carries a fare and no statement reports a fare line/.test(faresTile({}).sub));

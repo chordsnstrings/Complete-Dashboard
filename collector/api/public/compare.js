@@ -659,7 +659,7 @@ function peopleAndMoney(peopleHost, moneyHost, p, a, b, { colors, words, nowMin,
   moneyHost.append(el('p', 'cap', esc(`${words}${cut} ${dayWords(a, rb.a)} ${dayWords(b, rb.b)}`
     + (hatched ? ` An hour holding an estimate is drawn as ${drawnNoun('unfinished')}; its height is on record plus estimate.` : '')
     + (p.fleet ? ' Decided on this fleet’s own bookings and valued at its own rate; the hour charts are not cut.'
-      : ' The same estimate the day page shows as its trip value; the hour charts are not cut.'))));
+      : ' The same estimate the day page shows as its gross revenue; the hour charts are not cut.'))));
 }
 /* A change, signed, in the contract's form: the colour follows the meaning
    (`worse` inverts it), the glyph and sign the arithmetic, and no change is

@@ -39,7 +39,7 @@ const dubaiToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Duba
 /* ══ #finance ═════════════════════════════════════════════════════════════ */
 if (want('finance')) {
   console.log('\n#finance');
-  const HEADS = ['At a glance', 'Money in, day by day', 'Trip value a day', 'Platform payouts a day',
+  const HEADS = ['At a glance', 'Net earnings, day by day', 'Gross revenue a day', 'Bank collection a day',
     'How the rider paid', 'What each priced tier earns', 'What makes up a payout', 'Tips by driver',
     'What the operator ledger added', 'What it took out', '† What this page does not know'];
   let classic = {};
@@ -62,9 +62,9 @@ if (want('finance')) {
     const vfig = await txtOf(page, '#view .cband .vdct-fig > b');
     check('no tile repeats the verdict\'s figure (ruling 7)', !Object.values(s.values).includes(vfig) || !vfig, `${vfig} ${JSON.stringify(s.values)}`);
     check('six tiles in one band, Money in the hero with the kpis answer\'s accounted total',
-      s.glance === 6 && s.glanceBands === 1 && s.hero === 'Money in' && s.values['Money in'] === aed(K.accounted), JSON.stringify(s.values));
+      s.glance === 6 && s.glanceBands === 1 && s.hero === 'Net earnings' && s.values['Net earnings'] === aed(K.accounted), JSON.stringify(s.values));
     check('Platform payouts, On-trip revenue and Cash collected carry the old page\'s figures exactly',
-      ['Platform payouts', 'On-trip revenue', 'Cash trips (including POS) — measured portion']
+      ['Bank collection', 'On-trip revenue', 'Cash trips (including POS) — measured portion']
         .every((l) => s.values[l] && s.values[l] === classic[l]), JSON.stringify([s.values, classic]));
     /* The operator, 2026-11-24: cash trips INCLUDING POS — the hotel's fares
        paid on the driver's card machine are added, and said. */
@@ -72,7 +72,7 @@ if (want('finance')) {
       /plus AED 21,400(\.00)? from 190 hotel bookings paid on the driver’s card machine \(POS\)/.test(s.subs['Cash trips (including POS) — measured portion'] || ''),
       s.subs['Cash trips (including POS) — measured portion']);
     check('Trip value booked is the daily answer\'s fares total, and never called Money in',
-      s.values['Trip value booked'] === aed(F.totals.fares) && /never added to Money in/.test(s.subs['Trip value booked']), s.subs['Trip value booked']);
+      s.values['Gross revenue'] === aed(F.totals.fares) && /never added to Net earnings/.test(s.subs['Gross revenue']), s.subs['Gross revenue']);
     const derived = F.rows.filter((r) => r.money_derived);
     if (+F.totals.money_derived_part > 0 && (F.open_statement || []).some(Boolean)) {
       check('The open week is the derived part, with the rate and the closed days it was worked out from',
@@ -92,11 +92,11 @@ if (want('finance')) {
       return before ? ((now - before) / before) * 100 : null;
     };
     const signed = (v) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(1)}%`;
-    const dm = await deltaOf(page, 'Money in');
+    const dm = await deltaOf(page, 'Net earnings');
     const wm = wow('money', (r) => r.money_derived);
     check('Money in\'s change is over closed statement days only — the derived open week is left out',
       wm == null ? /not compared/.test(dm) : dm.includes(signed(wm)), `${dm} vs ${wm}`);
-    const dp = await deltaOf(page, 'Platform payouts');
+    const dp = await deltaOf(page, 'Bank collection');
     const wp = wow('payout');
     check('Platform payouts\' change is the last seven whole days against the seven before',
       wp == null ? /not compared/.test(dp) : dp.includes(signed(wp)), `${dp} vs ${wp}`);
@@ -154,7 +154,7 @@ if (want('finance')) {
     const { ctx, page } = await open('arkiv', 'finance', { fixtures: { '/api/finance/daily': null } });
     const s = await shape(page);
     check('no daily series: Trip value booked and The open week are ABSENT with that reason',
-      /daily money series did not load/.test(s.na['Trip value booked'] || '') && /daily money series did not load/.test(s.na['The open week'] || ''),
+      /daily money series did not load/.test(s.na['Gross revenue'] || '') && /daily money series did not load/.test(s.na['The open week'] || ''),
       JSON.stringify(s.na));
     check('…and the two day charts say so rather than drawing nothing', /did not load/.test(await txtOf(page, '[data-panel="fin-tripvalue"]'))
       && /did not load/.test(await txtOf(page, '[data-panel="fin-payouts"]')));
@@ -164,7 +164,7 @@ if (want('finance')) {
     /* Fewer than fourteen whole days: no change is invented. */
     const short = (_q, real) => ({ ...real, rows: real.rows.slice(-9) });
     const { ctx, page } = await open('arkiv', 'finance', { fixtures: { '/api/finance/daily': short } });
-    const d = await deltaOf(page, 'Platform payouts');
+    const d = await deltaOf(page, 'Bank collection');
     check('under fourteen whole days, the change is not computed and says how many days the window holds',
       /not compared: this window holds \d+ whole days? of it, and a week against a week needs fourteen/.test(d), d);
     await ctx.close();
