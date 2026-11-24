@@ -346,7 +346,10 @@ console.log('\nthe source says where the names come from, and where they do not'
     'the reason this is built from history rather than from a geocoder is the measurement');
   check('…and that it is not a geocoder',
     /What it is NOT: a geocoder[\s\S]{0,120}?never\s+driven near/.test(src));
-  const day = readFileSync('api/driver_routes.js', 'utf8');
+  /* The day route's evidence moved, comments and all, to
+     api/driver_day_core.js (2026-11-24) so the movement rollup runs the same
+     code; the measurement moved with it. */
+  const day = readFileSync('api/driver_day_core.js', 'utf8');
   check('the day route records that the timeline lat column is empty on production',
     /197,687 timeline events and lat is\s+null on every single one/.test(day),
     'the online position comes from the tracker BECAUSE Uber\'s own field is empty');

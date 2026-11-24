@@ -212,7 +212,9 @@ const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
 check('no bounds are framed with degree padding',
   !/fitBounds\([^)]*\.pad\(/.test(strip(mapJs)) && !/\.pad\(/.test(strip(driverJs)));
 check('the fit is re-applied when the panel resizes', /_fitAgain/.test(mapJs));
-check('the territory map renders even with no points', /if \(!pts\.length\) \{\s*mapP\.body\.append/.test(driverJs));
+/* 2026-11-24: the map has four layers (waiting, driving, placed pickups and
+   drop-offs, booked addresses), so "no points" is no point on any of them. */
+check('the territory map renders even with no points', /if \(!Object\.values\(pts\)\.some\(\(x\) => x\.length\)\) \{\s*mapP\.body\.append/.test(driverJs));
 check('no vehicle map frames bounds with degree padding', !/\.pad\(/.test(strip(vehicleJs)));
 
 /* ── chart markup must match the stylesheet ───────────────────────────────

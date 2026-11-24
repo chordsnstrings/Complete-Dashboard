@@ -428,4 +428,9 @@ export const SCHEMA_FILES = [
      src/card_fares.js after each card-payments read, so phase 3's cash in
      notes reads a small table instead of the trip views (FIX-STATUS CARD-3). */
   'schema_v128.sql',
+  /* One driver's movement per Dubai day — minutes stopped, moving and with a
+     passenger, waiting online, km, per half-kilometre cell, and pickups and
+     drop-offs placed by Uber's job stages and the tracker — built by
+     src/movement_rollup.js for the driver page's range view. */
+  'schema_v129.sql',
 ];

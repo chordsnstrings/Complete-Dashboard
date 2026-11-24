@@ -8,6 +8,7 @@
 import cron from 'node-cron';
 import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
+import { movementRollupTick } from './movement_rollup.js';
 import { recordCredentialVisibility, withPinnedSettings, get } from './settings.js';
 import { runDiscovery } from './sources/discovery.js';
 import { liveMoneyTick } from './sources/uber_transactions.js';
@@ -275,6 +276,36 @@ async function main() {
        aggregates at 03:10. */
     cron.schedule('40 22 * * *', () => refreshRollups()
       .catch((e) => log.error('scheduler', 'rollup full', { err: String(e) })));
+    /* One driver's movement per day (src/movement_rollup.js, sql/schema_v129.sql)
+       for the driver page's range view. Hourly at :47, clear of the :15/:45
+       rollups and the :37 incremental tail: today each hour; yesterday at
+       00:47 and 03:47; three older days of backfill a pass (back to 21 Aug)
+       only between 00:47 and 05:47 Dubai, when the collectors are quiet — a
+       day page is 2–4 s of reads (measured 2026-11-24) and a day is ~250
+       people. One pass at a
+       time: a pass still running when the next is due is skipped, not
+       stacked. */
+    let movementBusy = false;
+    cron.schedule('47 * * * *', () => {
+      if (movementBusy) { log.warn('scheduler', 'movement rollup still running; this hour skipped'); return; }
+      movementBusy = true;
+      /* Each person-day's replace (delete + insert) in one transaction on one
+         client: pool.query hands each statement to any client, so a BEGIN
+         there would not hold the writes together. */
+      const pgTx = async (fn) => {
+        const c = await pool.connect();
+        try {
+          await c.query('BEGIN');
+          const r = await fn((t, p) => c.query(t, p).then((x) => x.rows));
+          await c.query('COMMIT');
+          return r;
+        } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
+      };
+      movementRollupTick(sq, { tx: pgTx })
+        .then((r) => log.info('scheduler', 'movement rollup', { days: r.map((x) => `${x.day}:${x.built}/${x.persons}${x.failed ? ` (${x.failed} failed)` : ''}`).join(' ') }))
+        .catch((e) => log.error('scheduler', 'movement rollup', { err: String(e) }))
+        .finally(() => { movementBusy = false; });
+    });
     /* And once at boot. A fresh database, or a deploy that lands before the
        first collection, would otherwise serve empty months on every page that
        reads a rollup until the quarter hour came round. */

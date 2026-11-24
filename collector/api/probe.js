@@ -39,6 +39,13 @@ import { YANGO_SURFACES } from '../src/sources/yango.js';
    the offset here is how the two would eventually disagree. */
 import { dubaiIso, iso as isoDay } from '../src/util.js';
 import { log } from '../src/log.js';
+/* The four movement probes (FMS GetVehicleActivity, Yango's order track,
+   Bolt's getFleetStateLogs, CABMAN's fix cadence) live in their own module:
+   they handle driver positions, which no sibling here does, and their shape
+   reducers and scrubber are tested on their own (test/probe_movement.test.mjs).
+   Mounted from probeRoutes below so server.js — and test/mount.mjs, which
+   slices it — does not change. */
+import { movementRoutes } from './probe_movement.js';
 
 /* The org a probe asks about: the first with a full credential pair. The
    legacy fields carry Ecosine's values where they are set, but on a component
@@ -2940,6 +2947,10 @@ export function probeRoutes(app, { wrap }) {
     }
     res.json({ window: [from, to], operation: op, fleets: out });
   }));
+
+  /* GET /api/probe/movement?which=fms_activity|yango_track|bolt_states|cabman_cadence
+     — read-only, one probe per request, shape only. See api/probe_movement.js. */
+  movementRoutes(app, { wrap });
 
   log.info('api', 'probe routes mounted (read-only, allowlisted)');
 }

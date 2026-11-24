@@ -30,6 +30,7 @@
    imported rather than restated, so "how far did it go" and "where did it
    stop" have one answer across the assistant, the place route and this page. */
 import { findStops, km, GAP_MIN, HOP_KM } from './where_routes.js';
+import { PARKED_CADENCE_MIN, STAY_RADIUS_KM } from './whereabouts.js';
 
 /* A silence longer than this is a hole in the record, not a stretch of
    driving or parking: the same 20 minutes /api/map/journey and /api/where
@@ -170,11 +171,62 @@ export function custodyWindows({ own = [], others = [], spells = [], limit = 144
    where the later has none. Tri-state — null is "this feed did not say",
    never an empty seat. */
 const seatOn = (a, b) => (b.passenger != null ? b.passenger : a.passenger != null ? a.passenger : null);
+/* A reported speed above walking pace is moving. A reported 0 is the car at
+   that instant — a red light reads 0 too — so an interval whose two ends are
+   MIN_DRIVE_KM or more apart at above walking pace was a drive whatever the
+   last instant said (2026-11-24: FMS's 0 is now kept as 0, src/sources/fms.js
+   fmsSpeed, where it used to arrive as null and fall through to displacement).
+   Short hops under MIN_DRIVE_KM on a reported 0 stay stopped: that is GPS
+   jitter at CABMAN's 20-second cadence, not a drive. */
 const movingOn = (a, b) => {
-  if (b.speed != null) return Number(b.speed) > 3;
+  if (b.speed != null && Number(b.speed) > 3) return true;
   const h = (ms(b.at) - ms(a.at)) / 3600000;
-  return h > 0 && km(a, b) / h > MOVING_KMH;
+  const d = km(a, b);
+  if (b.speed != null && d < MIN_DRIVE_KM) return false;
+  return h > 0 && d / h > MOVING_KMH;
 };
+
+/* A PARKED CAR'S QUIET TRACKER IS WATCHED, NOT A HOLE (2026-11-24, the
+   operator's step A: "the same 'parked, tracker quiet' rule on the day page
+   as on the vehicle page"). A parked CABMAN unit sends a heartbeat every
+   65–67 minutes and an FMS unit keeps its 6-minute rate; this page dropped
+   every gap over SILENCE_MIN on both, so the same parked hour was "unseen"
+   here and a stay on the vehicle page (api/whereabouts.js, measured there:
+   CABMAN 70, FMS 30). A same-spot gap (within STAY_RADIUS_KM) up to the
+   source's parked cadence is now a stop, marked inferred; a moved gap or a
+   longer one is still a silence. */
+export function quietParked(a, b) {
+  const gap = (ms(b.at) - ms(a.at)) / 60000;
+  return gap > SILENCE_MIN && gap <= (PARKED_CADENCE_MIN[b.source] ?? 30) && km(a, b) < STAY_RADIUS_KM;
+}
+/* Two fixes from two different custody windows of the same car are never
+   one interval (review, 2026-11-24): the gap between the windows is another
+   driver's evidence, and the parked-tracker rule would otherwise hand up to
+   70 minutes of it to this one. `w` is the window index the day route sets
+   on each fix; a fix without one (a test, the vehicle page) is unrestricted. */
+const sameWindow = (a, b) => a.w == null || b.w == null || a.w === b.w;
+const watched = (a, b) => sameWindow(a, b) && ((ms(b.at) - ms(a.at)) / 60000 <= SILENCE_MIN || quietParked(a, b));
+
+/* One interval between two fixes of the same car and tracker: its state
+   ('engaged' a passenger aboard, 'available' moving with none, 'idle'
+   stopped), the seat, and whether it is a quiet parked gap (inferred); null
+   where the interval is a silence. Shared by carRuns below and the
+   per-driver-day movement rollup (src/movement_rollup.js), so a range view
+   and this page classify the same minute the same way. */
+export function intervalState(a, b) {
+  if (a.plate !== b.plate || a.source !== b.source || !watched(a, b)) return null;
+  /* A step of HOP_KM or more is a bad fix, not a drive — the rule
+     distanceBySeat and /api/map/journey already use. Without it one lost-lock
+     fix at 0,0 between two real ones was 13,096 km (review, 2026-11-24). */
+  if (km(a, b) >= HOP_KM) return null;
+  const quiet = quietParked(a, b);
+  /* A quiet parked gap's seat is not read — the tracker said nothing for an
+     hour; a bag on a seat flagged at both ends is not an hour with a
+     passenger (review, 2026-11-24; seatMinutes below already said so). */
+  const seat = quiet ? null : seatOn(a, b);
+  const state = seat === true ? 'engaged' : (!quiet && movingOn(a, b)) ? 'available' : 'idle';
+  return { state, seat, inferred: quiet };
+}
 
 /* ── 2. what the car was doing, interval by interval ───────────────────────
    One run per stretch of one state: 'engaged' a passenger aboard, 'available'
@@ -198,15 +250,15 @@ function carRunsOne(fixes) {
   const runs = [];
   for (let i = 1; i < fixes.length; i += 1) {
     const a = fixes[i - 1]; const b = fixes[i];
-    if (a.plate !== b.plate || a.source !== b.source) continue;
-    if ((ms(b.at) - ms(a.at)) / 60000 > SILENCE_MIN) continue;
-    const seat = seatOn(a, b);
-    const state = seat === true ? 'engaged' : movingOn(a, b) ? 'available' : 'idle';
+    const iv = intervalState(a, b);
+    if (!iv) continue;
+    const { state, seat, inferred } = iv;
     const last = runs[runs.length - 1];
-    if (last && last.state === state && last.seat === seat && last.e === a.m && last.plate === b.plate && last.source === b.source) {
+    if (last && last.state === state && last.seat === seat && !!last.inferred === inferred && last.e === a.m
+      && last.plate === b.plate && last.source === b.source) {
       last.e = b.m;
     } else {
-      runs.push({ s: a.m, e: b.m, state, seat, source: b.source, plate: b.plate });
+      runs.push({ s: a.m, e: b.m, state, seat, source: b.source, plate: b.plate, ...(inferred ? { inferred: true } : {}) });
     }
   }
   return runs.filter((r) => r.e > r.s);
@@ -217,8 +269,9 @@ function seatMinutes(fs) {
   const t = { with: 0, without: 0, unknown: 0 };
   for (let i = 1; i < fs.length; i += 1) {
     const gap = (ms(fs[i].at) - ms(fs[i - 1].at)) / 60000;
-    if (gap > SILENCE_MIN) continue;
-    const seat = seatOn(fs[i - 1], fs[i]);
+    if (!watched(fs[i - 1], fs[i])) continue;
+    /* A quiet parked gap's seat is not read: the tracker said nothing. */
+    const seat = quietParked(fs[i - 1], fs[i]) ? null : seatOn(fs[i - 1], fs[i]);
     t[seat === true ? 'with' : seat === false ? 'without' : 'unknown'] += gap;
   }
   return t;
@@ -281,10 +334,10 @@ export function movementSegments(fixes, windows) {
       continue;
     }
     if (fs[0].m - w.from > SILENCE_MIN) out.push({ kind: 'silence', s: w.from, e: fs[0].m, minutes: fs[0].m - w.from, plate: w.plate, edge: 'start' });
-    /* Runs between silences. */
+    /* Runs between silences (a quiet parked gap is not one). */
     const runs = [[fs[0]]];
     for (let i = 1; i < fs.length; i += 1) {
-      if ((ms(fs[i].at) - ms(fs[i - 1].at)) / 60000 > SILENCE_MIN) runs.push([fs[i]]); else runs[runs.length - 1].push(fs[i]);
+      if (!watched(fs[i - 1], fs[i])) runs.push([fs[i]]); else runs[runs.length - 1].push(fs[i]);
     }
     runs.forEach((run, ri) => {
       if (ri > 0) {
@@ -327,9 +380,12 @@ export function movementTotals(fixes, windows, runs) {
   const d = distanceBySeat(inside);
   const mins = (st) => runs.filter((r) => r.state === st).reduce((a, r) => a + (r.e - r.s), 0);
   const covered = runs.reduce((a, r) => a + (r.e - r.s), 0);
+  /* Of the stopped minutes, those a quiet parked tracker accounts for —
+     inferred, and said so. */
+  const inferred = runs.filter((r) => r.inferred).reduce((a, r) => a + (r.e - r.s), 0);
   const held = mergeRanges(windows.map((w) => ({ s: w.from, e: w.to }))).reduce((a, w) => a + Math.max(0, w.e - w.s), 0);
   return { ...d, fixes: inside.length,
-    with_passenger_min: mins('engaged'), moving_empty_min: mins('available'), stopped_min: mins('idle'),
+    with_passenger_min: mins('engaged'), moving_empty_min: mins('available'), stopped_min: mins('idle'), parked_quiet_min: inferred,
     held_min: held, unseen_min: Math.max(0, held - covered),
     seat_reported: inside.some((f) => f.passenger != null),
     sources: [...new Set(inside.map((f) => f.source).filter(Boolean))] };

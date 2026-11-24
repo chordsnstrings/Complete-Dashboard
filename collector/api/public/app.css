@@ -3582,3 +3582,5 @@ a.chip:hover{border-color:var(--rule-strong);color:var(--ink)}
 .thpair>button+button,.thpair>span+span{margin-top:2px}
 .tdpair .tdp-a,.tdpair .tdp-b{display:block}
 .tdpair .tdp-b{color:var(--grey-strong)}
+.terr-layers{margin:0 0 8px}
+.terr-layers button.chip{cursor:pointer}
