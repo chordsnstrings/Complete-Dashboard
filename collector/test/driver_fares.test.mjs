@@ -166,7 +166,7 @@ check('a priced channel still shows its trip fares, unchanged',
   num(find(hv, /^Fares$/i)?.v) === 2400, JSON.stringify(find(hv, /^Fares$/i)));
 
 const earn = await tiles(`#driver/${RIDE}/earnings?${W}`);
-const booked = find(earn, /^Booked revenue$/i);
+const booked = find(earn, /^Gross revenue$/i);
 check('the Earnings tab’s Booked revenue tile shows it too',
   num(booked?.v) === 1200, JSON.stringify(booked));
 check('…and says it is the statement’s line, not the trips’',

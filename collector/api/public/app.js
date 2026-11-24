@@ -4070,7 +4070,7 @@ function financeTiles({ k, settle, cash, tipAll, tipTotal, fareTotal, coverage }
       const classified = Number.isFinite(total) ? total - unl
         : (settle.classes || []).reduce((a, c) => a + (+c.trips || 0), 0);
       const any = +k.trips > 0 || classified > 0;
-      return { label: 'Cash collected — measured portion',
+      return { label: 'Cash trips (including POS) — measured portion',
         value: cash ? (cash.revenue == null ? 'not reported' : money(cash.revenue))
           : (classified > 0 ? money(0) : '\u2014'),
         sub: cash
@@ -4700,7 +4700,7 @@ async function financeContract(root) {
       spark: fr.length ? spark('money', derived) : null },
     { ...base['Platform payouts'], delta: fr.length ? finWow(fr, 'payout') : null, spark: fr.length ? spark('payout') : null },
     base['On-trip revenue'],
-    base['Cash collected — measured portion'],
+    base['Cash trips (including POS) — measured portion'],
     fin ? { label: 'Trip value booked', value: money(ft.fares),
       sub: `gross fare on ${fmt(ft.priced_trips)} priced of ${fmt(ft.bookings)} bookings — what riders were charged, never added to Money in`,
       delta: finWow(fr, 'revenue'), spark: spark('revenue') }

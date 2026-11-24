@@ -376,7 +376,7 @@ const bare = await render('bare', 'earnings');
      return v ? money(v) : (cashTrips ? 'not reported' : money(0));
    at api/public/driver.js's Cash collected tile. The value becomes "AED 0" and
    this assertion fails. */
-const qc = tile(quiet, 'Cash collected');
+const qc = tile(quiet, 'Cash trips (including POS)');
 check('cash collected on an empty window draws no figure at all',
   qc && qc.value === '—', JSON.stringify(qc));
 /* REVERSION: restore `: 'no cash booking in this window'` as the sub. The
@@ -453,7 +453,7 @@ check('the Counted column prunes itself rather than borrowing the Statement colu
 console.log('\na measurement of nought is still a measurement');
 
 const card = await render('cardonly', 'earnings');
-const cc = tile(card, 'Cash collected');
+const cc = tile(card, 'Cash trips (including POS)');
 /* THE BRANCH THAT MUST NOT CHANGE. 84 bookings, none of them cash: AED 0 is a
    real measurement of the cash this driver took, and rendering it as an absence
    would be this same defect facing the other way.
@@ -491,7 +491,7 @@ console.log('\na nought the PLATFORM published is not a figure nobody reported')
    `if (v != null) return money(v);`. The value becomes "not reported" and both
    assertions below fail. */
 const zc = await render('zerocash', 'earnings');
-const zt = tile(zc, 'Cash collected');
+const zt = tile(zc, 'Cash trips (including POS)');
 // Was 'AED 0': a published nought now carries its fils like every money figure.
 check('a cash figure the platform published AT nought still reads AED 0.00',
   zt && zt.value === 'AED 0.00', JSON.stringify(zt));
@@ -501,7 +501,7 @@ check('…and is never described as not reported',
 /* REVERSION (run 2026-10-20): take the `if (cashTakenKnown)` branch
    out of the tile — "the tile reads cash taken" fails with AED 2,310.58, and
    the sub returns to "56 cash trips". */
-const ct = tile(await render('cashtaken', 'earnings'), 'Cash collected');
+const ct = tile(await render('cashtaken', 'earnings'), 'Cash trips (including POS)');
 check('the tile reads cash taken, as the driver\u2019s Excel does: AED 2,445.99',
   ct && ct.value === 'AED 2,445.99', JSON.stringify(ct));
 check('…over the 44 completed cash trips, and says the 12 not completed are not counted',
@@ -510,7 +510,7 @@ check('…over the 44 completed cash trips, and says the 12 not completed are no
 /* REVERSION (run 2026-10-20): the first cut's guard, `k.cash_trips != null
    && !(+k.cash_trips === 0 && !(+k.cash_bookings) && cashTrips > 0)` — both
    checks fail: AED 1,585.00 over "38 cash trips". */
-const po = tile(await render('posonly', 'earnings'), 'Cash collected');
+const po = tile(await render('posonly', 'earnings'), 'Cash trips (including POS)');
 check('card-terminal and supervisor-collected bookings are not cash the driver took: AED 0.00, as their Excel says',
   po && po.value === 'AED 0.00', JSON.stringify(po));
 check('…and the sub says why, naming the labels',
@@ -530,7 +530,7 @@ console.log('\na population is not coverage: nobody recorded how any of it was p
    to AED 0 and the sentence returns to claiming a measurement over 84 bookings
    nobody classified. */
 const up = await render('unknownpay', 'earnings');
-const ut = tile(up, 'Cash collected');
+const ut = tile(up, 'Cash trips (including POS)');
 check('a window whose every booking is unlabelled draws no cash figure at all',
   ut && ut.value === '\u2014', JSON.stringify(ut));
 check('…and says nobody recorded how it was paid, not that none of it was cash',
