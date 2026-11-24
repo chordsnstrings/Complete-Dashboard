@@ -11,7 +11,7 @@
    name, never on a fuzzy score, because merging two real people into one page
    is a worse failure than showing the same person twice. */
 
-import { win, winDays } from './window.js';
+import { win, winDays, dubaiDay } from './window.js';
 import { cardNet, cardPartFor, dubaiToday, NET_FROM } from '../src/card_notes.js';
 /* One definition of an online span, shared with /api/supply/heat and with the
    rollup that writes driver_day.online_min. Four private copies of it had
@@ -3391,7 +3391,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     /* win() hands the window's end as the last instant of its day
        ('2026-07-31 23:59:59.999'); this route counts days, so both ends are
        the calendar dates. */
-    const [from, to] = [String(p[0]).slice(0, 10), String(p[1]).slice(0, 10)];
+    const [from, to] = [isoDay(p[0]), isoDay(p[1])];
     const who = await personIdOf(d);
     const [state] = await q(`SELECT value FROM source_state WHERE source = 'movement_rollup' AND fleet_id = '-' AND key = 'backfilled_to'`);
     const [span] = await q(`SELECT to_char(min(day), 'YYYY-MM-DD') AS first, to_char(max(day), 'YYYY-MM-DD') AS last,
@@ -3399,7 +3399,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const builtFrom = [state?.value, span?.first].filter(Boolean).sort()[0] || null;
     const today = dubaiToday();
     const dayCount = (a, b) => (a > b ? 0 : Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000) + 1);
-    const dayBefore = (x) => new Date(Date.parse(`${x}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+    const dayBefore = (x) => dubaiDay(new Date(Date.parse(`${x}T00:00:00Z`) - 86400000));
     const minOf = (a, b) => (a < b ? a : b); const maxOf = (a, b) => (a > b ? a : b);
     /* The window's days, split by what can be said of them: before live
        collection began (nothing to build), after it but not yet reached by

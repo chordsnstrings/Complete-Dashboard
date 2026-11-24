@@ -2087,6 +2087,13 @@ async function tabTerritory(root, id) {
       layerBar.append(b);
     });
     mapP.body.append(legend, capNote);
+    /* The map is drawn with nothing on it rather than replaced by a
+       paragraph: an empty map of the emirate reads as "nothing to plot",
+       and the page keeps its shape between drivers. */
+    if (!Object.values(pts).some((x) => x.length)) {
+      mapP.body.append(note('Nothing to plot for this driver in this window: the tracker saw no car of theirs '
+        + 'in their own hours, and no booking of theirs carries the platform’s own coordinates.'));
+    }
     show(pts.wait.length ? 'wait' : pts.drive.length ? 'drive' : pts.points.length ? 'points' : 'booked');
   }
 
