@@ -2227,6 +2227,16 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       cash_taken: num(taken?.cash_taken),
       pos_trips: posK?.pos_trips ?? 0,
       pos_fares: num(posK?.pos_fares),
+      /* POS PAYMENTS, its own tile (the operator, 2026-11-24: "driver page
+         should have POS payment as a separate modal"): what went to the bank
+         by card machine — the hotel's card-machine fares plus the card
+         payments (Network International) that paid cash trips, from
+         NET_FROM. So Cash trips (including POS) − POS payments = Cash in
+         hand. Card on the sheet that matched no fare is said beside it, never
+         taken off. */
+      pos_payments: Math.round(((num(posK?.pos_fares) || 0) + (kCard || 0)) * 100) / 100,
+      pos_card_total: kCard == null ? null : (kNet.by.get(String(kPerson))?.card ?? 0),
+      pos_card_unmatched: kCard == null ? null : (kNet.by.get(String(kPerson))?.unexplained ?? 0),
       cash_in_hand: taken?.cash_taken == null ? null : Math.round((num(taken.cash_taken) - (kCard || 0)) * 100) / 100,
       cash_in_hand_card: kCard,
       cash_in_hand_card_from: kNet.from,

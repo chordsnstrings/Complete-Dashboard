@@ -3997,15 +3997,28 @@ function financeTiles({ k, settle, cash, tipAll, tipTotal, fareTotal, coverage }
           : bases.every((b) => /fares/.test(b)) ? 'counted on their fares instead'
             : 'counted on their own statements and fares instead';
       const on = who ? `${who} being ${how}` : how;
-      return { label: 'Bank collection', value: money(wired),
-        sub: k.payout_days
+      /* POS PAYMENTS COME INTO THE BANK TOO (the operator, 2026-11-24: "Bank
+         Collection should add POS payment as well"): the hotel's card-machine
+         fares and the card payments that paid cash trips (from 1 Aug 2026),
+         both from /api/settlement/mix. */
+      const posFares = settle?.pos_driver?.revenue != null ? +settle.pos_driver.revenue : 0;
+      const posCard = settle?.pos_card?.on_cash != null ? +settle.pos_card.on_cash : 0;
+      const posAll = posFares + posCard;
+      const posWords = posAll
+        ? ` · plus ${money(posAll)} of POS payments: ${money(posFares)} hotel fares on the card machine`
+          + `${settle?.pos_card?.on_cash != null ? ` and ${money(posCard)} of card payments that paid cash trips (fares from ${settle.pos_card.from})` : ''}`
+        : '';
+      const posWhy = settle?.pos_card?.absent ? ` · card payments not added: ${settle.pos_card.absent}` : '';
+      return { label: 'Bank collection', value: wired == null && !posAll ? money(wired) : money((wired || 0) + posAll),
+        sub: (k.payout_days
           ? `wired by ${(k.payout_platforms || []).map(sourceLabel).join(', ')} · `
             + `${countOf(k.payout_days, 'day')}, ${countOf(k.payout_drivers, 'driver')}`
             + (elsewhere
               ? ` — ${money(elsewhere)} of it is not counted as income here, ${on}, `
                 + 'so the same work is not counted twice'
               : '')
-          : 'no payout statement covers this range' };
+          : (posAll ? 'at least: no payout statement covers this range, so only the POS payments are here' : 'no payout statement covers this range'))
+          + posWords + posWhy };
     })(),
     /* The statement view beside the bank view. What the fleet EARNED on trip
        (gross minus commission, from the platform's statement reports) vs what

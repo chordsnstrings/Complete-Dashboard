@@ -2344,6 +2344,9 @@
      "cash_trips",
      "cash_taken",
      "pos_fares",
+     "pos_payments",
+     "pos_card_total",
+     "pos_card_unmatched",
      "cash_in_hand",
      "cash_in_hand_card",
      "cash_unvalued"

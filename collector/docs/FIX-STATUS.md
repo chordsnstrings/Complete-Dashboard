@@ -4625,6 +4625,29 @@ Neighbours green: `ledger_exposure` 46, `history_routes` 71, `history_sparklines
 Reversions, one at a time:
 - not waiting for the sheet (9 fail), no AED 99 floor (4), card not taken off (7), the day not named (6), the email's last call at 09:15 (3), the email's card line dropped (1);
 - after the review: future-dated rows counted (2), the day need not hold payments (1), the text reading the summed table (7). |
+| LBL-1 | **One name per figure, everywhere** (the operator, 2026-11-24). On the driver Earnings tab:
+- Booked Revenue → **Gross Revenue**
+- Platform Earnings → **Bank Collection**
+- Actual Earnings → **Net Earnings**
+- Cash Collected → **Cash Trips (including POS)**
+
+At fleet level ("Yes, rename them too"):
+- Trip value → Gross Revenue
+- Platform payouts → Bank Collection
+- Money in / Income → Net Earnings
+
+The renames cover tiles, panels, columns, captions, the phone screens, the Excel exports (driver and today), the history labels, the assistant's labels and the monthly report. Only visible text changed, never a key or an id. Done by one isolated agent in two directed waves and verified by the lead with a grep: every remaining hit is a code comment, Uber's own "cash collected" field, or an unrelated phrase. Left on purpose: "platform payouts" where it names the counted payout part of Net Earnings (a different number from the Bank Collection tile), the PAY access class, and the assistant's bank-transfer register. | yes | not deployed | Agent waves 1 and 2 ran 23 suites, all green except `arkiv_fleet` 258/1. That one is a #vehicles panel-order check, red without the renames too. A reversion of the faresTile wording fails `driver_money_tiles`. |
+| CARD-3c | **Cash Trips (including POS), POS payments, Cash in hand, and Bank Collection with POS** (the operator, 2026-11-24: "POS directly comes to our bank. So it should be deducted from the Cash held with the driver… Cash In Hand which is Cash Trips - POS deposits"; "driver page should have POS payment as a separate modal"; "Bank Collection should add POS payment as well, as that comes into the bank").
+- **Cash Trips (including POS)** is the cash trips (`trip_cash`, gross) plus the hotel's fares paid on the driver's own card machine (`pos-driver`). It appears on the driver Earnings tile, the driver Excel, and the Finance tile (`/api/settlement/mix` `pos_driver`).
+- **POS payments** is a tile of its own: those hotel fares plus the card payments (Network International) that paid cash trips from 1 Aug 2026. Card on the sheet that matched no fare is said beside it, never counted.
+- **Cash in hand** = Cash Trips (including POS) − POS payments, which is the cash fares less what card paid of them. Where the card part is unknown it reads "at most this", with the reason.
+- **Bank Collection** adds the POS payments: the driver tile, the driver Excel, and the Finance tile (`pos_card` on the mix, not split for a fleet or platform filter, and said).
+- `/api/driver/kpis`: `cash_taken` is gross again. New fields: `pos_trips`, `pos_fares`, `pos_payments`, `pos_card_total`, `pos_card_unmatched`, `cash_in_hand`, `cash_in_hand_card*`. | yes | not deployed | `network_cards` 120, `driver_empty_window_page` 68, `money_workbook` 61, `arkiv_people` 246, `arkiv_finance` 132, `driver_routes` 85, and others green.
+
+Reversions, one at a time (each fails its check):
+- tile without POS, cash in hand not netted, POS fares not read, Excel without POS, Finance tile without POS;
+- Bank Collection without POS on the driver tile, the Finance tile and the Excel;
+- POS payments without the card part. |
 | DD-1 | #driver/…/day, the server (2026-10-13, Kashif Ali Ayyub Khan online from 07:04 with nothing drawn): `/api/driver/day` adds Uber's live status spans (SPANS_SQL, placed where each spell began), finds the car from Uber's own status rows (raw driverUuid) as well as bookings, keeps fixes to the hours the car was HIS (api/day_movement.js custodyWindows — never another driver's shift in a shared car; overlaps said as `shared`), and returns `movement` (runs by seat, stops/drives/silences, km by seat); manifest classes for every new field | yes | **on production** `87f5cca` (deployment ca1815a1, 2026-10-13) | driver_day_movement (new, 33 checks) — the review's server fixes each reverted alone, see DD-4 |
 | DD-2 | #driver/…/day, the page: a day with no booking draws everything else and says why; yesterday · today · tomorrow; one clock for every row — jobs in their platform's colour, Uber's log-in record and live status in Uber's ramp, the car in its tracker's ramp; custody sentence, km by seat, a map split at silences, a movement log with Uber's status changes; absence band measures distance with a passenger | yes | **on production** `87f5cca` (deployment ca1815a1, 2026-10-13) | mock renders in both skins and the phone with no error (scratchpad dday/shots); arkiv_classic_frozen: 13 driver routes re-recorded — the day page by design, the other 12 only for the strip link (proved: with the link off they match the old hashes); re-recorded again for DD-4, the same 13: rendered from HEAD's public/ and the tree's, the only differences are the link's `?period=month?on=` → `&on=` on all 13 and, on the day page, the old skin's colour fallback, `background-color` and the legend's "moving, no passenger" — nothing else |
 | DD-3 | The driver page's live status strip links to today's day page | yes | **on production** `87f5cca` (deployment ca1815a1, 2026-10-13) | as DD-2 |

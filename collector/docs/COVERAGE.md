@@ -12518,6 +12518,11 @@ pages say the sheet has not been read. The worker also reads once three minutes 
     afterwards must clear the table and that state, or call `refreshFares` (test §9 vs §10).
   - **The cash text reads the trips live** (`notesByPerson({ live: true })`), because its amount comes from
     live `trip_cash`. The table can be an hour behind a catch-up that lifted a fare to Uber's cash figure.
+* **The four cash words, defined once (CARD-3c, the operator, 2026-11-24):**
+  - Cash Trips (including POS) = the cash trips + the hotel's fares on the driver's own card machine.
+  - POS payments = those hotel fares + the card payments that paid cash trips (from 1 Aug 2026).
+  - Cash in hand = Cash Trips (including POS) − POS payments.
+  - Bank Collection = what the platforms wired + POS payments ("that comes into the bank").
 * **Traps from CARD-3b/CARD-4 (the review of 2026-11-24):**
   - **The driver page asks by ACCOUNT.** `/api/driver/kpis?id=<account>` never carries `?person=`, so
     `d.person_id` is null on every real page. Look the person up on the spine (`driver_platform_id` over

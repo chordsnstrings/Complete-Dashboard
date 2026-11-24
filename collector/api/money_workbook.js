@@ -511,20 +511,23 @@ export async function buildMoneyWorkbook({ q, from, to, fleet = null, platform =
     const inHand = cashTaken == null ? null : r2(cashTaken - (part.card || 0));
     const sd = wb.sheet('Driver', { widths: [34, 10, 10, 16, 10, 14, 18, 14, 18, 14, 14, 10, 12, 10, 10] });
     sd.header(['Driver', 'Bookings', 'Completed', 'Gross revenue (AED)', 'Priced', 'Average fare (AED)', 'Bank collection (AED)',
-      'Money (AED)', 'Cash trips (including POS) (AED)', 'POS (AED)', 'Cash in hand (AED)', 'Cash trips', 'Not priced yet', 'Km', 'Days worked'],
+      'Money (AED)', 'Cash trips (including POS) (AED)', 'POS payments (AED)', 'Cash in hand (AED)', 'Cash trips', 'Not priced yet', 'Km', 'Days worked'],
     ['text', 'int', 'int', 'money', 'int', 'money', 'money', 'money', 'money', 'money', 'money', 'int', 'int', 'int', 'int']);
     const priced = Number(mine?.priced_trips) || 0;
     sd.row([h('ID', person.name || person.account || mine?.driver_name || ''), Number(mine?.trips) || 0, Number(mine?.completed) || 0,
       h('REV', priced ? r2(mine.revenue) : null), priced, h('REV', priced ? r2(Number(mine.revenue) / priced) : null),
-      h('EARN', r2(mine?.payout)), h('EARN', r2(mine?.money)), h('CASH', inclPos), h('CASH', posPart), h('CASH', inHand), cashTrips, cashUnpriced,
+      /* Bank collection adds the POS payments, which come into the bank (the
+         operator, 2026-11-24), as the page's tile does. */
+      h('EARN', mine?.payout == null && !posPart ? null : r2((Number(mine?.payout) || 0) + posPart)), h('EARN', r2(mine?.money)),
+      h('CASH', inclPos), h('CASH', posPart), h('CASH', inHand), cashTrips, cashUnpriced,
       mine?.km == null ? null : Number(mine.km), Number(mine?.days) || 0]);
     if (!mine) sd.text('No booking of theirs is on record for these dates and filters.', 'dim');
     rm.blank();
-    rm.text(`Driver sheet — POS is ${pos?.n ? `${pos.n} hotel fare${pos.n === 1 ? '' : 's'} paid on the driver's card machine` : 'no hotel fare on the card machine'}`
+    rm.text(`Driver sheet — POS payments are ${pos?.n ? `${pos.n} hotel fare${pos.n === 1 ? '' : 's'} paid on the driver's card machine` : 'no hotel fare on the card machine'}`
       + (part.card != null ? ` plus what card payments (Network International) paid of the cash fares from ${net.from > '2026-08-01' ? net.from : '2026-08-01'}`
         + `${net.card_to && net.card_to < to ? ` to ${net.card_to}, the card sheet's last day` : ''}`
         : `; card payments are not taken off: ${part.absent}, so Cash in hand is at most this`)
-      + '. POS goes to the bank; Cash in hand is what is left in notes.', 'dim');
+      + '. POS payments go to the bank; Cash in hand is what is left in notes.', 'dim');
   }
 
   /* ── Cash to collect ─────────────────────────────────────────────────── */

@@ -2257,7 +2257,15 @@ async function tabEarnings(root, id, prof) {
             + `is nothing to average — ${UBER_FARE_WHY}, and an average over the statement would be `
             + 'a week divided by trips it does not count'
           : 'no booking of any kind in this window, so there is no fare to average' },
-    { label: 'Bank collection', value: money(k.reported_earnings), sub: 'as the platform reported it' },
+    /* POS payments come into the bank too (the operator, 2026-11-24: "Bank
+       Collection should add POS payment as well"), so they are added to what
+       the platform reported. */
+    { label: 'Bank collection', value: k.reported_earnings == null && !(+k.pos_payments > 0) ? money(k.reported_earnings)
+      : money((k.reported_earnings == null ? 0 : +k.reported_earnings) + (+k.pos_payments || 0)),
+    sub: +k.pos_payments > 0
+      ? `${k.reported_earnings == null ? 'at least: no platform statement for these dates, so only' : `${money(+k.reported_earnings)} as the platform reported it, plus`} `
+        + `the ${money(+k.pos_payments)} of POS payments (the card machine), which come into the bank`
+      : 'as the platform reported it' },
     /* WHAT ACTUALLY CAME IN, directly after the payout the operator reads as
        "platform share" (2026-11-16). Platform earnings is driver_payout_day —
        for Uber the bank transfer, after the cash the driver already took — so
@@ -2394,6 +2402,21 @@ async function tabEarnings(root, id, prof) {
             + (lastWorked ? ` \u2014 this person\u2019s last trip was ${dateStr(lastWorked)}` : ''),
     tone: cashTakenKnown ? (+k.cash_unvalued ? 'warn' : null)
       : (cashTrips && cashKnown.length < cashRows.length ? 'warn' : null) },
+    /* POS PAYMENTS (the operator, 2026-11-24: "driver page should have POS
+       payment as a separate modal"): what went straight to the bank by card
+       machine, between the two cash tiles so the sum reads across them —
+       Cash trips (including POS) − POS payments = Cash in hand. */
+    ...(cashTakenKnown && k.pos_payments !== undefined ? [{ label: 'POS payments',
+      value: +k.pos_trips > 0 || k.cash_in_hand_card != null ? money(+k.pos_payments || 0) : '\u2014',
+      sub: [
+        +k.pos_trips > 0 ? `${money(+k.pos_fares || 0)} from ${countOf(+k.pos_trips, 'hotel fare')} on the driver\u2019s card machine` : null,
+        k.cash_in_hand_card != null
+          ? `${money(+k.cash_in_hand_card)} of card payments (Network International) that paid cash trips, fares from ${k.cash_in_hand_card_from}`
+            + `${k.cash_in_hand_card_to ? ` to ${k.cash_in_hand_card_to}` : ''}`
+          : (k.cash_in_hand_card_absent_reason ? `card payments not known: ${k.cash_in_hand_card_absent_reason}` : null),
+        +k.pos_card_unmatched > 0 ? `${money(+k.pos_card_unmatched)} more on the card sheet matched no fare and is not counted` : null,
+      ].filter(Boolean).join(' \u00b7 ') || 'no card-machine payment in this window',
+      tone: k.cash_in_hand_card == null && +k.cash_trips > 0 ? 'warn' : null }] : []),
     /* CASH IN HAND (the operator, 2026-11-24): "Cash Trips - POS deposits".
        POS goes straight to the bank: the hotel's card-machine fares were never
        cash, and card payments (Network International) that paid cash fares

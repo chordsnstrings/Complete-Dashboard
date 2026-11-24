@@ -19,7 +19,8 @@
       is the only source that records where the driver set off from. Everywhere
       else it is unmeasured, and an unmeasured approach leg is never charted as
       a zero-kilometre one. */
-import { dubaiDay } from './window.js';
+import { dubaiDay, winDays } from './window.js';
+import { cardNet, dubaiToday } from '../src/card_notes.js';
 import { custodyOverWindow, custodyCountOverWindow, peopleCount, personKey, personKeyStored, NAMED } from './custody_sql.js';
 import { spanGaps } from './coverage_gaps.js';
 import { onlyFleet } from './access/one_fleet.js';
@@ -112,6 +113,23 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               count(*) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::int priced_trips,
               sum(price) FILTER (WHERE NOT is_complimentary) AS revenue
          FROM trip_ext WHERE ${FB} AND lower(coalesce(payment_type, '')) = 'pos-driver'`, p);
+    /* And the card payments (Network International) that paid cash trips over
+       the same days, from 1 Aug 2026 (src/card_notes.js) — with the hotel's
+       card-machine fares, the POS payments that come into the bank, which the
+       Finance page adds to Bank collection (the operator, 2026-11-24: "Bank
+       Collection should add POS payment as well, as that comes into the
+       bank"). A card payment is placed on a person, not a fleet or a
+       platform, so a filtered page says it cannot split it. */
+    let posCard = { on_cash: null, from: null, to: null, absent: null };
+    if (req.query.fleet || req.query.platform) {
+      posCard.absent = 'card payments are placed on a person, not on a fleet or a platform, so they are not split here';
+    } else {
+      const [wf, wt] = winDays(req);
+      const net = await cardNet(q, null, { from: wf, to: [wt, dubaiToday()].sort()[0] })
+        .catch((e) => ({ by: new Map(), absent: `the card payments could not be read (${String(e.message || e).slice(0, 120)})` }));
+      posCard = net.absent ? { on_cash: null, from: null, to: null, absent: net.absent }
+        : { on_cash: round([...net.by.values()].reduce((a, r) => a + (r.on_cash || 0), 0), 2), from: net.from, to: net.card_to, absent: null };
+    }
 
     const total = rows.reduce((a, r) => a + r.trips, 0);
     const labelled = rows.filter((r) => r.settlement_class);
@@ -134,6 +152,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       unlabelled_platforms: [...new Set(rows.filter((r) => !r.settlement_class).map((r) => r.platform))],
       pos_driver: { trips: posRow?.trips || 0, priced_trips: posRow?.priced_trips || 0,
         revenue: posRow?.priced_trips ? round(NUM(posRow.revenue) || 0, 2) : null },
+      pos_card: posCard,
       classes: [...byClass.values()].map((c) => ({
         settlement_class: c.settlement_class,
         label: LABEL[c.settlement_class] || c.settlement_class,

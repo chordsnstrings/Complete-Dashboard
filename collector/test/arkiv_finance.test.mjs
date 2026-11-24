@@ -68,6 +68,9 @@ if (want('finance')) {
         .every((l) => s.values[l] && s.values[l] === classic[l]), JSON.stringify([s.values, classic]));
     /* The operator, 2026-11-24: cash trips INCLUDING POS — the hotel's fares
        paid on the driver's card machine are added, and said. */
+    check('Bank collection adds the POS payments, which come into the bank, and says what they are',
+      /plus AED 22,600(\.00)? of POS payments: AED 21,400(\.00)? hotel fares on the card machine and AED 1,200(\.00)? of card payments that paid cash trips/
+        .test(s.subs['Bank collection'] || ''), s.subs['Bank collection']);
     check('the cash tile adds the hotel\'s card-machine (POS) fares, and says so',
       /plus AED 21,400(\.00)? from 190 hotel bookings paid on the driver’s card machine \(POS\)/.test(s.subs['Cash trips (including POS) — measured portion'] || ''),
       s.subs['Cash trips (including POS) — measured portion']);

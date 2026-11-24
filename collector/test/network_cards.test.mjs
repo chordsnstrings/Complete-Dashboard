@@ -638,6 +638,11 @@ console.log('\n§11 approved from August: the ceiling, the tiles and the history
   check('the overview: cash trips gross, the hotel\'s card-machine fares beside them, cash in hand less the card that paid cash fares',
     k.cash_in_hand_card === nNov.on_cash && k.cash_in_hand === r2_(k.cash_taken - k.cash_in_hand_card) && k.pos_trips === 1 && k.pos_fares === 120,
     JSON.stringify([k.cash_taken, k.pos_trips, k.pos_fares, k.cash_in_hand, k.cash_in_hand_card, k.cash_in_hand_card_absent_reason]));
+  /* "POS payment as a separate modal" (the operator, 2026-11-24). */
+  check('POS payments, its own figure: the hotel\'s card-machine fares plus the card that paid cash trips, so cash trips incl. POS − POS = cash in hand',
+    k.pos_payments === r2_(120 + nNov.on_cash) && r2_(k.cash_taken + k.pos_fares - k.pos_payments) === k.cash_in_hand
+    && k.pos_card_total === nNov.card && k.pos_card_unmatched === nNov.unexplained,
+    JSON.stringify([k.pos_payments, k.pos_card_total, k.pos_card_unmatched, nNov.card, nNov.unexplained]));
 
   const { refreshCashFareDay } = await import('../src/history_rollup.js');
   await refreshCashFareDay(db);

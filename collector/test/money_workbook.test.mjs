@@ -279,8 +279,11 @@ console.log('\n4. the Drivers sheet is the Drivers page (DR1-DR3, 2026-10-20)');
     && d1[0]['Money (AED)'] === 123.45 && d1[0]['Cash trips (including POS) (AED)'] === 97 && d1[0]['Cash trips'] === 4 && d1[0]['Days worked'] === 4,
   JSON.stringify(d1));
   const gFile = table((await make({ person: { id: 7, name: 'Test Driver G' } })).file, 'Driver')[0] || {};
-  check('a driver whose only "cash" trip was paid on their card machine: cash trips including POS 55, POS 55, cash in hand 0',
-    gFile['Cash trips (including POS) (AED)'] === 55 && gFile['POS (AED)'] === 55 && gFile['Cash in hand (AED)'] === 0, JSON.stringify(gFile));
+  check('a driver whose only "cash" trip was paid on their card machine: cash trips including POS 55, POS payments 55, cash in hand 0',
+    gFile['Cash trips (including POS) (AED)'] === 55 && gFile['POS payments (AED)'] === 55 && gFile['Cash in hand (AED)'] === 0
+    /* Bank collection adds the POS payments, which come into the bank. */
+    && Math.round((gFile['Bank collection (AED)'] - (Number(page.find((r) => r.driver_name === 'Test Driver G')?.payout) || 0)) * 100) / 100 === 55,
+  JSON.stringify(gFile));
   const named = await make({ person: { id: 1, name: 'Test Driver A As Their Page Names Them' } });
   check('…under the name their page prints, on every sheet of it', table(named.file, 'Driver')[0]?.Driver === 'Test Driver A As Their Page Names Them'
     && table(named.file, 'Cash to collect')[0]?.Driver === 'Test Driver A As Their Page Names Them');

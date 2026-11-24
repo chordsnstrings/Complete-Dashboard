@@ -308,9 +308,10 @@ if (want('driver-earnings')) {
        the actualEarningsTile(...) line from driver.js. */
     /* Eight since 2026-11-24: Cash in hand beside Cash trips (including POS)
        (the operator: "Cash In Hand which is Cash Trips - POS deposits"). */
-    check('old skin: eight tiles, Net earnings directly after Bank collection, Cash in hand after Cash trips (including POS)',
-      r.labels.length === 8 && r.labels.indexOf('Net earnings') === r.labels.indexOf('Bank collection') + 1
-      && r.labels.indexOf('Cash in hand') === r.labels.indexOf('Cash trips (including POS)') + 1
+    check('old skin: nine tiles, Net earnings directly after Bank collection; Cash trips (including POS), POS payments, Cash in hand in a row',
+      r.labels.length === 9 && r.labels.indexOf('Net earnings') === r.labels.indexOf('Bank collection') + 1
+      && r.labels.indexOf('POS payments') === r.labels.indexOf('Cash trips (including POS)') + 1
+      && r.labels.indexOf('Cash in hand') === r.labels.indexOf('POS payments') + 1
       && r.labels.indexOf('Bank collection') >= 0, JSON.stringify(r.labels));
     await ctx.close();
   }
@@ -324,12 +325,15 @@ if (want('driver-earnings')) {
        REVERSION: delete the actualEarningsTile(...) line from driver.js and
        the count, the order and the value all fail; read k.reported_earnings
        for its value and the third fails. */
-    check('00: the eight tiles, gross revenue the hero, the same figures, untoned', s.glance === 8 && s.hero === 'Gross revenue'
+    check('00: the nine tiles, gross revenue the hero, the same figures, untoned', s.glance === 9 && s.hero === 'Gross revenue'
       && s.values['Gross revenue'] === aedOf(k.revenue) && (await toned(page)).length === 0, JSON.stringify(s.values));
     check('00: cash trips include the hotel\'s card-machine fares; cash in hand is the cash trips less the card that paid them',
       s.values['Cash trips (including POS)'] === aedOf(+k.cash_taken + +k.pos_fares) && s.values['Cash in hand'] === aedOf(k.cash_in_hand)
-      && /less AED 100\.00 that card payments \(POS\) paid of them/.test(s.subs['Cash in hand'] || ''),
-    JSON.stringify([s.values['Cash trips (including POS)'], s.values['Cash in hand'], s.subs['Cash in hand']]));
+      && /less AED 100\.00 that card payments \(POS\) paid of them/.test(s.subs['Cash in hand'] || '')
+      && s.values['POS payments'] === aedOf(k.pos_payments) && /AED 50\.00 more on the card sheet matched no fare/.test(s.subs['POS payments'] || '')
+      && s.values['Bank collection'] === aedOf(+k.reported_earnings + +k.pos_payments)
+      && /plus the AED 370\.00 of POS payments \(the card machine\), which come into the bank/.test(s.subs['Bank collection'] || ''),
+    JSON.stringify([s.values['Bank collection'], s.subs['Bank collection'], s.values['Cash trips (including POS)'], s.values['POS payments'], s.subs['POS payments'], s.values['Cash in hand'], s.subs['Cash in hand']]));
     check('00: Actual earnings sits directly after Platform earnings',
       s.labels.indexOf('Bank collection') >= 0 && s.labels.indexOf('Net earnings') === s.labels.indexOf('Bank collection') + 1,
       JSON.stringify(s.labels));
