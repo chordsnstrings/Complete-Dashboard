@@ -526,6 +526,13 @@
      "days[].net",
      "days[].cash",
      "days[].over_by",
+     "days[].pay",
+     "days[].on_cash",
+     "days[].on_pos",
+     "days[].unexplained",
+     "days[].notes",
+     "days[].paid_next_day",
+     "days[].paid_prev_day",
      "payments[].amount",
      "terminals[].net"
     ]
@@ -548,7 +555,71 @@
   "fleetKey": "",
   "cap": null,
   "auditRead": true,
-  "notes": "api/card_routes.js (FIX-STATUS CARD-1). Network International card-machine payments read hourly from the operator's Google Sheet by src/sources/network_cards.js. ?person=<driver.id>[&from&to]. Body {person_id, from, to, read_at, covers_from, covers_to, skipped_rows, skipped, failed, why (null, or the true reason nothing is shown: sheet never read / no Emirates ID known for the person / none under it), currency, placed_by {hr_export, linked}, totals {payments, card, chargebacks, chargeback_n, net, first_day, last_day}, days[] (90) {day, payments, net, chargebacks, terminals[], cash_trips, cash, pos_trips, pos, status, over_by — CARD-2: the day against the fares collected that day}, payments[] (200) {day, terminal_id, amount, fleet_id, chargeback}, terminals[] {terminal_id, payments, net, first_day, last_day}, in_cash_position false, note}. A payment is placed by the sheet's Emirates ID through card_id_person (a person's link, then the HR export) — never by the car. A negative amount is a chargeback, summed as it is. A named driver's money: CASH. No Emirates ID is served. Read by the driver money tab (api/public/driverledger.js cardMachine)."
+  "notes": "api/card_routes.js (FIX-STATUS CARD-1). Network International card-machine payments read hourly from the operator's Google Sheet by src/sources/network_cards.js. ?person=<driver.id>[&from&to]. Body {person_id, from, to, read_at, covers_from, covers_to, skipped_rows, skipped, failed, why (null, or the true reason nothing is shown: sheet never read / no Emirates ID known for the person / none under it), currency, placed_by {hr_export, linked}, totals {payments, card, chargebacks, chargeback_n, net, first_day, last_day}, days[] (90) {day, payments, net, chargebacks, terminals[], cash_trips, cash, pos_trips, pos, cash_unvalued, status, over_by — CARD-2: the day against the fares collected that day; CARD-3: pay, on_cash (this day's cash fares paid by card, its own card and the next day's), on_pos, unexplained, notes = cash − on_cash, paid_next_day, paid_prev_day (this day's card that paid the day before's fares)}, payments[] (200) {day, terminal_id, amount, fleet_id, chargeback}, terminals[] {terminal_id, payments, net, first_day, last_day}, in_cash_position false, note}. A payment is placed by the sheet's Emirates ID through card_id_person (a person's link, then the HR export) — never by the car. A negative amount is a chargeback, summed as it is. A named driver's money: CASH. No Emirates ID is served. Read by the driver money tab (api/public/driverledger.js cardMachine)."
+ },
+ {
+  "method": "GET",
+  "path": "/api/card/notes",
+  "subject": "CASH",
+  "carries": [
+   "CASH",
+   "ID",
+   "SYS"
+  ],
+  "grain": "list",
+  "fields": [
+   {
+    "class": "ID",
+    "paths": [
+     "drivers[].person_id",
+     "drivers[].name"
+    ]
+   },
+   {
+    "class": "CASH",
+    "paths": [
+     "totals.cash",
+     "totals.card",
+     "totals.on_cash",
+     "totals.on_pos",
+     "totals.unexplained",
+     "totals.notes",
+     "totals.paid_before_window",
+     "totals.chargebacks",
+     "drivers[].cash",
+     "drivers[].card",
+     "drivers[].on_cash",
+     "drivers[].on_pos",
+     "drivers[].unexplained",
+     "drivers[].notes",
+     "drivers[].paid_before_window",
+     "drivers[].chargebacks",
+     "drivers[].latest.cash",
+     "drivers[].latest.on_cash",
+     "drivers[].latest.notes"
+    ]
+   },
+   {
+    "class": "SYS",
+    "paths": [
+     "read_at",
+     "covers_from",
+     "covers_to",
+     "skipped_rows",
+     "skipped",
+     "failed",
+     "fares_summarised_at",
+     "whole_span"
+    ]
+   }
+  ],
+  "whole": [],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "auditRead": true,
+  "notes": "api/card_routes.js (FIX-STATUS CARD-3). Cash in notes per driver: over [from, to] (default the whole span of card payments once card_fare_day is built, else the last 30 days), each placed driver's cash fares (trip_cash), the card payments, the part that paid the hotel's pos-driver fares (on_pos, never cash), the part that paid cash fares (on_cash; the same day, then one day back for a fare paid after midnight), what was not explained (never taken off), and notes = cash − on_cash. What card paid is booked on the fare's day, so over any window cash − on_cash = notes; card on `from` that paid the day before's fares is paid_before_window. A driver whose only card payment is the day before `from` is not listed. cash_unvalued counts cash trips with no fare on record (the cash is then a floor). Chargebacks are not put back. Body {from, to, read state, fares_summarised_at, currency, why, totals {drivers, cash, cash_unvalued, card, on_cash, on_pos, unexplained, notes, paid_before_window, chargebacks}, whole_span, latest_day, drivers[] {person_id, name, cash, cash_unvalued, card, on_cash, on_pos, unexplained, notes, paid_before_window, chargebacks, card_days, latest {day, cash, cash_unvalued, on_cash, notes}}, in_cash_position false, note}. A preview: no other figure uses it yet. Read by the Deposits page (api/public/card_panel.js)."
  },
  {
   "method": "GET",
