@@ -507,20 +507,26 @@ export async function pullLive(fleet) {
     state: 'ok', surface: 'Login', detail: null,
   });
   const { data } = await call('GetVehicleStatus', { UserId: userid });
-  const seats = await liveSeatCounts(fleet);
+  const { counts: seats, fields: details } = await liveSeatCounts(fleet);
   const rows = (data?.data || []).map((v) => {
     const plate = normPlate(v.vehicleno);
+    const det = details.get(plate) || {};
     return {
       source: SRC, fleet_id: fleet.fleet, plate,
       captured_at: parseFmsTime(v.tracktime) || new Date().toISOString(),
-      lat: v.lat, lng: v.lon, speed: parseFloat(v.speed) || null,
+      lat: v.lat, lng: v.lon, speed: fmsSpeed(v.speed),
       ignition: /on/i.test(v.ignition || ''), status: (v.vehiclestatus || '').split(' - ')[0],
       fuel_level: v.fuellevel, ac_on: /on/i.test(v.acstatus || ''),
       /* On every row, null where FMS gave none: upsertMany groups rows by
          their key set, and a column present on some rows only would split one
          poll into two statements for no reason. */
       seat_count: seats.get(plate) ?? null,
-      raw: v,
+      heading: det.heading ?? null, odometer: det.odometer ?? null, engine: det.engine ?? null,
+      /* The two live fields with no column of their own ride in raw under
+         `current`: how long the car has been in its present state, and the
+         driver card in the reader (2026-11-24, the operator's step A). */
+      raw: det.status_duration != null || det.rfid != null
+        ? { ...v, current: { status_duration: det.status_duration ?? null, rfid: det.rfid ?? null } } : v,
     };
   });
   return rows.length ? upsertMany('telemetry_snapshot', rows, ['source', 'plate', 'captured_at']) : 0;
@@ -550,11 +556,24 @@ async function liveSeatCounts(fleet) {
     const got = detailsSeatCounts(r);
     if (got.refused) log.warn(SRC, `live seat count refused for ${fleet.fleet}`, { said: got.refused });
     else if (!r.ok) log.warn(SRC, `live seat count unavailable for ${fleet.fleet}`, { status: r.status });
-    return got.counts;
+    return { counts: got.counts, fields: got.refused ? new Map() : detailsFields(r) };
   } catch (e) {
     log.warn(SRC, `live seat count unavailable for ${fleet.fleet}`, { err: String(e).slice(0, 160) });
-    return new Map();
+    return { counts: new Map(), fields: new Map() };
   }
+}
+
+/* FMS'S SPEED 0 IS A READING (2026-11-24). `parseFloat(v.speed) || null`
+   turned every 0 into null, so a parked FMS car and one whose speed FMS never
+   sent looked the same, and every stop on half the fleet had to be inferred
+   from displacement. A number is kept as the number, 0 included; only a
+   missing or unparseable speed is null. The day page reads a reported 0
+   after a real displacement as moving still (api/day_movement.js movingOn),
+   so an instant at a red light does not undo a drive. */
+export function fmsSpeed(raw) {
+  if (raw == null || String(raw).trim() === '') return null;
+  const n = parseFloat(raw);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 /* A field by name, whatever its case or spacing: the docs spell the plate
@@ -584,6 +603,32 @@ export function detailsSeatCounts(r) {
     counts.set(plate, n);
   }
   return { refused: null, counts };
+}
+
+/** Plate → the live fields GetVehicleCurrentDetails carries and
+    GetVehicleStatus does not (docs/fleet-tracking-api-reference.md): heading
+    in degrees, odometer, engine state (Idle/Stop), how long the car has been
+    in that state, and the RFID card in the reader. Pure, like the seat count;
+    a field FMS left empty stays absent, never a zero. */
+export function detailsFields(r) {
+  const d = r?.data;
+  const list = Array.isArray(d) ? d : Array.isArray(d?.Data) ? d.Data : Array.isArray(d?.data) ? d.data : [];
+  const txt = (x) => (x == null || String(x).trim() === '' ? null : String(x).trim());
+  const numOf = (x) => { const t = txt(x); if (t == null) return null; const n = Number(t); return Number.isFinite(n) ? n : null; };
+  const out = new Map();
+  for (const v of list) {
+    const plate = normPlate(field(v, 'Plate No', 'vehicleno', 'plate'));
+    if (!plate) continue;
+    const h = numOf(field(v, 'direction', 'heading'));
+    out.set(plate, {
+      heading: h != null && h >= 0 && h <= 360 ? Math.round(h) % 360 : null,
+      odometer: numOf(field(v, 'Odometer')),
+      engine: txt(field(v, 'Engine status', 'Engine')),
+      status_duration: txt(field(v, 'Status Duration')),
+      rfid: txt(field(v, 'RFID')),
+    });
+  }
+  return out;
 }
 
 // backfill/incremental entry point

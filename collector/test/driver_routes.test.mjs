@@ -225,9 +225,13 @@ check('the map says how much of the work it could place',
   terr.coverage.bookings > 0 && terr.coverage.positioned <= terr.coverage.bookings
   && terr.coverage.positioned_pct != null,
   JSON.stringify(terr.coverage));
-check('waiting spots come from stationary fixes', terr.idle.length === 1, String(terr.idle.length));
-// Three fixes at that spot, and two custody rows for the day — still three.
-check('a stationary fix is counted once per custody day', terr.idle[0]?.fixes === 3, String(terr.idle[0]?.fixes));
+/* Waiting spots are the movement rollup's (2026-11-24): minutes in the
+   driver's own hours, keyed by person. This fixture's driver is on no
+   person, so there are none — and the answer says why rather than drawing
+   the car's whole day from its stationary fixes, as it used to
+   (test/movement_rollup.test.mjs carries the built case). */
+check('waiting spots are not counted from the car\'s stationary fixes any more', terr.idle.length === 0, JSON.stringify(terr.idle));
+check('…and an account on no person is told why it has none', /on no person/.test(terr.idle_absent || ''), String(terr.idle_absent));
 
 /* ── mix ────────────────────────────────────────────────────────────────── */
 const mix = (await get(`/api/driver/mix?id=${UBER}&${W}`)).body;

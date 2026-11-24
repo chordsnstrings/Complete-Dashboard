@@ -10,7 +10,7 @@
    keeps a refusal of THIS operation off the credential banner, and the probe's
    parameters. The payloads are synthetic; nothing here came from FMS. */
 import { readFileSync } from 'node:fs';
-import { detailsSeatCounts } from '../src/sources/fms.js';
+import { detailsSeatCounts, detailsFields, fmsSpeed } from '../src/sources/fms.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -63,6 +63,24 @@ console.log('\na refusal of this one operation');
     /GetVehicleCurrentDetails'[\s\S]{0,120}username: fleet\.username, Password: fleet\.password, vehicleno: 'ALL'/.test(body));
   check('every live row carries seat_count, null where FMS gave none',
     /seat_count: seats\.get\(plate\) \?\? null/.test(src));
+}
+
+console.log('\nspeed 0 is a reading, and the live fields are kept (2026-11-24)');
+{
+  check('FMS speed "0" is kept as 0, not turned into "no speed"', fmsSpeed('0') === 0 && fmsSpeed(0) === 0 && fmsSpeed('42.5') === 42.5);
+  check('…a missing or unreadable speed is null', fmsSpeed(null) === null && fmsSpeed('') === null && fmsSpeed('n/a') === null && fmsSpeed('-3') === null);
+  const f = detailsFields(ok({ Data: [
+    { 'Plate No': 'L20001', direction: '271', Odometer: '123456.7', 'Engine status': 'Idle', 'Status Duration': '00:14:00', RFID: 'X1' },
+    { 'Plate No': 'L20002', direction: '', Odometer: '', 'Engine status': '', 'Status Duration': '', RFID: '' },
+  ] }));
+  const a = f.get('L20001'); const b = f.get('L20002');
+  check('heading, odometer, engine state, state duration and the RFID card are read per plate',
+    a && a.heading === 271 && a.odometer === 123456.7 && a.engine === 'Idle' && a.status_duration === '00:14:00' && a.rfid === 'X1', JSON.stringify(a));
+  check('…and a field FMS left empty stays absent, never a zero',
+    b && b.heading === null && b.odometer === null && b.engine === null && b.status_duration === null && b.rfid === null, JSON.stringify(b));
+  const src2 = readFileSync(new URL('../src/sources/fms.js', import.meta.url), 'utf8');
+  check('every live row carries heading, odometer and engine, null where FMS gave none',
+    /heading: det\.heading \?\? null, odometer: det\.odometer \?\? null, engine: det\.engine \?\? null/.test(src2) && /speed: fmsSpeed\(v\.speed\)/.test(src2));
 }
 
 console.log('\nthe nightly probe asks the question the collector asks');

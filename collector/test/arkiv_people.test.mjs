@@ -271,7 +271,11 @@ if (want('driver-territory')) {
   {
     const { ctx, page } = await open('classic', 'driver/drv-0/territory');
     const m = await marks(page);
-    check('old skin: the stationary places still hollow dashed rings, the subtitle still says so', m.hollowDashed > 0 && /Hollow markers/.test(m.sub), JSON.stringify(m).slice(0, 200));
+    /* 2026-11-24: the waiting spots are minutes the tracker saw inside the
+       driver's own hours (the movement rollup) — measured in either skin, so
+       filled in either skin; the hollow dashed ring is gone from this map. */
+    check('old skin too: a place the car waited is a filled mark, not a hollow dashed ring', m.still.length > 0
+      && m.still.every((x) => x.fill && x.fill !== 'none' && !x.dash) && m.hollowDashed === 0, JSON.stringify(m).slice(0, 200));
     await ctx.close();
   }
   {
@@ -280,7 +284,7 @@ if (want('driver-territory')) {
     const T = answer('/api/driver/territory');
     check('a place the car sat still is MEASURED: a filled grey mark, never the hollow ring kept for "not measured"',
       m.still.length === (T.idle || []).length && m.still.every((x) => x.fill && x.fill !== 'none' && !x.dash) && m.hollowDashed === 0, JSON.stringify(m).slice(0, 300));
-    check('…and the subtitle names the mark the reader is looking at', /filled grey marks/.test(m.sub) && !/Hollow/.test(m.sub), m.sub.slice(0, 160));
+    check('…and the subtitle names the layer the reader is looking at', /waited or was parked/.test(m.sub) && !/Hollow/.test(m.sub), m.sub.slice(0, 160));
     const key = await page.evaluate(() => { const i = document.querySelector('#view .legend .terr-still-key'); return i ? getComputedStyle(i).borderStyle + ' ' + getComputedStyle(i).backgroundColor : null; });
     check('…and so does the key under the map: a filled grey swatch, not the dashed ring', !!key && !/dashed/.test(key) && !/rgba\(0, 0, 0, 0\)/.test(key), String(key));
     const s = await shape(page);

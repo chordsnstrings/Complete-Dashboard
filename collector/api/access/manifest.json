@@ -2795,7 +2795,45 @@
   "fleetRows": [],
   "fleetKey": "",
   "cap": null,
-  "notes": "api/driver_routes.js:3147-3211, res.json :3200. {pickups[]{lat, lng, n, addr, avg_km, avg_fare} (up to 400), dropoffs[]{lat, lng, n, addr} (400), areas[]{area, n, avg_km, avg_fare} (25), idle[]{lat, lng, fixes} (120), coverage{bookings, positioned, addressed, positioned_pct, unpositioned_platforms}}. LOC is whole: every list is a place; without it only coverage counts remain. idle[] is telemetry f"
+  "notes": "api/driver_routes.js:3147-3211, res.json :3200. {pickups[]{lat, lng, n, addr, avg_km, avg_fare} (up to 400), dropoffs[]{lat, lng, n, addr} (400), areas[]{area, n, avg_km, avg_fare} (25), idle[]{lat, lng, area, stopped_min, wait_min, offline_min, days} (120, from the movement rollup since 2026-11-24), idle_absent, coverage{bookings, positioned, addressed, positioned_pct, unpositioned_platforms}}. LOC is whole: every list is a place; without it only coverage counts remain. idle[] is telemetry f"
+ },
+ {
+  "method": "GET",
+  "path": "/api/driver/movement",
+  "subject": "ID",
+  "carries": [
+   "BK",
+   "ID",
+   "LOC"
+  ],
+  "grain": "record",
+  "fields": [
+   {
+    "class": "BK",
+    "paths": [
+     "totals.pickups",
+     "totals.pickups_placed",
+     "totals.dropoffs",
+     "totals.dropoffs_placed",
+     "days[].pickups",
+     "days[].pickups_placed",
+     "days[].dropoffs",
+     "days[].dropoffs_placed",
+     "points_summary.pickups",
+     "points_summary.pickups_placed",
+     "points_summary.dropoffs",
+     "points_summary.dropoffs_placed"
+    ]
+   }
+  ],
+  "whole": [
+   "LOC"
+  ],
+  "fleet": "mixed",
+  "fleetRows": [],
+  "fleetKey": "",
+  "cap": null,
+  "notes": "api/driver_routes.js /api/driver/movement (2026-11-24). One person's movement over the window, read from the movement rollup (src/movement_rollup.js, sql/schema_v129.sql): {coverage{from, to, floor, built_from, built_to, built_at, days_in_window, days_before_floor, days_not_built, absent}, totals{online_min, ontrip_min, seen_min, unseen_online_min, stopped_min, parked_quiet_min, moving_empty_min, moving_seat_unknown_min, with_passenger_min, wait_min, parked_offline_min, km, km_with_passenger, fixes, pickups, pickups_placed, dropoffs, dropoffs_placed, days, days_moving}|null, points_summary, cells[]{lat, lng, area, minutes by state and status, km, fixes, days} (800), areas[]{area, ...} (25), points[]{kind, platform, lat, lng, basis, gap_s, at, day} (3000), days[]{day, plates, sources, minutes, km, absent, partial}, basis}. LOC is whole: cells, areas, points and the days' plates are places and cars; without it only the coverage and the minute totals remain."
  },
  {
   "method": "GET",

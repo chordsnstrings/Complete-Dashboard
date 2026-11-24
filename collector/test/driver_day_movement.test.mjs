@@ -30,7 +30,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
-import { custodyWindows, carRuns, distanceBySeat, movementSegments, statusSpans } from '../api/day_movement.js';
+import { custodyWindows, carRuns, distanceBySeat, movementSegments, statusSpans, intervalState, quietParked } from '../api/day_movement.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -77,6 +77,30 @@ const F = (hm, lat, lng, extra = {}) => ({ plate: 'L1', source: 'fms', at: at(hm
     && Math.abs(d.km - (d.km_with_passenger + d.km_empty + d.km_seat_not_reported)) <= 0.11, JSON.stringify(d));
   const none = carRuns([F('08:00', 25.2, 55.3, { passenger: null }), F('08:05', 25.21, 55.31, { passenger: null })]);
   check('a seat nobody reported is not an empty seat', none[0].state === 'available' && none[0].seat === null, JSON.stringify(none));
+
+  /* The vehicle page's "parked, tracker quiet" rule, here too (2026-11-24):
+     a CABMAN heartbeat 66 minutes apart on the same spot is a stop, said as
+     inferred; the same gap after the car moved is still a silence, and FMS's
+     cadence is 30 minutes, not 70. */
+  const C = (hm, lat, lng, extra = {}) => F(hm, lat, lng, { source: 'cabman', ...extra });
+  const parked = carRuns([C('10:00', 25.20, 55.30), C('11:06', 25.2003, 55.3002), C('11:08', 25.2003, 55.3002)]);
+  check('a CABMAN unit parked and quiet for 66 minutes is a stop, marked inferred — not an unseen hour',
+    parked.length >= 1 && parked[0].state === 'idle' && parked[0].inferred === true && parked[0].s === mm('10:00') && parked[0].e === mm('11:06'),
+    JSON.stringify(parked));
+  const moved = carRuns([C('10:00', 25.20, 55.30), C('11:06', 25.25, 55.35)]);
+  check('…but the same gap after the car moved is still a silence', moved.length === 0, JSON.stringify(moved));
+  const fmsQuiet = carRuns([F('10:00', 25.20, 55.30), F('10:25', 25.2002, 55.3001)]);
+  const fmsLong = carRuns([F('10:00', 25.20, 55.30), F('10:45', 25.2002, 55.3001)]);
+  check('FMS is held to its own 30-minute cadence: 25 quiet minutes parked are a stop, 45 are a silence',
+    fmsQuiet.length === 1 && fmsQuiet[0].inferred === true && fmsLong.length === 0, JSON.stringify({ fmsQuiet, fmsLong }));
+  check('a quiet parked gap never reads as moving, whatever its endpoints say',
+    intervalState(C('10:00', 25.20, 55.30, { speed: 30 }), C('11:00', 25.2004, 55.3004, { speed: 30 }))?.state === 'idle'
+    && quietParked(C('10:00', 25.20, 55.30), C('10:15', 25.20, 55.30)) === false);
+  /* FMS's 0 is now a reading. An instant at a red light after a real drive
+     is still a drive; a 0 with the car where it was is a stop. */
+  check('a reported 0 at the end of a 2 km interval is still a drive; a reported 0 on the spot is a stop',
+    intervalState(F('10:00', 25.20, 55.30, { speed: 40 }), F('10:05', 25.215, 55.31, { speed: 0 }))?.state === 'available'
+    && intervalState(F('10:00', 25.20, 55.30, { speed: 0 }), F('10:05', 25.2003, 55.3002, { speed: 0 }))?.state === 'idle');
 }
 
 /* ── the fleet for the route ───────────────────────────────────────────── */
