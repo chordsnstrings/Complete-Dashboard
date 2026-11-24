@@ -262,11 +262,14 @@ if (want('driver-day')) {
 if (want('driver-territory')) {
   console.log('\n#driver/territory');
   const marks = (page) => page.evaluate(() => {
-    const p = [...document.querySelectorAll('#view .panel')].find((x) => /Where this driver works/.test(x.querySelector('h3')?.textContent || ''));
+    /* 2026-11-24: the granular view — "Where they move and park". */
+    const p = [...document.querySelectorAll('#view .panel')].find((x) => /Where they move and park/.test(x.querySelector('h3')?.textContent || ''));
     const paths = p ? [...p.querySelectorAll('path.leaflet-interactive')] : [];
     return { sub: p?.querySelector('p.cap, .sub')?.textContent || p?.textContent.slice(0, 200) || '',
       still: paths.filter((x) => x.classList.contains('terr-still')).map((x) => ({ fill: x.getAttribute('fill'), dash: x.getAttribute('stroke-dasharray') })),
-      hollowDashed: paths.filter((x) => x.getAttribute('fill') === 'none' && x.getAttribute('stroke-dasharray')).length };
+      /* A route line has no fill by nature, and the one with the seat
+         unreported is dashed: it is a line, not a ring (class terr-route). */
+      hollowDashed: paths.filter((x) => !x.classList.contains('terr-route') && x.getAttribute('fill') === 'none' && x.getAttribute('stroke-dasharray')).length };
   });
   {
     const { ctx, page } = await open('classic', 'driver/drv-0/territory');
@@ -281,10 +284,13 @@ if (want('driver-territory')) {
   {
     const { ctx, page, answer } = await open('arkiv', 'driver/drv-0/territory');
     const m = await marks(page);
-    const T = answer('/api/driver/territory');
-    check('a place the car sat still is MEASURED: a filled grey mark, never the hollow ring kept for "not measured"',
-      m.still.length === (T.idle || []).length && m.still.every((x) => x.fill && x.fill !== 'none' && !x.dash) && m.hollowDashed === 0, JSON.stringify(m).slice(0, 300));
-    check('…and the subtitle names the layer the reader is looking at', /waited or was parked/.test(m.sub) && !/Hollow/.test(m.sub), m.sub.slice(0, 160));
+    /* Over all days the map opens on the places they park — one filled mark
+       per spot the granular answer names. */
+    const T = answer('/api/driver/movement/track');
+    check('a place the car sat still is MEASURED: a filled mark, never the hollow ring kept for "not measured"',
+      m.still.length === (T.parking || []).length && m.still.length > 0 && m.still.every((x) => x.fill && x.fill !== 'none' && !x.dash)
+      && m.hollowDashed === 0, JSON.stringify(m).slice(0, 300));
+    check('…and the subtitle says what the map shows: the car\'s own route and every stop', /own route and every stop/.test(m.sub) && !/Hollow/.test(m.sub), m.sub.slice(0, 160));
     const key = await page.evaluate(() => { const i = document.querySelector('#view .legend .terr-still-key'); return i ? getComputedStyle(i).borderStyle + ' ' + getComputedStyle(i).backgroundColor : null; });
     check('…and so does the key under the map: a filled grey swatch, not the dashed ring', !!key && !/dashed/.test(key) && !/rgba\(0, 0, 0, 0\)/.test(key), String(key));
     const s = await shape(page);

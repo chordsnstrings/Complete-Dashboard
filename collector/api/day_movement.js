@@ -311,6 +311,9 @@ const drive = (fs) => {
   return { kind: 'drive', s: fs[0].m, e: fs[fs.length - 1].m, from: fs[0].time, to: fs[fs.length - 1].time,
     minutes: Math.round((ms(fs[fs.length - 1].at) - ms(fs[0].at)) / 60000),
     from_area: fs[0].area || null, to_area: fs[fs.length - 1].area || null,
+    /* Where it began and ended, so the Territory map can draw the drive's
+       ends and the rollup can keep them (2026-11-24, granular view). */
+    lat: fs[0].lat, lng: fs[0].lng, to_lat: fs[fs.length - 1].lat, to_lng: fs[fs.length - 1].lng,
     via: via.filter((a) => a !== fs[fs.length - 1].area).slice(0, 4),
     km: d.km, km_with_passenger: d.km_with_passenger, passenger: seatWord(seat),
     /* The minutes behind the word, so "part of it" can be said as "15 of 20

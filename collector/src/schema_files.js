@@ -433,4 +433,8 @@ export const SCHEMA_FILES = [
      drop-offs placed by Uber's job stages and the tracker — built by
      src/movement_rollup.js for the driver page's range view. */
   'schema_v129.sql',
+  /* The movement rollup, granular: every stop, drive and silence of a
+     person-day, and which car was theirs when, for Territory's routes,
+     stops and parking spots (src/movement_rollup.js, api/movement_track.js). */
+  'schema_v130.sql',
 ];

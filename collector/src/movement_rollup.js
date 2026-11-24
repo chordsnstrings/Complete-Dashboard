@@ -53,6 +53,7 @@
    Pickups and drop-offs are counted over COMPLETED bookings — a booking
    nobody rode has neither. */
 import { intervalState } from '../api/day_movement.js';
+import { segmentRows } from '../api/movement_track.js';
 import { km } from '../api/where_routes.js';
 import { dayTrips, dayOnline, dayMovement, MOVEMENT_FLOOR_DAY } from '../api/driver_day_core.js';
 import { driverScope, PKEY } from '../api/driver_routes.js';
@@ -296,14 +297,32 @@ export async function buildPersonDay(q, { personId, day, resolve, now = null, tx
   const plates = [...new Set(mv.fixes.map((f) => f.plate))].sort();
   const sources = [...new Set(mv.fixes.map((f) => f.source))].sort();
   const full = { ...row, ...counts, plates, sources, absent: mv.movement.absent || null, partial: !!mv.isToday, failed: false };
-  await (tx || ((fn) => fn(q)))((w) => writePersonDay(w, { personId, day, full, cells, points }));
+  /* The granular view's two (sql/schema_v130.sql): the day as a log, each
+     stop split by what the driver was doing; and which car was theirs when,
+     with the one tracker kept for it. */
+  const segments = segmentRows(mv.movement.segments, status);
+  const keptSource = (plate) => mv.secondTracker.get(plate)?.kept || mv.fixes.find((f) => f.plate === plate)?.source || null;
+  const windows = mv.windows.map((w) => ({ plate: w.plate, source: keptSource(w.plate), from_min: w.from, to_min: w.to }));
+  await (tx || ((fn) => fn(q)))((w) => writePersonDay(w, { personId, day, full, cells, points, segments, windows }));
   return full;
 }
 
 /* Replace one person-day: the old cells and points go and the new ones come
    in together, so a failure part-way leaves the old day whole (inside the
    caller's transaction) rather than a day row with no cells. */
-async function writePersonDay(q, { personId, day, full, cells, points }) {
+async function writePersonDay(q, { personId, day, full, cells, points, segments = [], windows = [] }) {
+  await q(`DELETE FROM driver_move_segment WHERE person_id = $1 AND day = $2::date`, [personId, day]);
+  await q(`DELETE FROM driver_move_window WHERE person_id = $1 AND day = $2::date`, [personId, day]);
+  const many = async (table, cols, rows) => {
+    for (let i = 0; i < rows.length; i += 150) {
+      const chunk = rows.slice(i, i + 150); const params = [personId, day];
+      const vals = chunk.map((r) => `($1, $2::date, ${cols.map((k) => { params.push(r[k] ?? null); return `$${params.length}`; }).join(', ')})`);
+      await q(`INSERT INTO ${table} (person_id, day, ${cols.join(', ')}) VALUES ${vals.join(', ')} ON CONFLICT DO NOTHING`, params);
+    }
+  };
+  await many('driver_move_segment', ['seq', 'kind', 's_min', 'e_min', 'minutes', 'plate', 'source', 'lat', 'lng', 'area', 'to_lat', 'to_lng',
+    'to_area', 'km', 'km_with_passenger', 'passenger', 'passenger_min', 'wait_min', 'ontrip_min', 'offline_min', 'inferred'], segments);
+  await many('driver_move_window', ['plate', 'source', 'from_min', 'to_min'], windows);
   await q(`DELETE FROM driver_move_cell WHERE person_id = $1 AND day = $2::date`, [personId, day]);
   await q(`DELETE FROM driver_move_point WHERE person_id = $1 AND day = $2::date`, [personId, day]);
   if (cells.length) {

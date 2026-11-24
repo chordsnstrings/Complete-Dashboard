@@ -20,6 +20,8 @@ import { cardNet, cardPartFor, dubaiToday, NET_FROM } from '../src/card_notes.js
 import { onlineSpansSql } from './online_span_sql.js';
 import { SPANS_SQL, STALE_AFTER_MIN } from './status_routes.js';
 import { seatOf } from './where_routes.js';
+import { REAL_FIX } from './telemetry_sql.js';
+import { routePieces, parkingSpots } from './movement_track.js';
 import { dayTrips, dayOnline, dayMovement, MOVEMENT_FLOOR_DAY } from './driver_day_core.js';
 /* "L1 and L2" for a sentence; the page's own helper lives in the browser. */
 const listWordsPlain = (xs) => (xs.length < 2 ? (xs[0] || '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
@@ -3507,6 +3509,77 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
         + 'per car). Each interval between two fixes is split half to the cell of each end, on the half-kilometre grid the '
         + 'area names come from. Waiting is stopped while online and on no job; a parked tracker\u2019s quiet hour (CABMAN '
         + 'about 66 min, FMS 30) is a stop, inferred. A moving car whose seat was not reported is never counted as empty.',
+    });
+  }));
+
+  /* ── movement, granular (2026-11-24) ─────────────────────────────────
+     The operator: "in territory let's focus on granular view. we need to see
+     territory where they move around, where they park everything." Cells say
+     where the time went; this says where the car actually went and stood:
+     every stop and drive the rollup kept (driver_move_segment), the places
+     the stops group into (parkingSpots), and the path itself — the tracker's
+     own fixes inside the hours the car was the driver's (driver_move_window),
+     cut into pieces by state and never drawn across a silence
+     (api/movement_track.js). Positions are read from telemetry_snapshot, not
+     stored twice. */
+  app.get('/api/driver/movement/track', withDriver(async (req, res, d, p) => {
+    const [from, to] = [isoDay(p[0]), isoDay(p[1])];
+    const who = await personIdOf(d);
+    if (who.id == null) {
+      return res.json({ from, to, absent: who.why, days: [], stops: [], drives: [], parking: [], routes: [] });
+    }
+    const P = [who.id, from, to];
+    const segs = await q(
+      `SELECT to_char(day, 'YYYY-MM-DD') AS day, seq, kind, s_min, e_min, minutes, plate, source, lat, lng, area,
+              to_lat, to_lng, to_area, km::float AS km, km_with_passenger::float AS km_with_passenger, passenger,
+              passenger_min, wait_min, ontrip_min, offline_min, inferred
+         FROM driver_move_segment WHERE person_id = $1 AND day BETWEEN $2::date AND $3::date
+        ORDER BY day, seq`, P);
+    const wins = await q(
+      `SELECT to_char(day, 'YYYY-MM-DD') AS day, plate, source, from_min, to_min
+         FROM driver_move_window WHERE person_id = $1 AND day BETWEEN $2::date AND $3::date ORDER BY day, from_min`, P);
+    /* The fixes for those hours, from the tracker kept for each car. */
+    const fixRows = wins.some((w) => w.source) ? await q(
+      `SELECT to_char(w.day, 'YYYY-MM-DD') AS day, w.plate, w.from_min, s.source, s.captured_at AS at, s.lat, s.lng, s.speed,
+              s.seat_occupied, s.seat_count,
+              floor(extract(epoch FROM s.captured_at - (w.day::timestamp AT TIME ZONE 'Asia/Dubai')) / 60)::int AS m
+         FROM driver_move_window w
+         JOIN telemetry_snapshot s ON s.plate = w.plate AND s.source = w.source
+          AND s.captured_at >= (w.day::timestamp AT TIME ZONE 'Asia/Dubai') + w.from_min * interval '1 minute'
+          AND s.captured_at <  (w.day::timestamp AT TIME ZONE 'Asia/Dubai') + (w.to_min + 1) * interval '1 minute'
+        WHERE w.person_id = $1 AND w.day BETWEEN $2::date AND $3::date AND ${REAL_FIX('s.')}
+        ORDER BY w.day, s.captured_at
+        LIMIT 40000`, P) : [];
+    const byDay = new Map();
+    for (const r of fixRows) {
+      if (!byDay.has(r.day)) byDay.set(r.day, []);
+      byDay.get(r.day).push({ plate: r.plate, source: r.source, at: new Date(r.at).toISOString(), m: r.m,
+        lat: Number(r.lat), lng: Number(r.lng), speed: r.speed == null ? null : Number(r.speed),
+        passenger: seatOf(r), w: `${r.plate}@${r.from_min}` });
+    }
+    const routes = [];
+    for (const [day, fs] of byDay) for (const piece of routePieces(fs)) routes.push({ day, ...piece });
+    const stops = segs.filter((g) => g.kind === 'stop');
+    const drives = segs.filter((g) => g.kind === 'drive');
+    const days = [...new Set(segs.map((g) => g.day).concat(wins.map((w) => w.day)))].sort().map((day) => {
+      const sd = segs.filter((g) => g.day === day);
+      const st = sd.filter((g) => g.kind === 'stop');
+      return { day, stops: st.length, drives: sd.filter((g) => g.kind === 'drive').length,
+        silences: sd.filter((g) => g.kind === 'silence').length,
+        km: Math.round(sd.filter((g) => g.kind === 'drive').reduce((a, g) => a + (g.km || 0), 0) * 10) / 10,
+        stopped_min: st.reduce((a, g) => a + g.minutes, 0),
+        first_min: sd.length ? Math.min(...sd.map((g) => g.s_min)) : null, last_min: sd.length ? Math.max(...sd.map((g) => g.e_min)) : null,
+        plates: [...new Set(wins.filter((w) => w.day === day).map((w) => w.plate))] };
+    });
+    res.json({
+      from, to, absent: segs.length || wins.length ? null
+        : 'no day in this window has been built with a car of theirs and a tracker reporting — see Where the time went for why',
+      days, stops, drives, parking: parkingSpots(stops), routes,
+      fixes_read: fixRows.length, fixes_capped: fixRows.length >= 40000,
+      basis: 'The path is the tracker’s own fixes inside the hours the car was the driver’s, one tracker per car; '
+        + 'a line is never drawn across a silence. A stop is 10 minutes or more within 250 m; a parking spot groups '
+        + 'stops within 150 m of each other. What the driver was doing at a stop comes from their bookings and Uber’s '
+        + 'live status, minute by minute.',
     });
   }));
 

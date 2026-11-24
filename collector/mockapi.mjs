@@ -2288,6 +2288,48 @@ app.get('/api/driver/movement', (req, r) => {
   });
 });
 
+/* One driver's movement, granular (2026-11-24): every stop and drive the
+   rollup kept, the places the stops group into, and the route as pieces of
+   one state each — the shape /api/driver/movement/track answers. */
+app.get('/api/driver/movement/track', (req, r) => {
+  const P = [['Dubai International Airport', 25.2532, 55.3657], ['Al Garhoud', 25.2410, 55.3480], ['Deira', 25.2660, 55.3200],
+    ['Business Bay', 25.1850, 55.2710], ['Downtown Dubai', 25.1960, 55.2760], ['Dubai Marina', 25.0780, 55.1390]];
+  const days = []; const stops = []; const drives = []; const routes = [];
+  for (let i = 0; i < 7; i += 1) {
+    const day = new Date(Date.UTC(2026, 10, 15 + i)).toISOString().slice(0, 10);
+    let m = 420 + i * 5; let seq = 0; let kmDay = 0; let stopped = 0;
+    const order = [0, 1, 3, 4, 2, 0].map((k) => P[(k + i) % P.length]);
+    order.forEach(([area, lat, lng], k) => {
+      const minutes = k === 0 ? 55 : 15 + ((k * 13 + i * 7) % 50);
+      const wait = k % 3 === 0 ? minutes : Math.round(minutes * 0.6); const job = k % 3 === 1 ? Math.round(minutes * 0.3) : 0;
+      stops.push({ day, seq: seq++, kind: 'stop', s_min: m, e_min: m + minutes, minutes, plate: 'L46174', source: 'cabman',
+        lat, lng, area, km: null, wait_min: wait, ontrip_min: job, offline_min: Math.max(0, minutes - wait - job), inferred: k === 0 && i % 2 === 0 });
+      stopped += minutes; m += minutes;
+      const next = order[k + 1];
+      if (next) {
+        const dur = 18 + ((k + i) % 4) * 6; const pax = k % 2 === 0;
+        const pts = Array.from({ length: 6 }, (_, j) => [+(lat + (next[1] - lat) * j / 5 + Math.sin(j) * 0.004).toFixed(5),
+          +(lng + (next[2] - lng) * j / 5 + Math.cos(j) * 0.004).toFixed(5)]);
+        const km = +(Math.hypot((next[1] - lat) * 111, (next[2] - lng) * 101) * 1.3).toFixed(1);
+        kmDay += km;
+        drives.push({ day, seq: seq++, kind: 'drive', s_min: m, e_min: m + dur, minutes: dur, plate: 'L46174', source: 'cabman', lat, lng, area,
+          to_lat: next[1], to_lng: next[2], to_area: next[0], km, km_with_passenger: pax ? km : 0, passenger: pax ? 'with a passenger' : 'empty',
+          passenger_min: pax ? dur : 0, inferred: false });
+        routes.push({ day, state: pax ? 'passenger' : (k === 3 ? 'seat_unknown' : 'empty'), plate: 'L46174', s: m, e: m + dur, km, points: pts });
+        m += dur;
+      }
+    });
+    days.push({ day, stops: order.length, drives: order.length - 1, silences: i === 3 ? 1 : 0, km: +kmDay.toFixed(1), stopped_min: stopped,
+      first_min: 420 + i * 5, last_min: m, plates: ['L46174'] });
+  }
+  const parking = P.map(([area, lat, lng], k) => ({ lat, lng, area, visits: 7 - k, days: 7 - k, first_day: days[0].day, last_day: days[6].day,
+    minutes: 420 - k * 50, wait_min: 300 - k * 40, ontrip_min: 20, offline_min: 100 - k * 10, nights: k === 5 ? 3 : 0,
+    usual_from_min: 420 + k * 60, usual_to_min: 470 + k * 60, inferred_visits: k === 0 ? 3 : 0 }));
+  r.json({ from: req.query.from || days[0].day, to: req.query.to || days[6].day, absent: null, days, stops, drives, parking, routes,
+    fixes_read: 980, fixes_capped: false,
+    basis: 'The path is the tracker’s own fixes inside the hours the car was the driver’s, one tracker per car.' });
+});
+
 app.get('/api/driver/mix', (req, r) => r.json({
   distance: [{ label: '0–3 km', ord: 1, n: 44, revenue: 900, avg_fare: 20.4 },
     { label: '3–7 km', ord: 2, n: 96, revenue: 2600, avg_fare: 27.1 },

@@ -3584,3 +3584,7 @@ a.chip:hover{border-color:var(--rule-strong);color:var(--ink)}
 .tdpair .tdp-b{color:var(--grey-strong)}
 .terr-layers{margin:0 0 8px}
 .terr-layers button.chip{cursor:pointer}
+.terr-big .mapnode{height:min(72vh,720px);min-height:460px}
+.terr-days{margin:0 0 6px}
+.terr-days button.chip{cursor:pointer}
+@media (max-width:720px){.terr-big .mapnode{height:min(62vh,520px);min-height:360px}}

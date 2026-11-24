@@ -1931,36 +1931,39 @@ async function tabTerritory(root, id) {
      tracker per car — kept per day and summed over the window. */
   const timeP = panel('Where the time went', 'Inside this driver’s own hours in the car, from the tracker — online, waiting, moving, with a passenger');
   root.append(timeP.panel); loading(timeP.body);
-  // Map beside the area list rather than above it: a full-width map is roughly
-  // 2.4:1, and a driver's working area is roughly square, so a full-width panel
-  // is mostly empty margin however tightly the points are framed.
-  const g = el('div', 'grid g23'); root.append(g);
-  /* Under the page contract (plan §4 #driver/territory, restyle only): a
-     place the car sat still is MEASURED — the tracker saw it there — so it is
-     a small filled grey mark, never the hollow ring SPEC §5 keeps for "not
-     measured"; the pickup clusters are ink. */
+  /* THE GRANULAR VIEW (2026-11-24, the operator: "in territory let's focus
+     on granular view. we need to see territory where they move around, where
+     they park everything"). Full width, because a route needs the room: the
+     car's own path inside this driver's hours, every stop with its times and
+     what the driver was doing, and the places the stops group into — over
+     every day of the window, or one day followed in order. Read from
+     /api/driver/movement/track (api/movement_track.js). Under the page
+     contract a place the car stood is MEASURED, so it is always a filled mark,
+     never the hollow ring SPEC §5 keeps for "not measured". */
   const ak = contract();
-  const mapP = panel('Where this driver works', 'Choose a layer: where the car waited or was parked, where it drove, or where passengers were picked up and set down.');
-  mapP.panel.classList.add('mapwrap'); g.append(mapP.panel);
+  const mapP = panel('Where they move and park', 'The car’s own route and every stop, inside this driver’s hours in it. Choose a day to follow it in order; the layers can be shown together.');
+  mapP.panel.classList.add('mapwrap', 'terr-big'); root.append(mapP.panel);
+  const dayBar = el('div', 'chips terr-days'); mapP.body.append(dayBar);
   const layerBar = el('div', 'chips terr-layers'); mapP.body.append(layerBar);
   const node = el('div', 'mapnode'); mapP.body.append(node);
-  /* Not "from the address" any more (FIX-STATUS PLC): where the address names
-     no area, a name in its text, a plus code, the booking's coordinates or the
-     car's own tracker places the pickup, and the caption under the table says
-     how many came from which. */
-  const areas = panel('Busiest pickup areas', 'From the address the platform recorded, or the car\'s tracker where it named no area'); g.append(areas.panel);
+  const gP = el('div', 'grid g2'); root.append(gP);
+  const parkP = panel('Where they park', 'Stops of ten minutes or more, grouped where they fall within 150 m of each other, longest first'); gP.append(parkP.panel);
+  const stopP = panel('Stops', 'Every stop in order for the day chosen above; over all days, the longest'); gP.append(stopP.panel);
   const g1 = el('div', 'grid g2'); root.append(g1);
   const byArea = panel('Time by area', 'Minutes in each area inside this driver’s hours, from the tracker, busiest first'); g1.append(byArea.panel);
   const byDay = panel('Day by day', 'What the tracker saw of each day this driver worked'); g1.append(byDay.panel);
-  /* Drop-offs the same way (the operator, 2026-11-16: "also show dropoff
-     areas the same way"). */
+  /* Not "from the address" any more (FIX-STATUS PLC): where the address names
+     no area, a name in its text, a plus code, the booking's coordinates or the
+     car's own tracker places the pickup. Drop-offs the same way (the
+     operator, 2026-11-16: "also show dropoff areas the same way"). */
   const g2 = el('div', 'grid g2'); root.append(g2);
+  const areas = panel('Busiest pickup areas', 'From the address the platform recorded, or the car\'s tracker where it named no area'); g2.append(areas.panel);
   const drops = panel('Busiest drop-off areas', 'Completed trips, from the address the platform recorded, or the car\'s tracker where it named no area'); g2.append(drops.panel);
-  const dmix = panel('Trip distance mix', 'Short hops or long runs'); g2.append(dmix.panel);
-  [areas.body, drops.body, dmix.body, byArea.body, byDay.body].forEach(loading);
+  const dmix = panel('Trip distance mix', 'Short hops or long runs'); root.append(dmix.panel);
+  [areas.body, drops.body, dmix.body, byArea.body, byDay.body, parkP.body, stopP.body].forEach(loading);
 
-  const [terr, mix, mv] = await Promise.all([qAll('/api/driver/territory', { id }), qAll('/api/driver/mix', { id }),
-    qAll('/api/driver/movement', { id }).catch(() => null)]);
+  const [terr, mix, mv, tk] = await Promise.all([qAll('/api/driver/territory', { id }), qAll('/api/driver/mix', { id }),
+    qAll('/api/driver/movement', { id }).catch(() => null), qAll('/api/driver/movement/track', { id }).catch(() => null)]);
   const cov = mv?.coverage || {};
   const tot = mv?.totals || null;
 
@@ -1992,118 +1995,182 @@ async function tabTerritory(root, id) {
     timeP.body.append(el('p', 'cap', esc(`${capBits.join(' · ')}. ${mv.basis || ''}`)));
   }
 
-  // The map is drawn either way. An empty map of the emirate still tells you
-  // "we have no positions for this person", which a paragraph in place of the
-  // map does not — and it keeps the page from reflowing between drivers.
+  /* The map is drawn either way. An empty map of the emirate still tells you
+     "we have no positions for this person", which a paragraph in place of the
+     map does not — and it keeps the page from reflowing between drivers. */
   {
     const map = await makeMap(node, { zoom: 10 });
-    const layers = { wait: L.layerGroup(), drive: L.layerGroup(), points: L.layerGroup(), booked: L.layerGroup() };
-    const pts = { wait: [], drive: [], points: [], booked: [] };
-    /* Waiting spots: minutes in the driver's own hours, from the movement
-       rollup (api/driver_routes.js, 2026-11-24). This said "Stationary here
-       across N five-minute fixes" over the car's whole day, any driver's —
-       and a fix is not a minute. */
-    const maxStop = Math.max(1, ...(terr.idle || []).map((s) => s.stopped_min || 0));
-    (terr.idle || []).forEach((s) => {
-      /* Grey only where parked with no working status outweighs waiting —
-         a stop on a job (a red light, the pickup wait) is neither, and is
-         said apart rather than counted as parked (review, 2026-11-24). */
-      const parked = (s.offline_min || 0) > (s.wait_min || 0);
-      L.circleMarker([s.lat, s.lng], {
-        radius: 4 + 12 * Math.sqrt((s.stopped_min || 0) / maxStop), weight: 1, color: css('--pin-ring'),
-        fillColor: css(parked ? '--grey' : '--s1'), fillOpacity: ak ? 0.75 : 0.6, className: 'terr-still',
-      }).addTo(layers.wait).bindTooltip(`<b>${esc(s.area || 'Unnamed ground')}</b><br>`
-        + `Waited online ${durWords(s.wait_min)}`
-        + `${s.offline_min ? ` · parked, not working ${durWords(s.offline_min)}` : ''}`
-        + `${s.ontrip_min ? ` · stopped on a job ${durWords(s.ontrip_min)}` : ''}<br>on ${countOf(s.days, 'day')}`, { direction: 'top' });
-      pts.wait.push([s.lat, s.lng]);
-    });
-    const movingCells = (mv?.cells || []).filter((c) => (c.moving_empty_min + c.moving_seat_unknown_min + c.with_passenger_min) > 0);
-    const maxMove = Math.max(1, ...movingCells.map((c) => c.moving_empty_min + c.moving_seat_unknown_min + c.with_passenger_min));
-    movingCells.forEach((c) => {
-      const mins = c.moving_empty_min + c.moving_seat_unknown_min + c.with_passenger_min;
-      L.circleMarker([c.lat, c.lng], { radius: 3 + 7 * Math.sqrt(mins / maxMove), weight: 0,
-        fillColor: css(c.with_passenger_min >= mins / 2 ? (ak ? '--ink' : '--s2') : (ak ? '--grey' : '--s3')), fillOpacity: 0.55 })
-        .addTo(layers.drive).bindTooltip(`<b>${esc(c.area || 'Unnamed ground')}</b><br>Driving ${durWords(mins)}`
-          + ` · ${durWords(c.with_passenger_min)} with a passenger · ${fmt(c.km, 1)} km`, { direction: 'top' });
-      pts.drive.push([c.lat, c.lng]);
-    });
-    (mv?.points || []).forEach((x) => {
-      L.circleMarker([x.lat, x.lng], { radius: 4, weight: 1.2, color: css('--pin-ring'),
-        fillColor: css(x.kind === 'pickup' ? (ak ? '--ink' : '--s1') : '--s3'), fillOpacity: 0.8 })
-        .addTo(layers.points).bindTooltip(`<b>${x.kind === 'pickup' ? 'Pickup' : 'Drop-off'}</b> · ${esc(x.day || '')}`
-          + `<br>${esc(POINT_BASIS[x.basis] || x.basis)}${x.gap_s != null ? ` (${fmt(x.gap_s)} s away)` : ''}`, { direction: 'top' });
-      pts.points.push([x.lat, x.lng]);
-    });
-    const max = Math.max(1, ...terr.pickups.map((p) => p.n));
+    const hhmm = (m) => (m == null ? '—' : `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+    const dayWord = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+    /* What the driver was doing while the car stood, in words and in colour:
+       the larger of waiting online, on a job and no working status. */
+    const what = (x) => {
+      const parts = [['waiting online', x.wait_min || 0], ['on a job', x.ontrip_min || 0], ['parked, not working', x.offline_min || 0]];
+      const top = parts.slice().sort((a, b) => b[1] - a[1])[0];
+      return { word: top[1] ? top[0] : 'stopped', key: top[0], detail: parts.filter(([, n]) => n).map(([w, n]) => `${w} ${durWords(n)}`).join(' · ') };
+    };
+    const STILL = { 'waiting online': ak ? '--ink' : '--s1', 'on a job': '--s2', 'parked, not working': '--grey', stopped: '--grey' };
+    const ROUTE = { passenger: ak ? '--ink' : '--s2', empty: ak ? '--grey' : '--s3', seat_unknown: '--grey' };
+    const days = (tk?.days || []).slice().reverse();
+    let chosen = null;      // null = every day of the window
+    const on = { routes: true, stops: false, parking: true, points: false, booked: false };
+    const groups = { routes: L.layerGroup(), stops: L.layerGroup(), parking: L.layerGroup(), points: L.layerGroup(), booked: L.layerGroup() };
+    const pts = { routes: [], stops: [], parking: [], points: [], booked: [] };
+    const legend = el('div', 'legend'); const capNote = el('p', 'cap');
+    mapP.body.append(legend, capNote);
+
+    /* The booked addresses do not change with the day chosen: the booking
+       coordinates are per booking, not per position. */
+    const maxB = Math.max(1, ...terr.pickups.map((p) => p.n));
     terr.pickups.forEach((p) => {
-      L.circleMarker([p.lat, p.lng], {
-        radius: 4 + 11 * Math.sqrt(p.n / max), color: css('--pin-ring'), weight: 1.2,
-        fillColor: css(ak ? '--ink' : '--s1'), fillOpacity: ak ? 0.55 : 0.8,
-      }).addTo(layers.booked).bindTooltip(
-        `<b>${esc(p.addr || 'pickup')}</b><br>${p.n} pickup${p.n > 1 ? 's' : ''}` +
-        `<br>avg ${fmt(p.avg_km, 1)} km${p.avg_fare ? ` · ${money(p.avg_fare)}` : ''}`, { direction: 'top' });
+      L.circleMarker([p.lat, p.lng], { radius: 4 + 11 * Math.sqrt(p.n / maxB), color: css('--pin-ring'), weight: 1.2,
+        fillColor: css(ak ? '--ink' : '--s1'), fillOpacity: ak ? 0.55 : 0.8 }).addTo(groups.booked).bindTooltip(
+        `<b>${esc(p.addr || 'pickup')}</b><br>${p.n} pickup${p.n > 1 ? 's' : ''}`
+        + `<br>avg ${fmt(p.avg_km, 1)} km${p.avg_fare ? ` · ${money(p.avg_fare)}` : ''}`, { direction: 'top' });
       pts.booked.push([p.lat, p.lng]);
     });
     terr.dropoffs.slice(0, 150).forEach((d) => {
       L.circleMarker([d.lat, d.lng], { radius: 3, color: css('--s3'), weight: 1, fillColor: css('--s3'), fillOpacity: .4 })
-        .addTo(layers.booked).bindTooltip(`Drop-off · ${esc(d.addr || '')} (${d.n})`, { direction: 'top' });
+        .addTo(groups.booked).bindTooltip(`Drop-off · ${esc(d.addr || '')} (${d.n})`, { direction: 'top' });
     });
-    const LAYERS = [
-      ['wait', 'Waiting and parked', `${countOf(pts.wait.length, 'spot')}`],
-      ['drive', 'Where it drove', `${countOf(pts.drive.length, 'cell')}`],
-      ['points', 'Pickups and drop-offs', `${fmt(pts.points.length)}`],
-      ['booked', 'Booked addresses', `${countOf(terr.pickups.length, 'cluster')}`],
-    ];
-    const legend = el('div', 'legend'); const capNote = el('p', 'cap');
-    const show = (k) => {
-      Object.entries(layers).forEach(([n, l]) => (n === k ? l.addTo(map) : l.remove()));
-      layerBar.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.layer === k));
-      /* Zoom to the driver's own working area rather than the whole emirate,
-         capped so a driver who only ever works one street doesn't end up
-         looking at rooftops. */
-      fitTo(map, pts[k], { maxZoom: 14 });
-      legend.innerHTML = {
-        wait: `<span><i style="background:var(--s1);border-radius:50%"></i>mostly waiting online</span><span><i class="terr-still-key" style="background:var(--grey);border-radius:50%"></i>mostly parked, not working</span><span>sized by minutes stopped</span>`,
-        drive: `<span><i style="background:var(${ak ? '--ink' : '--s2'})"></i>mostly with a passenger</span><span><i style="background:var(${ak ? '--grey' : '--s3'})"></i>mostly without</span><span>half-kilometre cells, sized by minutes driving</span>`,
-        points: `<span><i style="background:var(${ak ? '--ink' : '--s1'})"></i>pickups</span><span><i style="background:var(--s3)"></i>drop-offs</span>`,
-        booked: `<span><i style="background:var(${ak ? '--ink' : '--s1'})"></i>pickups</span><span><i style="background:var(--s3)"></i>drop-offs</span><span>from the booking’s own coordinates</span>`,
-      }[k];
-      const ps = mv?.points_summary;
-      capNote.textContent = {
-        wait: pts.wait.length ? 'Places the car stood ten minutes or more inside this driver’s own hours in it — not the car’s whole day, and not another driver’s shift.'
-          : `No waiting spot: ${terr.idle_absent || 'the car was not seen stopped in this driver’s hours'}.`,
-        drive: pts.drive.length ? 'Every stretch between two tracker fixes, split between the half-kilometre cells at its two ends.'
-          : 'No driving to show: the tracker reported no movement in this driver’s hours in this window.',
-        points: ps && ps.pickups ? `${fmt(ps.pickups_placed)} of ${fmt(ps.pickups)} completed pickups and ${fmt(ps.dropoffs_placed)} of ${fmt(ps.dropoffs)} drop-offs placed: `
-          + Object.entries({ ...ps.pickups_by }).map(([b, n]) => `${fmt(n)} pickups by ${POINT_BASIS[b] || b}`).join('; ')
-          + '. A pickup with no stage time, coordinates or seat reading is not placed: a request time is not a pickup time.'
-          : 'No completed booking in this window could be placed.',
-        /* The two sentences this replaced were false: Uber carries no
-           coordinates through the API, and FMS records positions all day. */
-        booked: pts.booked.length ? 'Only hotel, Yango and Bolt-order bookings carry the platform’s own coordinates; Uber’s carry none through the API. “Pickups and drop-offs” places Uber’s from its own pickup moment and the tracker.'
-          : 'No booking of this driver’s in this window carries the platform’s own coordinates — Uber’s carry none through the API. “Pickups and drop-offs” places them from Uber’s own pickup moment and the car’s tracker instead.',
-      }[k];
+
+    const draw = () => {
+      ['routes', 'stops', 'parking', 'points'].forEach((k) => { groups[k].clearLayers(); pts[k] = []; });
+      const inDay = (x) => chosen == null || x.day === chosen;
+      /* The route: one line per stretch of one state, never across a silence. */
+      (tk?.routes || []).filter(inDay).forEach((r) => {
+        L.polyline(r.points, { color: css(ROUTE[r.state] || '--grey'), weight: chosen ? 4 : 2.5, opacity: chosen ? 0.9 : 0.5,
+          dashArray: r.state === 'seat_unknown' ? '4,4' : null, className: 'terr-route' }).addTo(groups.routes)
+          .bindTooltip(`${esc(dayWord(r.day))} ${hhmm(r.s)}–${hhmm(r.e)} · ${r.state === 'passenger' ? 'a passenger aboard'
+            : r.state === 'empty' ? 'no passenger' : 'seat not reported'} · ${fmt(r.km, 1)} km`, { sticky: true });
+        r.points.forEach((pt) => pts.routes.push(pt));
+      });
+      /* Every stop, numbered in the day's order when one day is chosen. */
+      const dayStops = (tk?.stops || []).filter(inDay);
+      const maxS = Math.max(1, ...dayStops.map((x) => x.minutes));
+      dayStops.forEach((x, i) => {
+        const w = what(x);
+        L.circleMarker([x.lat, x.lng], { radius: 4 + 10 * Math.sqrt(x.minutes / maxS), weight: 1.2, color: css('--pin-ring'),
+          fillColor: css(STILL[w.key] || '--grey'), fillOpacity: 0.85, className: 'terr-still' }).addTo(groups.stops)
+          .bindTooltip(`<b>${chosen ? `Stop ${i + 1} · ` : `${esc(dayWord(x.day))} · `}${esc(x.area || 'Unnamed ground')}</b><br>`
+            + `${hhmm(x.s_min)}–${hhmm(x.e_min)} · ${durWords(x.minutes)}${x.inferred ? ' (tracker quiet, inferred)' : ''}`
+            + `${w.detail ? `<br>${esc(w.detail)}` : ''}${x.plate ? `<br>${esc(x.plate)}` : ''}`, { direction: 'top' });
+        pts.stops.push([x.lat, x.lng]);
+      });
+      /* The places they park, over the window (one day: that day's spots). */
+      const spots = chosen == null ? (tk?.parking || []) : parkingOf(dayStops);
+      const maxP = Math.max(1, ...spots.map((x) => x.minutes));
+      spots.forEach((x) => {
+        const w = what(x);
+        L.circleMarker([x.lat, x.lng], { radius: 5 + 13 * Math.sqrt(x.minutes / maxP), weight: x.nights ? 2.5 : 1.2,
+          color: css(x.nights ? '--ink' : '--pin-ring'), fillColor: css(STILL[w.key] || '--grey'), fillOpacity: 0.7, className: 'terr-still' })
+          .addTo(groups.parking).bindTooltip(`<b>${esc(x.area || 'Unnamed ground')}</b><br>${countOf(x.visits, 'stop')} · ${durWords(x.minutes)} in all`
+            + `${x.nights ? ` · ${countOf(x.nights, 'night')}` : ''}<br>${esc(w.detail)}`
+            + `${x.usual_from_min != null ? `<br>usually ${hhmm(x.usual_from_min)}–${hhmm(x.usual_to_min)}` : ''}`, { direction: 'top' });
+        pts.parking.push([x.lat, x.lng]);
+      });
+      (mv?.points || []).filter(inDay).forEach((x) => {
+        L.circleMarker([x.lat, x.lng], { radius: 4, weight: 1.2, color: css('--pin-ring'),
+          fillColor: css(x.kind === 'pickup' ? (ak ? '--ink' : '--s1') : '--s3'), fillOpacity: 0.8 })
+          .addTo(groups.points).bindTooltip(`<b>${x.kind === 'pickup' ? 'Pickup' : 'Drop-off'}</b> · ${esc(x.day || '')}`
+            + `<br>${esc(POINT_BASIS[x.basis] || x.basis)}${x.gap_s != null ? ` (${fmt(x.gap_s)} s away)` : ''}`, { direction: 'top' });
+        pts.points.push([x.lat, x.lng]);
+      });
+      Object.entries(groups).forEach(([k, g]) => (on[k] ? g.addTo(map) : g.remove()));
+      const counts = { routes: (tk?.routes || []).filter(inDay).length, stops: pts.stops.length, parking: pts.parking.length,
+        points: pts.points.length, booked: terr.pickups.length };
+      layerBar.querySelectorAll('button').forEach((b) => {
+        b.classList.toggle('on', !!on[b.dataset.layer]);
+        const n = b.querySelector('.dim'); if (n) n.textContent = fmt(counts[b.dataset.layer]);
+      });
+      dayBar.querySelectorAll('button').forEach((b) => b.classList.toggle('on', (b.dataset.day || null) === chosen));
+      /* Frame what is shown, capped so one street is not rooftops. */
+      fitTo(map, Object.keys(on).filter((k) => on[k]).flatMap((k) => pts[k]), { maxZoom: chosen ? 15 : 14 });
+      legend.innerHTML = [
+        on.routes ? `<span><i style="background:var(${ROUTE.passenger})"></i>route with a passenger</span><span><i style="background:var(${ROUTE.empty})"></i>route without</span><span><i style="background:none;border-top:2px dashed var(--grey);height:0"></i>seat not reported</span>` : '',
+        on.stops || on.parking ? `<span><i style="background:var(${STILL['waiting online']});border-radius:50%"></i>waiting online</span><span><i style="background:var(--s2);border-radius:50%"></i>stopped on a job</span><span><i class="terr-still-key" style="background:var(--grey);border-radius:50%"></i>parked, not working</span>` : '',
+        on.parking ? '<span>a dark ring: parked overnight</span>' : '',
+        on.points ? `<span><i style="background:var(${ak ? '--ink' : '--s1'})"></i>pickups</span><span><i style="background:var(--s3)"></i>drop-offs</span>` : '',
+      ].join('');
+      const day = chosen ? (tk?.days || []).find((x) => x.day === chosen) : null;
+      capNote.textContent = !tk ? 'The routes and stops could not be read from the server; the tables below do not depend on them.'
+        : !(tk.days || []).length ? `No route or stop to show: ${tk.absent || cov.absent || 'nothing was built for this window'}.`
+          : day ? `${dayWord(day.day)}: ${countOf(day.drives, 'drive')} (${fmt(day.km, 1)} km), ${countOf(day.stops, 'stop')} (${durWords(day.stopped_min)} stopped)`
+              + `${day.silences ? `, ${countOf(day.silences, 'silence')} in the tracker` : ''}, from ${hhmm(day.first_min)} to ${hhmm(day.last_min)}${day.plates.length ? ` in ${day.plates.join(', ')}` : ''}. ${tk.basis}`
+            : `${countOf((tk.days || []).length, 'day')} with a route${tk.fixes_capped ? ' (the first 40,000 positions — choose a day for the rest)' : ''}. ${tk.basis}`;
+      renderStops();
     };
-    LAYERS.forEach(([k, label, n]) => {
-      const b = el('button', 'chip', `${esc(label)} <span class="dim">${esc(n)}</span>`);
-      b.type = 'button'; b.dataset.layer = k; b.addEventListener('click', () => show(k));
+    /* One day's spots, grouped the server's way (api/movement_track.js
+       parkingSpots), for the day chosen: within 150 m, longest first. */
+    function parkingOf(stops) {
+      const out = [];
+      stops.filter((x) => x.minutes >= 10).slice().sort((a, b) => b.minutes - a.minutes).forEach((x) => {
+        const near = out.find((sp) => Math.hypot((sp.lat - x.lat) * 111, (sp.lng - x.lng) * 101) <= 0.15);
+        if (near) { near.visits += 1; near.minutes += x.minutes; near.wait_min += x.wait_min || 0; near.ontrip_min += x.ontrip_min || 0; near.offline_min += x.offline_min || 0; }
+        else out.push({ lat: x.lat, lng: x.lng, area: x.area, visits: 1, minutes: x.minutes, wait_min: x.wait_min || 0, ontrip_min: x.ontrip_min || 0,
+          offline_min: x.offline_min || 0, nights: 0, usual_from_min: x.s_min, usual_to_min: x.e_min });
+      });
+      return out;
+    }
+    /* The stops table: the chosen day in order, or the longest over the window. */
+    function renderStops() {
+      stopP.body.innerHTML = '';
+      const all = (tk?.stops || []).filter((x) => chosen == null || x.day === chosen);
+      if (!all.length) {
+        stopP.body.append(note(chosen ? 'The car did not stop for ten minutes or more in this driver’s hours on this day.'
+          : `No stop to list: ${tk?.absent || cov.absent || 'nothing was built for this window'}.`));
+        return;
+      }
+      const rows = chosen ? all : all.slice().sort((a, b) => b.minutes - a.minutes).slice(0, 40);
+      stopP.body.append(tableFrom(rows.map((x, i) => ({ ...x, n: i + 1 })), [
+        ...(chosen ? [{ label: '#', key: 'n', num: true }] : [{ label: 'Day', key: 'day', render: (x) => esc(dayWord(x.day)) }]),
+        { label: 'From–to', key: 's_min', render: (x) => `${hhmm(x.s_min)}–${hhmm(x.e_min)}` },
+        { label: 'For', key: 'minutes', num: true, render: (x) => `${durWords(x.minutes)}${x.inferred ? ' <span class="dim" title="the tracker was quiet; the stop is inferred from two positions at one place">inferred</span>' : ''}` },
+        { label: 'Where', key: 'area', render: (x) => (x.area ? esc(x.area) : '<span class="ent-off">Unnamed ground</span>') },
+        { label: 'Doing', key: 'wait_min', render: (x) => { const w = what(x); return `<span title="${esc(w.detail)}">${esc(w.word)}</span>`; } },
+      ], { compact: true }));
+      if (!chosen && all.length > rows.length) stopP.body.append(el('p', 'cap', `The 40 longest of ${fmt(all.length)} stops in this window. Choose a day above to see every stop in order.`));
+    }
+
+    const chip = (label, sub, dayKey) => {
+      const b = el('button', 'chip', `${esc(label)}${sub ? ` <span class="dim">${esc(sub)}</span>` : ''}`);
+      b.type = 'button'; if (dayKey) b.dataset.day = dayKey;
+      b.addEventListener('click', () => {
+        chosen = dayKey || null;
+        /* One day: follow it — route, numbered stops, its pickups. All days:
+           the routes faint, and where the stops group. */
+        Object.assign(on, chosen ? { stops: true, parking: false, points: true } : { stops: false, parking: true, points: false });
+        draw();
+      });
+      return b;
+    };
+    if (days.length) {
+      dayBar.append(chip('All days', `${days.length}`, null));
+      days.slice(0, 31).forEach((d) => dayBar.append(chip(dayWord(d.day), `${fmt(d.km, 0)} km`, d.day)));
+    }
+    [['routes', 'Routes'], ['stops', 'Stops'], ['parking', 'Parking spots'], ['points', 'Pickups and drop-offs'], ['booked', 'Booked addresses']].forEach(([k, label]) => {
+      const b = el('button', 'chip', `${esc(label)} <span class="dim"></span>`);
+      b.type = 'button'; b.dataset.layer = k;
+      b.addEventListener('click', () => { on[k] = !on[k]; draw(); });
       layerBar.append(b);
     });
-    mapP.body.append(legend, capNote);
-    /* The denominator the booked layer is drawn over, kept whatever layer is
-       showing (FIX-STATUS PLC, 2026-11-16, on production): the table stops at
-       25 areas, so it is over EVERY pickup — `placement.total` — and a
-       one-cluster layer beside a table of 310 pickups must say how few of
-       them carry a position. A response from before PLC falls back to the
-       table's rows. */
+    /* With no route and no stop in the window, open on whatever there is. */
+    if (!(tk?.routes || []).length && !(tk?.parking || []).length) Object.assign(on, { points: !!(mv?.points || []).length, booked: !(mv?.points || []).length });
+    draw();
+
+    /* The denominator the booked layer is drawn over (FIX-STATUS PLC,
+       2026-11-16, on production): the pickup table is over EVERY pickup —
+       `placement.total` — so a layer of a few clusters beside it must say how
+       few of them carry a position. A response from before PLC falls back to
+       the table's rows. */
     const areaTrips = Number(terr.placement?.total) || (terr.areas || []).reduce((a, x) => a + (+x.n || 0), 0);
     const plotted = terr.pickups.reduce((a, x) => a + (+x.n || 0), 0);
     if (pts.booked.length && areaTrips > plotted) {
       mapP.body.append(el('p', 'cap',
         `${fmt(plotted)} of ${fmt(areaTrips)} pickups carry coordinates and are on the Booked addresses layer. The other `
-        + `${fmt(areaTrips - plotted)} have no booking position — the table beside this is over all of them, placed by their `
-        + 'address or the car\'s tracker, so it will name areas the layer does not show.'));
+        + `${fmt(areaTrips - plotted)} have no booking position — the pickup table is over all of them, placed by their `
+        + 'address or the car\'s tracker, so it will name areas the layer does not show. Only hotel, Yango and Bolt-order '
+        + 'bookings carry the platform\'s own coordinates; Uber\'s carry none through the API.'));
     }
     /* The map is drawn with nothing on it rather than replaced by a
        paragraph: an empty map of the emirate reads as "nothing to plot",
@@ -2112,7 +2179,25 @@ async function tabTerritory(root, id) {
       mapP.body.append(note('Nothing to plot for this driver in this window: the tracker saw no car of theirs '
         + 'in their own hours, and no booking of theirs carries the platform’s own coordinates.'));
     }
-    show(pts.wait.length ? 'wait' : pts.drive.length ? 'drive' : pts.points.length ? 'points' : 'booked');
+
+    /* Where they park, over the window. */
+    parkP.body.innerHTML = '';
+    const spots = tk?.parking || [];
+    if (!spots.length) {
+      parkP.body.append(note(tk ? `No parking spot to list: ${tk.absent || 'the car did not stop for ten minutes or more in this driver’s hours'}.`
+        : 'The stops could not be read from the server.'));
+    } else {
+      parkP.body.append(tableFrom(spots.slice(0, 20), [
+        { label: 'Where', key: 'area', render: (x) => (x.area ? esc(x.area) : '<span class="ent-off">Unnamed ground</span>') },
+        { label: 'Stops', key: 'visits', num: true },
+        { label: 'Time', key: 'minutes', num: true, render: (x) => durWords(x.minutes) },
+        { label: 'Waiting online', key: 'wait_min', num: true, render: (x) => durWords(x.wait_min) },
+        { label: 'Parked, not working', key: 'offline_min', num: true, render: (x) => durWords(x.offline_min) },
+        { label: 'Nights', key: 'nights', num: true, render: (x) => (x.nights ? fmt(x.nights) : '—') },
+        { label: 'Usually', key: 'usual_from_min', render: (x) => (x.usual_from_min != null ? `${hhmm(x.usual_from_min)}–${hhmm(x.usual_to_min)}` : '—') },
+      ], { compact: true, sortable: true, sortId: 'park-spots', defaultSort: { key: 'minutes', dir: 'desc' } }));
+      if (spots.length > 20) parkP.body.append(el('p', 'cap', `The 20 longest of ${fmt(spots.length)} places this driver stopped.`));
+    }
   }
 
   /* Time by area: where the minutes went, named from the gazetteer. */
