@@ -2108,7 +2108,7 @@ async function tabTerritory(root, id) {
             : `${countOf(routed.length, 'day')} with a route drawn`
               + `${notDrawn.length ? `; ${countOf(notDrawn.length, 'older day')} not drawn (over ${fmt(40000)} positions — choose a shorter window)` : ''}`
               + `${(tk.days || []).filter((x) => x.absent).length ? `; ${countOf(tk.days.filter((x) => x.absent).length, 'day')} the tracker did not see` : ''}`
-              + `${(tk.pre_granular_days || []).length ? `; ${countOf(tk.pre_granular_days.length, 'day')} built before this view, rebuilt overnight` : ''}. ${tk.basis}`;
+              + `${(tk.pre_granular_days || []).length ? `; ${countOf(tk.pre_granular_days.length, 'day')} built before this view, rebuilt by the rollup (today within the hour, older days overnight)` : ''}. ${tk.basis}`;
       renderStops();
     };
     /* One day's spots, grouped the server's way (api/movement_track.js
