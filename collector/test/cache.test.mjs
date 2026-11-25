@@ -44,6 +44,10 @@ app.get('/api/driver/day', (_q, res) => { calls++; res.json({ n: calls }); });
 app.get('/api/online/hours', (_q, res) => { calls++; res.json({ n: calls }); });
 /* Flights and airport trips: today's landings are live estimates. */
 app.get('/api/airport', (_q, res) => { calls++; res.json({ n: calls }); });
+/* 2026-11-25: a body outside Latin-1 (an em dash, an Arabic place name) is
+   counted by its UTF-8 bytes, and serialised once. */
+let stringified = 0;
+app.get('/api/wide', (_q, res) => { calls++; res.json({ name: 'الرفاعة — Deira', n: calls, toJSON: undefined, get z() { stringified++; return 1; } }); });
 /* Where the car was, all day: today's segments grow with every CABMAN tick. */
 app.get('/api/vehicle/whereabouts', (_q, res) => { calls++; res.json({ n: calls }); });
 /* Where each car spent the night: a night whose read is open is read to now. */
@@ -575,6 +579,20 @@ await fetch(`http://127.0.0.1:${p2}/api/thing`);
 await fetch(`http://127.0.0.1:${p2}/api/thing`);
 check('disabled, every request reaches the route', n2 === 2, String(n2));
 s2.close();
+
+{
+  cache.clear();
+  stringified = 0;
+  const w = await get('/api/wide');
+  const want = Buffer.byteLength(JSON.stringify({ name: 'الرفاعة — Deira', n: w.body.n, z: 1 }), 'utf8');
+  const a = cache.audit();
+  check('a body outside Latin-1 is counted by its UTF-8 bytes, not by characters', w.cache === 'miss' && w.body.name === 'الرفاعة — Deira'
+    && a.counted === want && a.actual === want && want > JSON.stringify({ name: 'الرفاعة — Deira', n: w.body.n, z: 1 }).length,
+    JSON.stringify({ a, want }));
+  check('…and a miss serialises the body once, not once to store and again to send', stringified === 1, `stringified ${stringified} times`);
+  const h = await get('/api/wide');
+  check('…and the stored bytes are what a hit sends', h.cache === 'hit' && h.body.name === 'الرفاعة — Deira' && h.body.z === 1);
+}
 
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);

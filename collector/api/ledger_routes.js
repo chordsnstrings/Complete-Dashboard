@@ -1216,10 +1216,41 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
           AND effective_from <= coalesce($1::date, (now() AT TIME ZONE 'Asia/Dubai')::date)
         ORDER BY effective_from DESC, id DESC LIMIT 1`, [to]);
 
+    /* CASH FARES FROM THE DAY ROLL-UP, THE RECENT DAYS LIVE (2026-11-25).
+       ─────────────────────────────────────────────────────────────────────
+       `taken` and `collected` each joined the trip_cash view, which filters
+       trip on an expression no index serves and reads every row's raw JSON:
+       two parallel scans of 0.73 M wide rows. Measured on production on the
+       audit of 2026-11-25: 103 s for one call, the gateway giving up at 80.
+       cash_fare_day (sql/schema_v119.sql, src/history_rollup.js) is the same
+       view summed per account per Dubai day — the same column, the same
+       trips — refreshed for the last 14 days every quarter hour and whole at
+       boot and nightly. So days before `cutoff` come from it, and the last
+       two days and today come live from trip_cash through the Dubai-day index,
+       so a cash fare taken an hour ago is in the ceiling. The roll-up is used
+       only once a full pass has filled its fare_only count back to the start
+       (history_rollup_build 'cash_fare_day:fare_only' built from 1900-01-01);
+       until then the whole sum is live, as before — slow, never short. */
+    const [cfd] = await q(`SELECT built_from::text AS built_from FROM history_rollup_build WHERE name = 'cash_fare_day:fare_only'`)
+      .catch(() => []);
+    const cutoff = cfd?.built_from === '1900-01-01'
+      ? (await q(`SELECT ((now() AT TIME ZONE 'Asia/Dubai')::date - 2)::text AS d`))[0].d : '1900-01-01';
     const rows = await q(
       `WITH acct AS (
          SELECT driver_id, platform, external_id
            FROM driver_platform_id WHERE detached_at IS NULL
+       ),
+       cash_days AS (
+         SELECT driver_ext_id, day, trips, valued, value, fare_only
+           FROM cash_fare_day WHERE day < $4::date
+         UNION ALL
+         SELECT t.driver_ext_id, (t.requested_at AT TIME ZONE 'Asia/Dubai')::date AS day,
+                count(*)::int, count(t.cash_amount)::int, sum(t.cash_amount),
+                count(*) FILTER (WHERE t.cash_basis = 'fare_only')::int
+           FROM trip_cash t
+          WHERE (t.requested_at AT TIME ZONE 'Asia/Dubai')::date >= $4::date  /* trip_econ_day_idx */
+            AND coalesce(btrim(t.driver_ext_id), '') <> ''
+          GROUP BY 1, 2
        ),
        /* The numerator, per book, over the person. entry_source 'verification'
           is excluded by construction — see sql/schema_v78.sql. */
@@ -1329,30 +1360,30 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
           absent-with-a-reason figure for what actually is. */
        taken AS (
          SELECT a.driver_id AS person_id,
-                sum(t.cash_amount)  AS value,
-                count(*)::int       AS trips,
-                min((t.requested_at AT TIME ZONE 'Asia/Dubai')::date) AS first_on,
-                max((t.requested_at AT TIME ZONE 'Asia/Dubai')::date) AS last_on
+                sum(c.value)        AS value,
+                sum(c.trips)::int   AS trips,
+                min(c.day)          AS first_on,
+                max(c.day)          AS last_on
            FROM acct a
-           JOIN trip_cash t ON t.driver_ext_id = a.external_id
-          WHERE ($2::date IS NULL OR (t.requested_at AT TIME ZONE 'Asia/Dubai')::date <= $2::date)
+           JOIN cash_days c ON c.driver_ext_id = a.external_id
+          WHERE ($2::date IS NULL OR c.day <= $2::date)
           GROUP BY a.driver_id
        ),
        collected AS (
          SELECT a.driver_id AS person_id,
-                sum(t.cash_amount)                                  AS value,
-                count(*)::int                                       AS trips,
-                count(*) FILTER (WHERE t.cash_amount IS NOT NULL)::int AS priced,
-                count(*) FILTER (WHERE t.cash_basis = 'fare_only')::int AS fare_only
+                sum(c.value)            AS value,
+                sum(c.trips)::int       AS trips,
+                sum(c.valued)::int      AS priced,
+                sum(c.fare_only)::int   AS fare_only
            FROM acct a
            JOIN opening o ON o.person_id = a.driver_id
-           JOIN trip_cash t ON t.driver_ext_id = a.external_id
-          WHERE (t.requested_at AT TIME ZONE 'Asia/Dubai')::date > o.effective_on
+           JOIN cash_days c ON c.driver_ext_id = a.external_id
+          WHERE c.day > o.effective_on
             /* Bounded ABOVE only, by the as-of. The lower bound is the day the
                accounts team stated the position — that is the whole point of
                their date — and from has no business here: a position asked
                for on the 30th includes what was collected on the 6th. */
-            AND ($2::date IS NULL OR (t.requested_at AT TIME ZONE 'Asia/Dubai')::date <= $2::date)
+            AND ($2::date IS NULL OR c.day <= $2::date)
           GROUP BY a.driver_id
        ),
        /* Everything in the cash book that is NOT the opening — deposits, and
@@ -1423,7 +1454,7 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
          LEFT JOIN collected c ON c.person_id = dr.id
          LEFT JOIN handed h ON h.person_id = dr.id
         WHERE ($3::bigint IS NULL OR dr.id = $3::bigint)
-        ORDER BY dr.full_name NULLS LAST`, [from, to, onePerson]);
+        ORDER BY dr.full_name NULLS LAST`, [from, to, onePerson, cutoff]);
 
     const pct = policy ? Number(policy.pct) : null;
     const people = rows.map((r) => {

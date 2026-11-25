@@ -8,7 +8,7 @@ import { dubaiIso } from './util.js';
 import { isoDay } from './sources/ledger.js';
 /* Money in a sentence, to the fils like every page (the ruling of 2026-09-23). */
 import { aedText } from './util.js';
-import { CABMAN_MOVING_KMH, TRACKER_SOURCES_SQL, REAL_FIX } from '../api/telemetry_sql.js';
+import { CABMAN_MOVING_KMH, TRACKER_SOURCES_SQL, REAL_FIX, TELEMETRY_PLATES } from '../api/telemetry_sql.js';
 
 const SRC = 'insights';
 const q = (t, p) => pool.query(t, p).then((r) => r.rows);
@@ -278,6 +278,29 @@ async function idleVehicles() {
   return rows.length;
 }
 
+/* The two telemetry reads, exported so test/insights_probe.test.mjs can hold
+   them against the GROUP BY / DISTINCT ON they replaced (2026-11-25). */
+export const DORMANT_SQL = `WITH RECURSIVE ${TELEMETRY_PLATES}
+     SELECT p.plate, l.fleet_id, l.captured_at AS last_seen, lp.captured_at AS last_position
+       FROM plates p
+       CROSS JOIN LATERAL (
+         SELECT t.fleet_id, t.captured_at FROM telemetry_snapshot t
+          WHERE t.plate = p.plate AND t.source IN ${TRACKER_SOURCES_SQL}
+          ORDER BY t.captured_at DESC LIMIT 1) l
+       LEFT JOIN LATERAL (
+         SELECT t.captured_at FROM telemetry_snapshot t
+          WHERE t.plate = p.plate AND t.source IN ${TRACKER_SOURCES_SQL} AND ${REAL_FIX('t.')}
+          ORDER BY t.captured_at DESC LIMIT 1) lp ON true
+      WHERE p.plate IS NOT NULL AND l.captured_at < now() - interval '30 days'
+      ORDER BY l.captured_at DESC`;
+export const STALE_SQL = `WITH RECURSIVE ${TELEMETRY_PLATES}
+     SELECT f.plate, f.fleet_id, f.source, f.captured_at
+       FROM plates p
+       CROSS JOIN LATERAL (
+         SELECT t.plate, t.fleet_id, t.source, t.captured_at FROM telemetry_snapshot t
+          WHERE t.plate = p.plate ORDER BY t.polled_at DESC LIMIT 1) f
+      WHERE p.plate IS NOT NULL`;
+
 /* ─────────────────── 1b. Dormant vehicles: is this still our car? ─────────────────── */
 async function dormantVehicles() {
   const rows = await q(
@@ -289,15 +312,16 @@ async function dormantVehicles() {
        "last position": L26153 has never had a GPS fix. The fleet is the
        newest fix's; a signal is any tracker fix, and a car's last POSITION is
        only a fix that had one. */
-    `SELECT plate,
-            (array_agg(fleet_id ORDER BY captured_at DESC))[1] AS fleet_id,
-            max(captured_at) last_seen,
-            max(captured_at) FILTER (WHERE ${REAL_FIX()}) last_position
-     FROM telemetry_snapshot
-     WHERE plate IS NOT NULL AND source IN ${TRACKER_SOURCES_SQL}
-     GROUP BY plate
-     HAVING max(captured_at) < now() - interval '30 days'
-     ORDER BY 3 DESC`);
+    /* ONE INDEXED PROBE PER PLATE, NOT A SORT OF THE TABLE (2026-11-25).
+       The GROUP BY plate with a sorted array_agg read and sorted all 1.6 M
+       telemetry rows, and hit the 120 s statement timeout on every run
+       (15 of 15 in the collector log, 2026-11-24/25) — so this insight had
+       stopped refreshing. The same answer is the newest tracker fix per
+       plate, and the newest one with a real position: TELEMETRY_PLATES
+       walks the distinct plates off telem_plate_time_idx (~300 probes), and
+       each LATERAL reads that index backwards to the first row that
+       qualifies. Same columns, same rule, same order. */
+    DORMANT_SQL);
   /* Two populations, not one.
      ─────────────────────────────────────────────────────────────────────
      Every one of these was 'warning' while the metric ran from 36 days to
@@ -679,9 +703,15 @@ async function volumeTrend() {
 const FEED_DARK_MIN = 5;
 
 async function staleTelemetry() {
+  /* ONE INDEXED PROBE PER PLATE (2026-11-25). DISTINCT ON (plate) …
+     ORDER BY plate, polled_at DESC sorted the whole table — no index has
+     that order — and hit the statement timeout on every run (14 of 14 in
+     the collector log, 2026-11-24/25). The newest-polled row per plate is
+     now read through telem_plate_polled_idx (sql/schema_v131.sql), one probe
+     per plate off TELEMETRY_PLATES. DESC puts a NULL polled_at first, as the
+     DISTINCT ON did. */
   const rows = await q(
-    `SELECT DISTINCT ON (plate) plate, fleet_id, source, captured_at
-     FROM telemetry_snapshot ORDER BY plate, polled_at DESC`);
+    STALE_SQL);
   const stale = [];
   for (const r of rows) {
     const ageH = (Date.now() - new Date(r.captured_at)) / 36e5;

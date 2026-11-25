@@ -3899,10 +3899,33 @@ app.get('/api/coverage', wrap(async (req, res) => {
   const pl = req.query.platform || null;
   const fl = req.query.fleet || null;
   const P = [pl, fl];
+  /* FROM THE DAY ROLL-UP ONCE IT IS BUILT (2026-11-25).
+     ─────────────────────────────────────────────────────────────────────
+     This route counted trip, driver_timeline_event, telemetry_snapshot and
+     alert in full, grouped by day, on every call — 18 s on average for the
+     telemetry calendar alone and 94 s at worst, 147 calls in 18 hours (the
+     audit of 2026-11-25). src/coverage_rollup.js keeps those counts per
+     dataset, fleet and Dubai day; once a full pass has built them
+     (history_rollup_build 'coverage_day' from 1900-01-01) the counts, first
+     dates and calendars below are sums over it, and the answer says when
+     they were read (counts_as_of). The LATEST of each — last poll, last
+     alert, last booking — stay live, through their indexes, because they are
+     how a reader tells a feed that is still arriving. Before the first full
+     build, the live counts below run as they always did. */
+  const [cov] = await q(`SELECT read_at, built_from::text AS built_from FROM history_rollup_build WHERE name = 'coverage_day'`)
+    .catch(() => []);
+  const rolled = cov?.built_from === '1900-01-01';
+  const UNDATED = '0001-01-01';
   /* Started now and awaited where it is read: it depends on nothing above
      it, and waiting behind the nine counts and the unpaid-gap count put a
      whole-table scan of trip on the critical path (SPD, 2026-10-05). */
-  const geoP = q(
+  const geoP = rolled ? q(
+    `SELECT dataset, sum(rows)::int n, sum(with_a)::int with_pickup, sum(with_b)::int with_dropoff
+       FROM coverage_day
+      WHERE (dataset LIKE 'trip:%' OR dataset LIKE 'timeline:%')
+        AND ($1::text IS NULL OR dataset IN ('trip:' || $1, 'timeline:' || $1))
+        AND ($2::text IS NULL OR fleet_id = $2)
+      GROUP BY 1 ORDER BY 1`, P) : q(
     `SELECT 'trip:' || platform AS dataset, count(*)::int n,
             count(pickup_lat)::int with_pickup, count(dropoff_lat)::int with_dropoff
        FROM trip WHERE ($1::text IS NULL OR platform=$1)
@@ -3917,9 +3940,21 @@ app.get('/api/coverage', wrap(async (req, res) => {
   geoP.catch(() => {});   // handled where awaited; this only stops an early rejection being 'unhandled'
   const [trips, telemetry, alerts, ledger, earnings, telDays, alertDays, ledgerDays,
     earnDays] = await Promise.all([
-    q(`SELECT platform, count(*)::int n, min(requested_at) from_ts, max(requested_at) to_ts
+    rolled ? q(
+      `SELECT c.platform, c.n, c.from_ts,
+              (SELECT max(t.requested_at) FROM trip t
+                WHERE t.platform = c.platform AND ($2::text IS NULL OR t.fleet_id = $2)) AS to_ts
+         FROM (SELECT substr(dataset, 6) AS platform, sum(rows)::int n, min(min_ts) from_ts
+                 FROM coverage_day
+                WHERE dataset LIKE 'trip:%' AND ($1::text IS NULL OR dataset = 'trip:' || $1)
+                  AND ($2::text IS NULL OR fleet_id = $2)
+                GROUP BY 1) c
+        ORDER BY 1`, P)
+      /* ORDER BY on both paths: GROUP BY alone returned the rows in whatever
+         order the aggregate produced them, and the two paths must agree. */
+      : q(`SELECT platform, count(*)::int n, min(requested_at) from_ts, max(requested_at) to_ts
        FROM trip WHERE ($1::text IS NULL OR platform=$1) AND ($2::text IS NULL OR fleet_id=$2)
-       GROUP BY 1`, P),
+       GROUP BY 1 ORDER BY 1`, P),
     /* telemetry_snapshot.source is 'cabman' or 'fms' — a tracker, not a booking
        channel — so a platform filter would empty it rather than narrow it. */
     /* min() as well as max(). This table is headed "what has actually landed"
@@ -3928,11 +3963,24 @@ app.get('/api/coverage', wrap(async (req, res) => {
        and the ledger obviously have one and the query simply never asked. On
        production that was 7 of 11 rows with no start date on the page whose
        job is to say how far back the record goes. */
-    q(`SELECT source, count(*)::int n, min(captured_at) from_ts,
+    rolled ? q(
+      `SELECT c.source, c.n, c.from_ts, c.collected_from,
+              (SELECT max(t.polled_at) FROM telemetry_snapshot t
+                WHERE t.source = c.source AND ($1::text IS NULL OR t.fleet_id = $1)) AS last_poll
+         FROM (SELECT substr(dataset, 11) AS source, sum(rows)::int n, min(min_ts) from_ts, min(min_b) collected_from
+                 FROM coverage_day
+                WHERE dataset LIKE 'telemetry:%' AND ($1::text IS NULL OR fleet_id = $1)
+                GROUP BY 1) c
+        ORDER BY 1`, [fl])
+      : q(`SELECT source, count(*)::int n, min(captured_at) from_ts,
               min(polled_at) collected_from,
               max(polled_at) last_poll FROM telemetry_snapshot
-       WHERE ($1::text IS NULL OR fleet_id=$1) GROUP BY 1`, [fl]),
-    q(`SELECT count(*)::int n, min(occurred_at) from_ts, max(occurred_at) latest FROM alert
+       WHERE ($1::text IS NULL OR fleet_id=$1) GROUP BY 1 ORDER BY 1`, [fl]),
+    rolled ? q(
+      `SELECT coalesce(sum(rows), 0)::int n, min(min_ts) from_ts,
+              (SELECT max(a.occurred_at) FROM alert a WHERE ($1::text IS NULL OR a.fleet_id = $1)) AS latest
+         FROM coverage_day WHERE dataset = 'alerts' AND ($1::text IS NULL OR fleet_id = $1)`, [fl])
+      : q(`SELECT count(*)::int n, min(occurred_at) from_ts, max(occurred_at) latest FROM alert
        WHERE ($1::text IS NULL OR fleet_id=$1)`, [fl]),
     q(`SELECT count(*)::int n, min(event_at) from_ts, max(event_at) latest FROM ledger_entry`),
 
@@ -3998,12 +4046,20 @@ app.get('/api/coverage', wrap(async (req, res) => {
        day with a poll on it is a day we collected. That is the question this
        column asks. src/reconcile.js draws the same distinction for the same
        reason. */
-    q(`SELECT 'telemetry:' || source AS dataset,
+    rolled ? q(
+      `SELECT dataset, to_char(day, 'YYYY-MM-DD') AS day, sum(rows)::int rows
+         FROM coverage_day WHERE dataset LIKE 'telemetry:%' AND day <> $1::date
+        GROUP BY 1, 2 ORDER BY 1, 2`, [UNDATED])
+      : q(`SELECT 'telemetry:' || source AS dataset,
               to_char((polled_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
               count(*)::int rows
          FROM telemetry_snapshot WHERE polled_at IS NOT NULL
          GROUP BY 1, 2 ORDER BY 1, 2`),
-    q(`SELECT 'alerts' AS dataset,
+    rolled ? q(
+      `SELECT dataset, to_char(day, 'YYYY-MM-DD') AS day, sum(rows)::int rows
+         FROM coverage_day WHERE dataset = 'alerts' AND day <> $1::date
+        GROUP BY 1, 2 ORDER BY 2`, [UNDATED])
+      : q(`SELECT 'alerts' AS dataset,
               to_char((occurred_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
               count(*)::int rows
          FROM alert WHERE occurred_at IS NOT NULL
@@ -4087,7 +4143,15 @@ app.get('/api/coverage', wrap(async (req, res) => {
     .filter(Boolean);
   let gaps = [];
   if (wanted.length) {
-    const counts = await q(
+    const counts = rolled ? await q(
+      /* The Dubai day before payFrom is exactly requested_at before payFrom's
+         midnight in Dubai; the undated day matched no comparison live either. */
+      `SELECT b.platform, coalesce(sum(c.rows), 0)::int unpaid
+         FROM unnest($1::text[], $2::date[]) AS b(platform, before)
+         JOIN coverage_day c ON c.dataset = 'trip:' || b.platform
+        WHERE c.day < b.before AND c.day <> $3::date
+        GROUP BY 1`,
+      [wanted.map((w) => w.platform), wanted.map((w) => w.payFrom), UNDATED]) : await q(
       `SELECT t.platform, count(*)::int unpaid
          FROM trip t
          JOIN unnest($1::text[], $2::date[]) AS b(platform, before)
@@ -4148,6 +4212,9 @@ app.get('/api/coverage', wrap(async (req, res) => {
   const geo = await geoP;
   res.json({ trips, telemetry, alerts, ledger, earnings, earnings_gaps: gaps,
     dataset_calendar,
+    /* When the counts were read: the roll-up's own read instant, or null when
+       they were counted live just now. The latest timestamps are always live. */
+    counts_as_of: rolled ? cov.read_at : null,
     geo: geo.map((r) => ({ ...r,
       pickup_pct: r.n ? Math.round((r.with_pickup / r.n) * 100) : 0,
       dropoff_pct: r.n ? Math.round((r.with_dropoff / r.n) * 100) : 0 })) });

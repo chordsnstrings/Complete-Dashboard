@@ -61,9 +61,13 @@ if (want('vehicles')) {
       return { all: t.querySelectorAll('tbody .pill').length, toned: [...t.querySelectorAll('tbody .pill')].filter((x) => /\b(ok|warn|bad)\b/.test(x.className)).length }; });
     check('the table\'s tracker and document chips are outline chips: none carries a tone', chips.all > 0 && chips.toned === 0, JSON.stringify(chips));
     const H = s.heads;
-    check('order: 00 → money | per km → idle hours → the table (search on it) → spread → tier → booked vs tracked → †',
+    /* "Where cars spent the night" (api/public/overnight.js, OVN) sits between
+       the idle hours and the table; this check predates it and failed on every
+       run after it landed (found 2026-11-25 — CI skips browser files). */
+    const ovn = H.indexOf('Where cars spent the night');
+    check('order: 00 → money | per km → idle hours → where they spent the night → the table (search on it) → spread → tier → booked vs tracked → †',
       H.indexOf('Money against distance') === 1 && H.indexOf('What a kilometre returned') === 2 && H.indexOf('Idle hours between drivers') === 3
-      && H.indexOf('Every vehicle') === 4 && H.indexOf('Booked against tracked distance') > H.indexOf('Which assets serve which tier') && /^† /.test(H.at(-1)), JSON.stringify(H));
+      && ovn === 4 && H.indexOf('Every vehicle') === 5 && H.indexOf('Booked against tracked distance') > H.indexOf('Which assets serve which tier') && /^† /.test(H.at(-1)), JSON.stringify(H));
     const search = await page.evaluate(() => { const b = document.querySelector('#vdq')?.closest('.toolbar'); return b?.nextElementSibling?.querySelector('h3')?.textContent || ''; });
     check('the search sits directly on the table it searches', search === 'Every vehicle', search);
     const dots = await page.evaluate(() => document.querySelectorAll('[data-panel="veh-money"] svg circle.sc-dot').length);

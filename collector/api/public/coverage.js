@@ -575,6 +575,14 @@ function coverageDatasets(root, c, cov) {
   if (!rows.length) { p.body.append(note('No dataset has a dated reading yet.')); return; }
   const b = el('div'); p.body.append(b);
   hbars(b, rows, { signed: false, colorFor: (x) => sourceToken(x.src) || '--mk-fill', valueFmt: (v) => `${fmt(v)} d` });
+  /* Counted from the day roll-up since 2026-11-25 (src/coverage_rollup.js):
+     say when, so a count a quarter of an hour old is not read as this second's. */
+  if (cov.counts_as_of) {
+    const t = new Date(cov.counts_as_of);
+    const hm = Number.isNaN(t.getTime()) ? null
+      : new Date(t.getTime() + 4 * 3600000).toISOString().slice(11, 16);
+    if (hm) p.body.append(el('p', 'cap', `Rows and days counted at ${hm} Dubai, from the day roll-up rebuilt every quarter hour; each feed’s latest reading is live.`));
+  }
 }
 function coverageAbsence(root, c, cov, ver) {
   const gaps = cov.earnings_gaps || [];

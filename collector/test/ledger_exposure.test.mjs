@@ -30,6 +30,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
+import { refreshCashFareDay } from '../src/history_rollup.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -324,6 +325,38 @@ await trip('U-40', '2026-09-09', 300, false);   // card — must not count
     (() => { const z = body.people.find((x) => x.owes.cash_taken == null);
       return !z || /nothing has gone into their hand/.test(z.owes.cash_taken_means || ''); })(),
     'a person with no cash trips reported a taken figure of zero');
+}
+
+/* ── THE DAY ROLL-UP ANSWERS EXACTLY WHAT THE LIVE SCAN DID (2026-11-25) ──
+   The route reads settled days from cash_fare_day once a full pass has filled
+   its fare_only count, and the last two days live. Same windows, same people,
+   byte for byte; then proof it reads the table, not the trips. */
+{
+  const today = (await q(`SELECT ((now() AT TIME ZONE 'Asia/Dubai')::date)::text AS d`))[0].d;
+  await trip('U-10', today, 55);                      // a cash fare taken today: the live part
+  await q(`UPDATE trip SET price = NULL WHERE external_id = (SELECT external_id FROM trip WHERE driver_ext_id = 'U-10' ORDER BY requested_at LIMIT 1)`);
+  const urls = ['/api/ledger/exposure?from=2026-09-01&to=2026-09-30', '/api/ledger/exposure?from=2026-09-01',
+    '/api/ledger/exposure', '/api/ledger/exposure?person=10'];
+  const live = [];
+  for (const u of urls) live.push(JSON.stringify((await get(u)).body));
+  const before = await q(`SELECT count(*)::int n FROM history_rollup_build WHERE name = 'cash_fare_day:fare_only'`);
+  await refreshCashFareDay({ query: (t, p) => db.query(t, p) });
+  const [mark] = await q(`SELECT built_from::text AS b FROM history_rollup_build WHERE name = 'cash_fare_day:fare_only'`);
+  const rolled = [];
+  for (const u of urls) rolled.push(JSON.stringify((await get(u)).body));
+  check('before a full pass the route reads live; after it, the roll-up is marked built back to the start',
+    before[0].n === 0 && mark?.b === '1900-01-01', JSON.stringify({ before, mark }));
+  check('the roll-up answers every window exactly as the live scan did — taken, collected, the fare-only count, today\'s fare',
+    urls.every((u, i) => live[i] === rolled[i]),
+    urls.map((u, i) => (live[i] === rolled[i] ? '' : `${u}: ${live[i].slice(0, 160)} ≠ ${rolled[i].slice(0, 160)}`)).filter(Boolean).join(' | '));
+  /* Proof it is the table that answered the settled days: remove an old
+     cash trip without refreshing — the live scan would drop it, the roll-up
+     still holds it until its next pass. */
+  const [old] = await q(`SELECT external_id FROM trip WHERE driver_ext_id = 'U-10' AND price IS NOT NULL
+                          AND requested_at < now() - interval '7 days' ORDER BY requested_at LIMIT 1`);
+  await q(`DELETE FROM trip WHERE external_id = $1`, [old.external_id]);
+  const after = JSON.stringify((await get(urls[2])).body);
+  check('settled days are read from the roll-up, not the trips', after === rolled[2], 'the answer changed when an old trip was removed without a refresh');
 }
 
 console.log(`\n${fail ? '✗' : '✓'} ledger_exposure: ${pass} passed, ${fail} failed`);

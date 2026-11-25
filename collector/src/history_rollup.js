@@ -89,19 +89,24 @@ export async function refreshCashFareDay(db = pool, { since = null } = {}) {
   const bound = since ? `AND (t.requested_at AT TIME ZONE '${TZ}')::date >= $1::date` : '';
   const p = since ? [since] : [];
   await db.query(
-    `INSERT INTO cash_fare_day (platform, driver_ext_id, day, fleet_id, trips, valued, value, computed_at)
+    `INSERT INTO cash_fare_day (platform, driver_ext_id, day, fleet_id, trips, valued, value, fare_only, computed_at)
      SELECT t.platform, t.driver_ext_id, (t.requested_at AT TIME ZONE '${TZ}')::date AS day,
-            min(t.fleet_id), count(*)::int, count(t.cash_amount)::int, sum(t.cash_amount), now()
+            min(t.fleet_id), count(*)::int, count(t.cash_amount)::int, sum(t.cash_amount),
+            count(*) FILTER (WHERE t.cash_basis = 'fare_only')::int, now()
        FROM trip_cash t
       WHERE coalesce(btrim(t.driver_ext_id), '') <> '' AND t.requested_at IS NOT NULL ${bound}
       GROUP BY 1, 2, 3
      ON CONFLICT (platform, driver_ext_id, day) DO UPDATE SET
        fleet_id = EXCLUDED.fleet_id, trips = EXCLUDED.trips, valued = EXCLUDED.valued,
-       value = EXCLUDED.value, computed_at = EXCLUDED.computed_at`, p);
+       value = EXCLUDED.value, fare_only = EXCLUDED.fare_only, computed_at = EXCLUDED.computed_at`, p);
   await db.query(
     `DELETE FROM cash_fare_day WHERE computed_at < $1::timestamptz
        ${since ? 'AND day >= $2::date' : ''}`, since ? [t0, since] : [t0]);
   await recordBuild(db, 'cash_fare_day', t0, since);
+  /* The fare_only count (sql/schema_v131.sql) has its own build record, so
+     /api/ledger/exposure reads this table only once a full pass has filled
+     that count back to the start — rows from before v131 carry NULL there. */
+  await recordBuild(db, 'cash_fare_day:fare_only', t0, since);
   const { rows } = await db.query('SELECT count(*)::int n FROM cash_fare_day');
   return rows[0].n;
 }

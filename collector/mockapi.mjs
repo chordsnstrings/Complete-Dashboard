@@ -7889,6 +7889,11 @@ app.get('/api/coverage', (_, r) => r.json({
   telemetry: [{ source: 'cabman', n: 412880, from_ts: '2025-08-19T00:00:00Z',
     collected_from: '2025-08-19T00:00:00Z', last_poll: new Date().toISOString() }],
   alerts: [{ n: 1904, from_ts: '2025-09-02T06:00:00Z', latest: '2026-08-21T14:20:00Z' }],
+  /* When the row and day counts were read from coverage_day (the quarter-hourly
+     roll-up, src/coverage_rollup.js); null on a server whose first full pass
+     has not finished, which then counts live. The latest-reading columns are
+     live either way. */
+  counts_as_of: new Date(Date.now() - 6 * 60e3).toISOString(),
   ledger: [{ n: 2399, from_ts: '2026-02-06T00:00:00Z', latest: '2026-08-20T21:00:00Z' }],
   /* Continuity for the datasets source_day_coverage does not cover, keyed by
      the label the table prints. Telemetry carries a real gap so the Missing
