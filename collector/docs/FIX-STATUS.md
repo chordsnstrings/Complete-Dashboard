@@ -7734,6 +7734,18 @@ Revert-proven: on the old code it fails 4 checks (narrow ≠ full; the CASE five
 and the missing helper. The 73 suites touching `driver_day`, the span builder or the roll-ups are all green, with
 `person_key`, `consistency`, `imports_resolve` and `sql_module_names`.
 
-**Not yet on production.** Still open, and not part of this: `money_event trip_price` timed out five times under the
-audit's load, and takes 16.5 s of a 14-day pass at this scale. `driver_day` never deletes a row it no longer produces,
+**DDT1–4 LIVE since ccaee19 (PR #73), deployed 2026-11-25 14:24 UTC.** On production the boot's full pass **finished**
+(`driver_day` ok, 106.4 s, back to 2024-10-01), where the old code had been cancelled at 120 s. That is too close to the
+limit for a full pass: production runs about 5× slower than the local benchmark, and the boot pass shares the database
+with the API warming its cache. Two follow-ups, written the same hour:
+
+| id | fix |
+|---|---|
+| DDT5 | **The row's person key, once per (account, name).** The final insert still evaluated `personKey()` on every one of ~238k rows of a full pass, about a fifth of it, for a few thousand distinct pairs. The same function of the same two values is now computed once per pair (`named`, `keyed`) and joined back; a NULL name joins on a sentinel (`E'\x01'`) and is keyed from the real NULL. Local full pass 21.0 s → **18.5 s**. Still identical to the old code from an empty table (0/0 over 237,891 driver-days), and a narrow pass still equals the full pass (0/0). |
+| DDT6 | **A full pass gets 600 s on its own connection** (`queryWithoutJit(…, { timeoutMs: FULL_PASS_TIMEOUT_MS })`). It runs at boot and nightly only, under the roll-up's advisory lock, and the work grows with the history it rebuilds. Quarter-hourly passes keep the pool's 120 s. `RESET statement_timeout` returns to 120 s: checked on Postgres 16, because node-postgres sends the pool's timeout as a startup parameter. A connection whose reset fails is destroyed. |
+
+`test/driver_day_timeout.test.mjs` is now 13. DDT5/6 are **not yet on production**.
+
+Still open, and not part of this: `money_event trip_price` timed out five times under the audit's load, and takes
+16.5 s of a 14-day pass at this scale. `driver_day` never deletes a row it no longer produces,
 so a payout or statement removed upstream leaves its day behind until the row is overwritten.
