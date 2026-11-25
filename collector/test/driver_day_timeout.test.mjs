@@ -24,7 +24,9 @@
          account id, a payout under a register id;
      §3  the statement reads the stored key and the bound (on the old code
          this fails: the register's CASE appeared five times, ev_floor never);
-     §4  JIT is switched off on one connection and reset before it goes back.
+     §4  JIT is switched off on one connection and reset before it goes back;
+         a full pass also gets a longer statement timeout there (the boot's
+         full pass on production took 106 s after the change, against 120 s).
 
    Synthetic data only; the register ids are read from api/identity_map.js. */
 import { PGlite } from '@electric-sql/pglite';
@@ -149,6 +151,13 @@ check('SET jit = off, the statement, RESET jit, then the connection goes back', 
 log.length = 0;
 await queryWithoutJit(fakePool(true), 'SELECT 1', []);
 check('…and a connection whose reset failed is destroyed, never pooled with JIT off', log.at(-1) === 'release:destroy', JSON.stringify(log));
+log.length = 0;
+await queryWithoutJit(fakePool(), 'SELECT 1', [], { timeoutMs: 600000 });
+check('a full pass also gets a longer statement timeout on that connection, reset with JIT before it goes back',
+  JSON.stringify(log) === JSON.stringify(['SET jit = off', 'SET statement_timeout = 600000', 'SELECT 1', 'RESET jit', 'RESET statement_timeout', 'release:keep']),
+  JSON.stringify(log));
+const src = (await import('node:fs')).readFileSync(new URL('../src/rollup.js', import.meta.url), 'utf8');
+check('…and only the full pass asks for it: quarter-hourly passes keep the pool\'s 120 s', /p, since \? \{\} : \{ timeoutMs: FULL_PASS_TIMEOUT_MS \}\);/.test(src));
 const plain = []; await queryWithoutJit({ query: async (t) => { plain.push(t); return { rows: [] }; } }, 'SELECT 2', []);
 check('PGlite (no pool): the statement alone', JSON.stringify(plain) === JSON.stringify(['SELECT 2']));
 

@@ -1025,16 +1025,25 @@ const PERSON = (nameCol, idCol) => personKey(idCol, nameCol);
    a full pass in 21 s (29 s). The whole roll-up pass was measured both ways
    too: every other step was the same or faster WITH JIT, so it is turned off
    on one pooled connection, for this one statement, and reset before the
-   connection goes back. PGlite (the tests) has no pool and no JIT. */
-export async function queryWithoutJit(db, sql, params) {
+   connection goes back. PGlite (the tests) has no pool and no JIT.
+
+   timeoutMs: the same connection, a longer statement timeout. The boot's full
+   pass on production after this change still took 106 s against the pool's
+   120 s (it shares the database with the API warming its cache), and a full
+   pass grows with the history it rebuilds. It runs at boot and nightly only,
+   under the roll-up's advisory lock; quarter-hourly passes keep 120 s. */
+export const FULL_PASS_TIMEOUT_MS = 600000;
+export async function queryWithoutJit(db, sql, params, { timeoutMs = null } = {}) {
   if (typeof db.connect !== 'function') return db.query(sql, params);
   const client = await db.connect();
   let broken = false;
   try {
     await client.query('SET jit = off');
+    if (timeoutMs) await client.query(`SET statement_timeout = ${Number(timeoutMs) | 0}`);
     return await client.query(sql, params);
   } finally {
     await client.query('RESET jit').catch(() => { broken = true; });
+    if (timeoutMs) await client.query('RESET statement_timeout').catch(() => { broken = true; });
     client.release(broken);
   }
 }
@@ -1315,7 +1324,23 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
           every incremental refresh — and because agg, money and pay ARE bounded,
           each of those older days would then be rewritten with trips 0 and no
           money at all. The insert would erase the record it exists to keep. */
-       UNION SELECT driver_ext_id, day FROM online WHERE TRUE ${dayBound})
+       UNION SELECT driver_ext_id, day FROM online WHERE TRUE ${dayBound}),
+     /* THE ROW'S PERSON KEY, ONCE PER (ACCOUNT, NAME) (2026-11-25). personKey()
+        — the register's CASE around two regexes — was evaluated on every one
+        of ~238k rows of a full pass, about a fifth of it, for a few thousand
+        distinct (account, name) pairs. The same function of the same two
+        values, computed once per pair and joined back. A NULL name joins on a
+        sentinel no name can be (hash joins cannot compare NULLs); the key
+        itself is computed from the real NULL, as before. */
+     named AS (
+       SELECT DISTINCT d.driver_ext_id, coalesce(a.driver_name, m.driver_name, acc.driver_name) AS nm
+         FROM days d
+         LEFT JOIN agg a   ON a.driver_ext_id = d.driver_ext_id AND a.day = d.day
+         LEFT JOIN money m ON m.driver_ext_id = d.driver_ext_id AND m.day = d.day
+         LEFT JOIN account acc ON acc.driver_ext_id = d.driver_ext_id),
+     keyed AS (
+       SELECT driver_ext_id, coalesce(nm, E'\\x01') AS nmk, ${PERSON('nm', 'driver_ext_id')} AS person_key
+         FROM named)
      INSERT INTO driver_day (driver_ext_id, day, fleet_id, platforms, plates, trips, completed,
                              cancelled, km, fares, unknown_end, first_min, last_min, span_min,
                              on_job_min, wait_min, longest_wait_min, online_min, idle_online_min,
@@ -1350,7 +1375,7 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
             m.money_period_days,
             /* The same fold the money was matched on, stored so a reader can
                count people at any grain without joining back to the trips. */
-            ${PERSON("coalesce(a.driver_name, m.driver_name, acc.driver_name)", 'd.driver_ext_id')},
+            k.person_key,
             now()
        FROM days d
        LEFT JOIN agg a    ON a.driver_ext_id  = d.driver_ext_id AND a.day  = d.day
@@ -1358,6 +1383,8 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
        LEFT JOIN pay py   ON py.driver_ext_id = d.driver_ext_id AND py.day = d.day
        LEFT JOIN online o ON o.driver_ext_id  = d.driver_ext_id AND o.day  = d.day
        LEFT JOIN account acc ON acc.driver_ext_id = d.driver_ext_id
+       LEFT JOIN keyed k ON k.driver_ext_id = d.driver_ext_id
+                        AND k.nmk = coalesce(a.driver_name, m.driver_name, acc.driver_name, E'\\x01')
      ON CONFLICT (driver_ext_id, day) DO UPDATE SET
        fleet_id = EXCLUDED.fleet_id, platforms = EXCLUDED.platforms, plates = EXCLUDED.plates,
        trips = EXCLUDED.trips, completed = EXCLUDED.completed, cancelled = EXCLUDED.cancelled,
@@ -1373,7 +1400,7 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
        payout_cash = EXCLUDED.payout_cash, money = EXCLUDED.money,
        money_source = EXCLUDED.money_source,
        money_period_days = EXCLUDED.money_period_days, person_key = EXCLUDED.person_key,
-       computed_at = now()`, p);
+       computed_at = now()`, p, since ? {} : { timeoutMs: FULL_PASS_TIMEOUT_MS });
 
   const { rows } = await db.query('SELECT count(*)::int n FROM driver_day');
   return rows[0].n;
