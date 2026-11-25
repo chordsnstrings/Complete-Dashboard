@@ -7676,4 +7676,18 @@ Neighbours run one at a time, all green: `rollup` 53, `rollup_schedule`, `rollup
 `coverage_accrual`, `collection_debt`, `completeness`, `warm`, `server_day_keys`, `data_retention_notes`, `driver_money_tab`,
 `compliance_person`, `indexes`, `consistency`, `sql_module_names`, `imports_resolve`, `endpoint_coverage`,
 `collector_invariants`, `job_heartbeat`, `money_precise`, `quiet_sources`, `answers` 259 (renders the coverage page).
-**Not yet on production.**
+
+**LIVE since ede09f7 (PR #72), deployed 2026-11-25 13:06 UTC. The API run command was set to
+`node --max-old-space-size=320 api/server.js` at 13:08 (spec PUT; `bin/app-spec.mjs --check` matches). Verified on production:**
+- **AUD-2:** the collector's boot pass finished `cash_fare_day` in full at 13:14:54 and `coverage_day` at 13:15:25 (about 30 s).
+  - `/api/coverage` took 57 s on the live read just before; it now takes 2.4 s (1.0 s for one fleet), with `counts_as_of` and
+    `older_counted_at` set.
+  - `/api/ledger/exposure` took 28 s live just before, and 84–103 s in the audit; it now takes 2.9 s (0.9 s for one driver),
+    `settled_days.before` 2026-11-23, still 324 people.
+- **AUD-3:** the first insight run on the new code (13:19:35) computed `vehicle_dormant` 48 and `stale_tracker` 16, with no
+  timeout. On the old code `vehicle_dormant` timed out on most runs, and gave 48 when it finished.
+- **AUD-1:** `/api/cache-stats` shows 76 entries in 9.85 MB of real bytes against a 48 MiB cap. API memory sits at 23% after
+  the deploy; under the audit's load on the old code it climbed to 61% and 74% before each restart (09:10, 11:00 UTC).
+  **Not yet proven under sustained load:** replaying that load at a quiet hour is the remaining check (pair it with `cap-audit`).
+- **Found that hour, not caused by this change:** the `driver_day` roll-up hit the 120 s statement timeout on the boot pass
+  (13:12:27). It did the same at 08:42 and 10:20 UTC on the old code. Open in HANDOFF.
