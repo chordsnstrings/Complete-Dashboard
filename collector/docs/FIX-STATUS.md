@@ -7744,7 +7744,15 @@ with the API warming its cache. Two follow-ups, written the same hour:
 | DDT5 | **The row's person key, once per (account, name).** The final insert still evaluated `personKey()` on every one of ~238k rows of a full pass, about a fifth of it, for a few thousand distinct pairs. The same function of the same two values is now computed once per pair (`named`, `keyed`) and joined back; a NULL name joins on a sentinel (`E'\x01'`) and is keyed from the real NULL. Local full pass 21.0 s → **18.5 s**. Still identical to the old code from an empty table (0/0 over 237,891 driver-days), and a narrow pass still equals the full pass (0/0). |
 | DDT6 | **A full pass gets 600 s on its own connection** (`queryWithoutJit(…, { timeoutMs: FULL_PASS_TIMEOUT_MS })`). It runs at boot and nightly only, under the roll-up's advisory lock, and the work grows with the history it rebuilds. Quarter-hourly passes keep the pool's 120 s. `RESET statement_timeout` returns to 120 s: checked on Postgres 16, because node-postgres sends the pool's timeout as a startup parameter. A connection whose reset fails is destroyed. |
 
-`test/driver_day_timeout.test.mjs` is now 13. DDT5/6 are **not yet on production**.
+`test/driver_day_timeout.test.mjs` is now 13. **DDT5/6 LIVE since 4b1b61f (PR #74), deployed 2026-11-25 14:54 UTC.**
+Measured on production with `/api/rollups`:
+- **Full pass:** the boot's full `driver_day` pass was ok in 101.6 s, where the old code was cancelled at 120 s. It now
+  has 600 s.
+- **14-day passes:** 12.7 s (15:11) and 12.9 s (15:16). The old code took 24.7 s at 14:16, and was cancelled at 120 s
+  under the audit's load.
+- **Smaller than the benchmark's gain:** about 2× on production against 4–7× locally, and still a tenth of the limit.
+- **The roll-up's largest cost is now `money_event`:** 188 s on the 15:11 pass and 98 s at boot. Its `trip_price` step
+  is the one that timed out five times this morning. Open.
 
 Still open, and not part of this: `money_event trip_price` timed out five times under the audit's load, and takes
 16.5 s of a 14-day pass at this scale. `driver_day` never deletes a row it no longer produces,
