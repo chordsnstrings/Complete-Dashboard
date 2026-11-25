@@ -1116,6 +1116,17 @@ coordinate, id, plate or name. Results are as measured at 12:36 UTC on deploy `7
 
 ## Traps that have cost time more than once
 
+* **JIT and the identity register's CASE, and windows that read all of history on a 14-day pass** (2026-11-25, DDT).
+  Any statement that folds people with `personKey()` carries a CASE of several hundred ids around two regexes. Postgres
+  JIT compiles every branch of it: 7.6 s per run of the driver-day statement, more than half of a 14-day pass. Evaluated
+  per row, it cost 8 s per pass over the trips. On a table that carries `person_key`, read `personKeyStored()`; through
+  `trip_norm`, which cannot expose the column, join `trip` by its primary key. A window over a whole event table (the
+  online spans) belongs behind a bound on a narrow pass, and the bound must be exact (`onlineSpansSql({ since })`). Before
+  believing a narrow pass, hold it to a full pass on the same data, from an empty table: `driver_day` upserts and never
+  deletes, so leftovers look like differences. Production cannot be EXPLAINed from here (GET-only); a local Postgres 16
+  (`/usr/lib/postgresql/16/bin`, run as the `postgres` user over TCP, data outside the scratchpad, whose parent folders'
+  permissions get reset) with synthetic data at the `/api/coverage` counts reproduces the plans.
+
 * **A cache bounded by `string.length` is not bounded in bytes, and a request-path aggregate grows with the table** (2026-11-25, AUD-1/2/3).
   `.length` counts UTF-16 units; V8 holds any string containing a character above U+00FF (every Arabic
   area name, an em dash) at two bytes a unit, so a "64 MB" cap was up to 128 MB of heap on a 512 MB

@@ -139,13 +139,34 @@ const DAY_END = (col) =>
             &fleet=egari answered 25 online hours for a driver who was online
             for two, because the OFFLINE that ended the shift carried the
             other fleet_id and was filtered away. */
-export function onlineSpansSql({ where = 'TRUE', keep = 'TRUE' } = {}) {
+/* `since` (an SQL timestamptz expression, optional): read only the events a
+   span ENDING at or after it can be built from, for a caller that keeps days
+   from `since` on (2026-11-25: the driver_day roll-up read every status event
+   ever recorded, sorted and windowed, on every 14-day pass — 748k pieces a
+   pass, growing every day). Exact for any span that reaches `since`:
+     · status: an account's spans are cut at its own consecutive events, so
+       every span ending at or after `since` starts at the account's LAST
+       status event before `since` (its next_at is the first after) or later;
+       an account's earlier events only make spans that end at or before that
+       event. Kept: from that event on, per account (ev_floor).
+     · jobs: a job span is its rows' min..max, so every row of any job with a
+       row at or after `since`.
+   Islands are a union, so a piece left out — ending before `since` — took
+   nothing from any day from `since` on. Callers without it read everything,
+   as before. */
+export function onlineSpansSql({ where = 'TRUE', keep = 'TRUE', since = null } = {}) {
   const CAP2 = `least(now(), ${DAY_END('at')})`;
   const CAP3 = `least(now(), ${DAY_END('at')}, feed_at)`;
   /* feed_at binds only when it is a real bound: a run recorded as finishing
      before the event it would truncate is a contradiction in the bookkeeping,
      not evidence about the driver. */
   const CEILING = 'feed_at IS NOT NULL AND feed_at > at';
+  const floorCte = since ? `ev_floor AS (
+     SELECT driver_ext_id, max(at) AS floor_at
+       FROM driver_timeline_event
+      WHERE kind = 'status' AND status <> '' AND (${where}) AND at < ${since}
+      GROUP BY 1),
+   ` : '';
   return `feed AS (
      /* When this fleet's timeline last completed. status <> 'error' rather
         than status = 'ok', because a PARTIAL run did reach the provider and
@@ -161,7 +182,7 @@ export function onlineSpansSql({ where = 'TRUE', keep = 'TRUE' } = {}) {
       WHERE source = 'uber_timeline' AND status <> 'error'
         AND finished_at IS NOT NULL
       GROUP BY 1),
-   ev AS (
+   ${floorCte}ev AS (
      /* PARTITIONED BY ACCOUNT, and that is correctness rather than tidiness:
         one ordering across two Uber accounts closes an ONLINE on account A
         with an OFFLINE on account B and yields spans belonging to neither. */
@@ -173,8 +194,10 @@ export function onlineSpansSql({ where = 'TRUE', keep = 'TRUE' } = {}) {
             lead(dte.at) OVER (PARTITION BY dte.driver_ext_id ORDER BY dte.at) AS next_at,
             f.feed_at
        FROM driver_timeline_event dte
-       LEFT JOIN feed f ON f.feed_fleet = dte.fleet_id
-      WHERE dte.kind = 'status' AND dte.status <> '' AND (${where})),
+       LEFT JOIN feed f ON f.feed_fleet = dte.fleet_id${since ? `
+       LEFT JOIN ev_floor fl ON fl.driver_ext_id = dte.driver_ext_id` : ''}
+      WHERE dte.kind = 'status' AND dte.status <> '' AND (${where})${since ? `
+        AND dte.at >= coalesce(fl.floor_at, ${since})` : ''}),
    status_span AS (
      /* coalesce, not a next_at IS NOT NULL filter. See the header: the filter
         this replaces deleted the most recent ONLINE of 60 of 89 drivers. */
@@ -193,7 +216,10 @@ export function onlineSpansSql({ where = 'TRUE', keep = 'TRUE' } = {}) {
    job_row AS (
      SELECT driver_ext_id, job_ext_id, at, platform, fleet_id
        FROM driver_timeline_event
-      WHERE kind = 'job' AND coalesce(job_ext_id, '') <> '' AND (${where})),
+      WHERE kind = 'job' AND coalesce(job_ext_id, '') <> '' AND (${where})${since ? `
+        AND (at >= ${since} OR job_ext_id IN (
+              SELECT job_ext_id FROM driver_timeline_event
+               WHERE kind = 'job' AND coalesce(job_ext_id, '') <> '' AND at >= ${since}))` : ''}),
    job_span AS (
      /* The opening row's platform and fleet, so the keep predicate attributes
         a job the same way it attributes a span: to the fleet that opened it. */

@@ -7676,4 +7676,64 @@ Neighbours run one at a time, all green: `rollup` 53, `rollup_schedule`, `rollup
 `coverage_accrual`, `collection_debt`, `completeness`, `warm`, `server_day_keys`, `data_retention_notes`, `driver_money_tab`,
 `compliance_person`, `indexes`, `consistency`, `sql_module_names`, `imports_resolve`, `endpoint_coverage`,
 `collector_invariants`, `job_heartbeat`, `money_precise`, `quiet_sources`, `answers` 259 (renders the coverage page).
-**Not yet on production.**
+
+**LIVE since ede09f7 (PR #72), deployed 2026-11-25 13:06 UTC. The API run command was set to
+`node --max-old-space-size=320 api/server.js` at 13:08 (spec PUT; `bin/app-spec.mjs --check` matches). Verified on production:**
+- **AUD-2:** the collector's boot pass finished `cash_fare_day` in full at 13:14:54 and `coverage_day` at 13:15:25 (about 30 s).
+  - `/api/coverage` took 57 s on the live read just before; it now takes 2.4 s (1.0 s for one fleet), with `counts_as_of` and
+    `older_counted_at` set.
+  - `/api/ledger/exposure` took 28 s live just before, and 84–103 s in the audit; it now takes 2.9 s (0.9 s for one driver),
+    `settled_days.before` 2026-11-23, still 324 people.
+- **AUD-3:** the first insight run on the new code (13:19:35) computed `vehicle_dormant` 48 and `stale_tracker` 16, with no
+  timeout. On the old code `vehicle_dormant` timed out on most runs, and gave 48 when it finished.
+- **AUD-1:** `/api/cache-stats` shows 76 entries in 9.85 MB of real bytes against a 48 MiB cap. API memory sits at 23% after
+  the deploy; under the audit's load on the old code it climbed to 61% and 74% before each restart (09:10, 11:00 UTC).
+  **Not yet proven under sustained load:** replaying that load at a quiet hour is the remaining check (pair it with `cap-audit`).
+- **Found that hour, not caused by this change:** the `driver_day` roll-up hit the 120 s statement timeout on the boot pass
+  (13:12:27). It did the same at 08:42 and 10:20 UTC on the old code. Open in HANDOFF.
+
+## DDT – the driver-day roll-up inside its statement timeout (2026-11-25)
+
+The operator: "yes look at the driver_day timeout", after the AUD deploy showed `driver_day` cancelled at 120 s on the
+boot's full pass (13:12 UTC). The same statement had also been cancelled at 08:42 and 10:20 UTC on 14-day passes, on the
+old code, while the audit's load was on the database (in the same hours `money_event trip_price` timed out five times).
+The last nightly full pass had succeeded, so the statement sat at the limit.
+
+**Measured, not guessed.** I could not EXPLAIN on production (measurements there are GET-only), so I loaded the real
+schema into a local Postgres 16 and generated synthetic data at production scale. The counts came from `/api/coverage`:
+729,654 trips and 1.07M timeline events (production has 725,651), with statements and payouts alongside. Then I ran
+EXPLAIN ANALYZE on the statement. The old code took 47.6 s for a full pass and 11.5–14.7 s for a 14-day pass, spent in
+three places:
+- **JIT compiling the statement: 7.6 s of every pass, more than half of a 14-day one.** The statement folds people
+  through the identity register's CASE of several hundred ids, and JIT compiles every branch of it.
+- **That fold evaluated row by row:** twice over every trip (`fare_pf`, `owner`, 8+ s each on a full pass), and over
+  every statement and payout. In the payout join it was evaluated for each of 162k row pairs (2.7 s on a 14-day pass).
+- **Every timeline event ever recorded, sorted and windowed on every pass,** including a 14-day one: 748k pieces, about
+  3 s, growing daily.
+
+| id | fix |
+|---|---|
+| DDT1 | **The stored person key.** `jobs` reads `trip.person_key` by the primary key; `trip_norm`'s `SELECT t.*` was frozen before the column existed. `stmt_pf` and `pay` read their own tables' stored key (`personKeyStored`). It is the same register: `sql/schema_v53.sql` generates the column, and `test/person_key.test.mjs` holds stored and computed equal on every row. The fold is now computed once, for the row's own key. |
+| DDT2 | **A narrow pass bounds the timeline** (`onlineSpansSql({ since })`, `api/online_span_sql.js`). Per account it reads from the last status event before the bound, plus every row of any job that reaches it. This is exact for every span ending on or after the bound, because islands are a union. Other callers pass no `since` and are unchanged. |
+| DDT3 | **JIT off for this one statement** (`queryWithoutJit`). It runs on one pooled connection with `SET jit = off`, then `RESET jit` before release; a connection whose reset fails is destroyed. The whole roll-up pass was measured both ways: every other step was the same or faster WITH JIT (full pass 73.7 s on vs 76.1 s off), so the pool's default is left alone. |
+| DDT4 | *Found by the new test, and older than this work:* on a 14-day pass the `account` step was computed from the window's trips only. An account online, paid or on a statement in the window, but whose last trip was before it, got `fleet_id` NULL and a bare-id `person_key` on every quarter-hourly pass, and the nightly full pass put them back. Fleet-filtered readers drop a NULL fleet, so those days fell out of their fleet. A narrow pass now reads `account` over every trip of the account (+0.3 s). |
+
+**At production scale, after the change:** full pass 47.6 s → **21.0 s**, 14-day pass 11.5 s → **1.7 s** (2.0 s with
+DDT4). The table is identical row for row to the old code's after a full and after a narrow pass (0/0 over 238,334
+driver-days, edge cases included). From an empty table, a narrow pass reproduces the full pass exactly (0/0 over 6,628
+driver-days).
+
+Tests: `test/driver_day_timeout.test.mjs` 11, covering:
+- a narrow pass equals the full pass on the shapes a bound gets wrong: an ONLINE closed after midnight, an open-ended
+  ONLINE the evening before, a span of days, a job across midnight, a blank status, an event at midnight;
+- folding: register ids under any spelling, a statement with no account id, a payout under a register id;
+- the statement computes the CASE once, joins the stored key and bounds the timeline;
+- the JIT switch is set, reset and destroyed on failure.
+
+Revert-proven: on the old code it fails 4 checks (narrow ≠ full; the CASE five times; no stored join; no `ev_floor`)
+and the missing helper. The 73 suites touching `driver_day`, the span builder or the roll-ups are all green, with
+`person_key`, `consistency`, `imports_resolve` and `sql_module_names`.
+
+**Not yet on production.** Still open, and not part of this: `money_event trip_price` timed out five times under the
+audit's load, and takes 16.5 s of a 14-day pass at this scale. `driver_day` never deletes a row it no longer produces,
+so a payout or statement removed upstream leaves its day behind until the row is overwritten.
