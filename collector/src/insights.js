@@ -707,7 +707,7 @@ async function staleTelemetry() {
      ORDER BY plate, polled_at DESC sorted the whole table — no index has
      that order — and hit the statement timeout on every run (14 of 14 in
      the collector log, 2026-11-24/25). The newest-polled row per plate is
-     now read through telem_plate_polled_idx (sql/schema_v131.sql), one probe
+     now read through telemetry_plate_polled_idx (sql/schema_v131.sql), one probe
      per plate off TELEMETRY_PLATES. DESC puts a NULL polled_at first, as the
      DISTINCT ON did. */
   const rows = await q(

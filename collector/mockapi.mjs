@@ -7894,6 +7894,7 @@ app.get('/api/coverage', (_, r) => r.json({
      has not finished, which then counts live. The latest-reading columns are
      live either way. */
   counts_as_of: new Date(Date.now() - 6 * 60e3).toISOString(),
+  older_counted_at: new Date(Date.now() - 9 * 3600e3).toISOString(),
   ledger: [{ n: 2399, from_ts: '2026-02-06T00:00:00Z', latest: '2026-08-20T21:00:00Z' }],
   /* Continuity for the datasets source_day_coverage does not cover, keyed by
      the label the table prints. Telemetry carries a real gap so the Missing
@@ -9071,7 +9072,7 @@ app.get('/api/driver/register', (req, r) => {
 app.get('/api/ledger/exposure', (req, r) => {
   const ext = String(req.query.ext_id || '');
   if (ext && !LEDGER_ACCOUNTS[ext]) {
-    return r.json({ from: null, to: null, person_id: null, people: [],
+    return r.json({ from: null, to: null, person_id: null, people: [], settled_days: null,
       policy: null, policy_absent_reason: null,
       summary: { people: 0, measurable: 0, not_measurable: 0, over_policy: 0,
         fleet_ratio: null, fleet_ratio_reason: 'exposure is a per-person measure by instruction.' },
@@ -9099,6 +9100,11 @@ const LEDGER_FLEET_EXPOSURE = ({
      filled when one is asked about by account; `absent_reason` is null unless
      an account resolved to nobody. */
   person_id: null, resolved_from: null, absent_reason: null,
+  /* Which days came from the cash_fare_day roll-up and when it counted them
+     (AUD-2b): days before `before` from the roll-up, the last 14 rebuilt each
+     quarter hour, older ones at the last full pass; null while the live read
+     answers (no full pass in 36 hours). */
+  settled_days: { before: '2026-09-20', recent_counted_at: '2026-09-22T08:15:03.000Z', older_counted_at: '2026-09-21T22:41:10.000Z' },
   policy: { pct: 35, effective_from: '2026-01-01', set_by: 'ahsan', note: 'opening policy' },
   policy_absent_reason: null,
   summary: { people: 3, measurable: 2, not_measurable: 1, over_policy: 1,

@@ -1197,7 +1197,7 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
          ledger record would have been answered with every person on the
          ledger, summed, on that driver's page. */
       return res.json({
-        from, to, person_id: null, people: [],
+        from, to, person_id: null, people: [], settled_days: null,
         policy: null, policy_absent_reason: null,
         summary: { people: 0, measurable: 0, not_measurable: 0, over_policy: 0,
           fleet_ratio: null,
@@ -1228,19 +1228,31 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
        boot and nightly. So days before `cutoff` come from it, and the last
        two days and today come live from trip_cash through the Dubai-day index,
        so a cash fare taken an hour ago is in the ceiling. The roll-up is used
-       only once a full pass has filled its fare_only count back to the start
-       (history_rollup_build 'cash_fare_day:fare_only' built from 1900-01-01);
-       until then the whole sum is live, as before — slow, never short. */
-    const [cfd] = await q(`SELECT built_from::text AS built_from FROM history_rollup_build WHERE name = 'cash_fare_day:fare_only'`)
-      .catch(() => []);
-    const cutoff = cfd?.built_from === '1900-01-01'
-      ? (await q(`SELECT ((now() AT TIME ZONE 'Asia/Dubai')::date - 2)::text AS d`))[0].d : '1900-01-01';
+       only while its last FULL pass (history_rollup_build 'cash_fare_day:full',
+       which also filled the fare_only count back to the start) is under 36
+       hours old: the nightly pass failing two nights running puts the whole
+       sum back on the live read — slow, never stale (the review of
+       2026-11-25). Days from today−14 are rebuilt every quarter hour; older
+       days as of that full pass; the answer says both (settled_days). */
+    const builds = await q(`SELECT name, read_at, read_at > now() - interval '36 hours' AS fresh,
+        ((now() AT TIME ZONE 'Asia/Dubai')::date - 2)::text AS d
+        FROM history_rollup_build WHERE name IN ('cash_fare_day', 'cash_fare_day:full')`).catch(() => []);
+    const cfdFull = builds.find((b) => b.name === 'cash_fare_day:full');
+    const cfdLast = builds.find((b) => b.name === 'cash_fare_day');
+    const cutoff = cfdFull?.fresh ? cfdFull.d : '1900-01-01';
+    const settledDays = cfdFull?.fresh
+      ? { before: cutoff, recent_counted_at: cfdLast?.read_at ?? null, older_counted_at: cfdFull.read_at } : null;
     const rows = await q(
       `WITH acct AS (
          SELECT driver_id, platform, external_id
            FROM driver_platform_id WHERE detached_at IS NULL
        ),
-       cash_days AS (
+       /* NOT MATERIALIZED: cash_days is read twice (taken, collected), and a
+          CTE read twice is materialized by default — the person filter then
+          never reaches it, and a one-person call (the driver page, 1.5 s
+          before) scanned every trip while the read was live (the review of
+          2026-11-25). Inlined, each reference gets the filter. */
+       cash_days AS NOT MATERIALIZED (
          SELECT driver_ext_id, day, trips, valued, value, fare_only
            FROM cash_fare_day WHERE day < $4::date
          UNION ALL
@@ -1251,6 +1263,18 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
           WHERE (t.requested_at AT TIME ZONE 'Asia/Dubai')::date >= $4::date  /* trip_econ_day_idx */
             AND coalesce(btrim(t.driver_ext_id), '') <> ''
           GROUP BY 1, 2
+         UNION ALL
+         /* A cash trip with no request time: the day roll-up cannot hold it
+            and no day bound passes it, but the query this replaced counted it
+            in cash_taken whenever 'to' was unset — and still
+            does, through the NULL day below (the review of 2026-11-25; none
+            on production that day). 'collected' leaves it out, as it did:
+            NULL > effective_on is not true. */
+         SELECT t.driver_ext_id, NULL::date, count(*)::int, count(t.cash_amount)::int, sum(t.cash_amount),
+                count(*) FILTER (WHERE t.cash_basis = 'fare_only')::int
+           FROM trip_cash t
+          WHERE t.requested_at IS NULL AND coalesce(btrim(t.driver_ext_id), '') <> ''
+          GROUP BY 1
        ),
        /* The numerator, per book, over the person. entry_source 'verification'
           is excluded by construction — see sql/schema_v78.sql. */
@@ -1637,6 +1661,7 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
       from, to,
       person_id: onePerson,
       resolved_from: who.from,
+      settled_days: settledDays,
       absent_reason: null,
       policy: policy
         ? { pct, effective_from: policy.effective_from, set_by: policy.set_by, note: policy.note }

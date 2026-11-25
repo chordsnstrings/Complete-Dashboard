@@ -1,11 +1,11 @@
 -- schema_v131 — the three fixes the audit of 2026-11-25 asked for, their storage
 -- ---------------------------------------------------------------------------
--- 1. telem_plate_polled_idx. The stale-tracker insight picks each plate's
---    newest-POLLED row (src/insights.js staleTelemetry). It was a DISTINCT ON
---    over the whole table sorted by (plate, polled_at DESC) — an order no index
---    had — and hit the 120 s statement timeout on every run. With this index it
---    is one probe per plate.
-CREATE INDEX IF NOT EXISTS telem_plate_polled_idx ON telemetry_snapshot (plate, polled_at DESC);
+-- 1. No index. The stale-tracker insight now probes each plate's newest-POLLED
+--    row through telemetry_plate_polled_idx (plate, polled_at DESC), which
+--    sql/schema_v27.sql already built for this very read. This file first
+--    added a twin of it; the review of 2026-11-25 caught that before the file
+--    ever ran on production (a second index on the busiest table costs every
+--    poll a non-HOT index write and buys nothing — v115 dropped such a twin).
 
 -- 2. cash_fare_day.fare_only. /api/ledger/exposure now reads settled days of
 --    cash fares from cash_fare_day (sql/schema_v119.sql) instead of scanning
@@ -13,7 +13,8 @@ CREATE INDEX IF NOT EXISTS telem_plate_polled_idx ON telemetry_snapshot (plate, 
 --    `collected` term also counts the trips valued only by their fare
 --    (cash_basis 'fare_only'), which the day table did not carry. NULL on rows
 --    built before this file; the route uses the table only once a full pass
---    has filled it (history_rollup_build 'cash_fare_day:fare_only').
+--    has filled it, and only while that pass is under 36 hours old
+--    (history_rollup_build 'cash_fare_day:full').
 ALTER TABLE cash_fare_day ADD COLUMN IF NOT EXISTS fare_only INT;
 
 -- 3. coverage_day. /api/coverage counted trip, driver_timeline_event,

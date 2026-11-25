@@ -3908,13 +3908,21 @@ app.get('/api/coverage', wrap(async (req, res) => {
      dataset, fleet and Dubai day; once a full pass has built them
      (history_rollup_build 'coverage_day' from 1900-01-01) the counts, first
      dates and calendars below are sums over it, and the answer says when
-     they were read (counts_as_of). The LATEST of each — last poll, last
-     alert, last booking — stay live, through their indexes, because they are
-     how a reader tells a feed that is still arriving. Before the first full
-     build, the live counts below run as they always did. */
-  const [cov] = await q(`SELECT read_at, built_from::text AS built_from FROM history_rollup_build WHERE name = 'coverage_day'`)
-    .catch(() => []);
-  const rolled = cov?.built_from === '1900-01-01';
+     they were read: counts_as_of for the last 14 days (every quarter hour),
+     older_counted_at for the days before (the last full pass). The LATEST of
+     each — last poll, last alert, last booking — stay live, through their
+     indexes, because they are how a reader tells a feed that is still
+     arriving. The roll-up is read only while its last FULL pass
+     ('coverage_day:full') is under 36 hours old — the nightly pass failing
+     two nights running puts the live counts back, slow but current, rather
+     than freezing the older days under a fresh time (the review of
+     2026-11-25). Before the first full build the live counts run as they
+     always did. */
+  const covRows = await q(`SELECT name, read_at, read_at > now() - interval '36 hours' AS fresh
+      FROM history_rollup_build WHERE name IN ('coverage_day', 'coverage_day:full')`).catch(() => []);
+  const cov = covRows.find((r) => r.name === 'coverage_day');
+  const covFull = covRows.find((r) => r.name === 'coverage_day:full');
+  const rolled = !!(cov && covFull?.fresh);
   const UNDATED = '0001-01-01';
   /* Started now and awaited where it is read: it depends on nothing above
      it, and waiting behind the nine counts and the unpaid-gap count put a
@@ -4215,6 +4223,7 @@ app.get('/api/coverage', wrap(async (req, res) => {
     /* When the counts were read: the roll-up's own read instant, or null when
        they were counted live just now. The latest timestamps are always live. */
     counts_as_of: rolled ? cov.read_at : null,
+    older_counted_at: rolled ? covFull.read_at : null,
     geo: geo.map((r) => ({ ...r,
       pickup_pct: r.n ? Math.round((r.with_pickup / r.n) * 100) : 0,
       dropoff_pct: r.n ? Math.round((r.with_dropoff / r.n) * 100) : 0 })) });

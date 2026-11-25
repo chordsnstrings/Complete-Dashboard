@@ -29,8 +29,10 @@
    nightly. Telemetry is the one dataset whose past days can move — a fix's
    polled_at advances while its vehicle is still listed — and those rows were
    polled in the last day or two, inside the narrow window. The build is
-   recorded in history_rollup_build ('coverage_day'); the route reads this
-   table only once a full pass has built it, and says when it was read. */
+   recorded in history_rollup_build ('coverage_day' every pass,
+   'coverage_day:full' full passes only); the route reads this table only
+   while the last full pass is under 36 hours old, and says when each part
+   was counted. */
 import { pool } from './db.js';
 
 const TZ = 'Asia/Dubai';
@@ -84,6 +86,19 @@ export async function refreshCoverageDay(db = pool, { since = null } = {}) {
      ON CONFLICT (name) DO UPDATE SET read_at = EXCLUDED.read_at,
        built_from = least(history_rollup_build.built_from, EXCLUDED.built_from),
        finished_at = EXCLUDED.finished_at`, [t0, since || '1900-01-01']);
+  /* THE FULL PASS, RECORDED APART (the review of 2026-11-25). 'coverage_day'
+     moves its read_at on every narrow pass, which rebuilds only the last 14
+     days — so it could name a time at which older days were not counted, and
+     its built_from (least) stayed 1900-01-01 for good after one full pass
+     however long ago. This row moves only when EVERY day was rebuilt: the
+     route reads the roll-up only while it is under 36 hours old, and says
+     when the older days were counted. */
+  if (!since) {
+    await db.query(
+      `INSERT INTO history_rollup_build (name, read_at, built_from, finished_at)
+       VALUES ('coverage_day:full', $1::timestamptz, DATE '1900-01-01', now())
+       ON CONFLICT (name) DO UPDATE SET read_at = EXCLUDED.read_at, finished_at = EXCLUDED.finished_at`, [t0]);
+  }
   const { rows } = await db.query('SELECT count(*)::int n FROM coverage_day');
   return rows[0].n;
 }

@@ -578,10 +578,13 @@ function coverageDatasets(root, c, cov) {
   /* Counted from the day roll-up since 2026-11-25 (src/coverage_rollup.js):
      say when, so a count a quarter of an hour old is not read as this second's. */
   if (cov.counts_as_of) {
-    const t = new Date(cov.counts_as_of);
-    const hm = Number.isNaN(t.getTime()) ? null
-      : new Date(t.getTime() + 4 * 3600000).toISOString().slice(11, 16);
-    if (hm) p.body.append(el('p', 'cap', `Rows and days counted at ${hm} Dubai, from the day roll-up rebuilt every quarter hour; each feed’s latest reading is live.`));
+    const dubai = (v) => { const t = new Date(v); return Number.isNaN(t.getTime()) ? null : new Date(t.getTime() + 4 * 3600000).toISOString(); };
+    const recent = dubai(cov.counts_as_of); const older = cov.older_counted_at ? dubai(cov.older_counted_at) : null;
+    /* Two times, because the roll-up keeps two (the review of 2026-11-25):
+       the last 14 days are rebuilt every quarter hour, the days before only
+       by the nightly full pass. */
+    const olderTxt = older ? `; older days at ${older.slice(11, 16)} on ${older.slice(8, 10)}/${older.slice(5, 7)}, by the nightly full rebuild` : '';
+    if (recent) p.body.append(el('p', 'cap', `Rows and days counted at ${recent.slice(11, 16)} Dubai for the last 14 days, from the day roll-up rebuilt every quarter hour${olderTxt}; each feed’s latest reading is live.`));
   }
 }
 function coverageAbsence(root, c, cov, ver) {

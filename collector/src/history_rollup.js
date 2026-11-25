@@ -103,10 +103,13 @@ export async function refreshCashFareDay(db = pool, { since = null } = {}) {
     `DELETE FROM cash_fare_day WHERE computed_at < $1::timestamptz
        ${since ? 'AND day >= $2::date' : ''}`, since ? [t0, since] : [t0]);
   await recordBuild(db, 'cash_fare_day', t0, since);
-  /* The fare_only count (sql/schema_v131.sql) has its own build record, so
-     /api/ledger/exposure reads this table only once a full pass has filled
-     that count back to the start — rows from before v131 carry NULL there. */
-  await recordBuild(db, 'cash_fare_day:fare_only', t0, since);
+  /* THE FULL PASS, RECORDED APART (sql/schema_v131.sql; the review of
+     2026-11-25). /api/ledger/exposure reads this table for settled days only
+     while this row's read_at — the last pass that rebuilt EVERY day, and so
+     filled the fare_only count back to the start — is under 36 hours old.
+     'cash_fare_day' cannot say that: its read_at moves on every narrow pass
+     and its built_from stays 1900-01-01 for good after one full pass. */
+  if (!since) await recordBuild(db, 'cash_fare_day:full', t0, null);
   const { rows } = await db.query('SELECT count(*)::int n FROM cash_fare_day');
   return rows[0].n;
 }

@@ -69,11 +69,13 @@ check('stale: the newest-polled row per plate, the same as the DISTINCT ON', JSO
   `\n    old ${JSON.stringify(byPlate(oldS))}\n    new ${JSON.stringify(byPlate(newS))}`);
 check('…a NULL poll time still sorts first, as DESC put it', byPlate(newS).find((r) => r.plate === 'LNULL') && byPlate(oldS).find((r) => r.plate === 'LNULL')?.captured_at === byPlate(newS).find((r) => r.plate === 'LNULL')?.captured_at);
 
-/* The index the stale read is served by exists (sql/schema_v131.sql); on a
-   table this small the planner may still choose a scan, so the speed is
-   measured on production, not asserted here. */
-const idx = await q(`SELECT indexname FROM pg_indexes WHERE tablename = 'telemetry_snapshot' AND indexname = 'telem_plate_polled_idx'`);
-check('telem_plate_polled_idx exists for the stale read', idx.length === 1);
+/* The index the stale read is served by exists — v27's, not a twin (the
+   review of 2026-11-25: v131 first added a duplicate). Exactly one index on
+   (plate, polled_at DESC). On a table this small the planner may still choose
+   a scan, so the speed is measured on production, not asserted here. */
+const idx = await q(`SELECT indexname FROM pg_indexes WHERE tablename = 'telemetry_snapshot'
+  AND regexp_replace(indexdef, '^.* USING btree ', '') = '(plate, polled_at DESC)'`);
+check('one index serves the stale read, v27\'s, and no twin of it', idx.length === 1 && idx[0].indexname === 'telemetry_plate_polled_idx', JSON.stringify(idx));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

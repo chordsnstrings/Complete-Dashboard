@@ -55,7 +55,7 @@ await alert('ecosine', '2026-10-04T12:00:00+04:00');
 await alert('egari', null);
 
 const { get } = await mountAll(pg);
-const strip = (b) => { const { counts_as_of, ...rest } = b; return JSON.stringify(rest); };
+const strip = (b) => { const { counts_as_of, older_counted_at, ...rest } = b; return JSON.stringify(rest); };
 const URLS = ['/api/coverage', '/api/coverage?fleet=egari', '/api/coverage?platform=uber', '/api/coverage?platform=bolt&fleet=egari'];
 
 /* ── §1 ─────────────────────────────────────────────────────────────────── */
@@ -68,7 +68,8 @@ const rolled = [];
 for (const u of URLS) rolled.push((await get(u)).body);
 check('after a full pass every figure is the same, for every filter', URLS.every((u, i) => strip(live[i]) === strip(rolled[i])),
   URLS.map((u, i) => (strip(live[i]) === strip(rolled[i]) ? '' : `${u}\n    live   ${strip(live[i]).slice(0, 400)}\n    rolled ${strip(rolled[i]).slice(0, 400)}`)).filter(Boolean).join('\n  '));
-check('…and the answer says when the counts were read', rolled.every((b) => b.counts_as_of));
+check('…and the answer says when the counts were read: the last 14 days and the older days, both from that full pass',
+  rolled.every((b) => b.counts_as_of && b.older_counted_at && b.counts_as_of === b.older_counted_at), JSON.stringify([rolled[0].counts_as_of, rolled[0].older_counted_at]));
 /* Proof the counts are the roll-up's: an old trip removed without a pass
    leaves the count where it was; the live count would drop by one. */
 await q(`DELETE FROM trip WHERE platform = 'bolt' AND fleet_id IS NULL`);
@@ -98,11 +99,19 @@ check('between passes the latest booking and the latest poll are live', between.
 const since = (await q(`SELECT ((now() AT TIME ZONE 'Asia/Dubai')::date - 60)::text AS d`))[0].d;
 await refreshCoverageDay(db, { since });
 const narrow = (await get('/api/coverage')).body;
+/* The review of 2026-11-25: a narrow pass moved the one time the answer
+   gave, though it rebuilt only the last 14 days. */
+check('a narrow pass moves counts_as_of (the last 14 days) but not older_counted_at (the full pass)',
+  narrow.counts_as_of !== rolled[0].counts_as_of && narrow.older_counted_at === rolled[0].older_counted_at,
+  JSON.stringify([rolled[0].counts_as_of, rolled[0].older_counted_at, narrow.counts_as_of, narrow.older_counted_at]));
 const relive = await q(`SELECT 1`).then(() => null);
-/* The live answer for the same data, to compare against: drop the build
-   record so the route counts live. */
-await q(`DELETE FROM history_rollup_build WHERE name = 'coverage_day'`);
+/* The live answer for the same data, to compare against: a full pass 37
+   hours old (the nightly pass failed twice) is not trusted, and the route
+   counts live — which is also the review's second finding. */
+await q(`UPDATE history_rollup_build SET read_at = now() - interval '37 hours' WHERE name = 'coverage_day:full'`);
 const truth = (await get('/api/coverage')).body;
+check('a full pass over 36 hours old puts the live counts back, and says so', truth.counts_as_of === null && truth.older_counted_at === null,
+  JSON.stringify([truth.counts_as_of, truth.older_counted_at]));
 await refreshCoverageDay(db);
 check('a narrow pass rebuilds the recent days to exactly the live answer', strip(narrow) === strip(truth),
   `\n    narrow ${strip(narrow).slice(0, 300)}\n    live   ${strip(truth).slice(0, 300)}`);

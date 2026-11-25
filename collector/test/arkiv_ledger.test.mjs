@@ -157,7 +157,10 @@ if (want('advances')) {
       'Cash taken against what each driver generated', 'Who has taken the most cash in fares', '† What this page does not know']),
     JSON.stringify(s.heads));
   check('the hero is the cash-fare CEILING, said to be one, with who carries it and the largest single driver',
-    s.hero === 'Cash fares put in drivers’ hands' && s.values[s.hero] === aed(sum)
+    /* The label says "less card" since CARD-3b (cash_taken is served net of
+       the card that paid it); this check kept the old words and failed on
+       every run after (found 2026-11-25 — CI skips browser files). */
+    s.hero === 'Cash fares in drivers’ hands, less card' && s.values[s.hero] === aed(sum)
     && s.subs[s.hero].startsWith('a ceiling, not a balance') && s.subs[s.hero].includes(`${carriers.length} of ${n} carry one`), JSON.stringify([s.values, s.subs[s.hero]]));
   check('the lending line is a tile that opens #policy, its figure the one in force', s.hrefs['The lending line'] === '#policy'
     && s.values['The lending line'] === `${exp.policy.pct}%`, JSON.stringify(s.hrefs));
