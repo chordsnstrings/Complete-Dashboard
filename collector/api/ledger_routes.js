@@ -1197,7 +1197,7 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
          ledger record would have been answered with every person on the
          ledger, summed, on that driver's page. */
       return res.json({
-        from, to, person_id: null, people: [],
+        from, to, person_id: null, people: [], settled_days: null,
         policy: null, policy_absent_reason: null,
         summary: { people: 0, measurable: 0, not_measurable: 0, over_policy: 0,
           fleet_ratio: null,
@@ -1216,10 +1216,65 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
           AND effective_from <= coalesce($1::date, (now() AT TIME ZONE 'Asia/Dubai')::date)
         ORDER BY effective_from DESC, id DESC LIMIT 1`, [to]);
 
+    /* CASH FARES FROM THE DAY ROLL-UP, THE RECENT DAYS LIVE (2026-11-25).
+       ─────────────────────────────────────────────────────────────────────
+       `taken` and `collected` each joined the trip_cash view, which filters
+       trip on an expression no index serves and reads every row's raw JSON:
+       two parallel scans of 0.73 M wide rows. Measured on production on the
+       audit of 2026-11-25: 103 s for one call, the gateway giving up at 80.
+       cash_fare_day (sql/schema_v119.sql, src/history_rollup.js) is the same
+       view summed per account per Dubai day — the same column, the same
+       trips — refreshed for the last 14 days every quarter hour and whole at
+       boot and nightly. So days before `cutoff` come from it, and the last
+       two days and today come live from trip_cash through the Dubai-day index,
+       so a cash fare taken an hour ago is in the ceiling. The roll-up is used
+       only while its last FULL pass (history_rollup_build 'cash_fare_day:full',
+       which also filled the fare_only count back to the start) is under 36
+       hours old: the nightly pass failing two nights running puts the whole
+       sum back on the live read — slow, never stale (the review of
+       2026-11-25). Days from today−14 are rebuilt every quarter hour; older
+       days as of that full pass; the answer says both (settled_days). */
+    const builds = await q(`SELECT name, read_at, read_at > now() - interval '36 hours' AS fresh,
+        ((now() AT TIME ZONE 'Asia/Dubai')::date - 2)::text AS d
+        FROM history_rollup_build WHERE name IN ('cash_fare_day', 'cash_fare_day:full')`).catch(() => []);
+    const cfdFull = builds.find((b) => b.name === 'cash_fare_day:full');
+    const cfdLast = builds.find((b) => b.name === 'cash_fare_day');
+    const cutoff = cfdFull?.fresh ? cfdFull.d : '1900-01-01';
+    const settledDays = cfdFull?.fresh
+      ? { before: cutoff, recent_counted_at: cfdLast?.read_at ?? null, older_counted_at: cfdFull.read_at } : null;
     const rows = await q(
       `WITH acct AS (
          SELECT driver_id, platform, external_id
            FROM driver_platform_id WHERE detached_at IS NULL
+       ),
+       /* NOT MATERIALIZED: cash_days is read twice (taken, collected), and a
+          CTE read twice is materialized by default — the person filter then
+          never reaches it, and a one-person call (the driver page, 1.5 s
+          before) scanned every trip while the read was live (the review of
+          2026-11-25). Inlined, each reference gets the filter. */
+       cash_days AS NOT MATERIALIZED (
+         SELECT driver_ext_id, day, trips, valued, value, fare_only
+           FROM cash_fare_day WHERE day < $4::date
+         UNION ALL
+         SELECT t.driver_ext_id, (t.requested_at AT TIME ZONE 'Asia/Dubai')::date AS day,
+                count(*)::int, count(t.cash_amount)::int, sum(t.cash_amount),
+                count(*) FILTER (WHERE t.cash_basis = 'fare_only')::int
+           FROM trip_cash t
+          WHERE (t.requested_at AT TIME ZONE 'Asia/Dubai')::date >= $4::date  /* trip_econ_day_idx */
+            AND coalesce(btrim(t.driver_ext_id), '') <> ''
+          GROUP BY 1, 2
+         UNION ALL
+         /* A cash trip with no request time: the day roll-up cannot hold it
+            and no day bound passes it, but the query this replaced counted it
+            in cash_taken whenever 'to' was unset — and still
+            does, through the NULL day below (the review of 2026-11-25; none
+            on production that day). 'collected' leaves it out, as it did:
+            NULL > effective_on is not true. */
+         SELECT t.driver_ext_id, NULL::date, count(*)::int, count(t.cash_amount)::int, sum(t.cash_amount),
+                count(*) FILTER (WHERE t.cash_basis = 'fare_only')::int
+           FROM trip_cash t
+          WHERE t.requested_at IS NULL AND coalesce(btrim(t.driver_ext_id), '') <> ''
+          GROUP BY 1
        ),
        /* The numerator, per book, over the person. entry_source 'verification'
           is excluded by construction — see sql/schema_v78.sql. */
@@ -1329,30 +1384,30 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
           absent-with-a-reason figure for what actually is. */
        taken AS (
          SELECT a.driver_id AS person_id,
-                sum(t.cash_amount)  AS value,
-                count(*)::int       AS trips,
-                min((t.requested_at AT TIME ZONE 'Asia/Dubai')::date) AS first_on,
-                max((t.requested_at AT TIME ZONE 'Asia/Dubai')::date) AS last_on
+                sum(c.value)        AS value,
+                sum(c.trips)::int   AS trips,
+                min(c.day)          AS first_on,
+                max(c.day)          AS last_on
            FROM acct a
-           JOIN trip_cash t ON t.driver_ext_id = a.external_id
-          WHERE ($2::date IS NULL OR (t.requested_at AT TIME ZONE 'Asia/Dubai')::date <= $2::date)
+           JOIN cash_days c ON c.driver_ext_id = a.external_id
+          WHERE ($2::date IS NULL OR c.day <= $2::date)
           GROUP BY a.driver_id
        ),
        collected AS (
          SELECT a.driver_id AS person_id,
-                sum(t.cash_amount)                                  AS value,
-                count(*)::int                                       AS trips,
-                count(*) FILTER (WHERE t.cash_amount IS NOT NULL)::int AS priced,
-                count(*) FILTER (WHERE t.cash_basis = 'fare_only')::int AS fare_only
+                sum(c.value)            AS value,
+                sum(c.trips)::int       AS trips,
+                sum(c.valued)::int      AS priced,
+                sum(c.fare_only)::int   AS fare_only
            FROM acct a
            JOIN opening o ON o.person_id = a.driver_id
-           JOIN trip_cash t ON t.driver_ext_id = a.external_id
-          WHERE (t.requested_at AT TIME ZONE 'Asia/Dubai')::date > o.effective_on
+           JOIN cash_days c ON c.driver_ext_id = a.external_id
+          WHERE c.day > o.effective_on
             /* Bounded ABOVE only, by the as-of. The lower bound is the day the
                accounts team stated the position — that is the whole point of
                their date — and from has no business here: a position asked
                for on the 30th includes what was collected on the 6th. */
-            AND ($2::date IS NULL OR (t.requested_at AT TIME ZONE 'Asia/Dubai')::date <= $2::date)
+            AND ($2::date IS NULL OR c.day <= $2::date)
           GROUP BY a.driver_id
        ),
        /* Everything in the cash book that is NOT the opening — deposits, and
@@ -1423,7 +1478,7 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
          LEFT JOIN collected c ON c.person_id = dr.id
          LEFT JOIN handed h ON h.person_id = dr.id
         WHERE ($3::bigint IS NULL OR dr.id = $3::bigint)
-        ORDER BY dr.full_name NULLS LAST`, [from, to, onePerson]);
+        ORDER BY dr.full_name NULLS LAST`, [from, to, onePerson, cutoff]);
 
     const pct = policy ? Number(policy.pct) : null;
     const people = rows.map((r) => {
@@ -1606,6 +1661,7 @@ export function ledgerExposureRoutes(app, { q, wrap }) {
       from, to,
       person_id: onePerson,
       resolved_from: who.from,
+      settled_days: settledDays,
       absent_reason: null,
       policy: policy
         ? { pct, effective_from: policy.effective_from, set_by: policy.set_by, note: policy.note }

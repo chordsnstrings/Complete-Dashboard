@@ -30,6 +30,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
+import { refreshCashFareDay } from '../src/history_rollup.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -324,6 +325,77 @@ await trip('U-40', '2026-09-09', 300, false);   // card — must not count
     (() => { const z = body.people.find((x) => x.owes.cash_taken == null);
       return !z || /nothing has gone into their hand/.test(z.owes.cash_taken_means || ''); })(),
     'a person with no cash trips reported a taken figure of zero');
+}
+
+/* ── THE DAY ROLL-UP ANSWERS EXACTLY WHAT THE LIVE SCAN DID (2026-11-25) ──
+   The route reads settled days from cash_fare_day while its last FULL pass is
+   under 36 hours old, and the last two days live. Same windows, same people,
+   byte for byte; then proof it reads the table, not the trips; then the four
+   things the review of 2026-11-25 found: a narrow pass is not a full one, a
+   stale full pass puts the live read back, the answer says when it counted,
+   and a cash trip with no request time is still taken. */
+{
+  const today = (await q(`SELECT ((now() AT TIME ZONE 'Asia/Dubai')::date)::text AS d`))[0].d;
+  const minus = async (n) => (await q(`SELECT ($1::date - $2::int)::text AS d`, [today, n]))[0].d;
+  await trip('U-10', today, 55);                      // a cash fare taken today: the live part
+  await q(`UPDATE trip SET price = NULL WHERE external_id = (SELECT external_id FROM trip WHERE driver_ext_id = 'U-10' ORDER BY requested_at LIMIT 1)`);
+  /* A completed cash trip with no request time (uber.js maps a missing
+     'Trip request time' to null): the replaced query counted it in
+     cash_taken whenever `to` was unset. */
+  await q(`INSERT INTO trip (platform, external_id, fleet_id, driver_ext_id, requested_at, status, payment_type, price)
+           VALUES ('uber', 'tnull', 'ecosine', 'U-40', NULL, 'completed', 'cash', 99)`);
+  const urls = ['/api/ledger/exposure?from=2026-09-01&to=2026-09-30', '/api/ledger/exposure?from=2026-09-01',
+    '/api/ledger/exposure', '/api/ledger/exposure?person=10', '/api/ledger/exposure?person=40'];
+  const strip = (b) => { const { settled_days, ...rest } = b; return JSON.stringify(rest); };
+  const db0 = { query: (t, p) => db.query(t, p) };
+  const live = []; const liveBodies = [];
+  for (const u of urls) { const b = (await get(u)).body; liveBodies.push(b); live.push(strip(b)); }
+  const p40 = (b) => b.people.find((x) => x.name === 'Took Cash Never Counted');
+  check('a cash trip with no request time is taken when `to` is unset, and not when it is set (as the replaced query had it)',
+    p40(liveBodies[2])?.owes.cash_taken === 299 && p40(liveBodies[2])?.owes.cash_taken_trips === 3
+      && p40(liveBodies[0])?.owes.cash_taken === 200,
+    JSON.stringify([p40(liveBodies[2])?.owes, p40(liveBodies[0])?.owes]));
+
+  /* A narrow pass is not a full one: the route stays live, and says so. */
+  await refreshCashFareDay(db0, { since: await minus(14) });
+  const [noFull] = await q(`SELECT count(*)::int n FROM history_rollup_build WHERE name = 'cash_fare_day:full'`);
+  const afterNarrow = (await get(urls[2])).body;
+  check('a narrow pass records no full pass, and the route stays live (settled_days null)',
+    noFull.n === 0 && afterNarrow.settled_days === null && strip(afterNarrow) === live[2], JSON.stringify(afterNarrow.settled_days));
+
+  await refreshCashFareDay(db0);
+  const [mark] = await q(`SELECT built_from::text AS b, read_at FROM history_rollup_build WHERE name = 'cash_fare_day:full'`);
+  const rolled = []; const rolledBodies = [];
+  for (const u of urls) { const b = (await get(u)).body; rolledBodies.push(b); rolled.push(strip(b)); }
+  check('a full pass is recorded apart, back to the start',
+    mark?.b === '1900-01-01' && mark.read_at, JSON.stringify(mark));
+  check('the roll-up answers every window exactly as the live scan did — taken, collected, the fare-only count, today\'s fare, the undated trip',
+    urls.every((u, i) => live[i] === rolled[i]),
+    urls.map((u, i) => (live[i] === rolled[i] ? '' : `${u}: ${live[i].slice(0, 160)} ≠ ${rolled[i].slice(0, 160)}`)).filter(Boolean).join(' | '));
+  const sd = rolledBodies[2].settled_days;
+  check('…and says what it read from the roll-up and when: days before today−2, the last 14 each quarter hour, older at the full pass',
+    liveBodies.every((b) => b.settled_days === null) && sd && sd.before === await minus(2)
+      && new Date(sd.older_counted_at).getTime() === new Date(mark.read_at).getTime() && sd.recent_counted_at,
+    JSON.stringify({ live: liveBodies.map((b) => ('settled_days' in b ? b.settled_days : 'missing')), sd }));
+
+  /* Proof it is the table that answered the settled days: remove an old
+     cash trip without refreshing — the live scan would drop it, the roll-up
+     still holds it until its next pass. */
+  const [old] = await q(`SELECT external_id FROM trip WHERE driver_ext_id = 'U-10' AND price IS NOT NULL
+                          AND requested_at < now() - interval '7 days' ORDER BY requested_at LIMIT 1`);
+  await q(`DELETE FROM trip WHERE external_id = $1`, [old.external_id]);
+  const after = (await get(urls[2])).body;
+  check('settled days are read from the roll-up, not the trips', strip(after) === rolled[2], 'the answer changed when an old trip was removed without a refresh');
+
+  /* A full pass 37 hours old — the nightly pass failed twice — is not
+     trusted: the live read comes back, and it sees the removal. */
+  await q(`UPDATE history_rollup_build SET read_at = now() - interval '37 hours' WHERE name = 'cash_fare_day:full'`);
+  const stale = (await get(urls[2])).body;
+  check('a full pass over 36 hours old puts the live read back (settled_days null, the removed trip gone)',
+    stale.settled_days === null && strip(stale) !== rolled[2], JSON.stringify(stale.settled_days));
+  await refreshCashFareDay(db0);
+  const fresh = (await get(urls[2])).body;
+  check('…and the next full pass agrees with that live read', fresh.settled_days && strip(fresh) === strip(stale));
 }
 
 console.log(`\n${fail ? '✗' : '✓'} ledger_exposure: ${pass} passed, ${fail} failed`);

@@ -437,4 +437,8 @@ export const SCHEMA_FILES = [
      person-day, and which car was theirs when, for Territory's routes,
      stops and parking spots (src/movement_rollup.js, api/movement_track.js). */
   'schema_v130.sql',
+  /* The audit of 2026-11-25's three fixes: an index for the stale-tracker
+     insight, a fare_only count on cash_fare_day for /api/ledger/exposure, and
+     coverage_day for /api/coverage (src/coverage_rollup.js). */
+  'schema_v131.sql',
 ];

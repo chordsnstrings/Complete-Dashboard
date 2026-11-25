@@ -181,8 +181,11 @@ check('both basic-xxs × 1, from the production branch, deploy_on_push off, from
   [api, worker].every((c) => c.instance_size_slug === 'basic-xxs' && c.instance_count === 1
     && c.branch === 'claude/ecosine-egari-tracking-apis-rf9ong' && c.deploy_on_push === false
     && c.source_dir === 'collector' && c.dockerfile_path === 'collector/Dockerfile' && c.repo === 'chordsnstrings/Complete-Dashboard'));
-check('the api runs node api/server.js on 8080; the worker runs the schedule',
-  api.run_command === 'node api/server.js' && api.http_port === 8080 && worker.run_command === 'node src/index.js schedule');
+/* 2026-11-25 (FIX-STATUS AUD-1): the API's V8 heap is capped under its
+   512 MB instance, so it is collected rather than killed. */
+check('the api runs node api/server.js on 8080 with its heap capped at 320 MB; the worker runs the schedule',
+  api.run_command === 'node --max-old-space-size=320 api/server.js' && api.http_port === 8080 && worker.run_command === 'node src/index.js schedule',
+  JSON.stringify([api.run_command, worker.run_command]));
 check('the health check is /api/health, 30 s initial delay, every 15 s',
   JSON.stringify(api.health_check) === JSON.stringify({ http_path: '/api/health', initial_delay_seconds: 30, period_seconds: 15 }), JSON.stringify(api.health_check));
 /* 43 + COMMIT_SHA and 45 + COMMIT_SHA at the 2026-11-12 audit; three fewer on

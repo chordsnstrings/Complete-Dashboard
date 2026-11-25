@@ -677,6 +677,12 @@ export function accessLayer({ db, log = { info() {}, warn() {}, error() {} }, lo
       return shapeAndSend(copy);
     };
     res.send = (b) => {
+      /* A Buffer is shaped like a string (2026-11-25, AUD-1): the response
+         cache now stores and sends UTF-8 bytes, on a miss and on every hit,
+         and this hook took only strings — so a one-fleet or phone-less reader
+         was sent the company-wide, unredacted answer. rls_gate and access_core
+         caught it in CI before it reached production. */
+      if (Buffer.isBuffer(b)) b = b.toString('utf8');
       if (res.fmShaped || res.statusCode >= 400 || typeof b !== 'string') return origSend(b);
       const type = String(res.get('content-type') || '');
       if (!type.includes('json')) return origSend(b);

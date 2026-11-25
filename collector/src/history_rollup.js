@@ -89,19 +89,27 @@ export async function refreshCashFareDay(db = pool, { since = null } = {}) {
   const bound = since ? `AND (t.requested_at AT TIME ZONE '${TZ}')::date >= $1::date` : '';
   const p = since ? [since] : [];
   await db.query(
-    `INSERT INTO cash_fare_day (platform, driver_ext_id, day, fleet_id, trips, valued, value, computed_at)
+    `INSERT INTO cash_fare_day (platform, driver_ext_id, day, fleet_id, trips, valued, value, fare_only, computed_at)
      SELECT t.platform, t.driver_ext_id, (t.requested_at AT TIME ZONE '${TZ}')::date AS day,
-            min(t.fleet_id), count(*)::int, count(t.cash_amount)::int, sum(t.cash_amount), now()
+            min(t.fleet_id), count(*)::int, count(t.cash_amount)::int, sum(t.cash_amount),
+            count(*) FILTER (WHERE t.cash_basis = 'fare_only')::int, now()
        FROM trip_cash t
       WHERE coalesce(btrim(t.driver_ext_id), '') <> '' AND t.requested_at IS NOT NULL ${bound}
       GROUP BY 1, 2, 3
      ON CONFLICT (platform, driver_ext_id, day) DO UPDATE SET
        fleet_id = EXCLUDED.fleet_id, trips = EXCLUDED.trips, valued = EXCLUDED.valued,
-       value = EXCLUDED.value, computed_at = EXCLUDED.computed_at`, p);
+       value = EXCLUDED.value, fare_only = EXCLUDED.fare_only, computed_at = EXCLUDED.computed_at`, p);
   await db.query(
     `DELETE FROM cash_fare_day WHERE computed_at < $1::timestamptz
        ${since ? 'AND day >= $2::date' : ''}`, since ? [t0, since] : [t0]);
   await recordBuild(db, 'cash_fare_day', t0, since);
+  /* THE FULL PASS, RECORDED APART (sql/schema_v131.sql; the review of
+     2026-11-25). /api/ledger/exposure reads this table for settled days only
+     while this row's read_at — the last pass that rebuilt EVERY day, and so
+     filled the fare_only count back to the start — is under 36 hours old.
+     'cash_fare_day' cannot say that: its read_at moves on every narrow pass
+     and its built_from stays 1900-01-01 for good after one full pass. */
+  if (!since) await recordBuild(db, 'cash_fare_day:full', t0, null);
   const { rows } = await db.query('SELECT count(*)::int n FROM cash_fare_day');
   return rows[0].n;
 }

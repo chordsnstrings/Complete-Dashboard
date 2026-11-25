@@ -318,8 +318,10 @@ const state = await rollupState(db);
    running — but it also passes when one pass disappears and another is added
    in the same change, and it says nothing about WHICH one went missing. */
 /* driver_first_online and cash_fare_day: the two day roll-ups /api/history
-   reads for the hero sparklines (sql/schema_v119.sql, src/history_rollup.js). */
-const PASSES = ['cash_fare_day', 'driver_day', 'driver_first_online', 'driver_lifetime', 'driver_online_hour',
+   reads for the hero sparklines (sql/schema_v119.sql, src/history_rollup.js).
+   coverage_day: the per-day landed counts /api/coverage reads instead of
+   counting four whole tables per call (sql/schema_v131.sql, src/coverage_rollup.js). */
+const PASSES = ['cash_fare_day', 'coverage_day', 'driver_day', 'driver_first_online', 'driver_lifetime', 'driver_online_hour',
   'driver_payout_day', 'driver_statement_day',
   'money_event', 'rollup_day', 'rollup_month', 'rollup_person_month', 'rollup_week'];
 const seen = state.map((s) => s.name).sort();

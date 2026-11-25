@@ -85,8 +85,16 @@ export const VERSION_SQL =
 
    64MB of JSON is a few thousand of the small ones or a few hundred of the
    large, which is the whole product across every window with room to spare, and
-   is nothing next to the memory a Node process already holds. */
-const MAX_BYTES = Number(process.env.CACHE_MAX_BYTES || 64 * 1024 * 1024);
+   is nothing next to the memory a Node process already holds.
+
+   BYTES, MEASURED AS BYTES (2026-11-25). The cap counted `text.length` — UTF-16
+   code units — and held the bodies as JS strings. A body with one character
+   outside Latin-1 (every em dash, every Arabic place name, which is most of
+   them) is stored two bytes a character, so "64MB" could hold ~128MB of heap
+   on a 512MB basic-xxs. The audit of 2026-11-25 watched the API's memory climb
+   43%→68% under sustained reading and the process restart twice. Bodies are
+   now UTF-8 Buffers, counted by their byte length, under a 48MB cap. */
+const MAX_BYTES = Number(process.env.CACHE_MAX_BYTES || 48 * 1024 * 1024);
 
 /* Never cached, by prefix. /api/live and /api/track are realtime positions, and
    a minute old is simply wrong. /api/settings reads credential state.
@@ -451,8 +459,15 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port, refre
     const origJson = res.json.bind(res);
     res.json = (body) => {
       if (res.statusCode === 200) {
+        /* SERIALISED ONCE (2026-11-25). This stringified the body for the store
+           and then origJson() stringified it again to send it — two copies of
+           the largest answers (the ledger's 741kb, the directory's 343kb) alive
+           at once on every miss. The one Buffer is now both stored and sent;
+           nothing in this app changes Express's JSON settings, so res.json and
+           this produce the same bytes. */
+        let text;
+        try { text = Buffer.from(JSON.stringify(body), 'utf8'); } catch { return origJson(body); }
         try {
-          const text = JSON.stringify(body);
           /* Oldest first — a Map iterates in insertion order — and evicting
              until the new entry fits rather than one per write, or a single
              large response never makes room for itself. */
@@ -469,7 +484,9 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port, refre
           }
           store.set(key, { version: v, at: Date.now(), body: text, type: 'application/json; charset=utf-8' });
           bytes += text.length;
-        } catch { /* a body that will not serialise is one we cannot cache */ }
+        } catch { /* a body that will not be stored is still sent below */ }
+        res.set('content-type', 'application/json; charset=utf-8');
+        return res.send(text);
       }
       return origJson(body);
     };

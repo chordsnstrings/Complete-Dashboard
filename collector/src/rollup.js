@@ -40,6 +40,7 @@ import { dubaiIso } from './util.js';
    (sql/schema_v119.sql). Their own module: they depend on nothing this file
    writes, so the ordering argument below does not reach them. */
 import { refreshFirstOnline, refreshCashFareDay } from './history_rollup.js';
+import { refreshCoverageDay } from './coverage_rollup.js';
 
 const SRC = 'rollup';
 
@@ -613,6 +614,9 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
      failure is recorded against its own name and stops nothing else. */
   out.push(await runOne(db, 'driver_first_online', () => refreshFirstOnline(db, { since })));
   out.push(await runOne(db, 'cash_fare_day', () => refreshCashFareDay(db, { since })));
+  /* What has landed per dataset, fleet and day, for /api/coverage
+     (src/coverage_rollup.js). Reads the collector-written tables only. */
+  out.push(await runOne(db, 'coverage_day', () => refreshCoverageDay(db, { since })));
   out.push(await runOne(db, 'driver_lifetime', () => refreshLifetime(db)));
   /* Last, and deliberately: it reads the collector-written tables, not the
      rollups, so it does not depend on this order — but running it here means

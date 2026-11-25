@@ -50,7 +50,13 @@ services:
       deploy_on_push: false
     source_dir: /collector
     dockerfile_path: collector/Dockerfile
-    run_command: node api/server.js
+    # A V8 heap limit under the 512 MB instance (2026-11-25, FIX-STATUS AUD-1).
+    # Unset, the heap could grow past what the container holds and the process
+    # was killed instead of collected: the audit of 2026-11-25 watched the API
+    # climb to 60-68% between samples and restart twice under sustained load.
+    # 320 MB of heap leaves room for the response cache's buffers (48 MB,
+    # api/cache.js) and the runtime itself.
+    run_command: node --max-old-space-size=320 api/server.js
     http_port: 8080
     instance_size_slug: basic-xxs
     instance_count: 1
