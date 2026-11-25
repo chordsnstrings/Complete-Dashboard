@@ -26,7 +26,7 @@
    3. It must say how old it is. rollup_state records every run, and the API
       exposes it, so a page reading a cached answer can date it.  */
 import { pool } from './db.js';
-import { personKey } from '../api/custody_sql.js';
+import { personKey, personKeyStored } from '../api/custody_sql.js';
 /* One definition of an online span, shared with the three read endpoints that
    draw one. This module is the writer and they are the readers, so a fifth
    private copy here is a fifth answer to "how long was this person available"
@@ -1013,6 +1013,32 @@ export async function refreshStatements(db = pool) {
    record disagreeing with the reconciliation about who a person is. */
 const PERSON = (nameCol, idCol) => personKey(idCol, nameCol);
 
+/* JIT OFF FOR THE DRIVER-DAY STATEMENT, AND FOR NOTHING ELSE (2026-11-25).
+   ─────────────────────────────────────────────────────────────────────────
+   driver_day hit the 120 s statement timeout on production on 25 Nov (08:42
+   and 10:20 UTC on 14-day passes, 13:12 on the boot's full pass). Measured
+   on a local Postgres 16 at production scale (729k trips, 1.07M timeline
+   events): JIT spent 7.6 s compiling this statement, more than half of a
+   14-day pass, because the statement folds people through the identity
+   register's CASE of several hundred ids and JIT compiles every branch of it.
+   With JIT off this statement ran a narrow pass in 1.8 s (5.9 s with JIT) and
+   a full pass in 21 s (29 s). The whole roll-up pass was measured both ways
+   too: every other step was the same or faster WITH JIT, so it is turned off
+   on one pooled connection, for this one statement, and reset before the
+   connection goes back. PGlite (the tests) has no pool and no JIT. */
+export async function queryWithoutJit(db, sql, params) {
+  if (typeof db.connect !== 'function') return db.query(sql, params);
+  const client = await db.connect();
+  let broken = false;
+  try {
+    await client.query('SET jit = off');
+    return await client.query(sql, params);
+  } finally {
+    await client.query('RESET jit').catch(() => { broken = true; });
+    client.release(broken);
+  }
+}
+
 export async function refreshDriverDays(db = pool, { since = null } = {}) {
   const MIN_OF = (c) => `(extract(hour FROM ${c} AT TIME ZONE 'Asia/Dubai') * 60`
     + ` + extract(minute FROM ${c} AT TIME ZONE 'Asia/Dubai'))::int`;
@@ -1028,13 +1054,24 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
      the narrow-refresh bound has to be spelled against each of them. */
   const dayBound = since ? 'AND day >= $1::date' : '';
 
-  await db.query(
+  await queryWithoutJit(db,
     `WITH jobs AS (
        SELECT n.driver_ext_id, n.driver_name, n.local_day AS day, n.fleet_id, n.platform, n.plate,
               n.outcome, n.distance_km, n.has_distance, n.price, n.has_fare, n.ended_at,
               ${MIN_OF('n.requested_at')} AS s,
-              ${END_MIN} AS e
+              ${END_MIN} AS e,
+              /* THE PERSON, READ ONCE AND STORED (2026-11-25). fare_pf and owner
+                 each computed personKey() — the identity register's CASE over
+                 hundreds of ids around two regexes — on every trip, twice over
+                 437k trips on a full pass; with JIT compiling that CASE, the
+                 pass reached the 120 s statement timeout on production. trip
+                 stores the same key (sql/schema_v53.sql generates it from the
+                 same register, and test/person_key.test.mjs compares the two
+                 on every row), so it is read here once, by the primary key —
+                 trip_norm's SELECT t.* was frozen before the column existed. */
+              ${personKeyStored('tk')} AS person
          FROM trip_norm n
+         JOIN trip tk ON tk.platform = n.platform AND tk.external_id = n.external_id
         WHERE n.is_booking AND coalesce(btrim(n.driver_ext_id), '') <> '' ${bound}),
      gapped AS (
        /* The furthest any earlier job in this driver-day ran to. A job with no
@@ -1086,7 +1123,11 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
         rewritten below, and bounding the event scan as well would close a span
         that opens before the bound. The union in the days CTE stops an
         unbounded scan from resurrecting old rows. */
-     ${onlineSpansSql()},
+     /* A narrow pass reads only the timeline events a span reaching its
+        first day can be built from (api/online_span_sql.js, since): exact for
+        every day it rewrites, and it no longer sorts every event ever
+        recorded on each quarter-hourly pass (2026-11-25). */
+     ${onlineSpansSql(since ? { since: `($1::date::timestamp AT TIME ZONE 'Asia/Dubai')` } : {})},
      /* ── the money, combined PER PLATFORM ──────────────────────────────
         Statement net and per-trip fares are complementary, not alternatives:
         Uber publishes a daily statement and no fare, the hotel channel
@@ -1116,7 +1157,7 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
         So the fold is used here too. Anything else would have this table
         disagreeing with the reconciliation about who earned what. */
      fare_pf AS (
-       SELECT ${PERSON('driver_name', 'driver_ext_id')} AS person, day, platform,
+       SELECT person, day, platform,
               round(sum(price) FILTER (WHERE has_fare)::numeric, 2) AS fares
          FROM jobs GROUP BY person, day, platform),
      /* Which ext_id a person's day belongs to. driver_day is keyed on
@@ -1125,12 +1166,14 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
         deterministically — rather than being duplicated onto both, which would
         double the fleet's revenue at every grain above the day. */
      owner AS (
-       SELECT DISTINCT ON (person, day) ${PERSON('driver_name', 'driver_ext_id')} AS person,
+       SELECT DISTINCT ON (person, day) person,
               day, driver_ext_id, count(*) AS n
          FROM jobs GROUP BY person, day, driver_ext_id
         ORDER BY person, day, count(*) DESC, driver_ext_id),
      stmt_pf AS (
-       SELECT ${PERSON('driver_name', 'driver_ext_id')} AS person,
+       /* The stored key here too (sql/schema_v51.sql put the same generated
+          column on driver_statement_day and driver_payout_day). */
+       SELECT ${personKeyStored('driver_statement_day')} AS person,
               max(driver_ext_id) FILTER (WHERE coalesce(btrim(driver_ext_id), '') <> '') AS own_id,
               max(driver_name) AS driver_name,
               day, platform,
@@ -1198,7 +1241,7 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
        SELECT coalesce(o.driver_ext_id, max(p2.driver_ext_id), p2.person) AS driver_ext_id, p2.day,
               round(sum(p2.earnings)::numeric, 2)      AS payout,
               round(sum(p2.cash_earnings)::numeric, 2) AS payout_cash
-         FROM (SELECT ${PERSON('driver_name', 'driver_ext_id')} AS person, driver_ext_id, day,
+         FROM (SELECT ${personKeyStored('driver_payout_day')} AS person, driver_ext_id, day,
                       earnings, cash_earnings
                  FROM driver_payout_day WHERE TRUE ${dayBound}) p2
          LEFT JOIN owner o ON o.person = p2.person AND o.day = p2.day
@@ -1234,11 +1277,21 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
                     the same human keyed two different ways depending on which
                     feed reached the day. That is the exact split the person
                     fold exists to prevent. */
+     /* OVER EVERY TRIP OF THE ACCOUNT, NOT THE PASS'S DAYS (2026-11-25).
+        Read from agg, a 14-day pass saw only the window's trips: an account
+        online, paid or on a statement in the window but with its last trip
+        before it got fleet_id NULL and a person_key that is its bare id on
+        every quarter-hourly pass, and the nightly full pass put them back —
+        the days nearest today flipping between the two. Found by
+        test/driver_day_timeout.test.mjs holding a narrow pass to the full one.
+        A full pass keeps reading agg, which already holds every trip. */
      account AS (
        SELECT driver_ext_id,
               min(fleet_id)    FILTER (WHERE fleet_id IS NOT NULL)    AS fleet_id,
               min(driver_name) FILTER (WHERE driver_name IS NOT NULL) AS driver_name
-         FROM agg GROUP BY 1),
+         FROM ${since ? `trip_norm n
+        WHERE n.is_booking AND coalesce(btrim(n.driver_ext_id), '') <> ''` : 'agg'}
+        GROUP BY 1),
      days AS (
        SELECT driver_ext_id, day FROM agg
        UNION SELECT driver_ext_id, day FROM money
