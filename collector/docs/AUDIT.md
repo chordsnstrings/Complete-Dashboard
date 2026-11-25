@@ -3279,3 +3279,98 @@ To repeat: `node test/whereabouts_page.test.mjs` (port 8325); `PORT=8325 node mo
 `ONLY='vehicle/L45235/whereabouts?day=<yesterday>' SETTLE=2500 node bin/focus-rows-audit.mjs http://127.0.0.1:8325
 /tmp/fx.json`. Against production once deployed: `node bin/prod-mirror.mjs &` and open
 `http://127.0.0.1:8200/#vehicle/<plate>/whereabouts`.
+
+## Full audit pass — 2026-11-25 (production at `7f1c220`), audit only
+
+The operator asked for "a complete audit now … audit pass only", then "check everything else as well, do a thorough audit". Nothing was fixed. This entry records what was measured and how.
+
+**How it was run.**
+- The working tree at `7f1c220` (identical to production) was served by `node bin/live-ui.mjs` on :8100 against the production API.
+- The harnesses ran one at a time, as in "How to reproduce a pass" above.
+- Production was read directly with GETs, the DigitalOcean API (app, deployments, alerts, metrics, run logs, database, backups) and `bin/app-spec.mjs --check`.
+- `npm test` ran once; `npm audit --omit=dev`; a repository-wide credential-pattern scan.
+- The raw render report is `docs/audit/render-2026-11-25.json`.
+- The numbers report was kept out of the repository: it carries a driver's name.
+
+### What each harness found
+
+| harness | result |
+|---|---|
+| `render-audit` (133 routes × 1500/1180/820) | 399 renders, findings on 98 routes. See the notes below the table. |
+| `page-audit` (7 / 30 / 90 / 365 / all) | The 7- and 30-day windows finished: 74 views, 262 endpoint calls. Every "unreached" endpoint is POST-only or needs a parameter the harness does not send (`/api/history` page, `/api/corporate/property` id, `/api/charging/driver` person). Empty answers: `/api/earnings/components`, `/api/ledger/entries`, `/api/schema/raw-values`. **The 90-day window hit the harness's one-hour limit**, so 90, 365 and all were not measured. |
+| `live-audit` | 47 passed, 6 failed. See the notes below the table. |
+| `numbers-audit` (133 routes at 412) | One finding. On `#unit/drivers`, one driver's licence days-left (1437) is in `/api/economics/drivers` but missing from that row's Licence cell. |
+| `slice-audit` | 29 tables render a cut list. One says nothing about the cut: Territory's "Time by area" (`driver.js`, `mv.areas.slice(0, 15)`), MOV-2's own. |
+| `link-audit` | 133 of 133 routes walked, 0 malformed links. |
+| `smoke_views` (`SMOKE_BASE`=:8100) | 124 of 133 render. Nine were still loading after 20 s: `#unit`, `#optimise`, both `#online-hours` routes, and five tabs of the driver it picked (overview, territory, quality, record, record by month). |
+| `cap-audit` | **Not run.** It asks for every list over 365 days, and the API restarted twice under this pass's load (below). |
+| `npm test` | 455 files, 17,967 assertions, 8 failing. Seven fail identically on the production branch. `phone_today_only` is new and **flaky**: rerun with its server up, it failed once at its second page load ("execution context was destroyed") and then passed 19 of 19. |
+| `bin/checkjs.sh` | Every source file parses. |
+| `bin/fare-vs-statement.mjs` (10–23 Nov) | On the one week priced in full, per-trip fares equal the statement's fare branch. The two surfaces agree. |
+
+**The render findings, read.**
+- **104 `js-error`, all `net::ERR_ABORTED` on `/app.js` or the view module.** Reproduced at rest, and against production's own bytes (`bin/prod-mirror.mjs`): every such page aborts one module fetch. Given nine seconds, every one renders fully (panels filled, no skeleton). So it is a cancelled duplicate fetch, harmless, not a broken page.
+- **The 29 `stuck-loading` and 7 `blank-page` findings are pages slower than the 4.5 s settle**, not broken ones. The smoke test's 20 s timeouts are the same thing.
+- **The 19 `api-error`s are fixture ids from the mock** (`h-palm`, `drv-3`, watchlist 1) that the harness did not substitute.
+- **Real but minor:**
+  - `page-overflow` on `#drivers` at 820 (87 px) and `#month-target` (199 px).
+  - 250 `dead-column`, 216 of them the hour columns of `#online-hours` and `#low-performers`.
+  - 42 `sparse-column`.
+  - 116 `semantic-no-glyph` (a warning dot with no word).
+  - 24 `off-token-colour` (form-control borders).
+  - 23 `chartless-panel`.
+  - 13 `silent-panel` (two on `#watchlist/1`).
+  - 43 `slow-panel`.
+
+**The invariant failures, read.**
+- **Two counts of people disagree in every window.** The Drivers directory's active people and the leaderboard's population: 258 against 277 all time, 116 against 122 this month, 111 against 112 over 7 days. This is the recorded state: links confirmed on the Same person page fold the directory but not `person_key` until they are promoted into the register. The leaderboard's trips over its top rows differ the same way.
+- `/api/forecast` `yoy[].split.*_pct` reach +383% to +632%. These are year-on-year growth (`(ratio − 1) × 100`) against thin months a year ago, so the invariant's 0–100 range is wrong for them.
+- **"Every declared route answered": harness, not production.** The routes that failed it want a parameter or a sign-in (400/401/404 by design).
+
+### Production, measured
+- **Deploy and runtime.**
+  - Active deployment `30bda2ce` at `7f1c220`, ACTIVE. The app spec matches `deploy/app-spec.redacted.yaml`.
+  - Both components are `basic-xxs` ×1, and no alert rules are set.
+  - Over three days: CPU p95 under 7%; collector memory p95 39%; API memory p95 78%.
+- **The API restarted twice during this pass, at about 09:16 and 11:02 UTC.** Each time its memory had climbed steadily under the audit's load, 43→60% and 26→68% between five-minute samples, before it dropped. Each restart meant about a minute of 504s, which is what `bin/timings.mjs` met (61 endpoints 504 around 11:00). The same endpoints answered afterwards in 4–16 s for a 30-day window. Sustained heavy reading grows the 512 MB API until it is killed.
+- **Slow queries:**
+  - 5,002 slow-query warnings in 18 hours, 254 distinct statements.
+  - The worst is `/api/coverage`'s telemetry dataset count: 147 times, 18 s average, 94 s maximum.
+  - `/api/ledger/exposure` took 84 s.
+- **Collectors.**
+  - Every collector's latest run is within 15 minutes, except the weekly backfill (55 h) and the timeline-mode rows. Timeline mode is never run any more: both crons pass `roster: true`.
+  - 29 of 30 credentials are ok. The other is BOLT_CLIENT_ID for Ecosine, unentitled (known; "add 142868 to this fleet-integration app in the Bolt portal").
+  - Bolt Egari's `ride_price` disagrees with the portal (0–1 of 15–141 matched), so no price is taken from it.
+  - YoCharge wallets: 429. The weekly Uber backfill: `getRecommendations: 3`. The Uber profile read: 15 of 119 and 5 of 46 drivers refused. Events: GDELT throttled or timing out.
+- **Collector log errors** (21:38 → 08:48 UTC):
+  - 109 `[cabman] telemetry clock skew`, all between 21:50 and 05:05 UTC (01:50–09:05 Dubai), on both fleets. They fire only while nearly every car is parked and stop once cars drive. So the check reads the parked fleet's hourly heartbeat as skew: a nightly false alarm logged at ERROR.
+  - 29 statement timeouts in the `vehicle_dormant` (15) and `stale_tracker` (14) insights, every run, so those two insights are not refreshing.
+  - One `driver_day` rollup statement timeout.
+- **Movement rollup.**
+  - Every person-day built, none failed: 18–103 people a day, ~90 s a pass.
+  - The night backfilled 14 Sep to 24 Nov. One busy driver's range reads 73 days: 2,266 route pieces, 595 stops, 155 parking spots, none capped.
+  - 21 Aug–13 Sep comes on the next night.
+- **Texts.**
+  - The cash text for 24 Nov went at 07:45 UTC, once the card sheet had the day: 59 people, 16 sent, 43 held (37 under AED 99, 5 shared number, 1 identity held).
+  - Delivery receipts: 2 of 16 confirmed by 08:40.
+- **Database.**
+  - `fleet-dashboard-db`: PG 16, `db-s-2vcpu-4gb`, one node with no standby, 60 GB.
+  - A maintenance update is pending (window Wednesday 04:29 UTC).
+  - 8 daily backups; the newest is 24 Nov 19:09, 6.9 GB.
+  - No connection pool; no trusted sources set.
+  - Retention runs dry: telemetry 1.6 M rows, trip 0.73 M, alert 1.0 M, timeline 0.70 M; nothing would be deleted.
+
+### The repository
+- **`npm audit --omit=dev`: 7 vulnerabilities** (1 critical, 2 high, 4 moderate).
+  - Fixable in place: `proxy-addr` (critical, via express), `body-parser` and `compression` (high), and `qs` (moderate).
+  - Major-version fixes: `csv-parse` (to 7) and `node-cron` (to 4, through its `uuid`).
+- **Two real Bolt tokens, expired 2026-08-27, are committed** as test fixtures: `test/bolt_refusals.test.mjs:72` and `test/credentials.test.mjs:40`. The house rule is "credentials never enter the repository … not in tests". No other credential pattern was found, in the tree or in the last five days of history.
+- **Stale notes.**
+  - CLAUDE.md says 452 test files; there are 455.
+  - HANDOFF row 0.4 ("Production is at `d8935c3e`") is a month old, its title date is 2026-10-20, and row numbers 0.3 and 0.20 are each used twice.
+  - Several FIX-STATUS section intros still say "not deployed" for work HANDOFF records as live (ERN, PLC, WHR, OVN).
+
+**To repeat.**
+- `node bin/live-ui.mjs &`, then each harness with `BASE=http://localhost:8100`. The smoke test reads `SMOKE_BASE`.
+- Run them one at a time, and not at a busy hour: this pass restarted the API twice.
+- Run `cap-audit` at a quiet hour, or with `DAYS=90`.
