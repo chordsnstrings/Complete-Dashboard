@@ -1,0 +1,5682 @@
+{
+  "base": "http://localhost:8100",
+  "at": "2026-11-25T08:57:47.076Z",
+  "widths": [
+    1500,
+    1180,
+    820
+  ],
+  "routes": 133,
+  "findings": [
+    {
+      "route": "unit",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /app.js"
+    },
+    {
+      "route": "unit",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":14,\"empty_panels\":0,\"rows\":62,\"highlights\":3,\"explained\":true,\"title\":\"Money per car and driver\",\"kpis\":8,\"tables\":6,\"charts\":6}"
+    },
+    {
+      "route": "unit/assets",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":273,\"highlights\":1,\"explained\":true,\"title\":\"Money per car and driver\",\"kpis\":6,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":327,\"highlights\":1,\"explained\":true,\"title\":\"Money per car and driver\",\"kpis\":7,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":14,\"empty_panels\":0,\"rows\":62,\"highlights\":3,\"explained\":true,\"title\":\"Money per car and driver\",\"kpis\":8,\"tables\":6,\"charts\":6}"
+    },
+    {
+      "route": "month-target",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "month-target",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /targetmonth.js"
+    },
+    {
+      "route": "month-target",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "125: \"▲ AED 14,883.40 ahead of plan\" (span.tg-sub.tg-over) · \"▲ AED 18,625.66 over\" (b.tg-v) · \"▲ AED 15,257.86 over\" (b.tg-v) · \"▲ the last 7 settled days aver\" (span.tg-sub.tg-over)"
+    },
+    {
+      "route": "month-target",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":70,\"highlights\":0,\"explained\":false,\"title\":\"Month target\",\"kpis\":0,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "month-target/2026-08",
+      "width": 1500,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "5 panel(s) still on the skeleton"
+    },
+    {
+      "route": "month-target/2026-08",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Month target\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "top-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /performers.js"
+    },
+    {
+      "route": "top-performers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":86,\"highlights\":1,\"explained\":true,\"title\":\"Top performers\",\"kpis\":4,\"tables\":3,\"charts\":1}"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /lowperf.js"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Asked of each, AED\" is empty in all 48 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Their average, AED\" is empty in all 48 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Everyone else, AED\" is empty in all 48 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"00\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"03\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"06\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"09\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"12\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"15\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"18\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"21\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(118,118,118) border on input"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "718: \"AED 143,656.36\" (b.tg-v) · \"69.1% of what they were asked\" (span.tg-sub.tg-under) · \"Days off\" (span.lp-chip) · \"0%\" (b.tg-under)"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":108,\"highlights\":0,\"explained\":false,\"title\":\"Low performers\",\"kpis\":0,\"tables\":6,\"charts\":0}"
+    },
+    {
+      "route": "performer/64686123-8389-4a9e-82f1-0287e936239b",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":28,\"highlights\":2,\"explained\":false,\"title\":\"Wisal Muhammad Muhammad\",\"kpis\":9,\"tables\":3,\"charts\":3}"
+    },
+    {
+      "route": "performer/64686123-8389-4a9e-82f1-0287e936239b",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":28,\"highlights\":2,\"explained\":false,\"title\":\"Wisal Muhammad Muhammad\",\"kpis\":9,\"tables\":3,\"charts\":3}"
+    },
+    {
+      "route": "low-performers/2026-09-01..2026-09-20/show.egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "7 panel(s) still on the skeleton"
+    },
+    {
+      "route": "low-performers/2026-09-01..2026-09-20/show.egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(118,118,118) border on input"
+    },
+    {
+      "route": "low-performers/2026-09-01..2026-09-20/show.egari",
+      "width": 1500,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "When — weekdays and hours, against everyone else"
+    },
+    {
+      "route": "low-performers/2026-09-01..2026-09-20/show.egari",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Low performers\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "watchlist",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "watchlist",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Watch lists\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "watchlist/1",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/lowperf/watch/1"
+    },
+    {
+      "route": "watchlist/1",
+      "width": 1500,
+      "sev": "e",
+      "code": "silent-panel",
+      "detail": "Each member, against everyone else"
+    },
+    {
+      "route": "watchlist/1",
+      "width": 1500,
+      "sev": "e",
+      "code": "silent-panel",
+      "detail": "Day by day, from two weeks before the save"
+    },
+    {
+      "route": "watchlist/1",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Watch list\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "watchlist/1/2026-09-15_2026-09-22",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/lowperf/watch/1?a=2026-09-15&b=2026-09-22"
+    },
+    {
+      "route": "watchlist/1/2026-09-15_2026-09-22",
+      "width": 1500,
+      "sev": "e",
+      "code": "silent-panel",
+      "detail": "Each member, against everyone else"
+    },
+    {
+      "route": "watchlist/1/2026-09-15_2026-09-22",
+      "width": 1500,
+      "sev": "e",
+      "code": "silent-panel",
+      "detail": "Day by day, from two weeks before the save"
+    },
+    {
+      "route": "watchlist/1/2026-09-15_2026-09-22",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Watch list\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "performance",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /performance.js"
+    },
+    {
+      "route": "performance",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":224,\"highlights\":2,\"explained\":true,\"title\":\"Better or worse\",\"kpis\":5,\"tables\":3,\"charts\":3}"
+    },
+    {
+      "route": "performance?grain=month",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":252,\"highlights\":2,\"explained\":true,\"title\":\"Better or worse\",\"kpis\":5,\"tables\":3,\"charts\":3}"
+    },
+    {
+      "route": "overview",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":12,\"highlights\":3,\"explained\":false,\"title\":\"Fleet activity\",\"kpis\":7,\"tables\":1,\"charts\":6}"
+    },
+    {
+      "route": "demand",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":25,\"highlights\":1,\"explained\":true,\"title\":\"Demand\",\"kpis\":8,\"tables\":1,\"charts\":6}"
+    },
+    {
+      "route": "day/2026-11-24",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "day/2026-11-24",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /day.js"
+    },
+    {
+      "route": "day/2026-11-24",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":12,\"empty_panels\":0,\"rows\":303,\"highlights\":1,\"explained\":true,\"title\":\"Tuesday, November 24, 2026\",\"kpis\":9,\"tables\":5,\"charts\":3}"
+    },
+    {
+      "route": "day/not-a-date",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"highlights\":0,\"explained\":true,\"title\":\"Day\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /driver.js"
+    },
+    {
+      "route": "drivers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":364,\"highlights\":2,\"explained\":false,\"title\":\"Drivers\",\"kpis\":4,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "compare",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /compare.js"
+    },
+    {
+      "route": "compare",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "compare",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":133,\"highlights\":2,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":6,\"tables\":3,\"charts\":8}"
+    },
+    {
+      "route": "compare/2026-11-25",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "compare/2026-11-25",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":133,\"highlights\":2,\"explained\":true,\"title\":\"November 25 vs the day before\",\"kpis\":6,\"tables\":3,\"charts\":8}"
+    },
+    {
+      "route": "compare/2026-11-25/2026-11-24",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "compare/2026-11-25/2026-11-24",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":133,\"highlights\":2,\"explained\":true,\"title\":\"November 25 vs November 24\",\"kpis\":6,\"tables\":3,\"charts\":8}"
+    },
+    {
+      "route": "compare/2026-11-25/2026-11-24?cut=full",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "compare/2026-11-25/2026-11-24?cut=full",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "compare/2026-11-25/2026-11-24?cut=full",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":154,\"highlights\":2,\"explained\":true,\"title\":\"November 25 vs November 24\",\"kpis\":6,\"tables\":3,\"charts\":8}"
+    },
+    {
+      "route": "compare/not-a-date",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "compare/not-a-date",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":133,\"highlights\":2,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":6,\"tables\":3,\"charts\":8}"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b",
+      "width": 1500,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "6 panel(s) still on the skeleton"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b",
+      "width": 1500,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "When the day starts"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b",
+      "width": 1500,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Trips per day"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Driver\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/activity",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/activity",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":51,\"highlights\":1,\"explained\":false,\"title\":\"WISAL MUHAMMAD IRSHAD MUHAMMAD\",\"kpis\":5,\"tables\":2,\"charts\":2}"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/territory",
+      "width": 1500,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "8 panel(s) still on the skeleton"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/territory",
+      "width": 1500,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Trip distance mix"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/territory",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":9,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Driver\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/earnings",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/earnings",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":47,\"highlights\":1,\"explained\":false,\"title\":\"WISAL MUHAMMAD IRSHAD MUHAMMAD\",\"kpis\":9,\"tables\":2,\"charts\":2}"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/quality",
+      "width": 1500,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "4 panel(s) still on the skeleton"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/quality",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Driver\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/trips",
+      "width": 1500,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "1 panel(s) still on the skeleton"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/trips",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Driver\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/record",
+      "width": 1500,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "5 panel(s) still on the skeleton"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/record",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Driver\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/record?grain=month",
+      "width": 1500,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "1 panel(s) still on the skeleton"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/record?grain=month",
+      "width": 1500,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel, and nothing explaining why"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/record?grain=month",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Driver\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "driver/drv-3/record",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/driver/profile?period=month&id=drv-3&grain=auto"
+    },
+    {
+      "route": "driver/drv-3/record",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/driver/profile?period=month&id=drv-3&grain=auto"
+    },
+    {
+      "route": "driver/drv-3/record",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"highlights\":0,\"explained\":true,\"title\":\"Driver\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "online-time",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "online-time",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /onlinetime.js"
+    },
+    {
+      "route": "online-time",
+      "width": 1500,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(118,118,118) border on input.inp"
+    },
+    {
+      "route": "online-time",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":168,\"highlights\":2,\"explained\":true,\"title\":\"Online time\",\"kpis\":5,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /onlinehours.js"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"00\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"01\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"02\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"03\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"04\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"05\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"06\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"07\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"08\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"09\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"10\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"11\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"12\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"13\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"14\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"15\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"16\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"17\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"18\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"19\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"20\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"21\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"22\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"23\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "2: rgb(118,118,118) border on input.inp · rgb(239,239,239) background on select.inp"
+    },
+    {
+      "route": "online-hours",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":99,\"highlights\":1,\"explained\":false,\"title\":\"Online by hour\",\"kpis\":5,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"00\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"01\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"02\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"03\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"04\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"05\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"06\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"07\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"08\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"09\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"10\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"11\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"12\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"13\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"14\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"15\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"16\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"17\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"18\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"19\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"20\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"21\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"22\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"23\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"00\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"01\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"02\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"03\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"04\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"05\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"06\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"07\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"08\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"09\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"10\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"11\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"12\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"13\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"14\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"15\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"16\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"17\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"18\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"19\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"20\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"21\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"22\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"23\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "2: rgb(118,118,118) border on input.inp · rgb(239,239,239) background on select.inp"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":125,\"highlights\":1,\"explained\":false,\"title\":\"Online by hour\",\"kpis\":5,\"tables\":3,\"charts\":1}"
+    },
+    {
+      "route": "roster",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /roster.js"
+    },
+    {
+      "route": "roster",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":338,\"highlights\":1,\"explained\":false,\"title\":\"Driver roster\",\"kpis\":6,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Bolt score\" is empty in 84 of 90 rows"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":90,\"highlights\":1,\"explained\":false,\"title\":\"Driver roster\",\"kpis\":6,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "roster/idle",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Bolt score\" is empty in 91 of 107 rows"
+    },
+    {
+      "route": "roster/idle",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":107,\"highlights\":1,\"explained\":false,\"title\":\"Driver roster\",\"kpis\":6,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "roster/blocked",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":20,\"highlights\":2,\"explained\":false,\"title\":\"Driver roster\",\"kpis\":6,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "roster/states",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":13,\"highlights\":1,\"explained\":false,\"title\":\"Driver roster\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "vehicles",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "vehicles",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /vehicle.js"
+    },
+    {
+      "route": "vehicles",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "vehicles",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":435,\"highlights\":2,\"explained\":true,\"title\":\"Vehicles\",\"kpis\":11,\"tables\":4,\"charts\":3}"
+    },
+    {
+      "route": "vehicle/L44251",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "vehicle/L44251",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: \"AED 8,094.61\" (b.num.tg-over) · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "vehicle/L44251",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":10,\"empty_panels\":0,\"rows\":15,\"highlights\":2,\"explained\":true,\"title\":\"L44251\",\"kpis\":13,\"tables\":1,\"charts\":6}"
+    },
+    {
+      "route": "vehicle/L44251/drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "vehicle/L44251/drivers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":26,\"highlights\":0,\"explained\":false,\"title\":\"L44251\",\"kpis\":0,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "vehicle/L44251/movement",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: \"AED 8,094.61\" (b.num.tg-over) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "vehicle/L44251/movement",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":112,\"highlights\":0,\"explained\":false,\"title\":\"L44251\",\"kpis\":4,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "vehicle/L44251/earnings",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "vehicle/L44251/earnings",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"highlights\":1,\"explained\":true,\"title\":\"L44251\",\"kpis\":4,\"tables\":2,\"charts\":2}"
+    },
+    {
+      "route": "vehicle/L44251/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "vehicle/L44251/safety",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":60,\"highlights\":1,\"explained\":false,\"title\":\"L44251\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "vehicle/L44251/compliance",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "vehicle/L44251/compliance",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"L44251\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "vehicle/L44251/trips",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "vehicle/L44251/trips",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":400,\"highlights\":0,\"explained\":false,\"title\":\"L44251\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "cohort/unit-drove-unpaid",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /cohort.js"
+    },
+    {
+      "route": "cohort/unit-drove-unpaid",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":4,\"highlights\":1,\"explained\":false,\"title\":\"Drove and was paid nothing\",\"kpis\":36,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "cohort/unit-idle-documented",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":20,\"empty_panels\":0,\"rows\":18,\"highlights\":1,\"explained\":false,\"title\":\"Insured and idle\",\"kpis\":45,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "cohort/vehicles-moved-no-booking",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"highlights\":1,\"explained\":false,\"title\":\"Moved with no booking\",\"kpis\":11,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "cohort/roster-blocked",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "cohort/roster-blocked",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":24,\"empty_panels\":0,\"rows\":20,\"highlights\":1,\"explained\":false,\"title\":\"Stopped everywhere\",\"kpis\":41,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "cohort/not-a-cohort",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"highlights\":0,\"explained\":true,\"title\":\"Who exactly?\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "cohort/retention-stopped",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":64,\"empty_panels\":1,\"rows\":60,\"highlights\":0,\"explained\":true,\"title\":\"Stopped last month\",\"kpis\":268,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "cohort/safety-drivers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":82,\"empty_panels\":1,\"rows\":78,\"highlights\":1,\"explained\":true,\"title\":\"Drivers with a driving event\",\"kpis\":684,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "cohort/settlement-cash",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "cohort/settlement-cash",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":198,\"empty_panels\":0,\"rows\":194,\"highlights\":1,\"explained\":false,\"title\":\"Holding cash\",\"kpis\":1346,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "cohort/tiers-behind",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "cohort/tiers-behind",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":78,\"empty_panels\":0,\"rows\":76,\"highlights\":1,\"explained\":false,\"title\":\"Behind the best car of their own model\",\"kpis\":565,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "platforms",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "platforms",
+      "width": 1500,
+      "sev": "e",
+      "code": "overflow",
+      "detail": "panel +4px"
+    },
+    {
+      "route": "platforms",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":9,\"highlights\":1,\"explained\":true,\"title\":\"Platforms\",\"kpis\":4,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "platforms/tiers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":101,\"highlights\":1,\"explained\":true,\"title\":\"Platforms\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Gross\" is empty in all 10 rows"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Cash share\" is empty in all 10 rows"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Commission\" is empty in all 10 rows"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":10,\"highlights\":1,\"explained\":true,\"title\":\"Platforms\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "corridors",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /corridors.js"
+    },
+    {
+      "route": "corridors",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":119,\"highlights\":2,\"explained\":true,\"title\":\"Popular routes\",\"kpis\":5,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "finance",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":9,\"empty_panels\":0,\"rows\":74,\"highlights\":2,\"explained\":false,\"title\":\"Money in and out\",\"kpis\":12,\"tables\":3,\"charts\":6}"
+    },
+    {
+      "route": "receipts",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /receipts.js"
+    },
+    {
+      "route": "receipts",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":106,\"highlights\":1,\"explained\":true,\"title\":\"What landed, and when\",\"kpis\":7,\"tables\":1,\"charts\":2}"
+    },
+    {
+      "route": "identity",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /identity.js"
+    },
+    {
+      "route": "identity",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":536,\"highlights\":2,\"explained\":false,\"title\":\"One person, two records\",\"kpis\":6,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "settlement",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /settlement.js"
+    },
+    {
+      "route": "settlement",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"highlights\":2,\"explained\":false,\"title\":\"Cash and unpaid\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "settlement/cash",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":194,\"highlights\":2,\"explained\":true,\"title\":\"Cash and unpaid\",\"kpis\":3,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "settlement/receivables",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":17,\"highlights\":1,\"explained\":false,\"title\":\"Cash and unpaid\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "corporate",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /corporate.js"
+    },
+    {
+      "route": "corporate",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":9,\"empty_panels\":0,\"highlights\":2,\"explained\":true,\"title\":\"Corporate & hotels\",\"kpis\":5,\"tables\":0,\"charts\":1}"
+    },
+    {
+      "route": "corporate/properties",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"highlights\":0,\"explained\":true,\"title\":\"Corporate & hotels\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "corporate/guests",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Property\" is empty in all 300 rows"
+    },
+    {
+      "route": "corporate/guests",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Purpose\" is empty in 258 of 300 rows"
+    },
+    {
+      "route": "corporate/guests",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":300,\"highlights\":0,\"explained\":true,\"title\":\"Corporate & hotels\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "corporate/leakage",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"highlights\":0,\"explained\":true,\"title\":\"Corporate & hotels\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Property\" is empty in all 11 rows"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":11,\"highlights\":0,\"explained\":false,\"title\":\"Corporate & hotels\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "corporate/approach",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":26,\"highlights\":0,\"explained\":true,\"title\":\"Corporate & hotels\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "corporate/approach/daypart",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":31,\"highlights\":0,\"explained\":true,\"title\":\"Corporate & hotels\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "property/h-palm",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/corporate/property?period=month&id=h-palm&grain=auto"
+    },
+    {
+      "route": "property/h-palm",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"highlights\":0,\"explained\":true,\"title\":\"Property\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "property/h-palm/guests",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/corporate/property?period=month&id=h-palm&grain=auto"
+    },
+    {
+      "route": "property/h-palm/guests",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"highlights\":0,\"explained\":true,\"title\":\"Property\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "property/h-palm/drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/corporate/property?period=month&id=h-palm&grain=auto"
+    },
+    {
+      "route": "property/h-palm/drivers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"highlights\":0,\"explained\":true,\"title\":\"Property\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "causes",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /causes.js"
+    },
+    {
+      "route": "causes",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "causes",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Expected crowd\" is empty in 51 of 53 rows"
+    },
+    {
+      "route": "causes",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":9,\"empty_panels\":0,\"rows\":97,\"highlights\":1,\"explained\":true,\"title\":\"Why trips changed\",\"kpis\":7,\"tables\":3,\"charts\":4}"
+    },
+    {
+      "route": "forecast",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /forecast.js"
+    },
+    {
+      "route": "forecast",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":9,\"empty_panels\":0,\"rows\":95,\"highlights\":1,\"explained\":true,\"title\":\"Forecast\",\"kpis\":19,\"tables\":8,\"charts\":4}"
+    },
+    {
+      "route": "trips",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /trips.js"
+    },
+    {
+      "route": "trips",
+      "width": 1500,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "2: rgb(239,239,239) background on select.inp · rgb(118,118,118) border on select.inp"
+    },
+    {
+      "route": "trips",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "24: \"▼rider_cancelled\" (span.dlt.dlt-negative) · \"▼\" (span.dlt-g) · \"▼rider_cancelled\" (span.dlt.dlt-negative) · \"▼\" (span.dlt-g)"
+    },
+    {
+      "route": "trips",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":100,\"highlights\":1,\"explained\":true,\"title\":\"Every trip\",\"kpis\":7,\"tables\":1,\"charts\":2}"
+    },
+    {
+      "route": "provenance",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /provenance.js"
+    },
+    {
+      "route": "provenance",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":63,\"highlights\":1,\"explained\":true,\"title\":\"Where each figure came from\",\"kpis\":5,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "retention",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /retention.js"
+    },
+    {
+      "route": "retention",
+      "width": 1500,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(13,13,13) background on td.num"
+    },
+    {
+      "route": "retention",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":92,\"highlights\":2,\"explained\":true,\"title\":\"Joiners & leavers\",\"kpis\":5,\"tables\":4,\"charts\":2}"
+    },
+    {
+      "route": "playbook",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /playbook.js"
+    },
+    {
+      "route": "playbook",
+      "width": 1500,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(118,118,118) border on input"
+    },
+    {
+      "route": "playbook",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":72,\"highlights\":2,\"explained\":true,\"title\":\"To-do list\",\"kpis\":6,\"tables\":7,\"charts\":0}"
+    },
+    {
+      "route": "capacity",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /capacity.js"
+    },
+    {
+      "route": "capacity",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "capacity",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":1,\"rows\":188,\"highlights\":1,\"explained\":true,\"title\":\"Rota gaps\",\"kpis\":6,\"tables\":2,\"charts\":3}"
+    },
+    {
+      "route": "optimise",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "optimise",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /optimise.js"
+    },
+    {
+      "route": "optimise",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "optimise",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":55,\"highlights\":1,\"explained\":true,\"title\":\"Cut waiting time\",\"kpis\":6,\"tables\":3,\"charts\":3}"
+    },
+    {
+      "route": "revenue",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /revenue.js"
+    },
+    {
+      "route": "revenue",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":38,\"highlights\":2,\"explained\":false,\"title\":\"Money by platform\",\"kpis\":6,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "reconcile",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /reconcile.js"
+    },
+    {
+      "route": "reconcile",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "reconcile",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Of which cash\" is empty in 664 of 775 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":802,\"highlights\":2,\"explained\":true,\"title\":\"Bank reconciliation\",\"kpis\":4,\"tables\":2,\"charts\":3}"
+    },
+    {
+      "route": "reconcile/2026-08",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "reconcile/2026-08",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Of which cash\" is empty in 80 of 92 rows"
+    },
+    {
+      "route": "reconcile/2026-08",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":123,\"highlights\":2,\"explained\":true,\"title\":\"Bank reconciliation\",\"kpis\":4,\"tables\":2,\"charts\":2}"
+    },
+    {
+      "route": "insights",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":3,\"highlights\":2,\"explained\":true,\"title\":\"Action list\",\"kpis\":5,\"tables\":1,\"charts\":2}"
+    },
+    {
+      "route": "action/idle_vehicle/L44251",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"highlights\":0,\"explained\":true,\"title\":\"Finding\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "action/nope/-",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"highlights\":0,\"explained\":true,\"title\":\"Finding\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "analyst",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "analyst",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /analyst.js"
+    },
+    {
+      "route": "analyst",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"highlights\":2,\"explained\":false,\"title\":\"Analyst\",\"kpis\":5,\"tables\":0,\"charts\":1}"
+    },
+    {
+      "route": "analyst/refuted",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"highlights\":2,\"explained\":true,\"title\":\"Analyst\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "analyst/immaterial",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"highlights\":2,\"explained\":false,\"title\":\"Analyst\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "analyst/unsupported",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"highlights\":1,\"explained\":true,\"title\":\"Analyst\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "analyst/rules",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":22,\"highlights\":1,\"explained\":true,\"title\":\"Analyst\",\"kpis\":3,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "compliance",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "143: \"expired · −914 d\" (span) · \"expired · −914 d\" (span) · \"expired · −895 d\" (span) · \"expired · −895 d\" (span)"
+    },
+    {
+      "route": "compliance",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":243,\"highlights\":2,\"explained\":true,\"title\":\"Compliance\",\"kpis\":6,\"tables\":3,\"charts\":1}"
+    },
+    {
+      "route": "unauthorized",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /segments.js"
+    },
+    {
+      "route": "unauthorized",
+      "width": 1500,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "6 panel(s) still on the skeleton"
+    },
+    {
+      "route": "unauthorized",
+      "width": 1500,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Unexplained trips per day"
+    },
+    {
+      "route": "unauthorized",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Unauthorized trips\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "segments",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "segments",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "311: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"One of several\" is empty in 57 of 65 rows"
+    },
+    {
+      "route": "segments",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":11,\"empty_panels\":0,\"rows\":385,\"highlights\":2,\"explained\":true,\"title\":\"All unauthorized trips\",\"kpis\":10,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "segments/verdict/unauthorized",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "311: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/verdict/unauthorized",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"One of several\" is empty in 57 of 65 rows"
+    },
+    {
+      "route": "segments/verdict/unauthorized",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":11,\"empty_panels\":0,\"rows\":385,\"highlights\":2,\"explained\":true,\"title\":\"All unauthorized trips\",\"kpis\":10,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "segments/verdict/authorized",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "segments/verdict/authorized",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "11: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/verdict/authorized",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":9,\"empty_panels\":0,\"rows\":320,\"highlights\":2,\"explained\":true,\"title\":\"All unauthorized trips\",\"kpis\":10,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "segments/plate/L44251",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "16: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/plate/L44251",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Forgone\" is empty in 296 of 300 rows"
+    },
+    {
+      "route": "segments/plate/L44251",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":11,\"empty_panels\":0,\"rows\":320,\"highlights\":2,\"explained\":true,\"title\":\"All unauthorized trips\",\"kpis\":10,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Named by time\" is empty in all 7 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"One of several\" is empty in all 7 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Distance named by time\" is empty in all 7 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Worth of those\" is empty in all 7 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "13: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Forgone\" is empty in 291 of 300 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":11,\"empty_panels\":0,\"rows\":317,\"highlights\":2,\"explained\":true,\"title\":\"All unauthorized trips\",\"kpis\":10,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "segments/driver/Ahmed",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "24: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/driver/Ahmed",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Forgone\" is empty in 287 of 300 rows"
+    },
+    {
+      "route": "segments/driver/Ahmed",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":11,\"empty_panels\":0,\"rows\":324,\"highlights\":2,\"explained\":true,\"title\":\"All unauthorized trips\",\"kpis\":10,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "segments/nonsense/x",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "311: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/nonsense/x",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"One of several\" is empty in 57 of 65 rows"
+    },
+    {
+      "route": "segments/nonsense/x",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":11,\"empty_panels\":0,\"rows\":385,\"highlights\":2,\"explained\":true,\"title\":\"All unauthorized trips\",\"kpis\":10,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "segment/L64009/2026-11-25T07:58:38.933Z",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":9,\"highlights\":1,\"explained\":true,\"title\":\"L64009\",\"kpis\":5,\"tables\":6,\"charts\":1}"
+    },
+    {
+      "route": "segment/L64009/2026-11-25T07:58:38.933Z",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":9,\"highlights\":1,\"explained\":true,\"title\":\"L64009\",\"kpis\":5,\"tables\":6,\"charts\":1}"
+    },
+    {
+      "route": "slot/2/19",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /slot.js"
+    },
+    {
+      "route": "slot/2/19",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":43,\"highlights\":2,\"explained\":true,\"title\":\"Tuesday 19:00\",\"kpis\":7,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "slot/0/3",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":15,\"highlights\":2,\"explained\":true,\"title\":\"Sunday 03:00\",\"kpis\":7,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "slot/9/99",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"highlights\":0,\"explained\":true,\"title\":\"One hour of the week\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "safety",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":79,\"highlights\":2,\"explained\":true,\"title\":\"Safety\",\"kpis\":6,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "safety/vehicles",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "safety/vehicles",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":76,\"highlights\":2,\"explained\":true,\"title\":\"Safety\",\"kpis\":6,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "safety/events",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "safety/events",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"highlights\":2,\"explained\":true,\"title\":\"Safety\",\"kpis\":6,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "live",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "live",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":139,\"highlights\":2,\"explained\":true,\"title\":\"Live fleet\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "feeds",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /feeds.js"
+    },
+    {
+      "route": "feeds",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "250: \"not receiving\" (span.pill) · \"not receiving\" (span.pill) · \"not receiving\" (span.pill) · \"not receiving\" (span.pill)"
+    },
+    {
+      "route": "feeds",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":178,\"highlights\":1,\"explained\":false,\"title\":\"Seat sensor & FMS\",\"kpis\":7,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "map",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Map & replay\",\"kpis\":0,\"tables\":0,\"charts\":1}"
+    },
+    {
+      "route": "sources",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "83: \"outstanding\" (span.pill) · \"outstanding\" (span.pill) · \"outstanding\" (span.pill) · \"outstanding\" (span.pill)"
+    },
+    {
+      "route": "sources",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":234,\"highlights\":1,\"explained\":true,\"title\":\"Data sources\",\"kpis\":4,\"tables\":3,\"charts\":4}"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /coverage.js"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "38: \"0\" (span.cov-miss) · \"0\" (span.cov-miss) · \"0\" (span.cov-miss) · \"0\" (span.cov-miss)"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":10,\"empty_panels\":0,\"rows\":56,\"highlights\":2,\"explained\":true,\"title\":\"Collection gaps\",\"kpis\":8,\"tables\":4,\"charts\":2}"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /providers.js"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":33,\"empty_panels\":0,\"rows\":420,\"highlights\":2,\"explained\":true,\"title\":\"What each API offers\",\"kpis\":4,\"tables\":27,\"charts\":0}"
+    },
+    {
+      "route": "settings",
+      "width": 1500,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "settings",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Restarts\" is empty in 39 of 40 rows"
+    },
+    {
+      "route": "settings",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":1,\"rows\":45,\"highlights\":1,\"explained\":true,\"title\":\"Settings\",\"kpis\":5,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":3,\"highlights\":2,\"explained\":true,\"title\":\"Action list\",\"kpis\":5,\"tables\":1,\"charts\":2}"
+    },
+    {
+      "route": "insights/safety",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":3,\"highlights\":2,\"explained\":true,\"title\":\"Action list\",\"kpis\":5,\"tables\":1,\"charts\":2}"
+    },
+    {
+      "route": "insights/nosuchcategory",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":1,\"rows\":3,\"highlights\":2,\"explained\":true,\"title\":\"Action list\",\"kpis\":5,\"tables\":1,\"charts\":2}"
+    },
+    {
+      "route": "providers/uber/trips/Surge%20multiplier",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"highlights\":0,\"explained\":true,\"title\":\"What each API offers\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "map/replay/L44251",
+      "width": 1500,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "map/replay/L44251",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Map & replay\",\"kpis\":4,\"tables\":0,\"charts\":4}"
+    },
+    {
+      "route": "overview?days=90&platform=uber",
+      "width": 1500,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "8 panel(s) still on the skeleton"
+    },
+    {
+      "route": "overview?days=90&platform=uber",
+      "width": 1500,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Bookings per day"
+    },
+    {
+      "route": "overview?days=90&platform=uber",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Fleet activity\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":364,\"highlights\":2,\"explained\":false,\"title\":\"Drivers\",\"kpis\":4,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1500,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "15 panel(s) still on the skeleton"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1500,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Cars earning most per day worked"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1500,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Cars earning least per day worked"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1500,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Drivers earning most per day worked"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1500,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Drivers earning least per day worked"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":14,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Money per car and driver\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "unit/assets?days=7&platform=uber",
+      "width": 1500,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "2 panel(s) still on the skeleton"
+    },
+    {
+      "route": "unit/assets?days=7&platform=uber",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"Money per car and driver\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "1 panel(s) still on the skeleton"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel, and nothing explaining why"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"highlights\":0,\"explained\":false,\"title\":\"All unauthorized trips\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "unit",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /app.js"
+    },
+    {
+      "route": "unit",
+      "width": 1180,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel, and nothing explaining why"
+    },
+    {
+      "route": "unit/assets",
+      "width": 1180,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1180,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "15 panel(s) still on the skeleton"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1180,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Cars earning most per day worked"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1180,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Cars earning least per day worked"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1180,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Drivers earning most per day worked"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1180,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Drivers earning least per day worked"
+    },
+    {
+      "route": "month-target",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /targetmonth.js"
+    },
+    {
+      "route": "month-target",
+      "width": 1180,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "1 panel(s) still on the skeleton"
+    },
+    {
+      "route": "month-target",
+      "width": 1180,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel, and nothing explaining why"
+    },
+    {
+      "route": "month-target/2026-08",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /targetmonth.js"
+    },
+    {
+      "route": "month-target/2026-08",
+      "width": 1180,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "5 panel(s) still on the skeleton"
+    },
+    {
+      "route": "top-performers",
+      "width": 1180,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "top-performers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /performers.js"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /lowperf.js"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "7 panel(s) still on the skeleton"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(118,118,118) border on input"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "When — weekdays and hours, against everyone else"
+    },
+    {
+      "route": "low-performers/2026-09-01..2026-09-20/show.egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(118,118,118) border on input"
+    },
+    {
+      "route": "low-performers/2026-09-01..2026-09-20/show.egari",
+      "width": 1180,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "When — weekdays and hours, against everyone else"
+    },
+    {
+      "route": "watchlist/1",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/lowperf/watch/1"
+    },
+    {
+      "route": "watchlist/1",
+      "width": 1180,
+      "sev": "e",
+      "code": "silent-panel",
+      "detail": "Each member, against everyone else"
+    },
+    {
+      "route": "watchlist/1",
+      "width": 1180,
+      "sev": "e",
+      "code": "silent-panel",
+      "detail": "Day by day, from two weeks before the save"
+    },
+    {
+      "route": "watchlist/1/2026-09-15_2026-09-22",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/lowperf/watch/1?a=2026-09-15&b=2026-09-22"
+    },
+    {
+      "route": "watchlist/1/2026-09-15_2026-09-22",
+      "width": 1180,
+      "sev": "e",
+      "code": "silent-panel",
+      "detail": "Each member, against everyone else"
+    },
+    {
+      "route": "watchlist/1/2026-09-15_2026-09-22",
+      "width": 1180,
+      "sev": "e",
+      "code": "silent-panel",
+      "detail": "Day by day, from two weeks before the save"
+    },
+    {
+      "route": "performance",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /performance.js"
+    },
+    {
+      "route": "day/2026-11-24",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /day.js"
+    },
+    {
+      "route": "drivers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /driver.js"
+    },
+    {
+      "route": "compare",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /compare.js"
+    },
+    {
+      "route": "compare",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "compare/2026-11-25",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "compare/2026-11-25/2026-11-24",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "compare/2026-11-25/2026-11-24?cut=full",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "compare/not-a-date",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b",
+      "width": 1180,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "6 panel(s) still on the skeleton"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b",
+      "width": 1180,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "When the day starts"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b",
+      "width": 1180,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Trips per day"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/activity",
+      "width": 1180,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/territory",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Nights\" is empty in 19 of 20 rows"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/earnings",
+      "width": 1180,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "5 panel(s) still on the skeleton"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/quality",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"▼\" (span.rt-g)"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/trips",
+      "width": 1180,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "1 panel(s) still on the skeleton"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/record",
+      "width": 1180,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/record?grain=month",
+      "width": 1180,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "5 panel(s) still on the skeleton"
+    },
+    {
+      "route": "driver/drv-3/record",
+      "width": 1180,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "driver/drv-3/record",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/driver/profile?period=month&id=drv-3&grain=auto"
+    },
+    {
+      "route": "online-time",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /onlinetime.js"
+    },
+    {
+      "route": "online-time",
+      "width": 1180,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(118,118,118) border on input.inp"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /onlinehours.js"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"00\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"01\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"02\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"03\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"04\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"05\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"06\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"07\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"08\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"09\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"10\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"11\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"12\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"13\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"14\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"15\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"16\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"17\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"18\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"19\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"20\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"21\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"22\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"23\" is empty in all 86 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"00\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"01\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"02\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"03\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"04\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"05\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"06\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"07\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"08\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"09\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"10\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"11\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"12\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"13\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"14\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"15\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"16\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"17\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"18\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"19\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"20\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"21\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"22\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"23\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours",
+      "width": 1180,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "2: rgb(118,118,118) border on input.inp · rgb(239,239,239) background on select.inp"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"00\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"01\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"02\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"03\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"04\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"05\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"06\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"07\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"08\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"09\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"10\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"11\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"12\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"13\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"14\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"15\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"16\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"17\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"18\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"19\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"20\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"21\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"22\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"23\" is empty in all 87 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"00\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"01\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"02\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"03\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"04\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"05\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"06\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"07\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"08\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"09\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"10\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"11\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"12\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"13\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"14\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"15\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"16\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"17\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"18\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"19\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"20\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"21\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"22\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"23\" is empty in all 14 rows"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 1180,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "2: rgb(118,118,118) border on input.inp · rgb(239,239,239) background on select.inp"
+    },
+    {
+      "route": "roster",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /roster.js"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Bolt score\" is empty in 84 of 90 rows"
+    },
+    {
+      "route": "roster/idle",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Bolt score\" is empty in 91 of 107 rows"
+    },
+    {
+      "route": "vehicles",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /vehicle.js"
+    },
+    {
+      "route": "vehicles",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "vehicle/L44251",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: \"AED 8,094.61\" (b.num.tg-over) · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "vehicle/L44251/drivers",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "vehicle/L44251/movement",
+      "width": 1180,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "vehicle/L44251/movement",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: \"AED 8,094.61\" (b.num.tg-over) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "vehicle/L44251/earnings",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "vehicle/L44251/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "vehicle/L44251/compliance",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "vehicle/L44251/trips",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "cohort/unit-drove-unpaid",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /cohort.js"
+    },
+    {
+      "route": "platforms",
+      "width": 1180,
+      "sev": "e",
+      "code": "overflow",
+      "detail": "panel +4px"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Gross\" is empty in all 10 rows"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Cash share\" is empty in all 10 rows"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Commission\" is empty in all 10 rows"
+    },
+    {
+      "route": "corridors",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /corridors.js"
+    },
+    {
+      "route": "receipts",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /receipts.js"
+    },
+    {
+      "route": "identity",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /identity.js"
+    },
+    {
+      "route": "settlement",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /settlement.js"
+    },
+    {
+      "route": "corporate",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /corporate.js"
+    },
+    {
+      "route": "corporate/guests",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Property\" is empty in all 300 rows"
+    },
+    {
+      "route": "corporate/guests",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Purpose\" is empty in 258 of 300 rows"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Property\" is empty in all 11 rows"
+    },
+    {
+      "route": "property/h-palm",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/corporate/property?period=month&id=h-palm&grain=auto"
+    },
+    {
+      "route": "property/h-palm/guests",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/corporate/property?period=month&id=h-palm&grain=auto"
+    },
+    {
+      "route": "property/h-palm/drivers",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/corporate/property?period=month&id=h-palm&grain=auto"
+    },
+    {
+      "route": "causes",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /causes.js"
+    },
+    {
+      "route": "causes",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "causes",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Expected crowd\" is empty in 51 of 53 rows"
+    },
+    {
+      "route": "forecast",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /forecast.js"
+    },
+    {
+      "route": "trips",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /trips.js"
+    },
+    {
+      "route": "trips",
+      "width": 1180,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "2: rgb(239,239,239) background on select.inp · rgb(118,118,118) border on select.inp"
+    },
+    {
+      "route": "trips",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "24: \"▼rider_cancelled\" (span.dlt.dlt-negative) · \"▼\" (span.dlt-g) · \"▼rider_cancelled\" (span.dlt.dlt-negative) · \"▼\" (span.dlt-g)"
+    },
+    {
+      "route": "provenance",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /provenance.js"
+    },
+    {
+      "route": "retention",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /retention.js"
+    },
+    {
+      "route": "retention",
+      "width": 1180,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(13,13,13) background on td.num"
+    },
+    {
+      "route": "playbook",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /playbook.js"
+    },
+    {
+      "route": "playbook",
+      "width": 1180,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(118,118,118) border on input"
+    },
+    {
+      "route": "capacity",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /capacity.js"
+    },
+    {
+      "route": "capacity",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "optimise",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /optimise.js"
+    },
+    {
+      "route": "optimise",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "revenue",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /revenue.js"
+    },
+    {
+      "route": "reconcile",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /reconcile.js"
+    },
+    {
+      "route": "reconcile",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "reconcile",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Of which cash\" is empty in 664 of 775 rows"
+    },
+    {
+      "route": "reconcile/2026-08",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "reconcile/2026-08",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Of which cash\" is empty in 80 of 92 rows"
+    },
+    {
+      "route": "analyst",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /analyst.js"
+    },
+    {
+      "route": "compliance",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "143: \"expired · −914 d\" (span) · \"expired · −914 d\" (span) · \"expired · −895 d\" (span) · \"expired · −895 d\" (span)"
+    },
+    {
+      "route": "unauthorized",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /segments.js"
+    },
+    {
+      "route": "unauthorized",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "300: \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "311: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"One of several\" is empty in 57 of 65 rows"
+    },
+    {
+      "route": "segments/verdict/unauthorized",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "311: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/verdict/unauthorized",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"One of several\" is empty in 57 of 65 rows"
+    },
+    {
+      "route": "segments/verdict/authorized",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "11: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/plate/L44251",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "16: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/plate/L44251",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Forgone\" is empty in 296 of 300 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Named by time\" is empty in all 7 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"One of several\" is empty in all 7 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Distance named by time\" is empty in all 7 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Worth of those\" is empty in all 7 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "13: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Forgone\" is empty in 291 of 300 rows"
+    },
+    {
+      "route": "segments/driver/Ahmed",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "24: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/driver/Ahmed",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Forgone\" is empty in 287 of 300 rows"
+    },
+    {
+      "route": "segments/nonsense/x",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "311: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/nonsense/x",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"One of several\" is empty in 57 of 65 rows"
+    },
+    {
+      "route": "slot/2/19",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /slot.js"
+    },
+    {
+      "route": "safety",
+      "width": 1180,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "safety/vehicles",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "safety/events",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "live",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "feeds",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /feeds.js"
+    },
+    {
+      "route": "feeds",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "250: \"not receiving\" (span.pill) · \"not receiving\" (span.pill) · \"not receiving\" (span.pill) · \"not receiving\" (span.pill)"
+    },
+    {
+      "route": "sources",
+      "width": 1180,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "1 panel(s) still on the skeleton"
+    },
+    {
+      "route": "sources",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "83: \"outstanding\" (span.pill) · \"outstanding\" (span.pill) · \"outstanding\" (span.pill) · \"outstanding\" (span.pill)"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /coverage.js"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "38: \"0\" (span.cov-miss) · \"0\" (span.cov-miss) · \"0\" (span.cov-miss) · \"0\" (span.cov-miss)"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /providers.js"
+    },
+    {
+      "route": "settings",
+      "width": 1180,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "settings",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "settings",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Restarts\" is empty in 39 of 40 rows"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1180,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "311: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"One of several\" is empty in 57 of 65 rows"
+    },
+    {
+      "route": "unit",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /app.js"
+    },
+    {
+      "route": "month-target",
+      "width": 820,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "month-target",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /targetmonth.js"
+    },
+    {
+      "route": "month-target",
+      "width": 820,
+      "sev": "e",
+      "code": "overflow",
+      "detail": "panel +223px"
+    },
+    {
+      "route": "month-target",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 199px wider than the window"
+    },
+    {
+      "route": "month-target",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "125: \"▲ AED 14,883.40 ahead of plan\" (span.tg-sub.tg-over) · \"▲ AED 18,625.66 over\" (b.tg-v) · \"▲ AED 15,257.86 over\" (b.tg-v) · \"▲ the last 7 settled days aver\" (span.tg-sub.tg-over)"
+    },
+    {
+      "route": "month-target/2026-08",
+      "width": 820,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "5 panel(s) still on the skeleton"
+    },
+    {
+      "route": "top-performers",
+      "width": 820,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "top-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /performers.js"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /lowperf.js"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Asked of each, AED\" is empty in all 48 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Their average, AED\" is empty in all 48 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Everyone else, AED\" is empty in all 48 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"00\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"03\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"06\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"09\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"12\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"15\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"18\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"21\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"\" is empty in all 3 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(118,118,118) border on input"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "718: \"AED 143,656.36\" (b.tg-v) · \"69.1% of what they were asked\" (span.tg-sub.tg-under) · \"Days off\" (span.lp-chip) · \"0%\" (b.tg-under)"
+    },
+    {
+      "route": "low-performers/2026-09-01..2026-09-20/show.egari",
+      "width": 820,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(118,118,118) border on input"
+    },
+    {
+      "route": "low-performers/2026-09-01..2026-09-20/show.egari",
+      "width": 820,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "When — weekdays and hours, against everyone else"
+    },
+    {
+      "route": "watchlist/1",
+      "width": 820,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/lowperf/watch/1"
+    },
+    {
+      "route": "watchlist/1",
+      "width": 820,
+      "sev": "e",
+      "code": "silent-panel",
+      "detail": "Each member, against everyone else"
+    },
+    {
+      "route": "watchlist/1",
+      "width": 820,
+      "sev": "e",
+      "code": "silent-panel",
+      "detail": "Day by day, from two weeks before the save"
+    },
+    {
+      "route": "watchlist/1/2026-09-15_2026-09-22",
+      "width": 820,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/lowperf/watch/1?a=2026-09-15&b=2026-09-22"
+    },
+    {
+      "route": "watchlist/1/2026-09-15_2026-09-22",
+      "width": 820,
+      "sev": "e",
+      "code": "silent-panel",
+      "detail": "Each member, against everyone else"
+    },
+    {
+      "route": "watchlist/1/2026-09-15_2026-09-22",
+      "width": 820,
+      "sev": "e",
+      "code": "silent-panel",
+      "detail": "Day by day, from two weeks before the save"
+    },
+    {
+      "route": "performance",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /performance.js"
+    },
+    {
+      "route": "day/2026-11-24",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /day.js"
+    },
+    {
+      "route": "drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /driver.js"
+    },
+    {
+      "route": "drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 87px wider than the window"
+    },
+    {
+      "route": "compare",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /compare.js"
+    },
+    {
+      "route": "compare",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "compare/2026-11-25",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "compare/2026-11-25/2026-11-24",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "compare/2026-11-25/2026-11-24?cut=full",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "compare/not-a-date",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b",
+      "width": 820,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"▼\" (span.rt-g)"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/territory",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Nights\" is empty in 19 of 20 rows"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/quality",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"▼\" (span.rt-g)"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/record?grain=month",
+      "width": 820,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "1 panel(s) still on the skeleton"
+    },
+    {
+      "route": "driver/64686123-8389-4a9e-82f1-0287e936239b/record?grain=month",
+      "width": 820,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel, and nothing explaining why"
+    },
+    {
+      "route": "driver/drv-3/record",
+      "width": 820,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "driver/drv-3/record",
+      "width": 820,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/driver/profile?period=month&id=drv-3&grain=auto"
+    },
+    {
+      "route": "online-time",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /onlinetime.js"
+    },
+    {
+      "route": "online-time",
+      "width": 820,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "2 panel(s) still on the skeleton"
+    },
+    {
+      "route": "online-time",
+      "width": 820,
+      "sev": "e",
+      "code": "silent-panel",
+      "detail": "Online to a first job"
+    },
+    {
+      "route": "online-time",
+      "width": 820,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(118,118,118) border on input.inp"
+    },
+    {
+      "route": "online-hours",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /onlinehours.js"
+    },
+    {
+      "route": "online-hours",
+      "width": 820,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "2: rgb(118,118,118) border on input.inp · rgb(239,239,239) background on select.inp"
+    },
+    {
+      "route": "online-hours",
+      "width": 820,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Drivers online, hour by hour"
+    },
+    {
+      "route": "online-hours",
+      "width": 820,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Every driver, hour by hour"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 820,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "2: rgb(118,118,118) border on input.inp · rgb(239,239,239) background on select.inp"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 820,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Drivers online, hour by hour"
+    },
+    {
+      "route": "online-hours/2026-09-20",
+      "width": 820,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Every driver, hour by hour"
+    },
+    {
+      "route": "roster",
+      "width": 820,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "1 panel(s) still on the skeleton"
+    },
+    {
+      "route": "roster",
+      "width": 820,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel, and nothing explaining why"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /roster.js"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 820,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "1 panel(s) still on the skeleton"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 820,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel, and nothing explaining why"
+    },
+    {
+      "route": "roster/idle",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /roster.js"
+    },
+    {
+      "route": "roster/idle",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Bolt score\" is empty in 91 of 107 rows"
+    },
+    {
+      "route": "vehicles",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /vehicle.js"
+    },
+    {
+      "route": "vehicles",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: a ::before dot on div.note.warn with no word for it · a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "vehicle/L44251",
+      "width": 820,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "vehicle/L44251",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "vehicle/L44251/drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "vehicle/L44251/movement",
+      "width": 820,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "vehicle/L44251/movement",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "2: \"AED 8,094.61\" (b.num.tg-over) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "vehicle/L44251/earnings",
+      "width": 820,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "vehicle/L44251/earnings",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "vehicle/L44251/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "vehicle/L44251/compliance",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "vehicle/L44251/trips",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: \"AED 8,094.61\" (b.num.tg-over)"
+    },
+    {
+      "route": "cohort/unit-drove-unpaid",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /cohort.js"
+    },
+    {
+      "route": "cohort/unit-idle-documented",
+      "width": 820,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "cohort/safety-drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "1 panel(s) still on the skeleton"
+    },
+    {
+      "route": "cohort/settlement-cash",
+      "width": 820,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "cohort/tiers-behind",
+      "width": 820,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "1 panel(s) still on the skeleton"
+    },
+    {
+      "route": "platforms",
+      "width": 820,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "platforms",
+      "width": 820,
+      "sev": "e",
+      "code": "overflow",
+      "detail": "panel +4px"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Gross\" is empty in all 10 rows"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Cash share\" is empty in all 10 rows"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Commission\" is empty in all 10 rows"
+    },
+    {
+      "route": "corridors",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /corridors.js"
+    },
+    {
+      "route": "receipts",
+      "width": 820,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "receipts",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /receipts.js"
+    },
+    {
+      "route": "identity",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /identity.js"
+    },
+    {
+      "route": "settlement",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /settlement.js"
+    },
+    {
+      "route": "corporate",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /corporate.js"
+    },
+    {
+      "route": "corporate/guests",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Property\" is empty in all 300 rows"
+    },
+    {
+      "route": "corporate/guests",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Purpose\" is empty in 258 of 300 rows"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Property\" is empty in all 11 rows"
+    },
+    {
+      "route": "property/h-palm",
+      "width": 820,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/corporate/property?period=month&id=h-palm&grain=auto"
+    },
+    {
+      "route": "property/h-palm/guests",
+      "width": 820,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/corporate/property?period=month&id=h-palm&grain=auto"
+    },
+    {
+      "route": "property/h-palm/drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/corporate/property?period=month&id=h-palm&grain=auto"
+    },
+    {
+      "route": "causes",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /causes.js"
+    },
+    {
+      "route": "causes",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "causes",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Expected crowd\" is empty in 51 of 53 rows"
+    },
+    {
+      "route": "forecast",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /forecast.js"
+    },
+    {
+      "route": "trips",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /trips.js"
+    },
+    {
+      "route": "trips",
+      "width": 820,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "2: rgb(239,239,239) background on select.inp · rgb(118,118,118) border on select.inp"
+    },
+    {
+      "route": "trips",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "22: \"▼rider_cancelled\" (span.dlt.dlt-negative) · \"▼\" (span.dlt-g) · \"▼rider_cancelled\" (span.dlt.dlt-negative) · \"▼\" (span.dlt-g)"
+    },
+    {
+      "route": "provenance",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /provenance.js"
+    },
+    {
+      "route": "retention",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /retention.js"
+    },
+    {
+      "route": "retention",
+      "width": 820,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(13,13,13) background on td.num"
+    },
+    {
+      "route": "playbook",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /playbook.js"
+    },
+    {
+      "route": "playbook",
+      "width": 820,
+      "sev": "e",
+      "code": "off-token-colour",
+      "detail": "1: rgb(118,118,118) border on input"
+    },
+    {
+      "route": "capacity",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /capacity.js"
+    },
+    {
+      "route": "capacity",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "optimise",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /optimise.js"
+    },
+    {
+      "route": "optimise",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "revenue",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /revenue.js"
+    },
+    {
+      "route": "reconcile",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /reconcile.js"
+    },
+    {
+      "route": "reconcile",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "reconcile",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Of which cash\" is empty in 664 of 775 rows"
+    },
+    {
+      "route": "reconcile/2026-08",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "reconcile/2026-08",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Of which cash\" is empty in 80 of 92 rows"
+    },
+    {
+      "route": "analyst",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /analyst.js"
+    },
+    {
+      "route": "compliance",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "143: \"expired · −914 d\" (span) · \"expired · −914 d\" (span) · \"expired · −895 d\" (span) · \"expired · −895 d\" (span)"
+    },
+    {
+      "route": "unauthorized",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /segments.js"
+    },
+    {
+      "route": "unauthorized",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "300: \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "311: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"One of several\" is empty in 57 of 65 rows"
+    },
+    {
+      "route": "segments/verdict/unauthorized",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "311: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/verdict/unauthorized",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"One of several\" is empty in 57 of 65 rows"
+    },
+    {
+      "route": "segments/verdict/authorized",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "11: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/plate/L44251",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "16: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/plate/L44251",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Forgone\" is empty in 296 of 300 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Named by time\" is empty in all 7 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"One of several\" is empty in all 7 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Distance named by time\" is empty in all 7 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Worth of those\" is empty in all 7 rows"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "13: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/day/2026-11-24",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Forgone\" is empty in 291 of 300 rows"
+    },
+    {
+      "route": "segments/driver/Ahmed",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Sole custodian that day\" is empty in all 3 rows"
+    },
+    {
+      "route": "segments/driver/Ahmed",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "23: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/driver/Ahmed",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Forgone\" is empty in 288 of 300 rows"
+    },
+    {
+      "route": "segments/nonsense/x",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "311: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/nonsense/x",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"One of several\" is empty in 57 of 65 rows"
+    },
+    {
+      "route": "slot/2/19",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /slot.js"
+    },
+    {
+      "route": "safety",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "safety/vehicles",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "safety/events",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "live",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "feeds",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /feeds.js"
+    },
+    {
+      "route": "feeds",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "250: \"not receiving\" (span.pill) · \"not receiving\" (span.pill) · \"not receiving\" (span.pill) · \"not receiving\" (span.pill)"
+    },
+    {
+      "route": "sources",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "83: \"outstanding\" (span.pill) · \"outstanding\" (span.pill) · \"outstanding\" (span.pill) · \"outstanding\" (span.pill)"
+    },
+    {
+      "route": "coverage",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /coverage.js"
+    },
+    {
+      "route": "coverage",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "38: \"0\" (span.cov-miss) · \"0\" (span.cov-miss) · \"0\" (span.cov-miss) · \"0\" (span.cov-miss)"
+    },
+    {
+      "route": "providers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_ABORTED /providers.js"
+    },
+    {
+      "route": "settings",
+      "width": 820,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "settings",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "1: a ::before dot on div.note.warn with no word for it"
+    },
+    {
+      "route": "settings",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Restarts\" is empty in 39 of 40 rows"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 87px wider than the window"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 820,
+      "sev": "e",
+      "code": "semantic-no-glyph",
+      "detail": "311: a ::before dot on div.note.warn with no word for it · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill) · \"unauthorized\" (span.pill)"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"One of several\" is empty in 57 of 65 rows"
+    }
+  ]
+}
