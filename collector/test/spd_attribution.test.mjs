@@ -45,8 +45,10 @@ check('the driver tab runs its three independent reads together',
   /const \[rows, tally, held\] = await Promise\.all\(\[rowsP, tallyP, heldP\]\);/.test(ur)
   && !/const (rows|tally|held) = await q\(/.test(ur.slice(ur.indexOf("app.get('/api/driver/unauthorized'"))));
 check('coverage starts its geo count before the nine counts, and marks it handled',
-  /const geoP = q\(/.test(srv) && /geoP\.catch\(\(\) => \{\}\);/.test(srv) && /const geo = await geoP;/.test(srv)
-  && srv.indexOf('const geoP = q(') < srv.indexOf("earnDays] = await Promise.all(["));
+  /* `rolled ? q(…) : q(…)` since the coverage_day roll-up (AUD-2a): either
+     read is started here, before the nine counts. */
+  /const geoP = (rolled \? )?q\(/.test(srv) && /geoP\.catch\(\(\) => \{\}\);/.test(srv) && /const geo = await geoP;/.test(srv)
+  && srv.indexOf('const geoP = ') < srv.indexOf("earnDays] = await Promise.all(["));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

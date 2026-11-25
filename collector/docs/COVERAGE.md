@@ -1120,7 +1120,9 @@ coordinate, id, plate or name. Results are as measured at 12:36 UTC on deploy `7
   `.length` counts UTF-16 units; V8 holds any string containing a character above U+00FF (every Arabic
   area name, an em dash) at two bytes a unit, so a "64 MB" cap was up to 128 MB of heap on a 512 MB
   container with no `--max-old-space-size`. Measure stored answers as UTF-8 `Buffer` bytes and set a heap
-  limit. Separately: `/api/coverage`, `/api/ledger/exposure` and two insights were fast once and got
+  limit. **And anything that changes what a response is (string → Buffer) must be checked against every
+  hook on `res.send`/`res.json`:** the access shaper shaped only strings, so Buffers went out unredacted to
+  restricted readers (caught by `rls_gate`/`access_core` in CI). Separately: `/api/coverage`, `/api/ledger/exposure` and two insights were fast once and got
   slower as `trip` and `telemetry_snapshot` grew, until they ran 18–103 s or hit the 120 s timeout. A
   `GROUP BY plate` or `DISTINCT ON (plate)` over `telemetry_snapshot` sorts ~1M rows: walk the plates
   (`TELEMETRY_PLATES`) and probe each plate's newest row through an index instead. Any count over a
