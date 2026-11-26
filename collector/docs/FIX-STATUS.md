@@ -7852,3 +7852,97 @@ ahead. Also green: `cabman` 23, `cabman_egari` 11, `feeds_cabman` 46, `tracker_f
 **LIVE since 8892b91 (PR #78), deployed 2026-11-26 07:24 UTC.** After the deploy, CABMAN polls normally: 52 rows a snapshot, 17 of 46 Ecosine and 1 of 6 Egari trackers counted as dormant (info), and no ERROR in the collector log. The check that matters is a night: zero clock-skew ERRORs between 21:50 and 05:05 UTC. A
 baseline for the night of 25–26 Nov could not be read, because DigitalOcean does not keep a superseded deployment's
 run log; the audit night's 109 stands.
+
+## NIR – card amounts from Network International's emailed reports, drivers from the sheet (2026-11-26)
+
+The operator gave the mailbox (credentials held in DigitalOcean, never here) and said: "let's do that. for POS terminal
+mapping use the sheet. For the amount use the [report]. Run the test." Before that, a read-only test from the
+DigitalOcean container found the first two reports and matched them to the sheet's 25 Nov one for one (COVERAGE
+"Network International's emailed POS reports").
+
+| id | what |
+|---|---|
+| NIR1 | **`src/sources/ni_reports.js`.** A read-only IMAP client (LOGIN, EXAMINE, UID SEARCH, UID FETCH BODY.PEEK[], LOGOUT; literals skipped whole), a minimal MIME parser (no library), the PDF read with `unpdf` (pdf.js, no dependencies, `npm audit` 0), `parseReport` (rows, span, merchant, fleet, grand totals; used only when it adds up), and `storeReport` (`ni_report` per merchant and span, a re-sent report replacing it; `ni_card_txn` keyed by the bank's reference). It runs inside the card-payments tick and is skipped until `NI_MAIL_HOST`, `NI_MAIL_USER` and `NI_MAIL_PASS` are set; a refused login is a credential state. |
+| NIR2 | **`mergeBank` in the sheet write** (`network_cards.js`): one transaction, as before. For a fleet-day a usable report covers AND the sheet already has, the bank's rows replace the sheet's, each with the sheet's driver for its terminal that day (exact amount; else an unmatched row, nearest amount; else the terminal's one driver; else nobody, with the reason). Never a driver from another day. A terminal's fleet is its merchant's. The bank's date is kept. Sheet rows the bank lacks are counted in the read's log, not kept. Every `card_payment` row carries `source`, `bank_ref` and `id_basis` (`sql/schema_v132.sql`). Downstream readers are unchanged: they read all of `card_payment`. |
+| NIR3 | **Settings:** `NI_MAIL_HOST` (env-only by the `_HOST` rule: the password is sent there), `NI_MAIL_PORT` (993), `NI_MAIL_USER`, `NI_MAIL_PASS` (secret), `NI_MAIL_AUTHSERV`, `NI_MERCHANTS` (defaults: the measured filter and the two merchant numbers). **The sender is one fixed address, accounts@arks.ae** (`SENDER` in `ni_reports.js`, not a setting; the mailbox is searched FROM it only). The operator ruled on 2026-11-26: "you will only check emails from THAT specific address. not any other address."; an earlier draft also allowed nifax@network.ae and had an `NI_MAIL_SENDERS` setting. Tests: the bank's own address is rejected, and the search names the sender (each proved by breaking it). |
+| NIR4 | **An independent review of PR #80 found 14 problems (0 refuted); all fixed before deploy:** (1) bank rows opened the cash texts on inferred drivers — now used only on a fleet-day the sheet has, and the last-known-driver rule is gone; (2) the shrink guard counted merged rows, so bank rows hid a broken sheet read — it now compares the sheet's read with the sheet's stored rows (sheet rows plus bank rows that each stood for one, `ONE_FOR_ONE`); (3) a broken re-send could take a usable report's references — `ni_card_txn` is keyed by (report, reference) and the merge reads usable reports only, one row per reference; (4) a multi-day report filed every payment under its last day — held until one is seen; (5) rule 2 could reuse a matched row and the sheet-only count hid rows — two passes, unmatched rows only; (6) the Platform cell overrode the merchant — the merchant wins; (7) one bad message blocked the rest and a bad Date header threw — every message is caught and recorded in `ni_mail_message`, dates parsed safely; (8) a missing merchant or span crashed the store — recorded `unreadable`, nothing stored; (9) two versions of one report flipped every tick — each message is read once, and an unusable copy never replaces a usable report; (10) the duplicate-attachment key was weak — sha256; (11) a forward-as-attachment was ignored — `message/rfc822` is opened; (12) anyone could email in rows — sender allowlist, the receiving filter's DMARC/SPF verdict, and the merchant allowlist. |
+
+| NIR5 | **A second independent review (of 7f20ab9) found 6 problems plus 5 nits; all fixed before deploy:** (1, blocker) the DMARC verdict was read by pattern, so a sender-chosen value the filter echoes (`header.s=dmarc=pass.header.from=arks.ae`) passed a forged mail — the verdict is now parsed by RFC 8601 grammar and every DMARC entry must pass; (2, blocker) bank rows were filed under the bank's date with the report day's driver, which moved a credit off the day the cash text is about — a row now stays on the sheet's day, the bank's date kept as `card_payment.bank_day`, and a late payment typed under the bank's date is matched there; (3) drivers were still guessed within a day (an unlisted payment given to the terminal's one driver; nearest-amount across two drivers) — gone: an unlisted payment has nobody, and a terminal-day whose unmatched rows are several drivers' stays as the sheet has it (`sheet_held`); (4) chargebacks vanished on covered days — kept, never matched; (5) after an IMAP timeout the next fetch took the late reply — the session is destroyed, the read stops, and a fetch answered for another UID is refused; (6) the filter's header could be forged by delivering past it — the filter's ARC seal is now verified against its DNS key (the measured headers prove nothing else: the mailbox server names the filter only by HELO). Nits: a `<` inside a quoted display name, an older retried copy replacing a newer one, a repeated bank reference silently dropped, `ni_mail_message` keeping nulls after a retry — all fixed; "never fetched again after a fix" documented (COVERAGE). Also: a sheet row on a terminal no report has ever carried is kept, and unsealed headers may veto but never vouch. |
+
+| NIR6 | **A third pass (of 01f1b84) confirmed every earlier fix and found 7 more, none a blocker; all fixed:** (1) a genuine seal was not tied to this mailbox or to the header copies read — exactly one copy of each used header, all seven in the signature, and the signed To naming the mailbox; (2) one oversized email could stall or crash the worker — size fetched first and over 5 MB recorded `too_large`, a body over the limit ends the session unread, the buffer grows by doubling, each attempt counted before the fetch, a fresh session after a failure; (3) a DNS "no record" answer permanently rejected real reports — any lookup failure of the filter's key is retried; (4) pass 2 was per payment, order-dependent and unbounded — smallest difference first across the terminal-day, within AED 5 or 5%, otherwise held; (5) a payment counted twice beside a kept row (a mistyped terminal; a terminal that changed merchants) — a kept row on the same terminal and day is matched, and an exact amount beside a mistyped terminal is held; (6) a late row was dropped before the bank could have shown it — kept as `sheet_pending` until D+1 is covered; (7) the UID check is read from the message's own FETCH line, and keys under 1024 bits are refused. Proved by breaking each fix (2–9 tests fail per break). |
+
+| NIR7 | **The final narrow pass (of 6d7c1a9) found the reader, the session and the origin check sound, and two should-fix items in the merge, both fixed:** (1) `sheet_pending` kept every unmatched row at text time (D+1 is never covered when D's text is computed), double entries included — a row that exactly repeats a bank-matched row (terminal, day, amount, driver) is now dropped at once, and only others wait for D+1; (2) the mistyped-terminal hold fired only when the bank's terminal had no sheet rows — it now holds any payment written with nobody that exactly matches a kept row (never-seen terminal, or pending) that day in the same fleet. Also found while fixing: the held terminal-days must be kept before pending rows are chosen, or a held row was kept twice (8 tests fail when the order is reversed). Deploy precondition noted by the review: `NI_MAIL_USER` must be exactly the address the reports are sent To (it is, on the real reports). |
+
+**Tests:** `test/ni_reports.test.mjs` 95 after the final pass (92 after the third pass (73 after the second, 53 before), on synthetic PDFs and messages built in the
+test, with ARC seals made by a key the test generates and serves from a fake DNS:
+- origin: a genuine seal (i=1, and i=2 over a relay's i=1); a stranger; a DMARC fail; the echoed-selector attack; a
+  pass and a fail in one verdict; no aligned SPF/DKIM in the seal; delivered past the filter; a seal by another key;
+  the PDF, the From or the subject changed after sealing; an unsealed fail; a look-alike filter; two From headers; a
+  quoted display-name address; no key published; a DNS failure retried; the verdict grammar;
+- the session: a timeout ends it, the read stops there, an answer for another UID is refused; an older copy never
+  replaces a newer;
+- the merge: each rule, the held terminal-day, the bank's date beside the sheet's day, a late payment typed under the
+  bank's date, a chargeback kept, an unknown terminal kept, a known terminal's missing payment reported; no driver-day
+  moves where the bank and the sheet agree.
+
+**Proved by breaking each fix and watching its test fail** (second review): DMARC entries ignored (4 fail), a
+pattern-style verdict (2), the seal not required (7), the message signature unchecked (3), the body hash unchecked
+(1), unsealed headers vouching (1), two From headers (1), the display name not stripped (1), the read not stopped (2),
+the UID unchecked (1), the session kept after a timeout (1), an older copy replacing (1), duplicate references (1),
+filed under the bank's date (2), no match on the bank's date (5), nearest across drivers (6), ambiguity written as
+nobody (8), chargebacks matched (7), unknown terminals dropped (5).
+
+**Real data after the third pass:** both emails pass with the mailbox check on; one changed PDF byte, an extra
+Content-Type on top, and the same email addressed to another mailbox are each rejected; 48 of 48 matched exactly; 0
+driver-day totals change.
+
+**Real data after the second review:** both emails' seals verify against the filter's real keys (fetched by
+DNS-over-HTTPS here; production uses its own DNS); one changed PDF byte, a changed From, or the newest seal removed are
+each rejected. 48 bank rows, all `sheet_same_payment`, 0 sheet-only, 0 held; the whole table 8,155 rows and AED
+551,754.92; **0 driver-day totals change** (the AED 23.95 late payment now stays on the 25th, its bank date kept).
+
+**Tests before the second review:** `test/ni_reports.test.mjs` 53, on synthetic PDFs and messages built in the test:
+- the report and its totals check, the year rollover, merchant numbers off the list (a stranger named "ECOSINE"
+  included), unseen types, a multi-day span;
+- MIME nesting, base64 and encoded filenames, a forward-as-attachment; the sender check (a stranger, a DMARC fail, a
+  planted pass below the server's fail, a look-alike server id, no verdict, another domain's pass);
+- storing: a PDF attached twice, a re-send replacing, an unusable copy NOT replacing, a PDF with no merchant, a
+  rejected message storing nothing;
+- IMAP against a scripted server that splits replies every 7 bytes and puts the tags inside a body; read-only commands
+  only; known messages not fetched again; a failing message recorded, retried, and blocking nothing after it; a
+  rejected one never fetched again; a refused login;
+- the merge: each rule, an exact match never taken by a near one, a matched row never reused, several drivers → nobody,
+  no driver borrowed from another day, a day the sheet lacks waiting, the merchant over the Platform cell, the bank's
+  date, sheet-only rows;
+- `card_payment` written with provenance, a second read replacing rather than doubling, and the shrink guard holding
+  a read that kept one of a covered day's rows (the merged count would have let it through).
+
+**Proved by breaking each fix and watching its test fail:** the guard on merged rows (1 fails), the bank used without
+the sheet's day (6), matched rows reused (3), the Platform cell over the merchant (6), only the lowest verdict read
+(1), an unusable copy replacing (1), no attachment dedupe (1).
+
+**Real data, 25 Nov (dry run, both emails as received):** both pass the sender check (`accounts@arks.ae`, DMARC pass
+at the filter); both reports usable; 48 bank rows, AED 3,099.97, all `sheet_same_payment`, 0 sheet-only; the whole
+table 8,155 rows and AED 551,754.92 either way. The only change: one AED 23.95 payment moves from 25 to 24 Nov, the
+bank's date.
+
+Also green: the 32 suites touching card payments, the cash texts and emails, settings and the schema list
+(`network_cards` 123, `settings_env_only` 13, which now pins `NI_MAIL_HOST`; `driver_sms` 76, `collector_invariants`
+132).
+
+**The test on real data** (the operator's "Run the test"), with nothing written to production: the two real emails,
+re-fetched read-only through the container console, went through the new reader into a local database, merged with the
+live sheet, and were written:
+
+| check | result |
+|---|---|
+| reports | both ok; 35 + 13 payments; gross and net equal each report's own GRAND TOTAL and NET PAYABLE |
+| bank rows vs the sheet's 25 Nov | 48 vs 48, AED 3,099.97 vs 3,099.97 |
+| how each found its driver | all 48 by the same terminal, day and amount; 0 sheet-only |
+| per-driver totals on the day | 29 drivers or labels, 0 differ |
+| the whole card table | 8,155 rows, AED 551,754.92, unchanged |
+
+The one change is the AED 23.95 payment the bank dates 24 Nov, which now sits on the 24th.
+
+**Not yet on production**, and dormant when deployed until the operator says to set the mailbox variables in
+DigitalOcean.
