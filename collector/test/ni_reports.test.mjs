@@ -57,10 +57,11 @@ const resolveTxt = async (name) => {
   if (DNS[name]) return [[DNS[name]]];
   throw Object.assign(new Error('nx'), { code: 'ENOTFOUND' });
 };
-const OPTS = { senders: ['accounts@example.test'], authserv: 'filter.example.test', merchants: MERCHANTS, resolveTxt };
+const MAILBOX = 'cardreports@mailbox.test';
+const OPTS = { senders: ['accounts@example.test'], authserv: 'filter.example.test', merchants: MERCHANTS, resolveTxt, mailbox: MAILBOX };
 const VERDICT = 'filter.example.test; iprev=pass smtp.remote-ip=192.0.2.1; spf=pass smtp.mailfrom=example.test; dmarc=pass header.from=example.test';
 function arcSeal(raw, { i = 1, d = FILTER_D, s = 'arckey', key = filterKey.privateKey, aar = VERDICT, cv = i === 1 ? 'none' : 'pass',
-  h = 'From:Subject:Date:Message-ID:MIME-Version:Content-Type' } = {}) {
+  h = 'MIME-Version:Content-Type:Message-ID:Date:Subject:To:From' } = {}) {
   const text = Buffer.isBuffer(raw) ? raw.toString('latin1') : raw;
   const { fields, body } = splitMessage(text);
   const bh = createHash('sha256').update(canonBody(body, 'relaxed'), 'latin1').digest('base64');
@@ -146,9 +147,10 @@ console.log('\n§2 the message');
 const pdf = makePdf(reportLines({ rows: ROWS }));
 const b64 = (buf) => buf.toString('base64').replace(/.{76}/g, '$&\r\n');
 const PASS = VERDICT;
-const unsealed = (pdfs, { id = '<r1@example.test>', from = 'Accounts <accounts@example.test>', auth = [PASS], date = 'Thu, 26 Nov 2026 08:05:22 +0000' } = {}) => Buffer.from([
+const unsealed = (pdfs, { id = '<r1@example.test>', from = 'Accounts <accounts@example.test>', auth = [PASS], date = 'Thu, 26 Nov 2026 08:05:22 +0000',
+  to = `"Card reports" <${MAILBOX}>` } = {}) => Buffer.from([
   ...auth.map((a) => `Authentication-Results: ${a}`),
-  ...[].concat(from).map((f) => `From: ${f}`), 'Subject: FW: MERCHANT TRANSACTION ACTIVITY - 200600000001 FROM 25/11/2026 TO',
+  ...[].concat(from).map((f) => `From: ${f}`), `To: ${to}`, 'Subject: FW: MERCHANT TRANSACTION ACTIVITY - 200600000001 FROM 25/11/2026 TO',
   `Message-ID: ${id}`, `Date: ${date}`, 'MIME-Version: 1.0',
   'Content-Type: multipart/mixed; boundary="OUTER"', '', '--OUTER',
   'Content-Type: multipart/alternative; boundary="ALT"', '', '--ALT', 'Content-Type: text/plain; charset="utf-8"',
@@ -175,7 +177,7 @@ check('an allowed sender, sealed by the receiving filter with a DMARC pass: read
 const two = await origin(arcSeal(arcSeal(unsealed([pdf]), { d: 'relay.other.test', s: 'sel1', key: otherKey.privateKey, aar: 'relay.other.test; spf=pass smtp.mailfrom=example.test' }), { i: 2 }));
 check('…the real shape, the filter\'s seal over an earlier relay\'s (i=2 over i=1): read', two.ok === true, JSON.stringify(two));
 const rej = async (label, raw, re, o) => { const r = await origin(raw, o); check(label, r.ok === false && re.test(r.why || ''), JSON.stringify(r)); };
-const nifax = await checkOrigin(unsealed([pdf], { from: 'NI Merchant HD <nifax@network.ae>' }), { authserv: 'filter.example.test', resolveTxt });
+const nifax = await checkOrigin(unsealed([pdf], { from: 'NI Merchant HD <nifax@network.ae>' }), { authserv: 'filter.example.test', resolveTxt, mailbox: MAILBOX });
 check('ONE sender, by the operator\'s ruling: accounts@arks.ae, and even the bank\'s own address is not read', SENDER === 'accounts@arks.ae'
   && nifax.ok === false && /nifax@network\.ae is not one of the allowed senders/.test(nifax.why), JSON.stringify(nifax));
 await rej('a sender not on the list: rejected, and says who', message([pdf], { from: 'Someone <billing@elsewhere.test>' }), /billing@elsewhere\.test is not one of the allowed senders/);
@@ -196,7 +198,18 @@ await rej('a filter verdict outside the seal that says fail: rejected', message(
 await rej('a look-alike filter name: rejected', message([pdf], { seal: { d: 'incoming.evilfilter.example.test' } }), /not the receiving filter's/);
 await rej('two From headers: rejected', message([pdf], { from: ['Accounts <accounts@example.test>', 'x@elsewhere.test'] }), /more than one From header/);
 await rej('an address inside a quoted display name is not the address', message([pdf], { from: '"<accounts@example.test>" <noreply@example.test>' }), /noreply@example\.test is not one of the allowed senders/);
-await rej('the filter\'s key not published: rejected', message([pdf], { seal: { s: 'gone' } }), /no key is published/);
+const gone = await origin(message([pdf], { seal: { s: 'gone' } })).then(() => null, (e) => e);
+check('the filter\'s key not found: retried, never a permanent rejection (a resolver\'s negative answer or a key change)', gone?.retry === true, String(gone));
+const top = (raw, line) => Buffer.from(`${line}\r\n${raw.toString('latin1')}`, 'latin1');
+await rej('an unsigned Content-Type added on top of a sealed message: rejected (it would choose the MIME boundary)',
+  top(message([pdf]), 'Content-Type: multipart/mixed; boundary="EVIL"'), /2 content-type headers/);
+await rej('…an unsigned Subject added on top: rejected', top(message([pdf]), 'Subject: MERCHANT TRANSACTION ACTIVITY'), /2 subject headers/);
+await rej('a genuine seal on mail to another of the filter\'s customers: rejected', message([pdf], { to: 'someone@elsewhere.test' }), /not addressed to this mailbox/);
+await rej('a seal whose signature does not cover To: rejected', message([pdf], { seal: { h: 'MIME-Version:Content-Type:Message-ID:Date:Subject:From' } }), /does not cover to/);
+const tiny = generateKeyPairSync('rsa', { modulusLength: 768 });
+DNS[`tiny._domainkey.${FILTER_D}`] = `k=rsa; p=${spki(tiny)}`;
+await rej('a key under 1024 bits is refused (RFC 8301)', message([pdf], { seal: { s: 'tiny', key: tiny.privateKey } }), /under 1024 bits/);
+await rej('no mailbox address configured: the To cannot be checked, so nothing is read', message([pdf]), /mailbox address is not configured/, { mailbox: '' });
 dnsDown = true;
 const down = await origin(message([pdf])).then(() => null, (e) => e);
 dnsDown = false;
@@ -240,7 +253,7 @@ check('a message from a stranger is rejected before its PDF is opened', stranger
 /* ── §4 ─────────────────────────────────────────────────────────────────── */
 console.log('\n§4 IMAP, read-only');
 const sent = [];
-function fakeServer({ messages = {}, refuse = false, silent = {}, wrongUid = {} } = {}) {
+function fakeServer({ messages = {}, refuse = false, silent = {}, wrongUid = {}, size = {}, unsolicited = {} } = {}) {
   return () => {
     const sock = new EventEmitter();
     const say = (s) => { const b = Buffer.isBuffer(s) ? s : Buffer.from(s, 'latin1'); for (let i = 0; i < b.length; i += 7) { const part = b.subarray(i, i + 7); setImmediate(() => sock.emit('data', part)); } };
@@ -249,9 +262,12 @@ function fakeServer({ messages = {}, refuse = false, silent = {}, wrongUid = {} 
       if (/^LOGIN/.test(c)) say(refuse ? `${tag} NO [AUTHENTICATIONFAILED] Authentication failed.\r\n` : `${tag} OK Logged in\r\n`);
       else if (/^EXAMINE/.test(c)) say(`* 2 EXISTS\r\n* OK [UIDVALIDITY 99] UIDs valid\r\n${tag} OK [READ-ONLY] Examine completed\r\n`);
       else if (/^UID SEARCH/.test(c)) say(`* SEARCH ${Object.keys(messages).join(' ')}\r\n${tag} OK Search completed\r\n`);
-      else if (/^UID FETCH/.test(c)) {
+      else if (/^UID FETCH \d+ \(RFC822\.SIZE\)/.test(c)) {
+        const uid = c.split(' ')[2];
+        say(`${unsolicited[uid] ? '* 9 FETCH (UID 99 FLAGS (\\Seen))\r\n' : ''}* 1 FETCH (UID ${uid} RFC822.SIZE ${size[uid] ?? messages[uid].length})\r\n${tag} OK Fetch completed\r\n`);
+      } else if (/^UID FETCH/.test(c)) {
         const uid = c.split(' ')[2]; const raw = messages[uid];
-        const reply = () => say(Buffer.concat([Buffer.from(`* 1 FETCH (UID ${wrongUid[uid] || uid} BODY[] {${raw.length}}\r\n`), raw, Buffer.from(`)\r\n${tag} OK Fetch completed\r\n`)]));
+        const reply = () => say(Buffer.concat([Buffer.from(`${unsolicited[uid] ? '* 9 FETCH (UID 99 FLAGS (\\Seen))\r\n' : ''}* 1 FETCH (UID ${wrongUid[uid] || uid} BODY[] {${raw.length}}\r\n`), raw, Buffer.from(`)\r\n${tag} OK Fetch completed\r\n`)]));
         if (silent[uid]) setTimeout(reply, 150); else reply();
       } else if (/^LOGOUT/.test(c)) say(`* BYE\r\n${tag} OK Logout\r\n`);
     };
@@ -295,7 +311,7 @@ await collect({ db, log: quiet, host: 'imap.example.test', user: 'u', pass: 'p',
   session: (o) => imapSession({ ...o, connect: fakeServer({ messages: box }) }) });
 const b4 = await book();
 check('…the next read retries only the failed one; the rejected and the read are not fetched again', b4[20] === 'ok/2'
-  && b4[21] === 'rejected/1' && b4[22] === 'ok/1' && sent.filter((c) => /FETCH/.test(c)).length === 1, JSON.stringify([b4, sent]));
+  && b4[21] === 'rejected/1' && b4[22] === 'ok/1' && sent.filter((c) => /BODY\.PEEK/.test(c)).length === 1, JSON.stringify([b4, sent]));
 check('…and the rejected message left nothing in the reports', (await q(`SELECT count(*)::int n FROM ni_report`))[0].n === 2);
 /* A fetch that times out ends the session: its late reply must never be taken
    as the next message's (the second review). */
@@ -305,8 +321,8 @@ const run5 = await collect({ db, log: quiet, host: 'imap.example.test', user: 'u
   session: (o) => imapSession({ ...o, timeoutMs: 60, connect: fakeServer({ messages: slowBox, silent: { 40: true } }) }) });
 await new Promise((r) => setTimeout(r, 250));
 const b5 = await book();
-check('a fetch that times out is recorded, and the read stops there: the next message is not read on that session',
-  b5[40] === 'error/1' && b5[41] === undefined && /timed out/.test(run5.stopped || ''), JSON.stringify([b5, run5.stopped]));
+check('a fetch that times out is recorded, and the next message is read on a FRESH session — one message cannot stop the rest',
+  b5[40] === 'error/1' && b5[41] === 'ok/1' && !run5.stopped, JSON.stringify([b5, run5.stopped]));
 const direct = imapSession({ host: 'imap.example.test', timeoutMs: 60, connect: fakeServer({ messages: slowBox, silent: { 40: true } }) });
 await direct.login('u', 'p'); await direct.examine('INBOX');
 const t1 = await direct.fetchRaw(40).then(() => 'answered', (e) => e.message);
@@ -317,8 +333,23 @@ await q('DELETE FROM ni_mail_message');
 const run6 = await collect({ db, log: quiet, host: 'imap.example.test', user: 'u', pass: 'p', readOpts: OPTS,
   session: (o) => imapSession({ ...o, connect: fakeServer({ messages: slowBox, wrongUid: { 40: 41 } }) }) });
 const b6 = await book();
-check('an answer for another message than the one asked for is refused, and the read stops', b6[40] === 'error/1' && b6[41] === undefined
-  && /answered for message 41, not 40/.test(run6.stopped || ''), JSON.stringify([b6, run6.stopped]));
+check('an answer for another message than the one asked for is refused, and the next is read on a fresh session', b6[40] === 'error/1' && b6[41] === 'ok/1',
+  JSON.stringify([b6, run6]));
+await q('DELETE FROM ni_mail_message');
+const timeline = [];
+const spyDb = { query: (t, p) => { if (/INSERT INTO ni_mail_message/.test(t)) timeline.push(`db:attempt ${p[1]}`); return pg.query(t, p); } };
+const big = { 50: message([pdf], { id: '<b50@example.test>' }), 51: message([pdf], { id: '<b51@example.test>' }), 52: message([egari], { id: '<b52@example.test>' }) };
+const run7 = await collect({ db: spyDb, log: quiet, host: 'imap.example.test', user: 'u', pass: 'p', readOpts: OPTS, maxBytes: big[50].length - 1,
+  session: (o) => imapSession({ ...o, connect: (...a) => { const sock = fakeServer({ messages: big, size: { 51: 10, 52: 10 }, unsolicited: { 52: true } })(...a);
+    const w = sock.write; sock.write = (l) => { if (/BODY\.PEEK/.test(l)) timeline.push(`imap:fetch ${l.split(' ')[3]}`); return w(l); }; return sock; } }) });
+const b7 = await book();
+check('a message over the size limit is recorded too_large from its size alone, and never fetched', b7[50] === 'too_large/1'
+  && !timeline.includes('imap:fetch 50'), JSON.stringify([b7, timeline]));
+check('…a server that understates a size cannot make the reader hold it: the oversized body ends that session unread, and the next is read',
+  b7[51] === 'error/1' && b7[52] === 'ok/1', JSON.stringify(b7));
+check('…an unsolicited flag update for another message is not taken as this message\'s answer', b7[52] === 'ok/1' && run7.reports.some((r) => r.fleet === 'egari'));
+check('every attempt is counted BEFORE the message is fetched, so a message that kills the process still uses up its tries',
+  timeline.indexOf('db:attempt 51') >= 0 && timeline.indexOf('db:attempt 51') < timeline.indexOf('imap:fetch 51'), JSON.stringify(timeline));
 const bad = await collect({ db, log: quiet, host: 'imap.example.test', user: 'u', pass: 'p',
   session: (o) => imapSession({ ...o, connect: fakeServer({ refuse: true }) }) });
 const credRow = (await q(`SELECT state FROM credential_state WHERE credential = 'NI_MAIL_PASS'`).catch(() => []))[0];
@@ -349,7 +380,7 @@ const sheet = [
   sheetRow(17, '2026-11-25', 'ecosine', '10800000', 52, E3),
   sheetRow(18, '2026-11-23', 'ecosine', '10900000', 33, E3),         // a late payment typed under the bank's own date
   sheetRow(19, '2026-11-25', 'ecosine', '10389535', -700, E1),       // a chargeback
-  sheetRow(20, '2026-11-25', 'ecosine', '10990000', 7, E3),          // a terminal the bank knows, without this payment
+  sheetRow(20, '2026-11-25', 'ecosine', '10990000', 7, E3),          // a terminal the bank knows, without this payment (yet)
 ];
 const bankTx = (ref, day, term, amount, reportDay = '2026-11-25', fleet = 'ecosine') => ({ bank_ref: ref, terminal_id: term, report_day: reportDay, txn_day: day, amount, txn_type: 'SALES', fleet_id: fleet });
 const txnsB = [
@@ -365,8 +396,8 @@ const bank = { covered: [{ fleet_id: 'ecosine', day: '2026-11-25' }, { fleet_id:
 const m = mergeBank(sheet, bank);
 const by = (ref) => m.rows.find((r) => r.bank_ref === ref);
 const sheetNos = m.rows.filter((r) => r.source === 'network_sheet').map((r) => r.row_no).sort((a, b) => a - b).join();
-check('kept as the sheet\'s: other days, the other fleet, a terminal no report has carried, a chargeback, and a terminal-day the sheet cannot split',
-  sheetNos === '2,8,9,10,16,17,19', sheetNos);
+check('kept as the sheet\'s: other days, the other fleet, a terminal no report has carried, a chargeback, a terminal-day the sheet cannot split, and a row the bank cannot have shown yet',
+  sheetNos === '2,8,9,10,16,17,19,20' && m.rows.find((r) => r.row_no === 20).id_basis === 'sheet_pending', sheetNos);
 check('a covered day\'s other rows are the bank\'s: 15 of them (two held back, one from another day)', m.rows.filter((r) => r.source === 'network_report').length === 15,
   String(m.rows.filter((r) => r.source === 'network_report').length));
 check('a day the bank reports but the sheet has not reached waits: none of its rows, the day not covered — the cash texts wait as before',
@@ -392,8 +423,37 @@ check('a late payment the team typed under the bank\'s own date is matched there
 check('a row whose Platform cell disagrees with the bank\'s merchant follows the merchant: replaced, not counted twice',
   by('R14').emirates_id === E2 && by('R14').id_basis === 'sheet_same_payment' && !m.rows.some((r) => r.row_no === 15));
 check('a chargeback on a covered day is kept, and never matched to a sale', m.rows.some((r) => r.row_no === 19 && r.amount === -700 && r.source === 'network_sheet'));
-check('a sheet row on a terminal the bank knows, missing from its report, is reported, not kept', m.sheet_only.length === 1 && m.sheet_only[0].row_no === 20,
+check('a row the bank has not shown is kept while the next day — whose report carries late payments — is not covered', m.sheet_only.length === 0,
   JSON.stringify(m.sheet_only.map((r) => r.row_no)));
+{
+  /* The third review's cases, on their own. */
+  const D = '2026-12-01'; const D1 = '2026-12-02';
+  const sh = [sheetRow(31, D, 'ecosine', 'T5', 50, E1), sheetRow(32, D, 'ecosine', 'T6', 50, E1), sheetRow(33, D, 'ecosine', 'T7X', 30, E2),
+    sheetRow(34, D, 'ecosine', 'T8', 40, E3), sheetRow(35, D, 'ecosine', 'T9', 40, E1), sheetRow(36, D1, 'ecosine', 'T10', 10, E2)];
+  const tx = [bankTx('A1', D, 'T5', 70, D), bankTx('A2', D, 'T5', 55, D), bankTx('B1', D, 'T6', 90, D), bankTx('C1', D, 'T7', 30, D),
+    bankTx('D1', D, 'T8', 40, D), bankTx('F1', D1, 'T10', 10, D1)];
+  const bk = (txns) => ({ covered: [{ fleet_id: 'ecosine', day: D }, { fleet_id: 'ecosine', day: D1 }],
+    terminalFleet: { T5: 'ecosine', T6: 'ecosine', T7: 'ecosine', T8: 'egari', T9: 'ecosine', T10: 'ecosine' }, txns });
+  const r = mergeBank(sh, bk(tx)); const b = (ref) => r.rows.find((x) => x.bank_ref === ref);
+  check('pairing is smallest difference first across the terminal-day: the 55 takes the row typed 50, and the unlisted 70 has nobody (in reference order the 70 took it)',
+    b('A2').emirates_id === E1 && b('A2').id_basis === 'sheet_same_terminal_day' && b('A1').emirates_id === null && b('A1').id_basis === 'none', JSON.stringify([b('A1'), b('A2')]));
+  check('…and never beyond AED 5 or 5%: a row typed 50 against a payment of 90 holds the terminal-day as the sheet has it',
+    !b('B1') && r.rows.some((x) => x.row_no === 32 && x.id_basis === 'sheet_held'), JSON.stringify(r.rows.filter((x) => x.terminal_id === 'T6')));
+  check('a mistyped terminal: the payment is held, not written with nobody beside the kept row — counted once, with its driver',
+    !b('C1') && r.rows.some((x) => x.row_no === 33 && x.source === 'network_sheet') && r.held.some((t) => t.bank_ref === 'C1'), JSON.stringify(r.held));
+  check('a terminal that changed merchants: its row kept by the newer fleet still matches that day\'s payment — counted once',
+    b('D1').emirates_id === E3 && b('D1').id_basis === 'sheet_same_payment' && !r.rows.some((x) => x.row_no === 34), JSON.stringify(b('D1')));
+  check('a row the bank has not shown, once the next day is covered and its report lacks it too: reported, not kept',
+    r.sheet_only.length === 1 && r.sheet_only[0].row_no === 35 && !r.rows.some((x) => x.row_no === 35), JSON.stringify(r.sheet_only));
+  const r3 = mergeBank([sheetRow(37, D, 'ecosine', 'T11', 50, E1)], { covered: [{ fleet_id: 'ecosine', day: D }], terminalFleet: { T11: 'ecosine' },
+    txns: [bankTx('H1', D, 'T11', 54, D), bankTx('H2', D, 'T11', 52, D)] });
+  const h = (ref) => r3.rows.find((x) => x.bank_ref === ref);
+  check('…both within the limit: the closer payment takes the row whatever the reference order (52 against 50, not 54)',
+    h('H2').emirates_id === E1 && h('H1').emirates_id === null && h('H1').id_basis === 'none', JSON.stringify([h('H1'), h('H2')]));
+  const r2 = mergeBank(sh, bk([...tx, bankTx('G1', D, 'T9', 40, D1)]));
+  check('…and when the next day\'s report does carry it, it is matched on its own day', r2.rows.find((x) => x.bank_ref === 'G1')?.txn_day === D
+    && r2.rows.find((x) => x.bank_ref === 'G1').emirates_id === E1 && r2.sheet_only.length === 0);
+}
 check('no report: the sheet\'s rows, all of them, marked as the sheet\'s', mergeBank(sheet, null).rows.every((r) => r.source === 'network_sheet' && r.id_basis === 'sheet') && mergeBank(sheet, null).rows.length === sheet.length);
 const perDriverDay = (rows) => { const o = {}; for (const r of rows) { const k = `${r.emirates_id}|${r.txn_day}`; o[k] = Math.round(((o[k] || 0) + r.amount) * 100) / 100; } return o; };
 const before = perDriverDay(sheet); const after = perDriverDay(m.rows);
@@ -408,23 +468,23 @@ const parsed = parseSheet(toValues(sheet));
 await q('DELETE FROM card_payment');
 const imp = await writeRead(db, parsed, { range: 'test', bank });
 const cp = await q(`SELECT source, bank_ref, id_basis, emirates_id, txn_day::text d, amount::float a FROM card_payment ORDER BY source, bank_ref, d`);
-check('card_payment carries source, bank_ref and id_basis for every row', imp.status === 'ok' && cp.length === 22
-  && cp.filter((r) => r.source === 'network_report').every((r) => r.bank_ref && r.id_basis) && cp.filter((r) => r.source === 'network_sheet').every((r) => !r.bank_ref && ['sheet', 'sheet_held'].includes(r.id_basis)),
+check('card_payment carries source, bank_ref and id_basis for every row', imp.status === 'ok' && cp.length === 23
+  && cp.filter((r) => r.source === 'network_report').every((r) => r.bank_ref && r.id_basis) && cp.filter((r) => r.source === 'network_sheet').every((r) => !r.bank_ref && ['sheet', 'sheet_held', 'sheet_pending'].includes(r.id_basis)),
   JSON.stringify([imp.status, imp.why, cp.length]));
 const day25 = cp.filter((r) => r.source === 'network_report').reduce((a, r) => a + r.a, 0);
 const want25 = bank.txns.filter((t) => t.report_day === '2026-11-25' && !['R15', 'R16'].includes(t.bank_ref)).reduce((a, t) => a + t.amount, 0);
 check('…the bank\'s rows are the bank\'s amounts, with its date beside them', Math.abs(day25 - want25) < 0.005
   && (await q(`SELECT bank_day::text b FROM card_payment WHERE bank_ref = 'R3'`))[0].b === '2026-11-24', `${day25} ${want25}`);
 const again = await writeRead(db, parsed, { range: 'test', bank });
-check('a second read replaces, never doubles', again.status === 'ok' && again.held === 2 && (await q('SELECT count(*)::int n FROM card_payment'))[0].n === 22);
+check('a second read replaces, never doubles', again.status === 'ok' && again.held === 2 && (await q('SELECT count(*)::int n FROM card_payment'))[0].n === 23);
 /* A broken read that kept ONE of the 25th's rows: the day stays covered, so
    the bank's rows would pad the merged count back up. Counted sheet against
-   sheet, it is 4 of 18, and held. */
+   sheet, it is 4 of 19, and held. */
 const thin = parseSheet(toValues(sheet.filter((r) => r.row_no <= 3 || r.row_no === 8 || r.row_no === 10)));
 const held = await writeRead(db, thin, { range: 'test', bank });
 check('the shrink guard compares the sheet with the sheet: the bank\'s rows cannot stand in for rows a broken read lost',
-  held.status === 'held' && /keeps 4 of the sheet's 18 stored payments/.test(held.why)
-  && (await q('SELECT count(*)::int n FROM card_payment'))[0].n === 22, JSON.stringify([held.status, held.why]));
+  held.status === 'held' && /keeps 4 of the sheet's 19 stored payments/.test(held.why)
+  && (await q('SELECT count(*)::int n FROM card_payment'))[0].n === 23, JSON.stringify([held.status, held.why]));
 await q('DELETE FROM ni_report'); await q('DELETE FROM ni_mail_message');
 await ingestMessage(db, { raw: message([pdf]), uid: 30, uidvalidity: 99 }, { log: quiet, ...OPTS });
 await ingestMessage(db, { raw: message([makePdf(reportLines({ rows: ROWS, merchant: '200699999999' }))], { id: '<x@example.test>' }), uid: 31, uidvalidity: 99 }, { log: quiet, ...OPTS });

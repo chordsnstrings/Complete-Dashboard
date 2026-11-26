@@ -12682,13 +12682,16 @@ changed. One payment the bank dates 24 Nov came in the 25 Nov report, and the sh
 - **Drivers:** only from the sheet's own row for that payment, never guessed:
   1. the same terminal and amount (`sheet_same_payment`), on the report's day or, for a late payment the team typed
      under the bank's own date, on that date;
-  2. else an unmatched sheet row on that terminal that day, when every such row is one driver's, nearest in amount
-     (`sheet_same_terminal_day`);
+  2. else an unmatched sheet row on that terminal that day, when every such row is one driver's, paired smallest
+     difference first across the terminal-day and only within AED 5 or 5% (`sheet_same_terminal_day`);
   3. else, when several drivers' rows are unmatched there, **that terminal-day stays as the sheet has it**
      (`sheet_held`): writing the bank's payments with nobody would drop each driver's sheet row, and each would be
      texted for a card payment they did make;
   4. else nobody (`none`), with the reason on the row: nobody mapped to the terminal that day, or a payment the sheet
-     does not list. Nobody's credit changes.
+     does not list. Nobody's credit changes. Exception: a payment of exactly the amount of a row kept that day on a
+     terminal no report has carried (a mistyped terminal) is held, so it is counted once.
+  - A sheet row the bank did not take on day D is kept (`sheet_pending`) while D+1, whose report carries D's late
+    payments, is not covered, and dropped only after.
 - **Day:** a bank row stays on the sheet's day (the day the cash texts and the allocation use); the bank's own date is
   kept as `bank_day`. Filing it under the bank's date left a driver's text a credit short.
 - **Fleet:** the merchant the terminal settles to, as the bank's reports show it; the sheet's Platform cell only for a
@@ -12701,6 +12704,11 @@ changed. One payment the bank dates 24 Nov came in the 25 Nov report, and the sh
   SALES. Otherwise it is stored with the reason and the sheet's rows stay. An unusable copy never replaces a usable
   report already held.
 - **Who it is believed from:**
+  - exactly one copy of each header the reader uses (From, To, Subject, Date, Message-ID, Content-Type,
+    MIME-Version), every one covered by the filter's signature, and the signed To naming this mailbox
+    (`NI_MAIL_USER`). On the real reports the filter's signature covers all seven, and To names the mailbox. Without
+    this rule, a genuine seal on mail to another of the filter's customers would pass, and so would an unsigned
+    Content-Type added on top, which chooses the MIME boundary;
   - exactly one From header, naming **accounts@arks.ae and no other address**. That is the operator's ruling of
     2026-11-26: "you will only check emails from THAT specific address. not any other address." It is a constant in
     the code (`SENDER`), not a setting, so the settings page cannot widen it. The mailbox search asks the server only
@@ -12715,8 +12723,15 @@ changed. One payment the bank dates 24 Nov came in the 25 Nov report, and the sh
   Measured on the real reports: arks.ae does not DKIM-sign (Microsoft: "message not signed"), so DMARC passes on SPF.
   The filter `incoming.instance-us-west1-*.prod.antispam.mailspamprotection.com` seals i=2 over Microsoft's i=1
   (selector `arckey`, rsa-sha256, `c=relaxed`), with `spf=pass smtp.mailfrom=arks.ae; dmarc=pass header.from=arks.ae`.
-  Both reports verify. One changed PDF byte, a changed From, or the seal removed are each rejected. Anything that fails
-  is recorded as `rejected` in `ni_mail_message` and never opened; a DNS failure worth retrying is an `error` (retried).
+  Both reports verify. One changed PDF byte, a changed From, an extra Content-Type on top, the same email addressed to
+  another mailbox, or the seal removed are each rejected. Anything that fails is recorded as `rejected` in
+  `ni_mail_message` and never opened. ANY failed lookup of the filter's own key (a "no such record" answer included) is
+  an `error`, retried up to three times. Keys under 1024 bits are refused.
+- **One message cannot stop the rest:**
+  - each attempt is counted before the message is fetched;
+  - a message over 5 MB, judged by its size alone (`RFC822.SIZE`), is recorded `too_large` and never fetched;
+  - a body over that limit ends the session unread, whatever size the server claimed;
+  - a session that fails on one message is replaced by a fresh one for the next, at most twice a tick.
 - **The limit of that check:** it proves arks.ae sent the mail, not that the bank did. The 12:05 forward looked manual
   (three hours after the bank's 09:20). If the accounts team ever automates it, anyone who emails accounts@arks.ae a
   made-up PDF passes every check. **The operator's ruling (2026-11-26): "arks.ae is fine"** — the accounts team's
@@ -12755,7 +12770,9 @@ deleted.
   split outside quotes; every DMARC entry must pass.
 - **After an IMAP timeout, the session is finished.** The late reply sits at the front of the buffer, and the next fetch
   takes it as its own. A timeout destroys the socket, the read stops, and `fetchRaw` refuses an answer naming another
-  UID.
+  UID, read from that message's own FETCH line (an unsolicited flag update for another message is not it).
+- **Fetch the size first, and grow the buffer by doubling.** Appending each chunk to a fresh copy was quadratic: 40 MB
+  took 22 s and about 415 MB of memory, on a worker with 512 MB shared by every collector.
 - **An IMAP reply is complete at the line that starts with its tag**, and that line can be the first thing in the
   buffer. A reader that only looks for "\r\n" + tag hangs on a short reply. Literals (`{n}\r\n` then n bytes) must be
   skipped whole, or a message body containing the tag ends the read early.

@@ -191,18 +191,28 @@ const sum = (xs) => Math.round(xs.reduce((a, p) => a + p.amount, 0) * 100) / 100
         on the report's day, or else — a late payment the team filed under the
         bank's own date — on that date;
      2. else an unmatched sheet row on that terminal that day when EVERY such
-        row is the same driver's, the nearest in amount ('sheet_same_terminal_day':
-        the sheet lists the payment, typed with another amount);
+        row is the same driver's, paired smallest difference first across the
+        terminal-day and only within AED 5 or 5% ('sheet_same_terminal_day': the
+        sheet lists the payment, typed with another amount). Per payment in
+        reference order, and unbounded, it once credited a driver an unlisted
+        70 for a 50 typed for a 55 (the third review);
      3. else, when several drivers' rows are unmatched on that terminal that
-        day, the sheet cannot say whose the payment is: THAT TERMINAL-DAY STAYS
-        AS THE SHEET HAS IT — its unmatched sheet rows are kept, and the
+        day, or one driver's row is left unmatched beyond that difference, the
+        sheet cannot say whose the payment is: THAT TERMINAL-DAY STAYS AS THE
+        SHEET HAS IT — its unmatched sheet rows are kept, and the
         bank's unmatched payments there are not written ('held'). Writing them
         with nobody would drop every one of those drivers' sheet rows, and
         each would be texted for a card payment they did make;
      4. else nobody ('none'), with the reason on the row: the sheet maps nobody
         to the terminal that day, or every row it lists there is already
         matched, so the sheet does not list this one. Nobody's credit changes:
-        the sheet never put that money against anyone.
+        the sheet never put that money against anyone. Except: a payment of
+        exactly the amount of a sheet row kept that day on a terminal no report
+        has carried (a mistyped terminal) is held, not written, so the same
+        money is not counted twice (the third review).
+   A sheet row the bank did not take on day D is kept while the bank cannot yet
+   have it — while D+1, whose report carries D's late payments, is not covered
+   ('sheet_pending') — and dropped only after.
    (Earlier drafts borrowed a terminal's driver from an earlier day, and gave
    an unlisted payment to the terminal's one driver that day; each named a
    driver for money the sheet never put against them.)
@@ -248,6 +258,11 @@ export function mergeBank(payments, bank) {
     const p = exact(onDay.get(`${t.terminal_id}|${t.report_day}`), t);
     if (p) take(i, p, 'sheet_same_payment');
   }
+  for (const { t, i } of use) {   // 1, a row kept on that terminal and day (its Platform's fleet-day not covered)
+    if (pick.has(i)) continue;
+    const p = exact(keptOn.get(`${t.terminal_id}|${t.report_day}`), t);
+    if (p) take(i, p, 'sheet_same_payment');
+  }
   for (const { t, i } of use) {   // 1, on the bank's own date
     if (pick.has(i) || t.txn_day === t.report_day) continue;
     const k = `${t.terminal_id}|${t.txn_day}`;
@@ -255,20 +270,39 @@ export function mergeBank(payments, bank) {
     if (p) take(i, p, 'sheet_same_payment');
   }
   const heldDays = new Set();
-  for (const { t, i } of use) {   // 2, else 3, else 4
-    if (pick.has(i)) continue;
-    const k = `${t.terminal_id}|${t.report_day}`;
+  const capOf = (a) => Math.max(5, 0.05 * Math.abs(a));
+  const groups = new Map();
+  for (const { t, i } of use) if (!pick.has(i)) push(groups, `${t.terminal_id}|${t.report_day}`, { t, i });
+  for (const [k, list] of groups) {   // 2, else 3, else 4 — a terminal-day at a time
     const same = onDay.get(k) || [];
     const free = same.filter((p) => !p.used);
     const whose = new Set(free.map((p) => (p.emirates_id ? `id:${p.emirates_id}` : `label:${p.id_label || ''}`)));
-    if (free.length && whose.size === 1) {
-      take(i, free.sort((a, b) => Math.abs(a.amount - t.amount) - Math.abs(b.amount - t.amount))[0], 'sheet_same_terminal_day');
-      continue;
+    if (whose.size > 1) { heldDays.add(k); for (const { i } of list) pick.set(i, { how: 'held' }); continue; }
+    const pairs = [];
+    for (const { t, i } of list) {
+      for (const p of free) { const gap = Math.abs(p.amount - t.amount); if (gap <= capOf(p.amount)) pairs.push({ gap, i, p }); }
     }
-    if (free.length) { heldDays.add(k); pick.set(i, { how: 'held' }); continue; }
-    pick.set(i, { src: null, how: 'none', day: t.report_day,
-      label: !same.length ? 'the sheet maps no driver to this terminal that day'
-        : 'the sheet does not list this payment: every payment it lists on this terminal that day is matched to another' });
+    pairs.sort((a, b) => a.gap - b.gap || a.i - b.i);
+    for (const x of pairs) if (!pick.has(x.i) && !x.p.used) take(x.i, x.p, 'sheet_same_terminal_day');
+    const left = free.some((p) => !p.used);
+    for (const { i } of list) {
+      if (pick.has(i)) continue;
+      if (left) { heldDays.add(k); pick.set(i, { how: 'held' }); continue; }
+      pick.set(i, { src: null, how: 'none', day: list[0].t.report_day,
+        label: !same.length ? 'the sheet maps no driver to this terminal that day'
+          : 'the sheet does not list this payment: every payment it lists on this terminal that day is matched to another' });
+    }
+  }
+  /* 4's exception: a mistyped terminal. A payment written with nobody, of
+     exactly the amount of a row kept that day on a terminal no report has
+     carried, in the same fleet, is held, so it is counted once (as the
+     sheet's, with its driver). */
+  const unbanked = rows.filter((r) => r.amount > 0 && !Object.prototype.hasOwnProperty.call(termFleet, r.terminal_id));
+  for (const { t, i } of use) {
+    const x = pick.get(i);
+    if (x?.how !== 'none' || (onDay.get(`${t.terminal_id}|${t.report_day}`) || []).length) continue;
+    const r = unbanked.find((u) => !u.paired && u.txn_day === t.report_day && u.fleet_id === t.fleet_id && Math.abs(u.amount - t.amount) < 0.005);
+    if (r) { r.paired = true; pick.set(i, { how: 'held' }); }
   }
   /* 3: the held terminal-days keep their unmatched sheet rows, as the sheet's. */
   for (const k of heldDays) {
@@ -287,8 +321,12 @@ export function mergeBank(payments, bank) {
      is the record of what was paid, so they are not kept — they are returned,
      so the read can say how many the sheet has that the bank has not. A kept
      row a late bank payment matched gives way to it. */
-  const sheet_only = [...onDay.values()].flat().filter((p) => !p.used).map(({ used, ...p }) => p);
-  const out = [...rows.filter((r) => !r.used).map(({ used, ...r }) => r), ...bankRows];
+  const nextDay = (d) => new Date(Date.parse(`${d}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
+  const unmatched = [...onDay.values()].flat().filter((p) => !p.used);
+  const pending = unmatched.filter((p) => !covered.has(`${fleetOf(p)}|${nextDay(p.txn_day)}`));
+  for (const p of pending) rows.push({ ...asSheet(p), id_basis: 'sheet_pending', used: false });
+  const sheet_only = unmatched.filter((p) => !pending.includes(p)).map(({ used, ...p }) => p);
+  const out = [...rows.filter((r) => !r.used).map(({ used, paired, ...r }) => r), ...bankRows];
   return { rows: out, sheet_only, held, basis, covered: [...covered] };
 }
 

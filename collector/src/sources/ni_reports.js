@@ -132,7 +132,13 @@ export function parseMime(raw) {
 /* WHO SENT IT (the reviews of 2026-11-26). Anyone can email the mailbox, and
    a report's amounts change what drivers are asked for, so a message is read
    only when all of this holds:
-     1. exactly one From header, naming SENDER and nothing else;
+     1. exactly one From header, naming SENDER and nothing else; exactly one
+        copy of every header this reader uses (From, To, Subject, Date,
+        Message-ID, Content-Type, MIME-Version), each covered by the filter's
+        signature, and the signed To naming THIS mailbox (the third review: a
+        genuine seal from the same filter on mail to another of its customers,
+        or an unsigned Content-Type or Subject added on top of a sealed message,
+        must not be read);
      2. the NEWEST ARC set (RFC 8617) is the receiving filter's (its d= under
         NI_MAIL_AUTHSERV) and VERIFIES against the key the filter publishes in
         DNS: its message signature covers From and the whole body (the PDF
@@ -246,11 +252,14 @@ export function fromAddress(fields) {
   return { addr, domain: addr.split('@')[1] };
 }
 const defaultResolveTxt = (name) => dnsPromises.resolveTxt(name);
+/* Only ever called for a d= under the filter's own name, so ANY lookup
+   failure — "no such record" included — is retried, never a rejection (the
+   third review: a resolver's negative answer, or a key change at the filter,
+   would otherwise turn a day's real reports into permanent rejections). */
 async function publicKey(d, sel, resolveTxt) {
   const name = `${sel}._domainkey.${d}`;
   let recs;
   try { recs = await resolveTxt(name); } catch (e) {
-    if (e && (e.code === 'ENOTFOUND' || e.code === 'ENODATA')) return { why: `no key is published at ${name}` };
     throw Object.assign(new Error(`looking up ${name} failed (${e?.code || e?.message || e}); tried again next read`), { retry: true });
   }
   const txt = (recs || []).map((r) => (Array.isArray(r) ? r.join('') : String(r))).find((r) => /(^|;)\s*p\s*=/.test(r)) || '';
@@ -258,11 +267,20 @@ async function publicKey(d, sel, resolveTxt) {
   if (!pk) return { why: `the key at ${name} is missing or revoked` };
   const k = ((txt.match(/(?:^|;)\s*k\s*=\s*([A-Za-z0-9]+)/) || [])[1] || 'rsa').toLowerCase();
   if (k !== 'rsa') return { why: `the key at ${name} is not an RSA key` };
-  try { return { key: createPublicKey({ key: Buffer.from(pk, 'base64'), format: 'der', type: 'spki' }) }; } catch {
+  let key;
+  try { key = createPublicKey({ key: Buffer.from(pk, 'base64'), format: 'der', type: 'spki' }); } catch {
     return { why: `the key at ${name} cannot be read` };
   }
+  /* RFC 8301: a verifier must refuse RSA keys under 1024 bits. */
+  if ((key.asymmetricKeyDetails?.modulusLength || 0) < 1024) return { why: `the key at ${name} is under 1024 bits` };
+  return { key };
 }
 const ARC_NAMES = ['arc-authentication-results', 'arc-message-signature', 'arc-seal'];
+/* The headers this reader acts on: each must appear once and be signed. On the
+   real reports the filter's signature covers all seven. */
+const USED_HEADERS = ['from', 'to', 'subject', 'date', 'message-id', 'content-type', 'mime-version'];
+const addressesIn = (v) => (stripComments(v).replace(/"(?:[^"\\]|\\.)*"/g, '').match(/[^\s<>,;:"()]+@[^\s<>,;:"()]+/g) || [])
+  .map((a) => a.toLowerCase());
 /* The newest ARC set, verified: -> { ok, why } or { ok: true, aar, d }. */
 export async function verifyArc({ fields, body }, { suffix, resolveTxt = defaultResolveTxt }) {
   const under = (d) => { const x = String(d || '').toLowerCase(); return Boolean(suffix) && (x === suffix || x.endsWith(`.${suffix}`)); };
@@ -286,7 +304,8 @@ export async function verifyArc({ fields, body }, { suffix, resolveTxt = default
   if (as.a !== 'rsa-sha256' || ams.a !== 'rsa-sha256') return { ok: false, why: 'the ARC set uses an algorithm this reader does not check' };
   if (ams.l !== undefined) return { ok: false, why: 'the ARC signature covers only part of the body' };
   const signed = String(ams.h || '').toLowerCase().split(':').map((x) => x.trim()).filter(Boolean);
-  if (!signed.includes('from')) return { ok: false, why: 'the ARC signature does not cover the From header' };
+  const unsigned = USED_HEADERS.filter((n) => !signed.includes(n));
+  if (unsigned.length) return { ok: false, why: `the ARC signature does not cover ${unsigned.join(', ')}` };
   const [hc = 'simple', bc = 'simple'] = String(ams.c || 'simple/simple').toLowerCase().split('/');
   if (createHash('sha256').update(canonBody(body, bc), 'latin1').digest('base64') !== ams.bh) {
     return { ok: false, why: 'the message body is not the one the filter sealed' };
@@ -317,14 +336,26 @@ export async function verifyArc({ fields, body }, { suffix, resolveTxt = default
   if (!under(aar.authserv)) return { ok: false, why: `the sealed verdict is not the receiving filter's (${aar.authserv || '?'})` };
   return { ok: true, aar, d: as.d };
 }
-export async function checkOrigin(raw, { senders = [SENDER], authserv = '', resolveTxt = defaultResolveTxt } = {}) {
+export async function checkOrigin(raw, { senders = [SENDER], authserv = '', resolveTxt = defaultResolveTxt, mailbox = '' } = {}) {
   const msg = splitMessage(raw);
   const from = fromAddress(msg.fields);
   if (!from.addr) return { ok: false, sender: null, why: from.why };
+  for (const n of USED_HEADERS) {
+    const c = msg.fields.filter((f) => f.name === n).length;
+    if (c !== 1) return { ok: false, sender: from.addr, why: c ? `the message has ${c} ${n} headers` : `the message has no ${n} header` };
+  }
+  for (const n of ['cc', 'content-transfer-encoding']) {
+    if (msg.fields.filter((f) => f.name === n).length > 1) return { ok: false, sender: from.addr, why: `the message has more than one ${n} header` };
+  }
   const allowed = senders.map((x) => String(x).trim().toLowerCase()).filter(Boolean);
   if (!allowed.includes(from.addr)) return { ok: false, sender: from.addr, why: `sender ${from.addr} is not one of the allowed senders` };
   const suffix = String(authserv || '').trim().toLowerCase().replace(/^\.+/, '');
   if (!suffix) return { ok: false, sender: from.addr, why: 'no receiving filter is configured to vouch for senders (NI_MAIL_AUTHSERV)' };
+  const box = String(mailbox || '').trim().toLowerCase();
+  if (!box) return { ok: false, sender: from.addr, why: 'the mailbox address is not configured (NI_MAIL_USER), so the To cannot be checked' };
+  if (!addressesIn(valueOf(msg.fields.find((f) => f.name === 'to').text)).includes(box)) {
+    return { ok: false, sender: from.addr, why: 'the message is not addressed to this mailbox' };
+  }
   const arc = await verifyArc(msg, { suffix, resolveTxt });
   if (!arc.ok) return { ok: false, sender: from.addr, why: arc.why };
   const under = (d) => d === suffix || d.endsWith(`.${suffix}`);
@@ -506,13 +537,13 @@ export async function storeReport(db, rep, meta = {}) {
    twice (the same bytes) is read once. Throws only on a failure worth
    retrying (the database); the caller records the outcome either way. */
 export async function ingestMessage(db, { raw, uid = null, uidvalidity = null }, {
-  log = defaultLog, senders = [SENDER],
+  log = defaultLog, senders = [SENDER], mailbox = get('NI_MAIL_USER', ''),
   authserv = get('NI_MAIL_AUTHSERV', DEFAULT_AUTHSERV), merchants = merchantsOf(get('NI_MERCHANTS', DEFAULT_MERCHANTS)),
   resolveTxt = defaultResolveTxt } = {}) {
   const { headers, parts } = parseMime(raw);
   const meta = { message_id: headers['message-id'] || null, subject: decodeWords(headers.subject || '').slice(0, 200),
     received_at: safeIso(headers.date) };
-  const origin = await checkOrigin(raw, { senders, authserv, resolveTxt });
+  const origin = await checkOrigin(raw, { senders, authserv, resolveTxt, mailbox });
   if (!origin.ok) {
     log.warn(SOURCE, 'message not read', { subject: meta.subject.slice(0, 100), why: origin.why });
     return { ...meta, sender: origin.sender, status: 'rejected', why: origin.why, reports: [] };
@@ -546,13 +577,28 @@ export async function ingestMessage(db, { raw, uid = null, uidvalidity = null },
    LOGOUT. A response is complete at the line that starts with its tag;
    literals ({n}\r\n then n bytes) are skipped whole while looking for it, so a
    message body that happens to contain the tag cannot end the read early. */
-export function imapSession({ host, port = 993, connect = tls.connect, timeoutMs = 60000 } = {}) {
+export const MAX_MESSAGE_BYTES = 5 * 1024 * 1024;   // the real reports are about 350 KB
+export function imapSession({ host, port = 993, connect = tls.connect, timeoutMs = 60000, maxLiteral = MAX_MESSAGE_BYTES } = {}) {
   const sock = connect({ host, port, servername: host });
-  let buf = Buffer.alloc(0); let waiting = null; let failed = null; let greeted = false; let onGreet = null;
+  let waiting = null; let failed = null; let greeted = false; let onGreet = null;
+  /* A buffer that grows by doubling: appending each chunk to a fresh copy was
+     quadratic in the message's size (the third review: 40 MB took 22 s). */
+  let store = Buffer.alloc(64 * 1024); let s0 = 0; let s1 = 0;
+  const view = () => store.subarray(s0, s1);
+  const append = (d) => {
+    if (s1 + d.length > store.length) {
+      const live = s1 - s0; const nb = Buffer.alloc(Math.max(2 * (live + d.length), 64 * 1024));
+      store.copy(nb, 0, s0, s1); store = nb; s0 = 0; s1 = live;
+    }
+    d.copy(store, s1); s1 += d.length;
+  };
+  const consume = (n) => { s0 += n; if (s0 === s1) { s0 = 0; s1 = 0; } };
+  const fail = (e) => { failed = e; sock.destroy(); if (waiting) { const w = waiting; waiting = null; clearTimeout(w.timer); w.rej(e); } };
   const tryResolve = () => {
+    const buf = view();
     if (!greeted) {
       const e = buf.indexOf('\r\n');
-      if (e >= 0) { greeted = true; buf = buf.subarray(e + 2); onGreet?.(); }
+      if (e >= 0) { greeted = true; consume(e + 2); onGreet?.(); }
       return;
     }
     if (!waiting) return;
@@ -562,9 +608,16 @@ export function imapSession({ host, port = 993, connect = tls.connect, timeoutMs
       if (e < 0) return;
       const line = buf.subarray(i, e).toString('latin1');
       const lit = line.match(/\{(\d+)\}$/);
-      if (lit) { const n = Number(lit[1]); if (buf.length < e + 2 + n) return; i = e + 2 + n; continue; }
+      if (lit) {
+        const n = Number(lit[1]);
+        /* Never hold more than a report could be, whatever the server said
+           its size was: a message this big ends the session unread. */
+        if (n > maxLiteral) { fail(new Error(`a message of ${n} bytes, over the ${maxLiteral}-byte limit; not read`)); return; }
+        if (buf.length < e + 2 + n) return;
+        i = e + 2 + n; continue;
+      }
       if (line.startsWith(`${waiting.tag} `)) {
-        const out = buf.subarray(0, e + 2); buf = buf.subarray(e + 2);
+        const out = Buffer.from(buf.subarray(0, e + 2)); consume(e + 2);
         const w = waiting; waiting = null; clearTimeout(w.timer);
         if (/^\S+ OK\b/.test(line)) w.res(out); else w.rej(Object.assign(new Error(line.slice(0, 200)), { imap: true, line }));
         return;
@@ -572,8 +625,8 @@ export function imapSession({ host, port = 993, connect = tls.connect, timeoutMs
       i = e + 2;
     }
   };
-  sock.on('data', (d) => { buf = Buffer.concat([buf, d]); tryResolve(); });
-  sock.on('error', (e) => { failed = e; if (waiting) { clearTimeout(waiting.timer); waiting.rej(e); waiting = null; } });
+  sock.on('data', (d) => { if (!failed) { append(d); tryResolve(); } });
+  sock.on('error', (e) => { if (!failed) fail(e); });
   const ready = new Promise((res, rej) => {
     const t = setTimeout(() => rej(new Error('IMAP greeting timed out')), timeoutMs);
     t.unref?.();
@@ -588,9 +641,7 @@ export function imapSession({ host, port = 993, connect = tls.connect, timeoutMs
       const tag = `N${++n}`;
       /* A command that times out ends the session: its late reply would
          otherwise be taken as the next command's (the second review). */
-      const timer = setTimeout(() => {
-        waiting = null; failed = new Error(`IMAP ${c.split(' ')[0]} timed out`); sock.destroy(); rej(failed);
-      }, timeoutMs);
+      const timer = setTimeout(() => fail(new Error(`IMAP ${c.split(' ')[0]} timed out`)), timeoutMs);
       timer.unref?.();
       waiting = { tag, res, rej, timer };
       sock.write(`${tag} ${c}\r\n`);
@@ -608,15 +659,31 @@ export function imapSession({ host, port = 993, connect = tls.connect, timeoutMs
       const r = (await cmd(`UID SEARCH ${criteria}`)).toString('latin1');
       return ((r.match(/\* SEARCH([\d ]*)/) || [])[1] || '').trim().split(/\s+/).filter(Boolean).map(Number);
     },
+    /* The size the server holds for one message, before fetching it. Read from
+       this message's own FETCH item: an unsolicited flag update for another
+       message (the accounts team reading mail meanwhile) is not it. */
+    async fetchSize(uid) {
+      const r = (await cmd(`UID FETCH ${uid} (RFC822.SIZE)`)).toString('latin1');
+      for (const item of r.matchAll(/^\* \d+ FETCH \(([^\r\n]*)\)\r?$/gm)) {
+        if (Number((item[1].match(/\bUID (\d+)/) || [])[1]) === Number(uid)) return Number((item[1].match(/RFC822\.SIZE (\d+)/) || [])[1] ?? NaN);
+      }
+      return null;
+    },
     async fetchRaw(uid) {
       const r = await cmd(`UID FETCH ${uid} (BODY.PEEK[])`);
       const head = r.toString('latin1');
       const m = /BODY\[\] \{(\d+)\}\r\n/.exec(head);
       if (!m) return null;
-      const start = m.index + m[0].length;
-      const said = /UID (\d+)/.exec(head.slice(0, m.index)) || /UID (\d+)/.exec(r.subarray(start + Number(m[1])).toString('latin1'));
-      if (said && Number(said[1]) !== Number(uid)) throw new Error(`the server answered for message ${said[1]}, not ${uid}`);
-      return r.subarray(start, start + Number(m[1]));
+      const start = m.index + m[0].length; const n = Number(m[1]);
+      /* The UID of THIS item: on the line that carries the literal, or after
+         the literal up to the end of that line — never another FETCH line. */
+      const lineStart = head.lastIndexOf('\r\n', m.index) + 2;
+      const before = head.slice(lineStart >= 2 ? lineStart : 0, m.index);
+      const afterEnd = head.indexOf('\r\n', start + n);
+      const after = head.slice(start + n, afterEnd < 0 ? undefined : afterEnd);
+      const said = /\bUID (\d+)/.exec(before) || /\bUID (\d+)/.exec(after);
+      if (!said || Number(said[1]) !== Number(uid)) throw new Error(`the server answered for message ${said ? said[1] : '(none)'}, not ${uid}`);
+      return r.subarray(start, start + n);
     },
     async logout() { try { await cmd('LOGOUT'); } catch { /* the server may close first */ } sock.end(); },
     close() { sock.destroy(); },
@@ -627,21 +694,36 @@ const IMAP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
 const imapDate = (d) => `${d.getUTCDate()}-${IMAP_MONTHS[d.getUTCMonth()]}-${d.getUTCFullYear()}`;
 
 /* The collector tick: read the reports that are new since the last read.
-   Skipped (and silent) until the mailbox is configured. */
+   Skipped (and silent) until the mailbox is configured.
+   ONE MESSAGE CANNOT STOP THE REST (the third review). Each attempt is counted
+   BEFORE the message is fetched, so a message that kills the process still
+   uses up its three attempts; a message over MAX_MESSAGE_BYTES is recorded
+   'too_large' from its size alone and never fetched; and a session that fails
+   on a message (a timeout, an answer for another message, an oversized
+   literal) is replaced by a fresh one for the next message, at most twice a
+   tick. */
 export async function collect({ db, log = defaultLog, now = Date.now(), sinceDays = 10,
   host = get('NI_MAIL_HOST', ''), port = Number(get('NI_MAIL_PORT', '993')) || 993,
-  user = get('NI_MAIL_USER', ''), pass = get('NI_MAIL_PASS', ''), session = imapSession, readOpts = {} } = {}) {
+  user = get('NI_MAIL_USER', ''), pass = get('NI_MAIL_PASS', ''), session = imapSession, readOpts = {},
+  maxBytes = MAX_MESSAGE_BYTES } = {}) {
   if (!host || !user || !pass) return { skipped: 'NI_MAIL_HOST, NI_MAIL_USER or NI_MAIL_PASS is not set' };
   const cred = { provider: 'network_international_mail', credential: 'NI_MAIL_PASS', surface: 'emailed POS reports' };
-  const s = session({ host, port });
   const out = { reports: [], skipped_known: 0 };
+  let s = null;
+  const open = async () => {
+    s = session({ host, port, maxLiteral: maxBytes });
+    try { await s.login(user, pass); } catch (e) { e.atLogin = true; throw e; }
+    return s.examine('INBOX');
+  };
   try {
-    try { await s.login(user, pass); } catch (e) {
-      if (e.imap) await noteCredential(db, { ...cred, state: 'invalid', detail: String(e.line || e.message).slice(0, 160) }).catch(() => {});
+    let box;
+    try { box = await open(); } catch (e) {
+      if (e.atLogin && e.imap) {
+        await noteCredential(db, { ...cred, state: 'invalid', detail: String(e.line || e.message).slice(0, 160) }).catch(() => {});
+      }
       throw e;
     }
     await noteCredential(db, { ...cred, state: 'ok' }).catch(() => {});
-    const box = await s.examine('INBOX');
     const from = (readOpts.senders || [SENDER])[0];
     const uids = await s.uidSearch(`SINCE ${imapDate(new Date(now - sinceDays * 864e5))} FROM "${from}" SUBJECT "${SUBJECT}"`);
     /* Known: every message already recorded, except one that failed for a
@@ -649,33 +731,44 @@ export async function collect({ db, log = defaultLog, now = Date.now(), sinceDay
     const known = new Set((await db.query(
       `SELECT mail_uid FROM ni_mail_message WHERE mail_uidvalidity = $1 AND (status <> 'error' OR attempts >= 3)`,
       [box.uidvalidity])).rows.map((r) => Number(r.mail_uid)));
+    let reopened = 0;
     for (const uid of uids) {
       if (known.has(uid)) { out.skipped_known += 1; continue; }
-      let res; let stop = false;
-      let raw = null;
-      try { raw = await s.fetchRaw(uid); } catch (e) {
-        /* The session is no longer to be trusted (a timeout, an answer for
-           another message): record this one, stop, and read the rest next time. */
-        res = { status: 'error', why: String(e.message || e).slice(0, 300) }; stop = true;
-      }
-      if (!res) {
-        try {
-          res = raw ? await ingestMessage(db, { raw, uid, uidvalidity: box.uidvalidity }, { log, ...readOpts })
-            : { status: 'error', why: 'the server returned no body' };
-        } catch (e) { res = { status: 'error', why: String(e.message || e).slice(0, 300) }; }
-      }
       await db.query(
-        `INSERT INTO ni_mail_message (mail_uidvalidity, mail_uid, message_id, sender, subject, received_at, status, why)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT (mail_uidvalidity, mail_uid) DO UPDATE SET status = EXCLUDED.status, why = EXCLUDED.why,
-           message_id = coalesce(EXCLUDED.message_id, ni_mail_message.message_id), sender = coalesce(EXCLUDED.sender, ni_mail_message.sender),
-           subject = coalesce(EXCLUDED.subject, ni_mail_message.subject), received_at = coalesce(EXCLUDED.received_at, ni_mail_message.received_at),
-           attempts = ni_mail_message.attempts + 1, seen_at = now()`,
-        [box.uidvalidity, uid, res.message_id || null, res.sender || null, res.subject || null, res.received_at || null, res.status, res.why || null]);
+        `INSERT INTO ni_mail_message (mail_uidvalidity, mail_uid, status, why) VALUES ($1, $2, 'error', 'stopped while reading it')
+         ON CONFLICT (mail_uidvalidity, mail_uid) DO UPDATE SET status = 'error', why = 'stopped while reading it',
+           attempts = ni_mail_message.attempts + 1, seen_at = now()`, [box.uidvalidity, uid]);
+      let res = null; let broken = false;
+      try {
+        const size = await s.fetchSize(uid);
+        if (Number.isFinite(size) && size > maxBytes) {
+          res = { status: 'too_large', why: `${size} bytes, over the ${maxBytes}-byte limit (a report is about 350 KB); not fetched` };
+        } else {
+          const raw = await s.fetchRaw(uid);
+          res = raw ? null : { status: 'error', why: 'the server returned no body' };
+          if (raw) {
+            try { res = await ingestMessage(db, { raw, uid, uidvalidity: box.uidvalidity }, { log, mailbox: user, ...readOpts }); } catch (e) {
+              res = { status: 'error', why: String(e.message || e).slice(0, 300) };
+            }
+          }
+        }
+      } catch (e) { res = { status: 'error', why: String(e.message || e).slice(0, 300) }; broken = true; }
+      await db.query(
+        `UPDATE ni_mail_message SET status = $3, why = $4, message_id = coalesce($5, message_id), sender = coalesce($6, sender),
+           subject = coalesce($7, subject), received_at = coalesce($8, received_at), seen_at = now()
+         WHERE mail_uidvalidity = $1 AND mail_uid = $2`,
+        [box.uidvalidity, uid, res.status, res.why || null, res.message_id || null, res.sender || null, res.subject || null, res.received_at || null]);
       out.messages = (out.messages || 0) + 1;
       out.reports.push(...(res.reports || []));
       if (res.status === 'error') log.warn(SOURCE, 'message failed; it will be tried again', { uid, why: String(res.why).slice(0, 160) });
-      if (stop) { out.stopped = res.why; break; }
+      if (broken) {
+        /* The session is no longer to be trusted: a fresh one for the rest. */
+        s.close();
+        if (reopened >= 2) { out.stopped = res.why; break; }
+        reopened += 1;
+        const again = await open();
+        if (again.uidvalidity !== box.uidvalidity) { out.stopped = 'the mailbox was renumbered (UIDVALIDITY changed); read again next tick'; break; }
+      }
     }
     await s.logout();
     await logRun({ source: SOURCE, fleet_id: null, mode: 'mail', status: 'ok', rows_written: out.reports.reduce((a, r) => a + r.txns, 0) }, db);
@@ -683,7 +776,7 @@ export async function collect({ db, log = defaultLog, now = Date.now(), sinceDay
       used: out.reports.filter((r) => r.status === 'ok').length });
     return out;
   } catch (e) {
-    s.close();
+    s?.close();
     const msg = String(e.message || e).slice(0, 300);
     await logRun({ source: SOURCE, fleet_id: null, mode: 'mail', status: 'error', rows_written: 0, error: msg }, db).catch(() => {});
     log.warn(SOURCE, 'read failed', { err: msg.slice(0, 200) });

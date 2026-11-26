@@ -97,10 +97,13 @@ CREATE TABLE IF NOT EXISTS ni_mail_message (
 -- day the cash texts and the allocation work by). id_basis says how the driver
 -- was found: 'sheet' (a sheet row), 'sheet_held' (a sheet row kept on a
 -- covered day because several drivers' payments there could not be told
--- apart, so the terminal-day stays as the sheet has it), 'sheet_same_payment' (the sheet's row for
+-- apart, so the terminal-day stays as the sheet has it), 'sheet_pending' (a
+-- sheet row the bank has not shown, kept while the next day's report, which
+-- carries late payments, is not yet covered), 'sheet_same_payment' (the sheet's row for
 -- the same terminal and amount, on the report's day or on the bank's date),
 -- 'sheet_same_terminal_day' (an unmatched sheet row on that terminal that day,
--- every such row the same driver's, nearest in amount), or 'none' (the sheet
+-- every such row the same driver's, smallest difference first, within AED 5
+-- or 5%), or 'none' (the sheet
 -- does not put this payment against anyone; the row says why). Never a guess:
 -- a bank amount is used only on a fleet-day the sheet itself has, and a driver
 -- only from the sheet's row for that payment (the reviews of 2026-11-26).
