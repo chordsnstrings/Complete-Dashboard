@@ -12679,23 +12679,45 @@ changed. One payment the bank dates 24 Nov came in the 25 Nov report, and the sh
 - **Amounts:** the bank's, for a fleet-day a usable report covers **and the sheet already has**. Until the team types
   the day in, the bank's rows wait and nothing about the day changes, so the cash texts (which wait for the sheet's
   day, CARD-4) wait exactly as before.
-- **Drivers:** the sheet's, for the same terminal on the report's day, in two passes so an exact match is never taken
-  by a near one: the same amount (`sheet_same_payment`); else an unmatched sheet row on that terminal that day, the
-  nearest in amount (`sheet_same_terminal_day`); else, every row there already matched, the terminal's one driver that
-  day (`sheet_terminal_driver`); else nobody (`none`), with the reason on the row. **Never a driver from another day.**
+- **Drivers:** only from the sheet's own row for that payment, never guessed:
+  1. the same terminal and amount (`sheet_same_payment`), on the report's day or, for a late payment the team typed
+     under the bank's own date, on that date;
+  2. else an unmatched sheet row on that terminal that day, when every such row is one driver's, nearest in amount
+     (`sheet_same_terminal_day`);
+  3. else, when several drivers' rows are unmatched there, **that terminal-day stays as the sheet has it**
+     (`sheet_held`): writing the bank's payments with nobody would drop each driver's sheet row, and each would be
+     texted for a card payment they did make;
+  4. else nobody (`none`), with the reason on the row: nobody mapped to the terminal that day, or a payment the sheet
+     does not list. Nobody's credit changes.
+- **Day:** a bank row stays on the sheet's day (the day the cash texts and the allocation use); the bank's own date is
+  kept as `bank_day`. Filing it under the bank's date left a driver's text a credit short.
 - **Fleet:** the merchant the terminal settles to, as the bank's reports show it; the sheet's Platform cell only for a
-  terminal no report has carried.
+  terminal no report has carried. A sheet row on a terminal no report has ever carried is kept (the bank's silence
+  about a terminal it never shows proves nothing). A chargeback (a sheet row of zero or less) is always kept: the
+  report carries sales only.
 - **Provenance:** every `card_payment` row says where it came from (`source`, `bank_ref`, `id_basis`).
 - **When a report is used at all:** only when every transaction row was read and they reproduce the report's count
   and grand total to the fil, the merchant number is on `NI_MERCHANTS`, the report covers one day, and every type is
   SALES. Otherwise it is stored with the reason and the sheet's rows stay. An unusable copy never replaces a usable
   report already held.
-- **Who it is believed from:** the From address must be on `NI_MAIL_SENDERS`, and every `Authentication-Results`
-  header carrying the receiving filter's id (`NI_MAIL_AUTHSERV`) must pass DMARC (or, with no DMARC result, SPF) for
-  that sender's domain. On the real reports the topmost header came from
-  `incoming.instance-us-west1-*.prod.antispam.mailspamprotection.com` and read `spf=pass smtp.mailfrom=arks.ae;
-  dmarc=pass header.from=arks.ae`; From and Return-Path were `accounts@arks.ae`. Anything else is recorded as
-  `rejected` in `ni_mail_message` and never opened.
+- **Who it is believed from:**
+  - exactly one From header, on `NI_MAIL_SENDERS`;
+  - the newest ARC set is the receiving filter's (`d=` under `NI_MAIL_AUTHSERV`), and both its message signature
+    (covering From and the whole body, PDF included) and its seal **verify against the key the filter publishes in
+    DNS**;
+  - in that sealed verdict, every DMARC result is a pass for the From domain and an aligned SPF or DKIM pass is there;
+    unsealed `Authentication-Results` headers carrying the filter's id may veto, never vouch.
+
+  Measured on the real reports: arks.ae does not DKIM-sign (Microsoft: "message not signed"), so DMARC passes on SPF.
+  The filter `incoming.instance-us-west1-*.prod.antispam.mailspamprotection.com` seals i=2 over Microsoft's i=1
+  (selector `arckey`, rsa-sha256, `c=relaxed`), with `spf=pass smtp.mailfrom=arks.ae; dmarc=pass header.from=arks.ae`.
+  Both reports verify. One changed PDF byte, a changed From, or the seal removed are each rejected. Anything that fails
+  is recorded as `rejected` in `ni_mail_message` and never opened; a DNS failure worth retrying is an `error` (retried).
+- **The limit of that check:** it proves arks.ae sent the mail, not that the bank did. The 12:05 forward looked manual
+  (three hours after the bank's 09:20). If the accounts team ever automates it, anyone who emails accounts@arks.ae a
+  made-up PDF passes every check. The safe arrangement is the bank sending to this mailbox directly.
+- **Not read again:** a message recorded `rejected`, `unreadable` or `ok` is never fetched again, even after a settings or
+  parser fix. To re-read one, delete its `ni_mail_message` row.
 - **Each message once:** `ni_mail_message` records every fetched UID with its outcome (`ok`, `no_report`,
   `rejected`, `unreadable`, `error`). Only an `error` is fetched again, up to three attempts, so one bad message
   blocks nothing and two versions of a report cannot take turns.
@@ -12717,9 +12739,18 @@ deleted.
   (CARD-4). A first draft wrote the bank's rows as soon as the report came, naming drivers by each terminal's last known
   driver, and that opened the cash texts on a guess. The bank's rows are now used only on a fleet-day the sheet already
   has.
-- **An Authentication-Results header can be written by the sender.** Trust only the ones carrying the receiving
-  filter's own id, require every one of those to pass, and match the id on a dot boundary (`evilfilter.example` is not
-  `filter.example`).
+- **An Authentication-Results header can be written by the sender, and the filter can be bypassed.** The mailbox's own
+  server (Exim) names the filter only by its HELO, which a sender chooses, so nothing in the headers
+  proves the filter saw a message, except the filter's ARC seal, verified against its DNS key. The filter publishes
+  one per instance at `arckey._domainkey.<instance host>`. This sandbox's own DNS returns ENODATA for it; DNS-over-HTTPS
+  through the proxy works, which is how the real seals were verified locally.
+- **Read an Authentication-Results header by its grammar, not by pattern.** The filter echoes sender-chosen values, such
+  as a DKIM selector `s=dmarc=pass.header.from=arks.ae`. A regex for `dmarc=…header.from=` matched that and skipped the real
+  `dmarc=fail`. A result is only an entry whose first token is `method=result`, after comments are removed and `;` is
+  split outside quotes; every DMARC entry must pass.
+- **After an IMAP timeout, the session is finished.** The late reply sits at the front of the buffer, and the next fetch
+  takes it as its own. A timeout destroys the socket, the read stops, and `fetchRaw` refuses an answer naming another
+  UID.
 - **An IMAP reply is complete at the line that starts with its tag**, and that line can be the first thing in the
   buffer. A reader that only looks for "\r\n" + tag hangs on a short reply. Literals (`{n}\r\n` then n bytes) must be
   skipped whole, or a message body containing the tag ends the read early.

@@ -7867,7 +7867,33 @@ DigitalOcean container found the first two reports and matched them to the sheet
 | NIR3 | **Settings:** `NI_MAIL_HOST` (env-only by the `_HOST` rule: the password is sent there), `NI_MAIL_PORT` (993), `NI_MAIL_USER`, `NI_MAIL_PASS` (secret), `NI_MAIL_SENDERS`, `NI_MAIL_AUTHSERV`, `NI_MERCHANTS` (defaults: the measured senders, filter and the two merchant numbers). |
 | NIR4 | **An independent review of PR #80 found 14 problems (0 refuted); all fixed before deploy:** (1) bank rows opened the cash texts on inferred drivers — now used only on a fleet-day the sheet has, and the last-known-driver rule is gone; (2) the shrink guard counted merged rows, so bank rows hid a broken sheet read — it now compares the sheet's read with the sheet's stored rows (sheet rows plus bank rows that each stood for one, `ONE_FOR_ONE`); (3) a broken re-send could take a usable report's references — `ni_card_txn` is keyed by (report, reference) and the merge reads usable reports only, one row per reference; (4) a multi-day report filed every payment under its last day — held until one is seen; (5) rule 2 could reuse a matched row and the sheet-only count hid rows — two passes, unmatched rows only; (6) the Platform cell overrode the merchant — the merchant wins; (7) one bad message blocked the rest and a bad Date header threw — every message is caught and recorded in `ni_mail_message`, dates parsed safely; (8) a missing merchant or span crashed the store — recorded `unreadable`, nothing stored; (9) two versions of one report flipped every tick — each message is read once, and an unusable copy never replaces a usable report; (10) the duplicate-attachment key was weak — sha256; (11) a forward-as-attachment was ignored — `message/rfc822` is opened; (12) anyone could email in rows — sender allowlist, the receiving filter's DMARC/SPF verdict, and the merchant allowlist. |
 
-**Tests:** `test/ni_reports.test.mjs` 53, on synthetic PDFs and messages built in the test:
+| NIR5 | **A second independent review (of 7f20ab9) found 6 problems plus 5 nits; all fixed before deploy:** (1, blocker) the DMARC verdict was read by pattern, so a sender-chosen value the filter echoes (`header.s=dmarc=pass.header.from=arks.ae`) passed a forged mail — the verdict is now parsed by RFC 8601 grammar and every DMARC entry must pass; (2, blocker) bank rows were filed under the bank's date with the report day's driver, which moved a credit off the day the cash text is about — a row now stays on the sheet's day, the bank's date kept as `card_payment.bank_day`, and a late payment typed under the bank's date is matched there; (3) drivers were still guessed within a day (an unlisted payment given to the terminal's one driver; nearest-amount across two drivers) — gone: an unlisted payment has nobody, and a terminal-day whose unmatched rows are several drivers' stays as the sheet has it (`sheet_held`); (4) chargebacks vanished on covered days — kept, never matched; (5) after an IMAP timeout the next fetch took the late reply — the session is destroyed, the read stops, and a fetch answered for another UID is refused; (6) the filter's header could be forged by delivering past it — the filter's ARC seal is now verified against its DNS key (the measured headers prove nothing else: the mailbox server names the filter only by HELO). Nits: a `<` inside a quoted display name, an older retried copy replacing a newer one, a repeated bank reference silently dropped, `ni_mail_message` keeping nulls after a retry — all fixed; "never fetched again after a fix" documented (COVERAGE). Also: a sheet row on a terminal no report has ever carried is kept, and unsealed headers may veto but never vouch. |
+
+**Tests:** `test/ni_reports.test.mjs` 73 after the second review (53 before), on synthetic PDFs and messages built in the
+test, with ARC seals made by a key the test generates and serves from a fake DNS:
+- origin: a genuine seal (i=1, and i=2 over a relay's i=1); a stranger; a DMARC fail; the echoed-selector attack; a
+  pass and a fail in one verdict; no aligned SPF/DKIM in the seal; delivered past the filter; a seal by another key;
+  the PDF, the From or the subject changed after sealing; an unsealed fail; a look-alike filter; two From headers; a
+  quoted display-name address; no key published; a DNS failure retried; the verdict grammar;
+- the session: a timeout ends it, the read stops there, an answer for another UID is refused; an older copy never
+  replaces a newer;
+- the merge: each rule, the held terminal-day, the bank's date beside the sheet's day, a late payment typed under the
+  bank's date, a chargeback kept, an unknown terminal kept, a known terminal's missing payment reported; no driver-day
+  moves where the bank and the sheet agree.
+
+**Proved by breaking each fix and watching its test fail** (second review): DMARC entries ignored (4 fail), a
+pattern-style verdict (2), the seal not required (7), the message signature unchecked (3), the body hash unchecked
+(1), unsealed headers vouching (1), two From headers (1), the display name not stripped (1), the read not stopped (2),
+the UID unchecked (1), the session kept after a timeout (1), an older copy replacing (1), duplicate references (1),
+filed under the bank's date (2), no match on the bank's date (5), nearest across drivers (6), ambiguity written as
+nobody (8), chargebacks matched (7), unknown terminals dropped (5).
+
+**Real data after the second review:** both emails' seals verify against the filter's real keys (fetched by
+DNS-over-HTTPS here; production uses its own DNS); one changed PDF byte, a changed From, or the newest seal removed are
+each rejected. 48 bank rows, all `sheet_same_payment`, 0 sheet-only, 0 held; the whole table 8,155 rows and AED
+551,754.92; **0 driver-day totals change** (the AED 23.95 late payment now stays on the 25th, its bank date kept).
+
+**Tests before the second review:** `test/ni_reports.test.mjs` 53, on synthetic PDFs and messages built in the test:
 - the report and its totals check, the year rollover, merchant numbers off the list (a stranger named "ECOSINE"
   included), unseen types, a multi-day span;
 - MIME nesting, base64 and encoded filenames, a forward-as-attachment; the sender check (a stranger, a DMARC fail, a

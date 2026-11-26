@@ -32,15 +32,56 @@
    Synthetic data only: the PDFs and messages are built here. */
 import { PGlite } from '@electric-sql/pglite';
 import { EventEmitter } from 'node:events';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { applySchema } from './schema.mjs';
-import { parseReport, pdfLines, parseMime, checkOrigin, merchantsOf, ingestMessage, imapSession, collect, bankForMerge } from '../src/sources/ni_reports.js';
+import { parseReport, pdfLines, parseMime, checkOrigin, merchantsOf, ingestMessage, imapSession, collect, bankForMerge,
+  splitMessage, canonHeader, canonBody, parseAuthResults } from '../src/sources/ni_reports.js';
 import { mergeBank, writeRead, parseSheet } from '../src/sources/network_cards.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 const quiet = { info: () => {}, warn: () => {}, error: () => {} };
 const MERCHANTS = merchantsOf('200600000001:ecosine,200600000002:egari');
-const OPTS = { senders: ['accounts@example.test'], authserv: 'filter.example.test', merchants: MERCHANTS };
+/* The receiving filter: its key, published in a fake DNS, seals messages the
+   way the real one does (ARC, rsa-sha256, relaxed/relaxed). The signer below
+   is the verifier's mirror; the real reports' seals, signed by the real
+   filter, are what prove the canonicalisation (FIX-STATUS NIR, the dry run). */
+const FILTER_D = 'incoming.x1.filter.example.test';
+const filterKey = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const otherKey = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const spki = (k) => k.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+const DNS = { [`arckey._domainkey.${FILTER_D}`]: `k=rsa; p=${spki(filterKey)}`, 'sel1._domainkey.relay.other.test': `k=rsa; p=${spki(otherKey)}` };
+let dnsDown = false;
+const resolveTxt = async (name) => {
+  if (dnsDown) throw Object.assign(new Error('timeout'), { code: 'ETIMEOUT' });
+  if (DNS[name]) return [[DNS[name]]];
+  throw Object.assign(new Error('nx'), { code: 'ENOTFOUND' });
+};
+const OPTS = { senders: ['accounts@example.test'], authserv: 'filter.example.test', merchants: MERCHANTS, resolveTxt };
+const VERDICT = 'filter.example.test; iprev=pass smtp.remote-ip=192.0.2.1; spf=pass smtp.mailfrom=example.test; dmarc=pass header.from=example.test';
+function arcSeal(raw, { i = 1, d = FILTER_D, s = 'arckey', key = filterKey.privateKey, aar = VERDICT, cv = i === 1 ? 'none' : 'pass',
+  h = 'From:Subject:Date:Message-ID:MIME-Version:Content-Type' } = {}) {
+  const text = Buffer.isBuffer(raw) ? raw.toString('latin1') : raw;
+  const { fields, body } = splitMessage(text);
+  const bh = createHash('sha256').update(canonBody(body, 'relaxed'), 'latin1').digest('base64');
+  const aarH = `ARC-Authentication-Results: i=${i}; ${aar}\r\n`;
+  let amsH = `ARC-Message-Signature: i=${i}; a=rsa-sha256; c=relaxed/relaxed; d=${d}; s=${s};\r\n h=${h}; bh=${bh}; b=\r\n`;
+  const used = new Set(); let data = '';
+  for (const name of h.toLowerCase().split(':')) {
+    for (let k = fields.length - 1; k >= 0; k -= 1) if (fields[k].name === name && !used.has(k)) { used.add(k); data += canonHeader(fields[k].text); break; }
+  }
+  data += canonHeader(amsH).replace(/\r\n$/, '');
+  amsH = amsH.replace(/b=\r\n$/, `b=${sign('sha256', Buffer.from(data, 'latin1'), key).toString('base64')}\r\n`);
+  let asH = `ARC-Seal: i=${i}; a=rsa-sha256; cv=${cv}; d=${d}; s=${s}; b=\r\n`;
+  const inst = (f) => Number((f.text.match(/:\s*i\s*=\s*(\d+)/) || [])[1]);
+  let sd = '';
+  for (let j = 1; j < i; j += 1) {
+    for (const n of ['arc-authentication-results', 'arc-message-signature', 'arc-seal']) sd += canonHeader(fields.find((f) => f.name === n && inst(f) === j).text);
+  }
+  sd += canonHeader(aarH) + canonHeader(amsH) + canonHeader(asH).replace(/\r\n$/, '');
+  asH = asH.replace(/b=\r\n$/, `b=${sign('sha256', Buffer.from(sd, 'latin1'), key).toString('base64')}\r\n`);
+  return Buffer.from(asH + amsH + aarH + text, 'latin1');
+}
 
 /* A minimal PDF: one Courier text line per row, top to bottom. */
 function makePdf(lines) {
@@ -91,6 +132,10 @@ check('…a stranger\'s report named "ECOSINE" included', named.status === 'mism
 const span = parseReport(reportLines({ rows: ROWS, from: '24/11/2026', to: '25/11/2026' }), { merchants: MERCHANTS });
 check('a report over several days is held until one is seen: which day each payment is filed under is not known', span.status === 'mismatch'
   && /spans 2026-11-24 to 2026-11-25/.test(span.why), span.why);
+const twice = reportLines({ rows: ROWS }); twice.splice(9, 1, twice[8]);
+const dup = parseReport(twice.map((l, i) => (i === 9 ? l.replace(/ 30\.00 /, ' 70.00 ') : l)), { merchants: MERCHANTS });
+check('one bank reference on two rows keeps the report out (storing would drop one of them)', dup.status === 'mismatch'
+  && /same bank reference appears on two rows/.test(dup.why), dup.why);
 const refund = parseReport(reportLines({ rows: [...ROWS, { term: '10389535', amt: 20, type: 'REFUND' }] }), { merchants: MERCHANTS });
 check('a transaction type not yet seen keeps it out until its sign is checked', refund.status === 'mismatch' && /REFUND/.test(refund.why), refund.why);
 const ny = parseReport(reportLines({ from: '01/01/2027', rows: [{ term: '10389535', amt: 30, day: '31/12' }, { term: '10389535', amt: 40, day: '01/01' }] }), { merchants: MERCHANTS });
@@ -100,11 +145,11 @@ check('a 31/12 payment in a report for 01/01 is last year\'s', ny.txns[0].txn_da
 console.log('\n§2 the message');
 const pdf = makePdf(reportLines({ rows: ROWS }));
 const b64 = (buf) => buf.toString('base64').replace(/.{76}/g, '$&\r\n');
-const PASS = 'filter.example.test; iprev=pass; spf=pass smtp.mailfrom=example.test; dmarc=pass header.from=example.test';
-const message = (pdfs, { id = '<r1@example.test>', from = 'Accounts <accounts@example.test>', auth = [PASS] } = {}) => Buffer.from([
+const PASS = VERDICT;
+const unsealed = (pdfs, { id = '<r1@example.test>', from = 'Accounts <accounts@example.test>', auth = [PASS], date = 'Thu, 26 Nov 2026 08:05:22 +0000' } = {}) => Buffer.from([
   ...auth.map((a) => `Authentication-Results: ${a}`),
-  `From: ${from}`, 'Subject: FW: MERCHANT TRANSACTION ACTIVITY - 200600000001 FROM 25/11/2026 TO',
-  `Message-ID: ${id}`, 'Date: Thu, 26 Nov 2026 08:05:22 +0000', 'MIME-Version: 1.0',
+  ...[].concat(from).map((f) => `From: ${f}`), 'Subject: FW: MERCHANT TRANSACTION ACTIVITY - 200600000001 FROM 25/11/2026 TO',
+  `Message-ID: ${id}`, `Date: ${date}`, 'MIME-Version: 1.0',
   'Content-Type: multipart/mixed; boundary="OUTER"', '', '--OUTER',
   'Content-Type: multipart/alternative; boundary="ALT"', '', '--ALT', 'Content-Type: text/plain; charset="utf-8"',
   'Content-Transfer-Encoding: quoted-printable', '', 'FYI =E2=80=94 the report is attached.', '--ALT',
@@ -112,29 +157,50 @@ const message = (pdfs, { id = '<r1@example.test>', from = 'Accounts <accounts@ex
   ...pdfs.flatMap((p, i) => ['--OUTER', `Content-Type: application/octet-stream; name="=?UTF-8?B?${Buffer.from(`PA_200600000001_${i}.PDF`).toString('base64')}?="`,
     'Content-Transfer-Encoding: base64', `Content-Disposition: attachment; filename="PA_200600000001_${i}.PDF"`, '', b64(p)]),
   '--OUTER--', ''].join('\r\n'), 'latin1');
+const message = (pdfs, o = {}) => arcSeal(unsealed(pdfs, o), o.seal || {});
 const mime = parseMime(message([pdf]));
 const att = mime.parts.find((p) => p.filename);
 check('a forwarded multipart message gives up its PDF, byte for byte, with its filename',
   att && att.filename === 'PA_200600000001_0.PDF' && Buffer.compare(att.data, pdf) === 0, JSON.stringify(mime.parts.map((p) => [p.contentType, p.filename, p.data.length])));
 check('…and its quoted-printable text decodes', mime.parts.some((p) => p.contentType === 'text/plain' && p.data.toString('utf8').includes('FYI — the report')));
-const wrapped = Buffer.from(['Authentication-Results: ' + PASS, 'From: Accounts <accounts@example.test>', 'Subject: FW: report',
+const wrapped = Buffer.from(['From: Accounts <accounts@example.test>', 'Subject: FW: report',
   'MIME-Version: 1.0', 'Content-Type: multipart/mixed; boundary="W"', '', '--W', 'Content-Type: text/plain', '', 'see attached', '--W',
-  'Content-Type: message/rfc822', '', message([pdf]).toString('latin1'), '--W--', ''].join('\r\n'), 'latin1');
+  'Content-Type: message/rfc822', '', unsealed([pdf]).toString('latin1'), '--W--', ''].join('\r\n'), 'latin1');
 const inner = parseMime(wrapped).parts.find((p) => p.filename);
 check('a report forwarded as an attachment (message/rfc822) is opened and its PDF read', inner && Buffer.compare(inner.data, pdf) === 0,
   JSON.stringify(parseMime(wrapped).parts.map((p) => [p.contentType, p.filename])));
-const origin = (raw) => checkOrigin(parseMime(raw).headerBlock, OPTS);
-check('an allowed sender the receiving server passed: read', origin(message([pdf])).ok === true, JSON.stringify(origin(message([pdf]))));
-check('a sender not on the list: rejected, and says who', !origin(message([pdf], { from: 'Someone <billing@elsewhere.test>' })).ok
-  && /billing@elsewhere\.test is not one of the allowed senders/.test(origin(message([pdf], { from: 'billing@elsewhere.test' })).why));
-const forged = origin(message([pdf], { auth: ['filter.example.test; spf=fail smtp.mailfrom=example.test; dmarc=fail header.from=example.test'] }));
-check('a forged From the receiving server failed on DMARC: rejected', !forged.ok && /did not pass example\.test/.test(forged.why), forged.why);
-const planted = origin(message([pdf], { auth: ['filter.example.test; dmarc=fail header.from=example.test', PASS] }));
-check('…its own "pass" written below the server\'s fail does not rescue it', !planted.ok, JSON.stringify(planted));
-const lookalike = origin(message([pdf], { auth: [PASS.replace('filter.example.test', 'evilfilter.example.test')] }));
-check('a look-alike server id is not the receiving server: rejected', !lookalike.ok && /no authentication result/.test(lookalike.why), lookalike.why);
-check('no verdict at all: rejected', !origin(message([pdf], { auth: [] })).ok);
-check('another domain\'s pass does not vouch for this sender', !origin(message([pdf], { auth: ['filter.example.test; dmarc=pass header.from=elsewhere.test'] })).ok);
+const origin = (raw, o = {}) => checkOrigin(raw, { ...OPTS, ...o });
+const ok0 = await origin(message([pdf]));
+check('an allowed sender, sealed by the receiving filter with a DMARC pass: read', ok0.ok === true, JSON.stringify(ok0));
+const two = await origin(arcSeal(arcSeal(unsealed([pdf]), { d: 'relay.other.test', s: 'sel1', key: otherKey.privateKey, aar: 'relay.other.test; spf=pass smtp.mailfrom=example.test' }), { i: 2 }));
+check('…the real shape, the filter\'s seal over an earlier relay\'s (i=2 over i=1): read', two.ok === true, JSON.stringify(two));
+const rej = async (label, raw, re, o) => { const r = await origin(raw, o); check(label, r.ok === false && re.test(r.why || ''), JSON.stringify(r)); };
+await rej('a sender not on the list: rejected, and says who', message([pdf], { from: 'Someone <billing@elsewhere.test>' }), /billing@elsewhere\.test is not one of the allowed senders/);
+await rej('a forged From the filter failed on DMARC: rejected', message([pdf], { seal: { aar: 'filter.example.test; spf=pass smtp.mailfrom=evil.test; dmarc=fail header.from=example.test' } }), /did not pass example\.test on DMARC/);
+await rej('a "dmarc=pass…header.from=" echoed inside another entry (a DKIM selector) is not a DMARC result: the real fail stands',
+  message([pdf], { seal: { aar: 'filter.example.test; spf=pass smtp.mailfrom=evil.test; dkim=pass header.d=evil.test header.s=dmarc=pass.header.from=example.test header.a=rsa-sha256; dmarc=fail header.from=example.test' } }),
+  /dmarc=fail/);
+await rej('…a pass and a fail in one verdict: rejected', message([pdf], { seal: { aar: `${VERDICT}; dmarc=fail header.from=example.test` } }), /dmarc=fail/);
+await rej('a DMARC pass with no aligned SPF or DKIM pass in the sealed verdict: rejected — an unsealed header saying so does not vouch',
+  message([pdf], { seal: { aar: 'filter.example.test; spf=pass smtp.mailfrom=evil.test; dmarc=pass header.from=example.test' } }), /no SPF or DKIM pass aligned/);
+await rej('delivered past the filter, with its own "pass" header and no seal: rejected', unsealed([pdf]), /did not seal the message/);
+await rej('a seal claiming the filter\'s name, signed with another key: rejected', message([pdf], { seal: { key: otherKey.privateKey } }), /message signature does not verify/);
+const sealed = message([pdf]).toString('latin1');
+await rej('the PDF changed after sealing: rejected', Buffer.from(sealed.replace(/(Content-Disposition: attachment[^\n]*\n\r\n)([A-Za-z0-9+/])/, (m, a, c) => a + (c === 'A' ? 'B' : 'A')), 'latin1'), /body is not the one the filter sealed/);
+await rej('the From changed after sealing: rejected', Buffer.from(sealed.replace('From: Accounts <accounts@example.test>', 'From: Billing <accounts@example.test>'), 'latin1'), /message signature does not verify/);
+await rej('…the subject changed after sealing: rejected', Buffer.from(sealed.replace('Subject: FW: MERCHANT', 'Subject: FW: MERCHANT!'), 'latin1'), /message signature does not verify/);
+await rej('a filter verdict outside the seal that says fail: rejected', message([pdf], { auth: [`filter.example.test; dmarc=fail header.from=example.test`] }), /did not pass/);
+await rej('a look-alike filter name: rejected', message([pdf], { seal: { d: 'incoming.evilfilter.example.test' } }), /not the receiving filter's/);
+await rej('two From headers: rejected', message([pdf], { from: ['Accounts <accounts@example.test>', 'x@elsewhere.test'] }), /more than one From header/);
+await rej('an address inside a quoted display name is not the address', message([pdf], { from: '"<accounts@example.test>" <noreply@example.test>' }), /noreply@example\.test is not one of the allowed senders/);
+await rej('the filter\'s key not published: rejected', message([pdf], { seal: { s: 'gone' } }), /no key is published/);
+dnsDown = true;
+const down = await origin(message([pdf])).then(() => null, (e) => e);
+dnsDown = false;
+check('a DNS failure worth retrying throws, so the message is retried rather than rejected', down && down.retry === true, String(down));
+const pa = parseAuthResults('mx.example (comment; dmarc=pass) 1; dkim=pass (good) header.d="a.test"; reason="x;y" dmarc=pass header.from=a.test');
+check('the verdict is read token by token: comments dropped, quoted ";" kept inside its entry', pa.authserv === 'mx.example'
+  && pa.results.length === 2 && pa.results[0].props['header.d'] === 'a.test' && pa.results[1].method === '?', JSON.stringify(pa));
 
 /* ── §3 ─────────────────────────────────────────────────────────────────── */
 console.log('\n§3 storing');
@@ -157,6 +223,11 @@ const broken = await ingestMessage(db, { raw: message([makePdf(reportLines({ row
 const kept = await q(`SELECT status, txns::int t, mail_uid::int u FROM ni_report`);
 check('…but an unusable copy never replaces the usable one held', broken.reports[0].status === 'kept_earlier' && kept.length === 1
   && kept[0].status === 'ok' && kept[0].t === 3 && kept[0].u === 8 && (await q(`SELECT count(*)::int n FROM ni_card_txn`))[0].n === 3, JSON.stringify([broken, kept]));
+const newer = await ingestMessage(db, { raw: message([makePdf(reportLines({ rows: ROWS.slice(0, 2) }))], { id: '<r2n@example.test>', date: 'Fri, 27 Nov 2026 08:00:00 +0000' }), uid: 12, uidvalidity: 99 }, { log: quiet, ...OPTS });
+const older = await ingestMessage(db, { raw: message([makePdf(reportLines({ rows: ROWS }))], { id: '<r2o@example.test>', date: 'Wed, 25 Nov 2026 20:00:00 +0000' }), uid: 13, uidvalidity: 99 }, { log: quiet, ...OPTS });
+const held2 = await q(`SELECT txns::int t, mail_uid::int u FROM ni_report`);
+check('…and an older copy, read after a newer one (a retry), never replaces it', newer.reports[0].status === 'ok' && older.reports[0].status === 'kept_earlier'
+  && held2[0].t === 2 && held2[0].u === 12, JSON.stringify(held2));
 const noMerchant = await ingestMessage(db, { raw: message([makePdf(['MERCHANT TRANSACTION REPORT', 'nothing else'])], { id: '<r2c@example.test>' }), uid: 10, uidvalidity: 99 }, { log: quiet, ...OPTS });
 check('a PDF with no merchant or span is unreadable, and nothing is stored', noMerchant.status === 'unreadable'
   && (await q(`SELECT count(*)::int n FROM ni_report`))[0].n === 1, JSON.stringify(noMerchant));
@@ -166,7 +237,7 @@ check('a message from a stranger is rejected before its PDF is opened', stranger
 /* ── §4 ─────────────────────────────────────────────────────────────────── */
 console.log('\n§4 IMAP, read-only');
 const sent = [];
-function fakeServer({ messages = {}, refuse = false } = {}) {
+function fakeServer({ messages = {}, refuse = false, silent = {}, wrongUid = {} } = {}) {
   return () => {
     const sock = new EventEmitter();
     const say = (s) => { const b = Buffer.isBuffer(s) ? s : Buffer.from(s, 'latin1'); for (let i = 0; i < b.length; i += 7) { const part = b.subarray(i, i + 7); setImmediate(() => sock.emit('data', part)); } };
@@ -177,7 +248,8 @@ function fakeServer({ messages = {}, refuse = false } = {}) {
       else if (/^UID SEARCH/.test(c)) say(`* SEARCH ${Object.keys(messages).join(' ')}\r\n${tag} OK Search completed\r\n`);
       else if (/^UID FETCH/.test(c)) {
         const uid = c.split(' ')[2]; const raw = messages[uid];
-        say(Buffer.concat([Buffer.from(`* 1 FETCH (UID ${uid} BODY[] {${raw.length}}\r\n`), raw, Buffer.from(`)\r\n${tag} OK Fetch completed\r\n`)]));
+        const reply = () => say(Buffer.concat([Buffer.from(`* 1 FETCH (UID ${wrongUid[uid] || uid} BODY[] {${raw.length}}\r\n`), raw, Buffer.from(`)\r\n${tag} OK Fetch completed\r\n`)]));
+        if (silent[uid]) setTimeout(reply, 150); else reply();
       } else if (/^LOGOUT/.test(c)) say(`* BYE\r\n${tag} OK Logout\r\n`);
     };
     sock.end = () => {}; sock.destroy = () => {};
@@ -186,7 +258,7 @@ function fakeServer({ messages = {}, refuse = false } = {}) {
   };
 }
 /* A body that contains what looks like this session's tags. */
-const tricky = Buffer.concat([message([pdf], { id: '<r3@example.test>' }), Buffer.from('\r\nN4 OK not the end\r\nN5 OK nor this\r\n')]);
+const tricky = arcSeal(Buffer.concat([unsealed([pdf], { id: '<r3@example.test>' }), Buffer.from('\r\nN4 OK not the end\r\nN5 OK nor this\r\n')]));
 await q('DELETE FROM ni_report');
 const run1 = await collect({ db, log: quiet, host: 'imap.example.test', user: 'u', pass: 'p', readOpts: OPTS,
   session: (o) => imapSession({ ...o, connect: fakeServer({ messages: { 7: tricky } }) }) });
@@ -220,6 +292,28 @@ const b4 = await book();
 check('…the next read retries only the failed one; the rejected and the read are not fetched again', b4[20] === 'ok/2'
   && b4[21] === 'rejected/1' && b4[22] === 'ok/1' && sent.filter((c) => /FETCH/.test(c)).length === 1, JSON.stringify([b4, sent]));
 check('…and the rejected message left nothing in the reports', (await q(`SELECT count(*)::int n FROM ni_report`))[0].n === 2);
+/* A fetch that times out ends the session: its late reply must never be taken
+   as the next message's (the second review). */
+await q('DELETE FROM ni_mail_message');
+const slowBox = { 40: message([pdf], { id: '<t40@example.test>' }), 41: message([egari], { id: '<t41@example.test>' }) };
+const run5 = await collect({ db, log: quiet, host: 'imap.example.test', user: 'u', pass: 'p', readOpts: OPTS,
+  session: (o) => imapSession({ ...o, timeoutMs: 60, connect: fakeServer({ messages: slowBox, silent: { 40: true } }) }) });
+await new Promise((r) => setTimeout(r, 250));
+const b5 = await book();
+check('a fetch that times out is recorded, and the read stops there: the next message is not read on that session',
+  b5[40] === 'error/1' && b5[41] === undefined && /timed out/.test(run5.stopped || ''), JSON.stringify([b5, run5.stopped]));
+const direct = imapSession({ host: 'imap.example.test', timeoutMs: 60, connect: fakeServer({ messages: slowBox, silent: { 40: true } }) });
+await direct.login('u', 'p'); await direct.examine('INBOX');
+const t1 = await direct.fetchRaw(40).then(() => 'answered', (e) => e.message);
+const t2 = await direct.uidSearch('ALL').then(() => 'answered', (e) => e.message);
+check('…the session itself is ended by a timeout: the next command fails rather than read a late reply', /timed out/.test(t1) && /timed out/.test(t2), JSON.stringify([t1, t2]));
+await new Promise((r) => setTimeout(r, 200));
+await q('DELETE FROM ni_mail_message');
+const run6 = await collect({ db, log: quiet, host: 'imap.example.test', user: 'u', pass: 'p', readOpts: OPTS,
+  session: (o) => imapSession({ ...o, connect: fakeServer({ messages: slowBox, wrongUid: { 40: 41 } }) }) });
+const b6 = await book();
+check('an answer for another message than the one asked for is refused, and the read stops', b6[40] === 'error/1' && b6[41] === undefined
+  && /answered for message 41, not 40/.test(run6.stopped || ''), JSON.stringify([b6, run6.stopped]));
 const bad = await collect({ db, log: quiet, host: 'imap.example.test', user: 'u', pass: 'p',
   session: (o) => imapSession({ ...o, connect: fakeServer({ refuse: true }) }) });
 const credRow = (await q(`SELECT state FROM credential_state WHERE credential = 'NI_MAIL_PASS'`).catch(() => []))[0];
@@ -235,52 +329,71 @@ const sheet = [
   sheetRow(2, '2026-11-24', 'ecosine', '10392910', 10, E2),          // a day no report covers: kept
   sheetRow(3, '2026-11-25', 'ecosine', '10389535', 30, E1),          // matched by amount
   sheetRow(4, '2026-11-25', 'ecosine', '10389535', 70, E1),
-  sheetRow(5, '2026-11-25', 'ecosine', '10392910', 23.95, E2),       // the late payment, under the 25th
+  sheetRow(5, '2026-11-25', 'ecosine', '10392910', 23.95, E2),       // the late payment, typed under the 25th
   sheetRow(6, '2026-11-25', 'ecosine', '10392910', 120, E2),         // the bank says 123.75
   sheetRow(7, '2026-11-25', 'ecosine', '10397223', 50, null, 'Not Found'),
   sheetRow(8, '2026-11-20', 'ecosine', '10403934', 15, E3),          // the terminal's earlier driver: never borrowed
-  sheetRow(9, '2026-11-25', 'ecosine', '10999999', 5, E3),           // on the sheet only
+  sheetRow(9, '2026-11-25', 'ecosine', '10999999', 5, E3),           // a terminal no report has ever carried: kept
   sheetRow(10, '2026-11-25', 'egari', '10413936', 60, E1),           // the other fleet, no report: kept
-  sheetRow(11, '2026-11-25', 'ecosine', '10600000', 30, E1),         // two drivers on one terminal
+  sheetRow(11, '2026-11-25', 'ecosine', '10600000', 30, E1),         // two drivers on one terminal, one exact
   sheetRow(12, '2026-11-25', 'ecosine', '10600000', 45, E2),
-  sheetRow(13, '2026-11-25', 'ecosine', '10700000', 20, E1),
+  sheetRow(13, '2026-11-25', 'ecosine', '10700000', 20, E1),         // both matched; the bank has a third
   sheetRow(14, '2026-11-25', 'ecosine', '10700000', 25, E3),
   sheetRow(15, '2026-11-25', 'egari', '10392910', 5, E2),            // Platform says Egari; the terminal settles to Ecosine
+  sheetRow(16, '2026-11-25', 'ecosine', '10800000', 50, E1),         // two drivers, near amounts, nothing exact
+  sheetRow(17, '2026-11-25', 'ecosine', '10800000', 52, E3),
+  sheetRow(18, '2026-11-23', 'ecosine', '10900000', 33, E3),         // a late payment typed under the bank's own date
+  sheetRow(19, '2026-11-25', 'ecosine', '10389535', -700, E1),       // a chargeback
+  sheetRow(20, '2026-11-25', 'ecosine', '10990000', 7, E3),          // a terminal the bank knows, without this payment
 ];
 const bankTx = (ref, day, term, amount, reportDay = '2026-11-25', fleet = 'ecosine') => ({ bank_ref: ref, terminal_id: term, report_day: reportDay, txn_day: day, amount, txn_type: 'SALES', fleet_id: fleet });
+const txnsB = [
+  bankTx('R1', '2026-11-25', '10389535', 30), bankTx('R2', '2026-11-25', '10389535', 70), bankTx('R3', '2026-11-24', '10392910', 23.95),
+  bankTx('R4', '2026-11-25', '10392910', 123.75), bankTx('R5', '2026-11-25', '10397223', 50), bankTx('R6', '2026-11-25', '10403934', 40),
+  bankTx('R7', '2026-11-25', '10500000', 9), bankTx('R8', '2026-11-25', '10600000', 44), bankTx('R9', '2026-11-25', '10600000', 30),
+  bankTx('R10', '2026-11-25', '10392910', 12), bankTx('R11', '2026-11-25', '10700000', 20), bankTx('R12', '2026-11-25', '10700000', 25),
+  bankTx('R13', '2026-11-25', '10700000', 31), bankTx('R14', '2026-11-25', '10392910', 5), bankTx('R15', '2026-11-25', '10800000', 51.5),
+  bankTx('R16', '2026-11-25', '10800000', 53), bankTx('R17', '2026-11-23', '10900000', 33),
+  bankTx('R20', '2026-11-26', '10389535', 66, '2026-11-26')];
 const bank = { covered: [{ fleet_id: 'ecosine', day: '2026-11-25' }, { fleet_id: 'ecosine', day: '2026-11-26' }],
-  terminalFleet: { 10392910: 'ecosine', 10389535: 'ecosine' },
-  txns: [
-    bankTx('R1', '2026-11-25', '10389535', 30), bankTx('R2', '2026-11-25', '10389535', 70), bankTx('R3', '2026-11-24', '10392910', 23.95),
-    bankTx('R4', '2026-11-25', '10392910', 123.75), bankTx('R5', '2026-11-25', '10397223', 50), bankTx('R6', '2026-11-25', '10403934', 40),
-    bankTx('R7', '2026-11-25', '10500000', 9), bankTx('R8', '2026-11-25', '10600000', 44), bankTx('R9', '2026-11-25', '10600000', 30),
-    bankTx('R10', '2026-11-25', '10392910', 12), bankTx('R11', '2026-11-25', '10700000', 20), bankTx('R12', '2026-11-25', '10700000', 25),
-    bankTx('R13', '2026-11-25', '10700000', 31), bankTx('R14', '2026-11-25', '10392910', 5),
-    bankTx('R20', '2026-11-26', '10389535', 66, '2026-11-26')] };
+  terminalFleet: { ...Object.fromEntries(txnsB.map((t) => [t.terminal_id, t.fleet_id])), 10990000: 'ecosine' }, txns: txnsB };
 const m = mergeBank(sheet, bank);
 const by = (ref) => m.rows.find((r) => r.bank_ref === ref);
-check('rows on days no report covers stay the sheet\'s — another day, the other fleet',
-  m.rows.filter((r) => r.source === 'network_sheet').map((r) => r.row_no).sort((a, b) => a - b).join() === '2,8,10', JSON.stringify(m.rows.filter((r) => r.source === 'network_sheet')));
-check('a covered day\'s rows are the bank\'s, every one of them, and none of the sheet\'s', m.rows.filter((r) => r.source === 'network_report').length === 14
-  && !m.rows.some((r) => r.source === 'network_sheet' && r.txn_day === '2026-11-25' && r.terminal_id !== '10413936'));
+const sheetNos = m.rows.filter((r) => r.source === 'network_sheet').map((r) => r.row_no).sort((a, b) => a - b).join();
+check('kept as the sheet\'s: other days, the other fleet, a terminal no report has carried, a chargeback, and a terminal-day the sheet cannot split',
+  sheetNos === '2,8,9,10,16,17,19', sheetNos);
+check('a covered day\'s other rows are the bank\'s: 15 of them (two held back, one from another day)', m.rows.filter((r) => r.source === 'network_report').length === 15,
+  String(m.rows.filter((r) => r.source === 'network_report').length));
 check('a day the bank reports but the sheet has not reached waits: none of its rows, the day not covered — the cash texts wait as before',
   !by('R20') && !m.covered.includes('ecosine|2026-11-26'), JSON.stringify(m.covered));
 check('1. the same terminal, day and amount: the sheet\'s driver', by('R1').emirates_id === E1 && by('R1').id_basis === 'sheet_same_payment');
-check('2. the same terminal and day, another amount: the unmatched row\'s driver, at the bank\'s amount',
+check('2. the same terminal and day, another amount, every unmatched row there one driver\'s: that driver, at the bank\'s amount',
   by('R4').emirates_id === E2 && by('R4').id_basis === 'sheet_same_terminal_day' && by('R4').amount === 123.75);
-check('…an exact match is never taken by a near one, and a row once taken is not taken again: 44 goes to the 45 row\'s driver, not the 30 row\'s',
+check('…an exact match is never taken by a near one: 30 to the 30 row\'s driver, then 44 to the only unmatched row\'s',
   by('R9').emirates_id === E1 && by('R9').id_basis === 'sheet_same_payment' && by('R8').emirates_id === E2 && by('R8').id_basis === 'sheet_same_terminal_day');
-check('3. every row on the terminal already taken, one driver there that day: that driver', by('R10').emirates_id === E2 && by('R10').id_basis === 'sheet_terminal_driver');
-check('4. several drivers on the terminal and nothing to tell them apart: nobody, and said so', by('R13').emirates_id === null
-  && by('R13').id_basis === 'none' && /several drivers/.test(by('R13').id_label));
+check('3. two drivers\' unmatched rows and nothing exact: that terminal-day stays as the sheet has it — both sheet rows kept, the bank\'s two not written',
+  !by('R15') && !by('R16') && m.held.length === 2 && m.rows.filter((r) => r.terminal_id === '10800000').every((r) => r.id_basis === 'sheet_held')
+    && m.rows.filter((r) => r.terminal_id === '10800000').map((r) => r.amount).join() === '50,52', JSON.stringify(m.rows.filter((r) => r.terminal_id === '10800000')));
+check('4. a payment the sheet does not list (every row there matched): nobody — not the terminal\'s one driver that day', by('R10').emirates_id === null
+  && by('R10').id_basis === 'none' && /does not list this payment/.test(by('R10').id_label) && by('R13').emirates_id === null);
 check('…a terminal the sheet has not mapped that day: nobody — never its driver from an earlier day', by('R6').emirates_id === null
   && by('R6').id_basis === 'none' && /maps no driver to this terminal that day/.test(by('R6').id_label));
 check('…the sheet\'s "Not Found" travels with its match', by('R5').emirates_id === null && by('R5').id_label === 'Not Found');
-check('the late payment keeps the bank\'s date (24th), the driver from the sheet\'s 25th', by('R3').txn_day === '2026-11-24' && by('R3').emirates_id === E2);
+check('the late payment stays on the sheet\'s day (25th) with its driver; the bank\'s date (24th) is kept beside it',
+  by('R3').txn_day === '2026-11-25' && by('R3').bank_day === '2026-11-24' && by('R3').emirates_id === E2, JSON.stringify(by('R3')));
+check('a late payment the team typed under the bank\'s own date is matched there, filed there, and replaces that sheet row',
+  by('R17').txn_day === '2026-11-23' && by('R17').emirates_id === E3 && by('R17').id_basis === 'sheet_same_payment' && !m.rows.some((r) => r.row_no === 18),
+  JSON.stringify(by('R17')));
 check('a row whose Platform cell disagrees with the bank\'s merchant follows the merchant: replaced, not counted twice',
-  by('R14').emirates_id === E2 && by('R14').id_basis === 'sheet_same_payment' && !m.rows.some((r) => r.source === 'network_sheet' && r.row_no === 15));
-check('a sheet row the bank does not have is reported, not kept', m.sheet_only.length === 1 && m.sheet_only[0].terminal_id === '10999999', JSON.stringify(m.sheet_only.map((r) => r.terminal_id)));
+  by('R14').emirates_id === E2 && by('R14').id_basis === 'sheet_same_payment' && !m.rows.some((r) => r.row_no === 15));
+check('a chargeback on a covered day is kept, and never matched to a sale', m.rows.some((r) => r.row_no === 19 && r.amount === -700 && r.source === 'network_sheet'));
+check('a sheet row on a terminal the bank knows, missing from its report, is reported, not kept', m.sheet_only.length === 1 && m.sheet_only[0].row_no === 20,
+  JSON.stringify(m.sheet_only.map((r) => r.row_no)));
 check('no report: the sheet\'s rows, all of them, marked as the sheet\'s', mergeBank(sheet, null).rows.every((r) => r.source === 'network_sheet' && r.id_basis === 'sheet') && mergeBank(sheet, null).rows.length === sheet.length);
+const perDriverDay = (rows) => { const o = {}; for (const r of rows) { const k = `${r.emirates_id}|${r.txn_day}`; o[k] = Math.round(((o[k] || 0) + r.amount) * 100) / 100; } return o; };
+const before = perDriverDay(sheet); const after = perDriverDay(m.rows);
+check('…and on the measured shape no driver-day moves: where the bank and the sheet agree, every driver keeps every day\'s total',
+  ['784200000000001|2026-11-25', '784200000000002|2026-11-24', '784200000000003|2026-11-23'].every((k) => before[k] === after[k]), JSON.stringify([before, after]));
 
 /* ── §6 ─────────────────────────────────────────────────────────────────── */
 console.log('\n§6 written');
@@ -290,22 +403,23 @@ const parsed = parseSheet(toValues(sheet));
 await q('DELETE FROM card_payment');
 const imp = await writeRead(db, parsed, { range: 'test', bank });
 const cp = await q(`SELECT source, bank_ref, id_basis, emirates_id, txn_day::text d, amount::float a FROM card_payment ORDER BY source, bank_ref, d`);
-check('card_payment carries source, bank_ref and id_basis for every row', imp.status === 'ok' && cp.length === 17
-  && cp.filter((r) => r.source === 'network_report').every((r) => r.bank_ref && r.id_basis) && cp.filter((r) => r.source === 'network_sheet').every((r) => !r.bank_ref && r.id_basis === 'sheet'),
+check('card_payment carries source, bank_ref and id_basis for every row', imp.status === 'ok' && cp.length === 22
+  && cp.filter((r) => r.source === 'network_report').every((r) => r.bank_ref && r.id_basis) && cp.filter((r) => r.source === 'network_sheet').every((r) => !r.bank_ref && ['sheet', 'sheet_held'].includes(r.id_basis)),
   JSON.stringify([imp.status, imp.why, cp.length]));
 const day25 = cp.filter((r) => r.source === 'network_report').reduce((a, r) => a + r.a, 0);
-const want25 = bank.txns.filter((t) => t.report_day === '2026-11-25').reduce((a, t) => a + t.amount, 0);
-check('…the covered day\'s total is the bank\'s', Math.abs(day25 - want25) < 0.005, `${day25} ${want25}`);
+const want25 = bank.txns.filter((t) => t.report_day === '2026-11-25' && !['R15', 'R16'].includes(t.bank_ref)).reduce((a, t) => a + t.amount, 0);
+check('…the bank\'s rows are the bank\'s amounts, with its date beside them', Math.abs(day25 - want25) < 0.005
+  && (await q(`SELECT bank_day::text b FROM card_payment WHERE bank_ref = 'R3'`))[0].b === '2026-11-24', `${day25} ${want25}`);
 const again = await writeRead(db, parsed, { range: 'test', bank });
-check('a second read replaces, never doubles', again.status === 'ok' && (await q('SELECT count(*)::int n FROM card_payment'))[0].n === 17);
+check('a second read replaces, never doubles', again.status === 'ok' && again.held === 2 && (await q('SELECT count(*)::int n FROM card_payment'))[0].n === 22);
 /* A broken read that kept ONE of the 25th's rows: the day stays covered, so
-   the bank's 14 rows would pad the merged count back up (16 of 17). Counted
-   sheet against sheet, it is 4 of 13, and held. */
+   the bank's rows would pad the merged count back up. Counted sheet against
+   sheet, it is 4 of 18, and held. */
 const thin = parseSheet(toValues(sheet.filter((r) => r.row_no <= 3 || r.row_no === 8 || r.row_no === 10)));
 const held = await writeRead(db, thin, { range: 'test', bank });
 check('the shrink guard compares the sheet with the sheet: the bank\'s rows cannot stand in for rows a broken read lost',
-  held.status === 'held' && /keeps 4 of the sheet's 13 stored payments/.test(held.why)
-  && (await q('SELECT count(*)::int n FROM card_payment'))[0].n === 17, JSON.stringify([held.status, held.why]));
+  held.status === 'held' && /keeps 4 of the sheet's 18 stored payments/.test(held.why)
+  && (await q('SELECT count(*)::int n FROM card_payment'))[0].n === 22, JSON.stringify([held.status, held.why]));
 await q('DELETE FROM ni_report'); await q('DELETE FROM ni_mail_message');
 await ingestMessage(db, { raw: message([pdf]), uid: 30, uidvalidity: 99 }, { log: quiet, ...OPTS });
 await ingestMessage(db, { raw: message([makePdf(reportLines({ rows: ROWS, merchant: '200699999999' }))], { id: '<x@example.test>' }), uid: 31, uidvalidity: 99 }, { log: quiet, ...OPTS });

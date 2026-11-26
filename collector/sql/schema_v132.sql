@@ -92,13 +92,18 @@ CREATE TABLE IF NOT EXISTS ni_mail_message (
 );
 
 -- card_payment says where each row's amount and driver came from. bank_ref is
--- set on rows whose amount is the bank's (source 'network_report'); id_basis
--- says how the driver was found: 'sheet' (a sheet row), 'sheet_same_payment'
--- (the sheet's row for the same terminal, day and amount), 'sheet_same_terminal_day'
--- (an unmatched sheet row on that terminal that day, nearest in amount),
--- 'sheet_terminal_driver' (every sheet row there already matched; the
--- terminal's one driver that day), or 'none' (the sheet maps nobody to that terminal that day, or several and the
--- payment cannot be told between them). Never a guess: a bank amount is used
--- only on a fleet-day the sheet itself has.
+-- set on rows whose amount is the bank's (source 'network_report'); bank_day is
+-- the bank's own date for the payment, while txn_day stays the sheet's day (the
+-- day the cash texts and the allocation work by). id_basis says how the driver
+-- was found: 'sheet' (a sheet row), 'sheet_held' (a sheet row kept on a
+-- covered day because several drivers' payments there could not be told
+-- apart, so the terminal-day stays as the sheet has it), 'sheet_same_payment' (the sheet's row for
+-- the same terminal and amount, on the report's day or on the bank's date),
+-- 'sheet_same_terminal_day' (an unmatched sheet row on that terminal that day,
+-- every such row the same driver's, nearest in amount), or 'none' (the sheet
+-- does not put this payment against anyone; the row says why). Never a guess:
+-- a bank amount is used only on a fleet-day the sheet itself has, and a driver
+-- only from the sheet's row for that payment (the reviews of 2026-11-26).
 ALTER TABLE card_payment ADD COLUMN IF NOT EXISTS bank_ref TEXT;
 ALTER TABLE card_payment ADD COLUMN IF NOT EXISTS id_basis TEXT;
+ALTER TABLE card_payment ADD COLUMN IF NOT EXISTS bank_day DATE;

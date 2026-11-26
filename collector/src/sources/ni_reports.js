@@ -34,7 +34,8 @@
    count and grand total to the fil; otherwise it is stored with the reason
    (status 'mismatch') and no amount is taken from it — the sheet's stays. */
 import tls from 'node:tls';
-import { createHash } from 'node:crypto';
+import { createHash, createPublicKey, verify as rsaVerify } from 'node:crypto';
+import { promises as dnsPromises } from 'node:dns';
 import { get } from '../settings.js';
 import { logRun } from '../db.js';
 import { noteCredential } from '../auth_state.js';
@@ -123,36 +124,221 @@ export function parseMime(raw) {
   return { ...top, headerBlock: sep < 0 ? text : text.slice(0, sep) };
 }
 
-/* WHO SENT IT (the review of 2026-11-26). Anyone can email the mailbox, and a
-   report's amounts change what drivers are asked for, so a message is read
-   only when (1) its From address is an allowed sender, and (2) the RECEIVING
-   server's own verdict passes DMARC (or, with no DMARC result, SPF) for that
-   sender's domain. Measured on the real reports: the inbound filter
-   (…prod.antispam.mailspamprotection.com, ahead of the mailbox's own server) wrote
-   "spf=pass smtp.mailfrom=arks.ae; dmarc=pass header.from=arks.ae". A forged
-   "From: accounts@arks.ae" fails arks.ae's DMARC there. A sender can write its
-   own Authentication-Results header, so EVERY one carrying the receiving
-   server's id must pass, and at least one must exist. */
-export function checkOrigin(headerBlock, { senders = [], authserv = '' } = {}) {
-  const from = (headerAll(headerBlock, 'from')[0] || '');
-  const addr = ((from.match(/<([^>]+)>/) || [])[1] || from).trim().toLowerCase();
-  const domain = addr.split('@')[1] || '';
-  if (!addr || !senders.map((x) => x.trim().toLowerCase()).filter(Boolean).includes(addr)) {
-    return { ok: false, sender: addr || null, why: `sender ${addr || '(none)'} is not one of the allowed senders` };
+/* WHO SENT IT (the reviews of 2026-11-26). Anyone can email the mailbox, and
+   a report's amounts change what drivers are asked for, so a message is read
+   only when all of this holds:
+     1. exactly one From header, naming one address on NI_MAIL_SENDERS;
+     2. the NEWEST ARC set (RFC 8617) is the receiving filter's (its d= under
+        NI_MAIL_AUTHSERV) and VERIFIES against the key the filter publishes in
+        DNS: its message signature covers From and the whole body (the PDF
+        included), and its seal covers the verdict it wrote;
+     3. in that sealed verdict, and in every Authentication-Results header
+        carrying the filter's id, every DMARC result is a pass for the From
+        domain, and an SPF or DKIM pass is aligned with it.
+   Measured on the real reports: no DKIM signature from arks.ae (Microsoft
+   says "message not signed"), so DMARC passes on SPF; the filter
+   (incoming.instance-us-west1-*.prod.antispam.mailspamprotection.com, key
+   "arckey") seals i=2 with "spf=pass smtp.mailfrom=arks.ae; dmarc=pass
+   header.from=arks.ae", and both reports' seal and message signature verify.
+   WHY THE SEAL (the second review): the mailbox's own server names the filter
+   only by its HELO, which a sender chooses, so an Authentication-Results
+   header could have been written by a sender who delivered past the filter;
+   and a verdict read by pattern could be fooled by a sender's value the filter
+   echoes (a DKIM selector "dmarc=pass.header.from=…"). A seal cannot be made
+   without the filter's key, and the verdict is read token by token
+   (parseAuthResults). A DNS failure worth retrying throws (the message is
+   retried); a missing key or a bad signature rejects. */
+
+/* raw -> { fields: [{ name, text }], body }: the header fields exactly as
+   received (folded, CRLF-terminated), top first, and the body. */
+export function splitMessage(raw) {
+  const text = Buffer.isBuffer(raw) ? raw.toString('latin1') : String(raw);
+  const sep = text.indexOf('\r\n\r\n');
+  const head = sep < 0 ? text : text.slice(0, sep + 2);
+  const body = sep < 0 ? '' : text.slice(sep + 4);
+  const fields = (head.match(/[^\r\n]+\r\n(?:[ \t][^\r\n]*\r\n)*/g) || []).filter((t) => t.indexOf(':') > 0)
+    .map((t) => ({ name: t.slice(0, t.indexOf(':')).trim().toLowerCase(), text: t }));
+  return { fields, body };
+}
+const valueOf = (text) => text.slice(text.indexOf(':') + 1).replace(/\r\n(?=[ \t])/g, '').replace(/\r\n$/, '');
+/* DKIM canonicalisation (RFC 6376 §3.4), as ARC uses it. */
+export const canonHeader = (t) => `${t.slice(0, t.indexOf(':')).trim().toLowerCase()}:${t.slice(t.indexOf(':') + 1)
+  .replace(/\r\n(?=[ \t])/g, '').replace(/[ \t]+/g, ' ').trim()}\r\n`;
+export function canonBody(body, how) {
+  if (how === 'relaxed') {
+    const b = body.split('\r\n').map((l) => l.replace(/[ \t]+/g, ' ').replace(/ $/, '')).join('\r\n').replace(/(\r\n)+$/, '');
+    return b ? `${b}\r\n` : '';
   }
-  const suffix = String(authserv || '').trim().toLowerCase();
-  if (!suffix) return { ok: false, sender: addr, why: 'no receiving server is configured to vouch for senders (NI_MAIL_AUTHSERV)' };
-  const ours = headerAll(headerBlock, 'authentication-results')
-    .filter((v) => { const id = v.split(';')[0].trim().toLowerCase(); return id === suffix || id.endsWith(`.${suffix}`); });
-  if (!ours.length) return { ok: false, sender: addr, why: `no authentication result from the receiving server (${suffix})` };
-  for (const v of ours) {
-    const dmarc = v.match(/\bdmarc=(\w+)[^;]*?header\.from=([^\s;]+)/i);
-    const spf = v.match(/\bspf=(\w+)[^;]*?smtp\.mailfrom=([^\s;]+)/i);
-    const pass = dmarc ? dmarc[1].toLowerCase() === 'pass' && dmarc[2].toLowerCase().replace(/^.*@/, '') === domain
-      : (spf ? spf[1].toLowerCase() === 'pass' && spf[2].toLowerCase().replace(/^.*@/, '') === domain : false);
-    if (!pass) return { ok: false, sender: addr, why: `the receiving server did not pass ${domain} (${(dmarc || spf || ['', 'no result'])[0].slice(0, 80)})` };
+  return `${body.replace(/(\r\n)+$/, '')}\r\n`;
+}
+export function tagsOf(text) {
+  const out = {};
+  for (const part of valueOf(text).split(';')) {
+    const i = part.indexOf('=');
+    const k = i < 0 ? '' : part.slice(0, i).trim();
+    if (k && !(k in out)) out[k] = part.slice(i + 1).replace(/[ \t\r\n]+/g, '');
   }
-  return { ok: true, sender: addr };
+  return out;
+}
+/* The signature header with its b= value emptied, everything else as received. */
+export function blankB(t) {
+  const end = t.endsWith('\r\n') ? '\r\n' : '';
+  const x = end ? t.slice(0, -2) : t; const i = x.indexOf(':');
+  return x.slice(0, i + 1) + x.slice(i + 1).replace(/(^|;)([ \t\r\n]*b[ \t\r\n]*=)[^;]*/, '$1$2') + end;
+}
+/* Comments out, then split on ';' outside quoted strings. */
+function stripComments(v) {
+  let out = ''; let depth = 0; let q = false;
+  for (let i = 0; i < v.length; i += 1) {
+    const c = v[i];
+    if (depth) { if (c === '\\') i += 1; else if (c === '(') depth += 1; else if (c === ')') depth -= 1; continue; }
+    if (q) { out += c; if (c === '\\') { out += v[i + 1] ?? ''; i += 1; } else if (c === '"') q = false; continue; }
+    if (c === '"') { q = true; out += c; } else if (c === '(') depth = 1; else out += c;
+  }
+  return out;
+}
+function splitOutsideQuotes(v, sep) {
+  const parts = []; let cur = ''; let q = false;
+  for (let i = 0; i < v.length; i += 1) {
+    const c = v[i];
+    if (q) { cur += c; if (c === '\\') { cur += v[i + 1] ?? ''; i += 1; } else if (c === '"') q = false; continue; }
+    if (c === '"') { q = true; cur += c; } else if (c === sep) { parts.push(cur); cur = ''; } else cur += c;
+  }
+  parts.push(cur);
+  return parts;
+}
+/* An Authentication-Results value (RFC 8601) -> { authserv, results: [{ method,
+   result, props }] }. A result is only an entry whose FIRST token is
+   method=result; "header.s=dmarc=pass…" inside another entry is a property of
+   that entry, never a DMARC result. */
+export function parseAuthResults(value) {
+  const parts = splitOutsideQuotes(stripComments(String(value || '')), ';');
+  const authserv = (parts.shift() || '').trim().split(/\s+/)[0].toLowerCase();
+  const results = [];
+  for (const p of parts) {
+    const toks = p.trim().match(/(?:[^\s"]+|"(?:[^"\\]|\\.)*")+/g) || [];
+    if (!toks.length || /^none$/i.test(toks[0])) continue;
+    const m = toks[0].match(/^([A-Za-z0-9_-]+)(?:\/\d+)?=([A-Za-z0-9_-]+)$/);
+    const props = {};
+    for (const t of toks.slice(1)) {
+      const pm = t.match(/^([A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+)=(.*)$/);
+      if (pm && !(pm[1].toLowerCase() in props)) props[pm[1].toLowerCase()] = pm[2].replace(/^"(.*)"$/, '$1').replace(/\\(.)/g, '$1');
+    }
+    results.push(m ? { method: m[1].toLowerCase(), result: m[2].toLowerCase(), props } : { method: '?', result: '?', props });
+  }
+  return { authserv, results };
+}
+/* Exactly one From, one address: quoted strings and comments removed first, so
+   a "<…>" inside a display name is not the address. */
+export function fromAddress(fields) {
+  const froms = fields.filter((f) => f.name === 'from');
+  if (froms.length !== 1) return { why: froms.length ? 'the message has more than one From header' : 'the message has no From header' };
+  const v = stripComments(valueOf(froms[0].text)).replace(/"(?:[^"\\]|\\.)*"/g, '').trim();
+  if (v.includes(',') || (v.match(/</g) || []).length > 1) return { why: 'the From header names more than one address' };
+  const m = v.match(/<([^<>]*)>/);
+  const addr = (m ? m[1] : v).trim().toLowerCase();
+  if (!/^[^\s@<>"]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(addr)) return { why: 'the From address cannot be read' };
+  return { addr, domain: addr.split('@')[1] };
+}
+const defaultResolveTxt = (name) => dnsPromises.resolveTxt(name);
+async function publicKey(d, sel, resolveTxt) {
+  const name = `${sel}._domainkey.${d}`;
+  let recs;
+  try { recs = await resolveTxt(name); } catch (e) {
+    if (e && (e.code === 'ENOTFOUND' || e.code === 'ENODATA')) return { why: `no key is published at ${name}` };
+    throw Object.assign(new Error(`looking up ${name} failed (${e?.code || e?.message || e}); tried again next read`), { retry: true });
+  }
+  const txt = (recs || []).map((r) => (Array.isArray(r) ? r.join('') : String(r))).find((r) => /(^|;)\s*p\s*=/.test(r)) || '';
+  const pk = ((txt.match(/(?:^|;)\s*p\s*=\s*([A-Za-z0-9+/=\s]*)/) || [])[1] || '').replace(/\s+/g, '');
+  if (!pk) return { why: `the key at ${name} is missing or revoked` };
+  const k = ((txt.match(/(?:^|;)\s*k\s*=\s*([A-Za-z0-9]+)/) || [])[1] || 'rsa').toLowerCase();
+  if (k !== 'rsa') return { why: `the key at ${name} is not an RSA key` };
+  try { return { key: createPublicKey({ key: Buffer.from(pk, 'base64'), format: 'der', type: 'spki' }) }; } catch {
+    return { why: `the key at ${name} cannot be read` };
+  }
+}
+const ARC_NAMES = ['arc-authentication-results', 'arc-message-signature', 'arc-seal'];
+/* The newest ARC set, verified: -> { ok, why } or { ok: true, aar, d }. */
+export async function verifyArc({ fields, body }, { suffix, resolveTxt = defaultResolveTxt }) {
+  const under = (d) => { const x = String(d || '').toLowerCase(); return Boolean(suffix) && (x === suffix || x.endsWith(`.${suffix}`)); };
+  const sets = {};
+  for (const f of fields) {
+    if (!ARC_NAMES.includes(f.name)) continue;
+    const i = Number((valueOf(f.text).match(/^\s*i\s*=\s*(\d+)\s*;/) || [])[1]);
+    if (!(i >= 1 && i <= 50)) return { ok: false, why: `an ${f.name} header has no valid instance` };
+    const set = (sets[i] ||= {});
+    if (set[f.name]) return { ok: false, why: `two ${f.name} headers for ARC instance ${i}` };
+    set[f.name] = f;
+  }
+  const N = Math.max(0, ...Object.keys(sets).map(Number));
+  if (!N) return { ok: false, why: 'the receiving filter did not seal the message (no ARC set)' };
+  for (let i = 1; i <= N; i += 1) {
+    if (!ARC_NAMES.every((n) => sets[i]?.[n])) return { ok: false, why: `ARC instance ${i} is incomplete` };
+  }
+  const as = tagsOf(sets[N]['arc-seal'].text); const ams = tagsOf(sets[N]['arc-message-signature'].text);
+  if (!under(as.d) || !under(ams.d)) return { ok: false, why: `the newest ARC seal is not the receiving filter's (d=${as.d || '?'})` };
+  if (String(as.cv || '').toLowerCase() !== (N === 1 ? 'none' : 'pass')) return { ok: false, why: `the ARC chain is broken (cv=${as.cv || '?'})` };
+  if (as.a !== 'rsa-sha256' || ams.a !== 'rsa-sha256') return { ok: false, why: 'the ARC set uses an algorithm this reader does not check' };
+  if (ams.l !== undefined) return { ok: false, why: 'the ARC signature covers only part of the body' };
+  const signed = String(ams.h || '').toLowerCase().split(':').map((x) => x.trim()).filter(Boolean);
+  if (!signed.includes('from')) return { ok: false, why: 'the ARC signature does not cover the From header' };
+  const [hc = 'simple', bc = 'simple'] = String(ams.c || 'simple/simple').toLowerCase().split('/');
+  if (createHash('sha256').update(canonBody(body, bc), 'latin1').digest('base64') !== ams.bh) {
+    return { ok: false, why: 'the message body is not the one the filter sealed' };
+  }
+  const ch = (t) => (hc === 'relaxed' ? canonHeader(t) : t);
+  const used = new Set(); let data = '';
+  for (const h of signed) {
+    for (let k = fields.length - 1; k >= 0; k -= 1) {
+      if (fields[k].name === h && !used.has(k)) { used.add(k); data += ch(fields[k].text); break; }
+    }
+  }
+  data += ch(blankB(sets[N]['arc-message-signature'].text)).replace(/\r\n$/, '');
+  const k1 = await publicKey(ams.d, ams.s, resolveTxt);
+  if (!k1.key) return { ok: false, why: k1.why };
+  if (!rsaVerify('sha256', Buffer.from(data, 'latin1'), k1.key, Buffer.from(ams.b || '', 'base64'))) {
+    return { ok: false, why: 'the filter’s message signature does not verify (the message was changed after it was sealed)' };
+  }
+  let sd = '';
+  for (let i = 1; i <= N; i += 1) {
+    for (const n of ARC_NAMES) sd += n === 'arc-seal' && i === N ? canonHeader(blankB(sets[i][n].text)).replace(/\r\n$/, '') : canonHeader(sets[i][n].text);
+  }
+  const k2 = as.d === ams.d && as.s === ams.s ? k1 : await publicKey(as.d, as.s, resolveTxt);
+  if (!k2.key) return { ok: false, why: k2.why };
+  if (!rsaVerify('sha256', Buffer.from(sd, 'latin1'), k2.key, Buffer.from(as.b || '', 'base64'))) {
+    return { ok: false, why: 'the filter’s ARC seal does not verify' };
+  }
+  const aar = parseAuthResults(valueOf(sets[N]['arc-authentication-results'].text).replace(/^\s*i\s*=\s*\d+\s*;/, ''));
+  if (!under(aar.authserv)) return { ok: false, why: `the sealed verdict is not the receiving filter's (${aar.authserv || '?'})` };
+  return { ok: true, aar, d: as.d };
+}
+export async function checkOrigin(raw, { senders = [], authserv = '', resolveTxt = defaultResolveTxt } = {}) {
+  const msg = splitMessage(raw);
+  const from = fromAddress(msg.fields);
+  if (!from.addr) return { ok: false, sender: null, why: from.why };
+  const allowed = senders.map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+  if (!allowed.includes(from.addr)) return { ok: false, sender: from.addr, why: `sender ${from.addr} is not one of the allowed senders` };
+  const suffix = String(authserv || '').trim().toLowerCase().replace(/^\.+/, '');
+  if (!suffix) return { ok: false, sender: from.addr, why: 'no receiving filter is configured to vouch for senders (NI_MAIL_AUTHSERV)' };
+  const arc = await verifyArc(msg, { suffix, resolveTxt });
+  if (!arc.ok) return { ok: false, sender: from.addr, why: arc.why };
+  const under = (d) => d === suffix || d.endsWith(`.${suffix}`);
+  const plain = msg.fields.filter((f) => f.name === 'authentication-results').map((f) => parseAuthResults(valueOf(f.text)))
+    .filter((r) => under(r.authserv));
+  const entries = [arc.aar, ...plain].flatMap((r) => r.results);
+  const dom = (x) => String(x || '').toLowerCase().replace(/^.*@/, '');
+  if (!arc.aar.results.some((e) => e.method === 'dmarc')) return { ok: false, sender: from.addr, why: 'the filter’s sealed verdict has no DMARC result' };
+  const bad = entries.find((e) => e.method === 'dmarc' && (e.result !== 'pass' || dom(e.props['header.from']) !== from.domain));
+  if (bad) {
+    return { ok: false, sender: from.addr,
+      why: `the receiving filter did not pass ${from.domain} on DMARC (dmarc=${bad.result} header.from=${dom(bad.props['header.from']) || '?'})` };
+  }
+  /* Headers outside the seal may veto (above), never vouch: the aligned pass
+     must be in the sealed verdict itself. */
+  const aligned = arc.aar.results.some((e) => e.result === 'pass' && ((e.method === 'spf' && dom(e.props['smtp.mailfrom']) === from.domain)
+    || (e.method === 'dkim' && dom(e.props['header.d']) === from.domain)));
+  if (!aligned) return { ok: false, sender: from.addr, why: `no SPF or DKIM pass aligned with ${from.domain}` };
+  return { ok: true, sender: from.addr };
 }
 const safeIso = (v) => { const t = Date.parse(v || ''); return Number.isFinite(t) ? new Date(t).toISOString() : null; };
 
@@ -252,6 +438,10 @@ export function parseReport(lines, { merchants = {} } = {}) {
   if (day_from && day_to && day_from !== day_to) why.push(`spans ${day_from} to ${day_to}; a report over several days has not been seen yet, so its amounts are not taken`);
   const types = [...new Set(txns.map((t) => t.txn_type))].filter((t) => t !== 'SALES');
   if (types.length) why.push(`transaction types not yet seen in a report: ${types.join(', ')} — check their sign before trusting the amounts`);
+  /* The reference is unique per transaction; one seen twice in a report means
+     the read went wrong, and storing would drop one of them (the review). */
+  const refs = txns.map((t) => t.bank_ref);
+  if (new Set(refs).size !== refs.length) why.push('the same bank reference appears on two rows');
   return { merchant_no, merchant_name, fleet_id, day_from, day_to, report_date, txns, totals, stated,
     status: why.length ? 'mismatch' : 'ok', why: why.join('; ') || null };
 }
@@ -275,14 +465,18 @@ export async function storeReport(db, rep, meta = {}) {
          attachment = EXCLUDED.attachment, txns = EXCLUDED.txns, gross = EXCLUDED.gross, fees = EXCLUDED.fees,
          vat = EXCLUDED.vat, net = EXCLUDED.net, stated_txns = EXCLUDED.stated_txns, stated_gross = EXCLUDED.stated_gross,
          stated_net = EXCLUDED.stated_net, status = EXCLUDED.status, why = EXCLUDED.why, ingested_at = now()
-       WHERE ni_report.status <> 'ok' OR EXCLUDED.status = 'ok'
+       WHERE (ni_report.status <> 'ok' AND EXCLUDED.status = 'ok')
+          OR ((ni_report.status = 'ok') = (EXCLUDED.status = 'ok')
+              AND (ni_report.received_at IS NULL OR EXCLUDED.received_at IS NULL OR EXCLUDED.received_at >= ni_report.received_at))
        RETURNING id`,
       [rep.merchant_no, rep.merchant_name, rep.fleet_id, rep.day_from, rep.day_to,
         rep.report_date, meta.message_id || null, meta.uid ?? null, meta.uidvalidity ?? null, meta.received_at || null,
         meta.attachment || null, rep.totals.txns, rep.totals.gross, rep.totals.fees, rep.totals.vat, rep.totals.net,
         rep.stated.txns, rep.stated.gross, rep.stated.net, rep.status, rep.why]);
-    /* An unusable copy never replaces a usable one (the review): the earlier
-       report and its rows stay, and null says so. */
+    /* An unusable copy never replaces a usable one, and an older copy never
+       replaces a newer one of the same kind (a retried message arriving after
+       its correction — the reviews): the held report and its rows stay, and
+       null says so. */
     if (!row) { await client.query('COMMIT'); return null; }
     await q('DELETE FROM ni_card_txn WHERE report_id = $1', [row.id]);
     for (const t of rep.txns) {
@@ -308,11 +502,12 @@ export async function storeReport(db, rep, meta = {}) {
    retrying (the database); the caller records the outcome either way. */
 export async function ingestMessage(db, { raw, uid = null, uidvalidity = null }, {
   log = defaultLog, senders = splitList(get('NI_MAIL_SENDERS', DEFAULT_SENDERS)),
-  authserv = get('NI_MAIL_AUTHSERV', DEFAULT_AUTHSERV), merchants = merchantsOf(get('NI_MERCHANTS', DEFAULT_MERCHANTS)) } = {}) {
-  const { headers, headerBlock, parts } = parseMime(raw);
+  authserv = get('NI_MAIL_AUTHSERV', DEFAULT_AUTHSERV), merchants = merchantsOf(get('NI_MERCHANTS', DEFAULT_MERCHANTS)),
+  resolveTxt = defaultResolveTxt } = {}) {
+  const { headers, parts } = parseMime(raw);
   const meta = { message_id: headers['message-id'] || null, subject: decodeWords(headers.subject || '').slice(0, 200),
     received_at: safeIso(headers.date) };
-  const origin = checkOrigin(headerBlock, { senders, authserv });
+  const origin = await checkOrigin(raw, { senders, authserv, resolveTxt });
   if (!origin.ok) {
     log.warn(SOURCE, 'message not read', { subject: meta.subject.slice(0, 100), why: origin.why });
     return { ...meta, sender: origin.sender, status: 'rejected', why: origin.why, reports: [] };
@@ -386,7 +581,11 @@ export function imapSession({ host, port = 993, connect = tls.connect, timeoutMs
     if (failed) throw failed;
     return new Promise((res, rej) => {
       const tag = `N${++n}`;
-      const timer = setTimeout(() => { waiting = null; rej(new Error(`IMAP ${c.split(' ')[0]} timed out`)); }, timeoutMs);
+      /* A command that times out ends the session: its late reply would
+         otherwise be taken as the next command's (the second review). */
+      const timer = setTimeout(() => {
+        waiting = null; failed = new Error(`IMAP ${c.split(' ')[0]} timed out`); sock.destroy(); rej(failed);
+      }, timeoutMs);
       timer.unref?.();
       waiting = { tag, res, rej, timer };
       sock.write(`${tag} ${c}\r\n`);
@@ -410,6 +609,8 @@ export function imapSession({ host, port = 993, connect = tls.connect, timeoutMs
       const m = /BODY\[\] \{(\d+)\}\r\n/.exec(head);
       if (!m) return null;
       const start = m.index + m[0].length;
+      const said = /UID (\d+)/.exec(head.slice(0, m.index)) || /UID (\d+)/.exec(r.subarray(start + Number(m[1])).toString('latin1'));
+      if (said && Number(said[1]) !== Number(uid)) throw new Error(`the server answered for message ${said[1]}, not ${uid}`);
       return r.subarray(start, start + Number(m[1]));
     },
     async logout() { try { await cmd('LOGOUT'); } catch { /* the server may close first */ } sock.end(); },
@@ -444,21 +645,31 @@ export async function collect({ db, log = defaultLog, now = Date.now(), sinceDay
       [box.uidvalidity])).rows.map((r) => Number(r.mail_uid)));
     for (const uid of uids) {
       if (known.has(uid)) { out.skipped_known += 1; continue; }
-      let res;
-      try {
-        const raw = await s.fetchRaw(uid);
-        res = raw ? await ingestMessage(db, { raw, uid, uidvalidity: box.uidvalidity }, { log, ...readOpts })
-          : { status: 'error', why: 'the server returned no body' };
-      } catch (e) { res = { status: 'error', why: String(e.message || e).slice(0, 300) }; }
+      let res; let stop = false;
+      let raw = null;
+      try { raw = await s.fetchRaw(uid); } catch (e) {
+        /* The session is no longer to be trusted (a timeout, an answer for
+           another message): record this one, stop, and read the rest next time. */
+        res = { status: 'error', why: String(e.message || e).slice(0, 300) }; stop = true;
+      }
+      if (!res) {
+        try {
+          res = raw ? await ingestMessage(db, { raw, uid, uidvalidity: box.uidvalidity }, { log, ...readOpts })
+            : { status: 'error', why: 'the server returned no body' };
+        } catch (e) { res = { status: 'error', why: String(e.message || e).slice(0, 300) }; }
+      }
       await db.query(
         `INSERT INTO ni_mail_message (mail_uidvalidity, mail_uid, message_id, sender, subject, received_at, status, why)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
          ON CONFLICT (mail_uidvalidity, mail_uid) DO UPDATE SET status = EXCLUDED.status, why = EXCLUDED.why,
+           message_id = coalesce(EXCLUDED.message_id, ni_mail_message.message_id), sender = coalesce(EXCLUDED.sender, ni_mail_message.sender),
+           subject = coalesce(EXCLUDED.subject, ni_mail_message.subject), received_at = coalesce(EXCLUDED.received_at, ni_mail_message.received_at),
            attempts = ni_mail_message.attempts + 1, seen_at = now()`,
         [box.uidvalidity, uid, res.message_id || null, res.sender || null, res.subject || null, res.received_at || null, res.status, res.why || null]);
       out.messages = (out.messages || 0) + 1;
       out.reports.push(...(res.reports || []));
       if (res.status === 'error') log.warn(SOURCE, 'message failed; it will be tried again', { uid, why: String(res.why).slice(0, 160) });
+      if (stop) { out.stopped = res.why; break; }
     }
     await s.logout();
     await logRun({ source: SOURCE, fleet_id: null, mode: 'mail', status: 'ok', rows_written: out.reports.reduce((a, r) => a + r.txns, 0) }, db);
