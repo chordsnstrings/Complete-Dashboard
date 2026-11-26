@@ -12715,7 +12715,8 @@ changed. One payment the bank dates 24 Nov came in the 25 Nov report, and the sh
   is recorded as `rejected` in `ni_mail_message` and never opened; a DNS failure worth retrying is an `error` (retried).
 - **The limit of that check:** it proves arks.ae sent the mail, not that the bank did. The 12:05 forward looked manual
   (three hours after the bank's 09:20). If the accounts team ever automates it, anyone who emails accounts@arks.ae a
-  made-up PDF passes every check. The safe arrangement is the bank sending to this mailbox directly.
+  made-up PDF passes every check. **The operator's ruling (2026-11-26): "arks.ae is fine"** — the accounts team's
+  forward is the trusted path; do not raise it again unless the forward is known to have been automated.
 - **Not read again:** a message recorded `rejected`, `unreadable` or `ok` is never fetched again, even after a settings or
   parser fix. To re-read one, delete its `ni_mail_message` row.
 - **Each message once:** `ni_mail_message` records every fetched UID with its outcome (`ok`, `no_report`,
