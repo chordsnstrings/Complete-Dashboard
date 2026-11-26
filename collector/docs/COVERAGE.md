@@ -12676,13 +12676,29 @@ amount. Each payment took its driver from the sheet's row for the same terminal,
 changed. One payment the bank dates 24 Nov came in the 25 Nov report, and the sheet files it under the 25th.
 
 **How it is used** (`src/sources/ni_reports.js`, `network_cards.js mergeBank`):
-- **Amounts:** the bank's, for every fleet-day a usable report covers.
-- **Drivers:** the sheet's, for the same terminal on the report's day. It tries the same amount first, then the
-  terminal's driver that day, then the terminal's last known driver (`terminal_last_known`, inferred), else nobody.
+- **Amounts:** the bank's, for a fleet-day a usable report covers **and the sheet already has**. Until the team types
+  the day in, the bank's rows wait and nothing about the day changes, so the cash texts (which wait for the sheet's
+  day, CARD-4) wait exactly as before.
+- **Drivers:** the sheet's, for the same terminal on the report's day, in two passes so an exact match is never taken
+  by a near one: the same amount (`sheet_same_payment`); else an unmatched sheet row on that terminal that day, the
+  nearest in amount (`sheet_same_terminal_day`); else, every row there already matched, the terminal's one driver that
+  day (`sheet_terminal_driver`); else nobody (`none`), with the reason on the row. **Never a driver from another day.**
+- **Fleet:** the merchant the terminal settles to, as the bank's reports show it; the sheet's Platform cell only for a
+  terminal no report has carried.
 - **Provenance:** every `card_payment` row says where it came from (`source`, `bank_ref`, `id_basis`).
 - **When a report is used at all:** only when every transaction row was read and they reproduce the report's count
-  and grand total to the fil, the merchant is a fleet, and every type is SALES. Otherwise it is stored with the reason
-  and the sheet's rows stay.
+  and grand total to the fil, the merchant number is on `NI_MERCHANTS`, the report covers one day, and every type is
+  SALES. Otherwise it is stored with the reason and the sheet's rows stay. An unusable copy never replaces a usable
+  report already held.
+- **Who it is believed from:** the From address must be on `NI_MAIL_SENDERS`, and every `Authentication-Results`
+  header carrying the receiving filter's id (`NI_MAIL_AUTHSERV`) must pass DMARC (or, with no DMARC result, SPF) for
+  that sender's domain. On the real reports the topmost header came from
+  `incoming.instance-us-west1-*.prod.antispam.mailspamprotection.com` and read `spf=pass smtp.mailfrom=arks.ae;
+  dmarc=pass header.from=arks.ae`; From and Return-Path were `accounts@arks.ae`. Anything else is recorded as
+  `rejected` in `ni_mail_message` and never opened.
+- **Each message once:** `ni_mail_message` records every fetched UID with its outcome (`ok`, `no_report`,
+  `rejected`, `unreadable`, `error`). Only an `error` is fetched again, up to three attempts, so one bad message
+  blocks nothing and two versions of a report cannot take turns.
 
 **Read-only:** the mailbox is opened with EXAMINE and every fetch is a BODY.PEEK. Nothing is marked read, moved or
 deleted.
@@ -12697,6 +12713,13 @@ deleted.
   - the websocket must be opened **without an Origin header** (websocket-client sends one by default and gets a bare
     403; doctl's Go dialer sends none);
   - the sandbox's proxy port changes between sessions, so read it from `HTTPS_PROXY`.
+- **A bank amount must never arrive ahead of the sheet's day.** The cash texts wait until the sheet has a day
+  (CARD-4). A first draft wrote the bank's rows as soon as the report came, naming drivers by each terminal's last known
+  driver, and that opened the cash texts on a guess. The bank's rows are now used only on a fleet-day the sheet already
+  has.
+- **An Authentication-Results header can be written by the sender.** Trust only the ones carrying the receiving
+  filter's own id, require every one of those to pass, and match the id on a dot boundary (`evilfilter.example` is not
+  `filter.example`).
 - **An IMAP reply is complete at the line that starts with its tag**, and that line can be the first thing in the
   buffer. A reader that only looks for "\r\n" + tag hangs on a short reply. Literals (`{n}\r\n` then n bytes) must be
   skipped whole, or a message body containing the tag ends the read early.

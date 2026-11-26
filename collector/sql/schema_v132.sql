@@ -11,7 +11,8 @@
 -- for one by terminal and amount.
 
 -- One row per emailed report. A report re-sent for the same merchant and days
--- replaces the earlier one. status 'ok' only when every transaction row was
+-- replaces the earlier one — unless it is unusable and the earlier one is
+-- usable, which is kept (the review of 2026-11-26). status 'ok' only when every transaction row was
 -- read and they add up to the report's own grand totals; anything else is
 -- stored with its reason and never used for an amount.
 CREATE TABLE IF NOT EXISTS ni_report (
@@ -42,9 +43,12 @@ CREATE TABLE IF NOT EXISTS ni_report (
 );
 CREATE INDEX IF NOT EXISTS ni_report_mail_idx ON ni_report (mail_uidvalidity, mail_uid);
 
--- One row per bank transaction. bank_ref is the acquirer reference number,
--- unique per transaction; report_day is the day the report covers (the sheet
--- files a payment under it), txn_day the bank's own date for the payment.
+-- One row per bank transaction OF ONE REPORT. bank_ref is the acquirer
+-- reference number, unique per transaction; keyed with the report, so a
+-- broken report re-sent later can never take over a usable report's rows (the
+-- review of 2026-11-26); bankForMerge reads usable reports only, newest first.
+-- report_day is the day the report covers (the sheet files a payment under
+-- it), txn_day the bank's own date for the payment.
 CREATE TABLE IF NOT EXISTS ni_card_txn (
   merchant_no  TEXT NOT NULL,
   bank_ref     TEXT NOT NULL,
@@ -60,17 +64,41 @@ CREATE TABLE IF NOT EXISTS ni_card_txn (
   vat          NUMERIC(12,2),
   net          NUMERIC(12,2),
   card_class   TEXT,
-  PRIMARY KEY (merchant_no, bank_ref)
+  PRIMARY KEY (report_id, bank_ref)
 );
+CREATE INDEX IF NOT EXISTS ni_card_txn_ref_idx ON ni_card_txn (merchant_no, bank_ref);
 CREATE INDEX IF NOT EXISTS ni_card_txn_report_idx ON ni_card_txn (report_id);
 CREATE INDEX IF NOT EXISTS ni_card_txn_day_idx ON ni_card_txn (report_day, terminal_id);
+
+-- Every message the reader fetched, once, with what came of it: 'ok' (its
+-- report(s) stored), 'no_report' (no report PDF in it), 'rejected' (not from
+-- an allowed sender, or the receiving server did not pass its DMARC/SPF),
+-- 'unreadable' (a PDF with no merchant or span), 'error' (retried up to three
+-- times). A message is fetched again only while it is 'error' under three
+-- attempts: one bad message cannot block the ones after it, and two versions
+-- of one report cannot take turns (the review of 2026-11-26).
+CREATE TABLE IF NOT EXISTS ni_mail_message (
+  mail_uidvalidity BIGINT NOT NULL,
+  mail_uid       BIGINT NOT NULL,
+  message_id     TEXT,
+  sender         TEXT,
+  subject        TEXT,
+  received_at    TIMESTAMPTZ,
+  status         TEXT NOT NULL,
+  why            TEXT,
+  attempts       INT NOT NULL DEFAULT 1,
+  seen_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (mail_uidvalidity, mail_uid)
+);
 
 -- card_payment says where each row's amount and driver came from. bank_ref is
 -- set on rows whose amount is the bank's (source 'network_report'); id_basis
 -- says how the driver was found: 'sheet' (a sheet row), 'sheet_same_payment'
 -- (the sheet's row for the same terminal, day and amount), 'sheet_same_terminal_day'
--- (the sheet's driver on that terminal that day), 'terminal_last_known' (the
--- terminal's driver on its latest earlier day in the sheet: inferred), or
--- 'none' (no driver ever mapped to the terminal).
+-- (an unmatched sheet row on that terminal that day, nearest in amount),
+-- 'sheet_terminal_driver' (every sheet row there already matched; the
+-- terminal's one driver that day), or 'none' (the sheet maps nobody to that terminal that day, or several and the
+-- payment cannot be told between them). Never a guess: a bank amount is used
+-- only on a fleet-day the sheet itself has.
 ALTER TABLE card_payment ADD COLUMN IF NOT EXISTS bank_ref TEXT;
 ALTER TABLE card_payment ADD COLUMN IF NOT EXISTS id_basis TEXT;

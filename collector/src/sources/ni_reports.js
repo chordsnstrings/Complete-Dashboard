@@ -34,6 +34,7 @@
    count and grand total to the fil; otherwise it is stored with the reason
    (status 'mismatch') and no amount is taken from it — the sheet's stays. */
 import tls from 'node:tls';
+import { createHash } from 'node:crypto';
 import { get } from '../settings.js';
 import { logRun } from '../db.js';
 import { noteCredential } from '../auth_state.js';
@@ -41,6 +42,12 @@ import { log as defaultLog } from '../log.js';
 
 export const SOURCE = 'ni_reports';
 const SUBJECT = 'MERCHANT TRANSACTION ACTIVITY';
+/* The senders, the receiving server and the merchant numbers, as measured on
+   the first reports (2026-11-26); each a setting (src/settings.js). */
+export const DEFAULT_SENDERS = 'accounts@arks.ae,nifax@network.ae';
+export const DEFAULT_AUTHSERV = 'mailspamprotection.com';
+export const DEFAULT_MERCHANTS = '200600866495:ecosine,200601523517:egari';
+const splitList = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
 
 /* ── MIME: just what these messages need ──────────────────────────────────
    A forwarded report is multipart/mixed (the forward's text, possibly
@@ -83,7 +90,14 @@ function decodeBody(body, cte = '') {
   }
   return Buffer.from(body, 'latin1');
 }
-/* -> { headers, parts: [{ contentType, filename, data: Buffer }] } — the leaves, in order. */
+/* Every occurrence of a header, top first (headersOf keeps only the first). */
+export function headerAll(block, name) {
+  const want = name.toLowerCase();
+  return unfold(block).split(/\r?\n/).filter((l) => l.slice(0, l.indexOf(':')).trim().toLowerCase() === want)
+    .map((l) => l.slice(l.indexOf(':') + 1).trim());
+}
+/* -> { headers, headerBlock, parts: [{ contentType, filename, data: Buffer }] } — the leaves, in
+   order. A report forwarded AS AN ATTACHMENT (message/rfc822) is opened and its leaves read too. */
 export function parseMime(raw) {
   const text = Buffer.isBuffer(raw) ? raw.toString('latin1') : String(raw);
   const walk = (chunk, depth) => {
@@ -97,12 +111,50 @@ export function parseMime(raw) {
       const pieces = body.split(new RegExp(`(?:^|\\r?\\n)${b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:--)?[ \\t]*(?:\\r?\\n|$)`));
       return { headers: h, parts: pieces.slice(1).filter((p) => p.trim()).flatMap((p) => walk(p, depth + 1).parts) };
     }
+    if (ct.value === 'message/rfc822' && depth < 8) {
+      return { headers: h, parts: walk(decodeBody(body, h['content-transfer-encoding'] || '').toString('latin1'), depth + 1).parts };
+    }
     const cd = paramsOf(h['content-disposition'] || '');
     const filename = decodeWords(cd.params.filename || ct.params.name || '') || null;
     return { headers: h, parts: [{ contentType: ct.value, filename, data: decodeBody(body, h['content-transfer-encoding'] || '') }] };
   };
-  return walk(text, 0);
+  const top = walk(text, 0);
+  const sep = text.search(/\r?\n\r?\n/);
+  return { ...top, headerBlock: sep < 0 ? text : text.slice(0, sep) };
 }
+
+/* WHO SENT IT (the review of 2026-11-26). Anyone can email the mailbox, and a
+   report's amounts change what drivers are asked for, so a message is read
+   only when (1) its From address is an allowed sender, and (2) the RECEIVING
+   server's own verdict passes DMARC (or, with no DMARC result, SPF) for that
+   sender's domain. Measured on the real reports: the inbound filter
+   (…prod.antispam.mailspamprotection.com, ahead of the mailbox's own server) wrote
+   "spf=pass smtp.mailfrom=arks.ae; dmarc=pass header.from=arks.ae". A forged
+   "From: accounts@arks.ae" fails arks.ae's DMARC there. A sender can write its
+   own Authentication-Results header, so EVERY one carrying the receiving
+   server's id must pass, and at least one must exist. */
+export function checkOrigin(headerBlock, { senders = [], authserv = '' } = {}) {
+  const from = (headerAll(headerBlock, 'from')[0] || '');
+  const addr = ((from.match(/<([^>]+)>/) || [])[1] || from).trim().toLowerCase();
+  const domain = addr.split('@')[1] || '';
+  if (!addr || !senders.map((x) => x.trim().toLowerCase()).filter(Boolean).includes(addr)) {
+    return { ok: false, sender: addr || null, why: `sender ${addr || '(none)'} is not one of the allowed senders` };
+  }
+  const suffix = String(authserv || '').trim().toLowerCase();
+  if (!suffix) return { ok: false, sender: addr, why: 'no receiving server is configured to vouch for senders (NI_MAIL_AUTHSERV)' };
+  const ours = headerAll(headerBlock, 'authentication-results')
+    .filter((v) => { const id = v.split(';')[0].trim().toLowerCase(); return id === suffix || id.endsWith(`.${suffix}`); });
+  if (!ours.length) return { ok: false, sender: addr, why: `no authentication result from the receiving server (${suffix})` };
+  for (const v of ours) {
+    const dmarc = v.match(/\bdmarc=(\w+)[^;]*?header\.from=([^\s;]+)/i);
+    const spf = v.match(/\bspf=(\w+)[^;]*?smtp\.mailfrom=([^\s;]+)/i);
+    const pass = dmarc ? dmarc[1].toLowerCase() === 'pass' && dmarc[2].toLowerCase().replace(/^.*@/, '') === domain
+      : (spf ? spf[1].toLowerCase() === 'pass' && spf[2].toLowerCase().replace(/^.*@/, '') === domain : false);
+    if (!pass) return { ok: false, sender: addr, why: `the receiving server did not pass ${domain} (${(dmarc || spf || ['', 'no result'])[0].slice(0, 80)})` };
+  }
+  return { ok: true, sender: addr };
+}
+const safeIso = (v) => { const t = Date.parse(v || ''); return Number.isFinite(t) ? new Date(t).toISOString() : null; };
 
 /* ── PDF -> lines ─────────────────────────────────────────────────────────
    unpdf (Mozilla's pdf.js, serverless build, no dependencies). Text items are
@@ -138,15 +190,21 @@ const num = (s) => Math.round(Number(String(s).replace(/,/g, '')) * 100) / 100;
 const iso = (dmy) => { const [d, m, y] = dmy.split('/'); return `${y}-${m}-${d}`; };
 const r2 = (x) => Math.round(x * 100) / 100;
 
-export function fleetOf(name = '') {
-  if (/ECOSINE/i.test(name)) return 'ecosine';
-  if (/EGARI/i.test(name)) return 'egari';
-  return null;
+/* The merchant numbers this collector accepts, and the fleet each is
+   (NI_MERCHANTS, "merchant:fleet,merchant:fleet"). A report under any other
+   number is stored and never used — the name on it can be typed by anyone. */
+export function merchantsOf(spec = '') {
+  const out = {};
+  for (const pair of String(spec).split(',')) {
+    const [mid, fleet] = pair.split(':').map((x) => (x || '').trim());
+    if (/^\d{6,20}$/.test(mid) && /^[a-z0-9_-]+$/.test(fleet || '')) out[mid] = fleet;
+  }
+  return out;
 }
 
 /* lines -> { merchant_no, merchant_name, fleet_id, day_from, day_to,
    report_date, txns, totals, stated, status, why }. */
-export function parseReport(lines) {
+export function parseReport(lines, { merchants = {} } = {}) {
   const all = lines.join('\n');
   const pick = (re) => (all.match(re) || [])[1] || null;
   const merchant_no = pick(/Merchant No\s*:\s*(\d+)/);
@@ -186,8 +244,12 @@ export function parseReport(lines) {
     if (stated.txns !== totals.txns) why.push(`${totals.txns} rows read against the report's ${stated.txns}`);
     if (Math.abs(stated.gross - totals.gross) > 0.005) why.push(`rows add up to ${totals.gross.toFixed(2)} against the report's ${stated.gross.toFixed(2)}`);
   }
-  const fleet_id = fleetOf(merchant_name || '');
-  if (!fleet_id) why.push(`merchant "${merchant_name || merchant_no}" is neither Ecosine nor Egari`);
+  const fleet_id = (merchant_no && merchants[merchant_no]) || null;
+  if (!fleet_id) why.push(`merchant ${merchant_no || '(none)'} is not one of the accepted merchant numbers`);
+  /* Every report seen so far covers one day. One spanning several is held
+     until one is seen: the sheet files payments by the report's day, and with
+     a span it is not known which day each belongs under (the review). */
+  if (day_from && day_to && day_from !== day_to) why.push(`spans ${day_from} to ${day_to}; a report over several days has not been seen yet, so its amounts are not taken`);
   const types = [...new Set(txns.map((t) => t.txn_type))].filter((t) => t !== 'SALES');
   if (types.length) why.push(`transaction types not yet seen in a report: ${types.join(', ')} — check their sign before trusting the amounts`);
   return { merchant_no, merchant_name, fleet_id, day_from, day_to, report_date, txns, totals, stated,
@@ -213,20 +275,21 @@ export async function storeReport(db, rep, meta = {}) {
          attachment = EXCLUDED.attachment, txns = EXCLUDED.txns, gross = EXCLUDED.gross, fees = EXCLUDED.fees,
          vat = EXCLUDED.vat, net = EXCLUDED.net, stated_txns = EXCLUDED.stated_txns, stated_gross = EXCLUDED.stated_gross,
          stated_net = EXCLUDED.stated_net, status = EXCLUDED.status, why = EXCLUDED.why, ingested_at = now()
+       WHERE ni_report.status <> 'ok' OR EXCLUDED.status = 'ok'
        RETURNING id`,
-      [rep.merchant_no || '?', rep.merchant_name, rep.fleet_id, rep.day_from || '1900-01-01', rep.day_to || '1900-01-01',
+      [rep.merchant_no, rep.merchant_name, rep.fleet_id, rep.day_from, rep.day_to,
         rep.report_date, meta.message_id || null, meta.uid ?? null, meta.uidvalidity ?? null, meta.received_at || null,
         meta.attachment || null, rep.totals.txns, rep.totals.gross, rep.totals.fees, rep.totals.vat, rep.totals.net,
         rep.stated.txns, rep.stated.gross, rep.stated.net, rep.status, rep.why]);
+    /* An unusable copy never replaces a usable one (the review): the earlier
+       report and its rows stay, and null says so. */
+    if (!row) { await client.query('COMMIT'); return null; }
     await q('DELETE FROM ni_card_txn WHERE report_id = $1', [row.id]);
     for (const t of rep.txns) {
       await q(`INSERT INTO ni_card_txn (merchant_no, bank_ref, report_id, report_day, txn_day, terminal_id, card_last4,
                  txn_type, auth_code, amount, msf, vat, net, card_class)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-               ON CONFLICT (merchant_no, bank_ref) DO UPDATE SET report_id = EXCLUDED.report_id,
-                 report_day = EXCLUDED.report_day, txn_day = EXCLUDED.txn_day, terminal_id = EXCLUDED.terminal_id,
-                 card_last4 = EXCLUDED.card_last4, txn_type = EXCLUDED.txn_type, auth_code = EXCLUDED.auth_code,
-                 amount = EXCLUDED.amount, msf = EXCLUDED.msf, vat = EXCLUDED.vat, net = EXCLUDED.net, card_class = EXCLUDED.card_class`,
+               ON CONFLICT (report_id, bank_ref) DO NOTHING`,
       [rep.merchant_no, t.bank_ref, row.id, rep.day_to, t.txn_day, t.terminal_id, t.card_last4, t.txn_type, t.auth_code,
         t.amount, r2(t.msf + t.fee), t.vat, t.net, t.card_class]);
     }
@@ -238,27 +301,44 @@ export async function storeReport(db, rep, meta = {}) {
   } finally { if (pooled) client.release(); }
 }
 
-/* One fetched message -> stored reports. A PDF attached twice (the same
-   bytes under two names) is read once. */
-export async function ingestMessage(db, { raw, uid = null, uidvalidity = null }, { log = defaultLog } = {}) {
-  const { headers, parts } = parseMime(raw);
-  const subject = decodeWords(headers.subject || '');
-  const seen = new Set(); const stored = [];
+/* One fetched message -> { status, why, sender, reports }. Statuses: 'ok' (its
+   report(s) stored), 'rejected' (who sent it does not check out), 'no_report'
+   (no PDF), 'unreadable' (no PDF with a merchant and a span). A PDF attached
+   twice (the same bytes) is read once. Throws only on a failure worth
+   retrying (the database); the caller records the outcome either way. */
+export async function ingestMessage(db, { raw, uid = null, uidvalidity = null }, {
+  log = defaultLog, senders = splitList(get('NI_MAIL_SENDERS', DEFAULT_SENDERS)),
+  authserv = get('NI_MAIL_AUTHSERV', DEFAULT_AUTHSERV), merchants = merchantsOf(get('NI_MERCHANTS', DEFAULT_MERCHANTS)) } = {}) {
+  const { headers, headerBlock, parts } = parseMime(raw);
+  const meta = { message_id: headers['message-id'] || null, subject: decodeWords(headers.subject || '').slice(0, 200),
+    received_at: safeIso(headers.date) };
+  const origin = checkOrigin(headerBlock, { senders, authserv });
+  if (!origin.ok) {
+    log.warn(SOURCE, 'message not read', { subject: meta.subject.slice(0, 100), why: origin.why });
+    return { ...meta, sender: origin.sender, status: 'rejected', why: origin.why, reports: [] };
+  }
+  const seen = new Set(); const reports = []; const unreadable = [];
   for (const part of parts) {
     const isPdf = /\.pdf$/i.test(part.filename || '') || part.contentType === 'application/pdf'
       || part.data.subarray(0, 5).toString('latin1') === '%PDF-';
     if (!isPdf) continue;
-    const key = `${part.data.length}:${part.data.subarray(0, 64).toString('base64')}:${part.data.subarray(-64).toString('base64')}`;
+    const key = createHash('sha256').update(part.data).digest('hex');
     if (seen.has(key)) continue;
     seen.add(key);
-    const rep = parseReport(await pdfLines(part.data));
-    const id = await storeReport(db, rep, { message_id: headers['message-id'] || null, uid, uidvalidity,
-      received_at: headers.date ? new Date(headers.date).toISOString() : null, attachment: part.filename });
-    stored.push({ id, merchant: rep.merchant_no, fleet: rep.fleet_id, from: rep.day_from, to: rep.day_to,
-      txns: rep.totals.txns, gross: rep.totals.gross, status: rep.status, why: rep.why });
-    if (rep.status !== 'ok') log.warn(SOURCE, 'report not used for amounts', { subject: subject.slice(0, 120), why: rep.why });
+    let rep;
+    try { rep = parseReport(await pdfLines(part.data), { merchants }); } catch (e) {
+      unreadable.push(`${part.filename || 'a PDF'} could not be opened (${String(e.message || e).slice(0, 80)})`); continue;
+    }
+    if (!rep.merchant_no || !rep.day_from || !rep.day_to) { unreadable.push(`${part.filename || 'a PDF'}: ${rep.why}`); continue; }
+    const id = await storeReport(db, rep, { message_id: meta.message_id, uid, uidvalidity, received_at: meta.received_at, attachment: part.filename });
+    reports.push({ id, merchant: rep.merchant_no, fleet: rep.fleet_id, from: rep.day_from, to: rep.day_to,
+      txns: rep.totals.txns, gross: rep.totals.gross, status: id ? rep.status : 'kept_earlier',
+      why: id ? rep.why : `${rep.why}; the usable report already held for this merchant and day is kept` });
+    if (rep.status !== 'ok') log.warn(SOURCE, 'report not used for amounts', { subject: meta.subject.slice(0, 100), why: rep.why });
   }
-  return stored;
+  if (reports.length) return { ...meta, sender: origin.sender, status: 'ok', why: unreadable.join('; ') || null, reports };
+  if (!seen.size) return { ...meta, sender: origin.sender, status: 'no_report', why: 'no PDF in the message', reports };
+  return { ...meta, sender: origin.sender, status: 'unreadable', why: unreadable.join('; ').slice(0, 500), reports };
 }
 
 /* ── IMAP, read-only ──────────────────────────────────────────────────────
@@ -344,7 +424,7 @@ const imapDate = (d) => `${d.getUTCDate()}-${IMAP_MONTHS[d.getUTCMonth()]}-${d.g
    Skipped (and silent) until the mailbox is configured. */
 export async function collect({ db, log = defaultLog, now = Date.now(), sinceDays = 10,
   host = get('NI_MAIL_HOST', ''), port = Number(get('NI_MAIL_PORT', '993')) || 993,
-  user = get('NI_MAIL_USER', ''), pass = get('NI_MAIL_PASS', ''), session = imapSession } = {}) {
+  user = get('NI_MAIL_USER', ''), pass = get('NI_MAIL_PASS', ''), session = imapSession, readOpts = {} } = {}) {
   if (!host || !user || !pass) return { skipped: 'NI_MAIL_HOST, NI_MAIL_USER or NI_MAIL_PASS is not set' };
   const cred = { provider: 'network_international_mail', credential: 'NI_MAIL_PASS', surface: 'emailed POS reports' };
   const s = session({ host, port });
@@ -357,14 +437,28 @@ export async function collect({ db, log = defaultLog, now = Date.now(), sinceDay
     await noteCredential(db, { ...cred, state: 'ok' }).catch(() => {});
     const box = await s.examine('INBOX');
     const uids = await s.uidSearch(`SINCE ${imapDate(new Date(now - sinceDays * 864e5))} SUBJECT "${SUBJECT}"`);
+    /* Known: every message already recorded, except one that failed for a
+       reason worth retrying, up to three attempts (ni_mail_message). */
     const known = new Set((await db.query(
-      'SELECT mail_uid FROM ni_report WHERE mail_uidvalidity = $1 AND mail_uid IS NOT NULL', [box.uidvalidity])).rows
-      .map((r) => Number(r.mail_uid)));
+      `SELECT mail_uid FROM ni_mail_message WHERE mail_uidvalidity = $1 AND (status <> 'error' OR attempts >= 3)`,
+      [box.uidvalidity])).rows.map((r) => Number(r.mail_uid)));
     for (const uid of uids) {
       if (known.has(uid)) { out.skipped_known += 1; continue; }
-      const raw = await s.fetchRaw(uid);
-      if (!raw) continue;
-      out.reports.push(...await ingestMessage(db, { raw, uid, uidvalidity: box.uidvalidity }, { log }));
+      let res;
+      try {
+        const raw = await s.fetchRaw(uid);
+        res = raw ? await ingestMessage(db, { raw, uid, uidvalidity: box.uidvalidity }, { log, ...readOpts })
+          : { status: 'error', why: 'the server returned no body' };
+      } catch (e) { res = { status: 'error', why: String(e.message || e).slice(0, 300) }; }
+      await db.query(
+        `INSERT INTO ni_mail_message (mail_uidvalidity, mail_uid, message_id, sender, subject, received_at, status, why)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (mail_uidvalidity, mail_uid) DO UPDATE SET status = EXCLUDED.status, why = EXCLUDED.why,
+           attempts = ni_mail_message.attempts + 1, seen_at = now()`,
+        [box.uidvalidity, uid, res.message_id || null, res.sender || null, res.subject || null, res.received_at || null, res.status, res.why || null]);
+      out.messages = (out.messages || 0) + 1;
+      out.reports.push(...(res.reports || []));
+      if (res.status === 'error') log.warn(SOURCE, 'message failed; it will be tried again', { uid, why: String(res.why).slice(0, 160) });
     }
     await s.logout();
     await logRun({ source: SOURCE, fleet_id: null, mode: 'mail', status: 'ok', rows_written: out.reports.reduce((a, r) => a + r.txns, 0) }, db);
@@ -380,13 +474,20 @@ export async function collect({ db, log = defaultLog, now = Date.now(), sinceDay
   }
 }
 
-/* What the sheet write merges: the transactions of every usable report, and
-   the fleet-days those reports cover (each day of each report's span). */
+/* What the sheet write merges: the transactions of every usable report (one
+   per bank reference, the newest usable report's), the fleet-days those
+   reports cover, and each terminal's fleet as the bank's reports show it (any
+   report: the merchant a terminal settles to is the bank's fact, whatever the
+   sheet's Platform column says). */
 export async function bankForMerge(db) {
   const reports = (await db.query(
     `SELECT id, fleet_id, to_char(day_from, 'YYYY-MM-DD') AS day_from, to_char(day_to, 'YYYY-MM-DD') AS day_to
        FROM ni_report WHERE status = 'ok' AND fleet_id IS NOT NULL`)).rows;
-  if (!reports.length) return { covered: [], txns: [] };
+  const terminalFleet = Object.fromEntries((await db.query(
+    `SELECT DISTINCT ON (t.terminal_id) t.terminal_id, r.fleet_id
+       FROM ni_card_txn t JOIN ni_report r ON r.id = t.report_id
+      WHERE r.fleet_id IS NOT NULL ORDER BY t.terminal_id, t.report_day DESC`)).rows.map((r) => [r.terminal_id, r.fleet_id]));
+  if (!reports.length) return { covered: [], txns: [], terminalFleet };
   const covered = [];
   for (const r of reports) {
     for (let d = new Date(`${r.day_from}T00:00:00Z`); d <= new Date(`${r.day_to}T00:00:00Z`); d = new Date(d.getTime() + 864e5)) {
@@ -394,10 +495,11 @@ export async function bankForMerge(db) {
     }
   }
   const txns = (await db.query(
-    `SELECT t.bank_ref, t.terminal_id, to_char(t.report_day, 'YYYY-MM-DD') AS report_day,
+    `SELECT DISTINCT ON (t.merchant_no, t.bank_ref) t.bank_ref, t.terminal_id, to_char(t.report_day, 'YYYY-MM-DD') AS report_day,
             to_char(t.txn_day, 'YYYY-MM-DD') AS txn_day, t.amount::float AS amount, t.txn_type, r.fleet_id
        FROM ni_card_txn t JOIN ni_report r ON r.id = t.report_id
       WHERE r.status = 'ok' AND r.fleet_id IS NOT NULL
-      ORDER BY t.report_day, t.terminal_id, t.bank_ref`)).rows;
-  return { covered, txns };
+      ORDER BY t.merchant_no, t.bank_ref, r.ingested_at DESC, r.id DESC`)).rows
+    .sort((a, b) => (a.report_day + a.terminal_id + a.bank_ref < b.report_day + b.terminal_id + b.bank_ref ? -1 : 1));
+  return { covered, txns, terminalFleet };
 }

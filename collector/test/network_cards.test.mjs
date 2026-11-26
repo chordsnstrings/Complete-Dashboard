@@ -213,7 +213,7 @@ const sheet = (...parts) => parseSheet([HEAD, ...parts.flat()]);
   check('a corrected read REPLACES — 60 payments at the new amounts, not 120', r2.status === 'ok' && s2.n === 60 && s2.s === 720, JSON.stringify(s2));
   const r3 = await writeRead(db, sheet(rows(30, '5-Jan-2026')));
   check('held: a read without February (half the stored payments) replaces nothing, and says why', r3.status === 'held'
-    && /keeps 30 of the 60/.test(r3.why) && (await stored()).n === 60, JSON.stringify([r3.status, r3.why]));
+    && /keeps 30 of the sheet's 60/.test(r3.why) && (await stored()).n === 60, JSON.stringify([r3.status, r3.why]));
   const r4 = await writeRead(db, sheet(rows(31, '5-Jan-2026', 12), rows(25, '5-Feb-2026', 12), rows(3, '6-Mar-2026', 12)));
   check('held by the month: February down to 25 of 30 is held though the read keeps 59 of 60',
     r4.status === 'held' && /2026-02 \(25 of 30\)/.test(r4.why) && (await stored()).n === 60, JSON.stringify([r4.status, r4.why]));

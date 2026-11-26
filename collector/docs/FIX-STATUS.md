@@ -7863,20 +7863,38 @@ DigitalOcean container found the first two reports and matched them to the sheet
 | id | what |
 |---|---|
 | NIR1 | **`src/sources/ni_reports.js`.** A read-only IMAP client (LOGIN, EXAMINE, UID SEARCH, UID FETCH BODY.PEEK[], LOGOUT; literals skipped whole), a minimal MIME parser (no library), the PDF read with `unpdf` (pdf.js, no dependencies, `npm audit` 0), `parseReport` (rows, span, merchant, fleet, grand totals; used only when it adds up), and `storeReport` (`ni_report` per merchant and span, a re-sent report replacing it; `ni_card_txn` keyed by the bank's reference). It runs inside the card-payments tick and is skipped until `NI_MAIL_HOST`, `NI_MAIL_USER` and `NI_MAIL_PASS` are set; a refused login is a credential state. |
-| NIR2 | **`mergeBank` in the sheet write** (`network_cards.js`): one transaction, as before. For every fleet-day a usable report covers, the bank's rows replace the sheet's, each with the sheet's driver for its terminal that day (by amount, then the terminal's driver, then its last known one marked inferred, else nobody). The bank's date is kept. Sheet rows the bank lacks are counted in the read's log, not kept. Every `card_payment` row carries `source`, `bank_ref` and `id_basis` (`sql/schema_v132.sql`). Downstream readers are unchanged: they read all of `card_payment`. |
-| NIR3 | **Settings:** `NI_MAIL_HOST` (env-only by the `_HOST` rule: the password is sent there), `NI_MAIL_PORT` (993), `NI_MAIL_USER`, `NI_MAIL_PASS` (secret). |
+| NIR2 | **`mergeBank` in the sheet write** (`network_cards.js`): one transaction, as before. For a fleet-day a usable report covers AND the sheet already has, the bank's rows replace the sheet's, each with the sheet's driver for its terminal that day (exact amount; else an unmatched row, nearest amount; else the terminal's one driver; else nobody, with the reason). Never a driver from another day. A terminal's fleet is its merchant's. The bank's date is kept. Sheet rows the bank lacks are counted in the read's log, not kept. Every `card_payment` row carries `source`, `bank_ref` and `id_basis` (`sql/schema_v132.sql`). Downstream readers are unchanged: they read all of `card_payment`. |
+| NIR3 | **Settings:** `NI_MAIL_HOST` (env-only by the `_HOST` rule: the password is sent there), `NI_MAIL_PORT` (993), `NI_MAIL_USER`, `NI_MAIL_PASS` (secret), `NI_MAIL_SENDERS`, `NI_MAIL_AUTHSERV`, `NI_MERCHANTS` (defaults: the measured senders, filter and the two merchant numbers). |
+| NIR4 | **An independent review of PR #80 found 14 problems (0 refuted); all fixed before deploy:** (1) bank rows opened the cash texts on inferred drivers — now used only on a fleet-day the sheet has, and the last-known-driver rule is gone; (2) the shrink guard counted merged rows, so bank rows hid a broken sheet read — it now compares the sheet's read with the sheet's stored rows (sheet rows plus bank rows that each stood for one, `ONE_FOR_ONE`); (3) a broken re-send could take a usable report's references — `ni_card_txn` is keyed by (report, reference) and the merge reads usable reports only, one row per reference; (4) a multi-day report filed every payment under its last day — held until one is seen; (5) rule 2 could reuse a matched row and the sheet-only count hid rows — two passes, unmatched rows only; (6) the Platform cell overrode the merchant — the merchant wins; (7) one bad message blocked the rest and a bad Date header threw — every message is caught and recorded in `ni_mail_message`, dates parsed safely; (8) a missing merchant or span crashed the store — recorded `unreadable`, nothing stored; (9) two versions of one report flipped every tick — each message is read once, and an unusable copy never replaces a usable report; (10) the duplicate-attachment key was weak — sha256; (11) a forward-as-attachment was ignored — `message/rfc822` is opened; (12) anyone could email in rows — sender allowlist, the receiving filter's DMARC/SPF verdict, and the merchant allowlist. |
 
-**Tests:** `test/ni_reports.test.mjs` 32, on synthetic PDFs and messages built in the test:
-- the report and its totals check, the year rollover, unknown merchants and types;
-- MIME nesting, base64 and encoded filenames, and a PDF attached twice;
-- re-sent reports;
+**Tests:** `test/ni_reports.test.mjs` 53, on synthetic PDFs and messages built in the test:
+- the report and its totals check, the year rollover, merchant numbers off the list (a stranger named "ECOSINE"
+  included), unseen types, a multi-day span;
+- MIME nesting, base64 and encoded filenames, a forward-as-attachment; the sender check (a stranger, a DMARC fail, a
+  planted pass below the server's fail, a look-alike server id, no verdict, another domain's pass);
+- storing: a PDF attached twice, a re-send replacing, an unusable copy NOT replacing, a PDF with no merchant, a
+  rejected message storing nothing;
 - IMAP against a scripted server that splits replies every 7 bytes and puts the tags inside a body; read-only commands
-  only; known messages not fetched again; a refused login;
-- the merge's four rules, the bank's date, and sheet-only rows;
-- `card_payment` written with provenance, and a second read replacing rather than doubling.
+  only; known messages not fetched again; a failing message recorded, retried, and blocking nothing after it; a
+  rejected one never fetched again; a refused login;
+- the merge: each rule, an exact match never taken by a near one, a matched row never reused, several drivers → nobody,
+  no driver borrowed from another day, a day the sheet lacks waiting, the merchant over the Platform cell, the bank's
+  date, sheet-only rows;
+- `card_payment` written with provenance, a second read replacing rather than doubling, and the shrink guard holding
+  a read that kept one of a covered day's rows (the merged count would have let it through).
+
+**Proved by breaking each fix and watching its test fail:** the guard on merged rows (1 fails), the bank used without
+the sheet's day (6), matched rows reused (3), the Platform cell over the merchant (6), only the lowest verdict read
+(1), an unusable copy replacing (1), no attachment dedupe (1).
+
+**Real data, 25 Nov (dry run, both emails as received):** both pass the sender check (`accounts@arks.ae`, DMARC pass
+at the filter); both reports usable; 48 bank rows, AED 3,099.97, all `sheet_same_payment`, 0 sheet-only; the whole
+table 8,155 rows and AED 551,754.92 either way. The only change: one AED 23.95 payment moves from 25 to 24 Nov, the
+bank's date.
 
 Also green: the 32 suites touching card payments, the cash texts and emails, settings and the schema list
-(`network_cards` 123, `settings_env_only` 13, which now pins `NI_MAIL_HOST`).
+(`network_cards` 123, `settings_env_only` 13, which now pins `NI_MAIL_HOST`; `driver_sms` 76, `collector_invariants`
+132).
 
 **The test on real data** (the operator's "Run the test"), with nothing written to production: the two real emails,
 re-fetched read-only through the container console, went through the new reader into a local database, merged with the

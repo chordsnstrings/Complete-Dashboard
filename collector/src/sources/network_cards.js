@@ -178,64 +178,87 @@ const sum = (xs) => Math.round(xs.reduce((a, p) => a + p.amount, 0) * 100) / 100
    the operator, 2026-11-26: "for POS terminal mapping use the sheet. For the
    amount use the [emailed report]").
    ─────────────────────────────────────────────────────────────────────────
-   For every fleet-day a usable report covers (src/sources/ni_reports.js
-   bankForMerge), the sheet's rows give way to the bank's transactions; every
-   other day keeps the sheet's rows, which is all of history before the
-   reports began. Each bank transaction takes the driver the sheet maps to its
-   terminal on the report's day:
-     1. the sheet's row for the same terminal, day and amount  ('sheet_same_payment')
-     2. else the sheet's driver on that terminal that day       ('sheet_same_terminal_day')
-     3. else the terminal's driver on its latest earlier day     ('terminal_last_known': inferred,
-        the report having arrived before the team typed the day into the sheet)
-     4. else nobody                                               ('none')
+   A fleet-day takes the bank's transactions only when a usable report covers
+   it AND THE SHEET ALREADY HAS THAT FLEET-DAY. Until the team has typed the
+   day in, the bank's rows wait and nothing about the day changes — so the
+   cash texts, which wait for the sheet's day (CARD-4, driver_sms.js), wait
+   exactly as before, and no driver is ever named by inference (the review of
+   2026-11-26: an earlier draft used a terminal's last known driver when the
+   report arrived first, which opened the cash texts on a guess). Every other
+   day keeps the sheet's rows: all of history before the reports began.
+
+   A row's fleet is the fleet of the merchant its terminal settles to, as the
+   bank's reports show it (bank.terminalFleet), and the sheet's Platform
+   column only for a terminal no report has carried — the bank's merchant is
+   a fact, the Platform cell is typed.
+
+   Each bank transaction takes the driver the sheet maps to its terminal ON
+   THE REPORT'S DAY, in two passes so an exact match is never taken by a
+   near one:
+     1. the sheet's row for the same terminal, day and amount ('sheet_same_payment')
+     2. else an unmatched sheet row on that terminal that day, the nearest in
+        amount ('sheet_same_terminal_day')
+     3. else, every sheet row there already matched, the terminal's one
+        driver that day ('sheet_terminal_driver')
+     4. else nobody ('none'): the sheet maps nobody to the terminal that day,
+        or several drivers and the payment cannot be told between them. The
+        row carries the reason, and the dashboard says it.
    The sheet's own "Not Found" / "N/A" travel with a match, as id_label.
    Each bank row keeps the BANK's date for the payment (a payment the bank
    dates 24 Nov arrived in the 25 Nov report, which the sheet files under the
    25th). Pure: the rows in, the rows out, and what did not match. */
 export function mergeBank(payments, bank) {
-  const covered = new Set((bank?.covered || []).map((c) => `${c.fleet_id}|${c.day}`));
+  const asSheet = (p) => ({ ...p, source: 'network_sheet', bank_ref: null, id_basis: 'sheet' });
+  const reported = new Set((bank?.covered || []).map((c) => `${c.fleet_id}|${c.day}`));
   const txns = bank?.txns || [];
-  if (!covered.size || !txns.length) {
-    return { rows: payments.map((p) => ({ ...p, source: 'network_sheet', bank_ref: null, id_basis: 'sheet' })),
-      sheet_only: [], basis: {} };
-  }
-  const kept = []; const coveredRows = new Map();
+  const termFleet = bank?.terminalFleet || {};
+  const fleetOf = (p) => termFleet[p.terminal_id] || p.fleet_id;
+  /* Covered: reported by the bank, and present in the sheet. */
+  const covered = new Set();
+  for (const p of payments) { const k = `${fleetOf(p)}|${p.txn_day}`; if (reported.has(k)) covered.add(k); }
+  if (!covered.size || !txns.length) return { rows: payments.map(asSheet), sheet_only: [], basis: {}, covered: [] };
+  const rows = []; const onDay = new Map();
   for (const p of payments) {
-    if (covered.has(`${p.fleet_id}|${p.txn_day}`)) {
+    if (covered.has(`${fleetOf(p)}|${p.txn_day}`)) {
       const k = `${p.terminal_id}|${p.txn_day}`;
-      (coveredRows.get(k) || coveredRows.set(k, []).get(k)).push({ ...p, used: false });
-    } else kept.push({ ...p, source: 'network_sheet', bank_ref: null, id_basis: 'sheet' });
+      (onDay.get(k) || onDay.set(k, []).get(k)).push({ ...p, used: false });
+    } else rows.push(asSheet(p));
   }
-  /* The terminal's driver history from the whole sheet, newest first, for 3. */
-  const lastKnown = new Map();
-  for (const p of [...payments].sort((a, b) => (a.txn_day < b.txn_day ? 1 : -1))) {
-    if (!p.emirates_id) continue;
-    (lastKnown.get(p.terminal_id) || lastKnown.set(p.terminal_id, []).get(p.terminal_id)).push(p);
+  const use = txns.map((t, i) => ({ t, i })).filter(({ t }) => covered.has(`${t.fleet_id}|${t.report_day}`));
+  const pick = new Map();
+  for (const { t, i } of use) {   // pass 1: exact
+    const exact = (onDay.get(`${t.terminal_id}|${t.report_day}`) || []).find((p) => !p.used && Math.abs(p.amount - t.amount) < 0.005);
+    if (exact) { exact.used = true; pick.set(i, { src: exact, how: 'sheet_same_payment' }); }
   }
-  const basis = {}; const rows = [...kept];
-  txns.forEach((t, i) => {
-    const same = coveredRows.get(`${t.terminal_id}|${t.report_day}`) || [];
-    let src = null; let how;
-    const exact = same.find((p) => !p.used && Math.abs(p.amount - t.amount) < 0.005);
-    if (exact) { exact.used = true; src = exact; how = 'sheet_same_payment'; }
-    else if (same.length) { src = same.find((p) => p.emirates_id) || same[0]; how = 'sheet_same_terminal_day'; }
-    else {
-      const prev = (lastKnown.get(t.terminal_id) || []).find((p) => p.txn_day < t.report_day);
-      if (prev) { src = prev; how = 'terminal_last_known'; } else how = 'none';
-    }
+  for (const { t, i } of use) {   // pass 2: the rest
+    if (pick.has(i)) continue;
+    const same = onDay.get(`${t.terminal_id}|${t.report_day}`) || [];
+    const free = same.filter((p) => !p.used).sort((a, b) => Math.abs(a.amount - t.amount) - Math.abs(b.amount - t.amount));
+    if (free.length) { free[0].used = true; pick.set(i, { src: free[0], how: 'sheet_same_terminal_day' }); continue; }
+    const drivers = [...new Set(same.map((p) => p.emirates_id || ''))];
+    if (same.length && drivers.length === 1 && drivers[0]) { pick.set(i, { src: same[0], how: 'sheet_terminal_driver' }); continue; }
+    pick.set(i, { src: null, how: 'none', label: same.length
+      ? 'the sheet has several drivers on this terminal that day; this payment cannot be told between them'
+      : 'the sheet maps no driver to this terminal that day' });
+  }
+  const basis = {};
+  for (const { t, i } of use) {
+    const { src, how, label } = pick.get(i);
     basis[how] = (basis[how] || 0) + 1;
     rows.push({ row_no: -(i + 1), txn_day: t.txn_day, fleet_id: t.fleet_id, terminal_id: t.terminal_id,
       amount: Math.round(t.amount * 100) / 100, emirates_id: src?.emirates_id || null,
-      id_label: src ? (how === 'terminal_last_known' ? null : src.id_label) : 'no driver mapped to this terminal yet',
-      source: 'network_report', bank_ref: t.bank_ref, id_basis: how });
-  });
-  /* The sheet's rows on a covered day that no bank transaction matched: the
-     bank is the record of what was paid, so they are not kept — they are
-     returned, so the read can say how many the sheet has that the bank has not. */
-  const sheet_only = [...coveredRows.values()].flat().filter((p) => !p.used && !txns.some((t) =>
-    t.terminal_id === p.terminal_id && t.report_day === p.txn_day && Math.abs(t.amount - p.amount) < 0.005));
-  return { rows, sheet_only, basis };
+      id_label: src ? src.id_label : label, source: 'network_report', bank_ref: t.bank_ref, id_basis: how });
+  }
+  /* The sheet's rows on a covered day that no bank transaction took: the bank
+     is the record of what was paid, so they are not kept — they are returned,
+     so the read can say how many the sheet has that the bank has not. */
+  const sheet_only = [...onDay.values()].flat().filter((p) => !p.used);
+  return { rows, sheet_only, basis, covered: [...covered] };
 }
+
+/* Bank rows that stand for one sheet row each — what the shrink guard counts
+   as the sheet's, so it compares the sheet's read with the sheet's last read. */
+export const ONE_FOR_ONE = ['sheet_same_payment', 'sheet_same_terminal_day'];
 
 export const MONTH_FLOOR = 20;
 const LOCK_KEY = 727001;   // pg_advisory_xact_lock key for card-payment writes
@@ -268,16 +291,24 @@ export async function writeRead(db, parsed, { range = null, acceptShrink = false
   try {
     await client.query('BEGIN');
     await q('SELECT pg_advisory_xact_lock($1)', [LOCK_KEY]);
+    /* THE SHRINK GUARD COMPARES THE SHEET WITH THE SHEET (the review of
+       2026-11-26): the fresh side is the rows the sheet returned, the stored
+       side the sheet's rows plus the bank rows that each stood for one sheet
+       row. Counting the merged rows instead let the bank's rows stand in for
+       sheet rows a broken read had lost. */
+    const SHEETS = `(source = 'network_sheet' OR (source = 'network_report' AND id_basis = ANY($1::text[])))`;
     const [{ n: stored }] = await q(`SELECT count(*)::int AS n FROM card_payment WHERE source IN ('network_sheet', 'network_report')`);
-    if (!acceptShrink && stored > 0) {
+    const [{ n: storedSheet }] = await q(`SELECT count(*)::int AS n FROM card_payment WHERE ${SHEETS}`, [ONE_FOR_ONE]);
+    const S = parsed.payments;
+    if (!acceptShrink && storedSheet > 0) {
       const months = await q(`SELECT to_char(txn_day, 'YYYY-MM') AS m, count(*)::int AS n FROM card_payment
-                               WHERE source IN ('network_sheet', 'network_report') GROUP BY 1 HAVING count(*) >= $1`, [MONTH_FLOOR]);
+                               WHERE ${SHEETS} GROUP BY 1 HAVING count(*) >= $2`, [ONE_FOR_ONE, MONTH_FLOOR]);
       const fresh = {};
-      for (const p of P) { const m = p.txn_day.slice(0, 7); fresh[m] = (fresh[m] || 0) + 1; }
+      for (const p of S) { const m = p.txn_day.slice(0, 7); fresh[m] = (fresh[m] || 0) + 1; }
       const short = months.filter((x) => (fresh[x.m] || 0) < x.n * KEEP_SHARE)
         .map((x) => `${x.m} (${fresh[x.m] || 0} of ${x.n})`);
-      if (P.length < stored * KEEP_SHARE || short.length) {
-        held = `this read keeps ${P.length} of the ${stored} stored payments`
+      if (S.length < storedSheet * KEEP_SHARE || short.length) {
+        held = `this read keeps ${S.length} of the sheet's ${storedSheet} stored payments`
           + `${short.length ? `, and fewer than ${Math.round(KEEP_SHARE * 100)}% of ${short.join(', ')}` : ''}`
           + ` — so nothing was replaced until a person looks`;
       }
