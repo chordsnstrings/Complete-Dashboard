@@ -193,12 +193,15 @@ check('the health check is /api/health, 30 s initial delay, every 15 s',
    (ANALYST_API_KEY, ANALYST_BASE_URL, ANALYST_MODEL) were removed; two more on
    the worker the same day, OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET (FLT), and one more,
    SEARCHINFINITY_API_KEY (EVW2); and one more on the worker on 2026-11-23,
-   NETWORK_SHEET_LINK (CARD-1b: the card-payments sheet's link, a secret). */
-check('40 + COMMIT_SHA env keys on the api, 46 + COMMIT_SHA on the worker',
-  Object.keys(api.envs).length === 41 && Object.keys(worker.envs).length === 47,
+   NETWORK_SHEET_LINK (CARD-1b: the card-payments sheet's link, a secret); and
+   three more on the worker on 2026-11-26, NI_MAIL_HOST, NI_MAIL_USER and the
+   secret NI_MAIL_PASS (FIX-STATUS NIR: the emailed POS reports switched on),
+   each RUN_TIME. */
+check('40 + COMMIT_SHA env keys on the api, 49 + COMMIT_SHA on the worker',
+  Object.keys(api.envs).length === 41 && Object.keys(worker.envs).length === 50,
   `${Object.keys(api.envs).length} ${Object.keys(worker.envs).length}`);
-check('18 and 23 of them encrypted (type SECRET)',
-  Object.values(api.envs).filter((e) => e.type === 'SECRET').length === 18 && Object.values(worker.envs).filter((e) => e.type === 'SECRET').length === 23);
+check('18 and 24 of them encrypted (type SECRET)',
+  Object.values(api.envs).filter((e) => e.type === 'SECRET').length === 18 && Object.values(worker.envs).filter((e) => e.type === 'SECRET').length === 24);
 check('no analyst variable names MiniMax any more — the analyst runs on its defaults and ARK_API_KEY',
   !Object.keys(api.envs).some((k) => k.startsWith('ANALYST_')) && !Object.keys(worker.envs).some((k) => k.startsWith('ANALYST_'))
     && 'ARK_API_KEY' in api.envs && 'ARK_API_KEY' in worker.envs);
@@ -211,8 +214,9 @@ check('every other value is the redaction placeholder',
   check('no value line in the file holds anything else (read as text, not parsed)',
     /* 41 + 45 value lines (90 until the analyst's three MiniMax keys left both components, 2026-11-16;
        84 until OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET joined the collector, FLT, the same day;
-       86 until SEARCHINFINITY_API_KEY did, EVW2; 87 until NETWORK_SHEET_LINK did, CARD-1b). */
-    values.length === 88 && values.every((v) => v === `"${REDACTED}"` || v === '"${_self.COMMIT_HASH}"'), `${values.length} ${values.find((v) => v !== `"${REDACTED}"`)}`);
+       86 until SEARCHINFINITY_API_KEY did, EVW2; 87 until NETWORK_SHEET_LINK did, CARD-1b;
+       88 until the three NI_MAIL_* did, NIR). */
+    values.length === 91 && values.every((v) => v === `"${REDACTED}"` || v === '"${_self.COMMIT_HASH}"'), `${values.length} ${values.find((v) => v !== `"${REDACTED}"`)}`);
 }
 check('the database is the production PG cluster fleet-dashboard-db',
   JSON.stringify(committed.databases) === JSON.stringify({ db: { engine: 'PG', production: true, cluster_name: 'fleet-dashboard-db' } }));
@@ -235,7 +239,8 @@ console.log('\nthe YAML reader and writer');
 /* ── redaction and drift ────────────────────────────────────────────────── */
 console.log('\nredaction, and the structural diff');
 /* A live spec as DigitalOcean returns it: the committed structure with real
-   values, scopes on every variable, and "collector" without its slash. */
+   values, scopes on every variable (the scope the file states, else
+   DigitalOcean's default), and "collector" without its slash. */
 const SECRETS = ['sk-live-SECRET-1', 'postgresql://doadmin:PASSWORD9@db.example:25060/defaultdb', 'EV[1:abc:SECRETENC]', 'dd-api-SECRET', 'ops-person@example.com'];
 const liveSpec = () => {
   const s = JSON.parse(JSON.stringify(spec));
@@ -243,7 +248,7 @@ const liveSpec = () => {
     c.source_dir = 'collector';
     for (const e of c.envs) {
       if (e.key === 'COMMIT_SHA') continue;
-      e.scope = 'RUN_AND_BUILD_TIME';
+      e.scope = e.scope || 'RUN_AND_BUILD_TIME';
       e.value = e.key === 'DATABASE_URL' ? SECRETS[1] : e.type === 'SECRET' ? SECRETS[2] : SECRETS[0];
     }
   }
