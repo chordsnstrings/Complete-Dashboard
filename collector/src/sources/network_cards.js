@@ -54,6 +54,7 @@ import { log as defaultLog } from '../log.js';
 import { parse as parseCsv } from 'csv-parse/sync';
 import { parseServiceAccount, readValues, readCsvByLink, sheetFromLink } from '../google_sheets.js';
 import { refreshFares } from '../card_fares.js';
+import * as niReports from './ni_reports.js';
 const sheetFromLinkSafe = (l) => { try { return sheetFromLink(l); } catch { return null; } };
 /* CARD-3: the fares the payments are measured against, summed per account and
    day (src/card_fares.js). They come from the trips, not the sheet, so they
@@ -173,14 +174,78 @@ export function parseSheet(values) {
 
 const sum = (xs) => Math.round(xs.reduce((a, p) => a + p.amount, 0) * 100) / 100;
 
+/* AMOUNTS FROM THE BANK'S REPORT, THE DRIVER FROM THE SHEET (FIX-STATUS NIR;
+   the operator, 2026-11-26: "for POS terminal mapping use the sheet. For the
+   amount use the [emailed report]").
+   ─────────────────────────────────────────────────────────────────────────
+   For every fleet-day a usable report covers (src/sources/ni_reports.js
+   bankForMerge), the sheet's rows give way to the bank's transactions; every
+   other day keeps the sheet's rows, which is all of history before the
+   reports began. Each bank transaction takes the driver the sheet maps to its
+   terminal on the report's day:
+     1. the sheet's row for the same terminal, day and amount  ('sheet_same_payment')
+     2. else the sheet's driver on that terminal that day       ('sheet_same_terminal_day')
+     3. else the terminal's driver on its latest earlier day     ('terminal_last_known': inferred,
+        the report having arrived before the team typed the day into the sheet)
+     4. else nobody                                               ('none')
+   The sheet's own "Not Found" / "N/A" travel with a match, as id_label.
+   Each bank row keeps the BANK's date for the payment (a payment the bank
+   dates 24 Nov arrived in the 25 Nov report, which the sheet files under the
+   25th). Pure: the rows in, the rows out, and what did not match. */
+export function mergeBank(payments, bank) {
+  const covered = new Set((bank?.covered || []).map((c) => `${c.fleet_id}|${c.day}`));
+  const txns = bank?.txns || [];
+  if (!covered.size || !txns.length) {
+    return { rows: payments.map((p) => ({ ...p, source: 'network_sheet', bank_ref: null, id_basis: 'sheet' })),
+      sheet_only: [], basis: {} };
+  }
+  const kept = []; const coveredRows = new Map();
+  for (const p of payments) {
+    if (covered.has(`${p.fleet_id}|${p.txn_day}`)) {
+      const k = `${p.terminal_id}|${p.txn_day}`;
+      (coveredRows.get(k) || coveredRows.set(k, []).get(k)).push({ ...p, used: false });
+    } else kept.push({ ...p, source: 'network_sheet', bank_ref: null, id_basis: 'sheet' });
+  }
+  /* The terminal's driver history from the whole sheet, newest first, for 3. */
+  const lastKnown = new Map();
+  for (const p of [...payments].sort((a, b) => (a.txn_day < b.txn_day ? 1 : -1))) {
+    if (!p.emirates_id) continue;
+    (lastKnown.get(p.terminal_id) || lastKnown.set(p.terminal_id, []).get(p.terminal_id)).push(p);
+  }
+  const basis = {}; const rows = [...kept];
+  txns.forEach((t, i) => {
+    const same = coveredRows.get(`${t.terminal_id}|${t.report_day}`) || [];
+    let src = null; let how;
+    const exact = same.find((p) => !p.used && Math.abs(p.amount - t.amount) < 0.005);
+    if (exact) { exact.used = true; src = exact; how = 'sheet_same_payment'; }
+    else if (same.length) { src = same.find((p) => p.emirates_id) || same[0]; how = 'sheet_same_terminal_day'; }
+    else {
+      const prev = (lastKnown.get(t.terminal_id) || []).find((p) => p.txn_day < t.report_day);
+      if (prev) { src = prev; how = 'terminal_last_known'; } else how = 'none';
+    }
+    basis[how] = (basis[how] || 0) + 1;
+    rows.push({ row_no: -(i + 1), txn_day: t.txn_day, fleet_id: t.fleet_id, terminal_id: t.terminal_id,
+      amount: Math.round(t.amount * 100) / 100, emirates_id: src?.emirates_id || null,
+      id_label: src ? (how === 'terminal_last_known' ? null : src.id_label) : 'no driver mapped to this terminal yet',
+      source: 'network_report', bank_ref: t.bank_ref, id_basis: how });
+  });
+  /* The sheet's rows on a covered day that no bank transaction matched: the
+     bank is the record of what was paid, so they are not kept — they are
+     returned, so the read can say how many the sheet has that the bank has not. */
+  const sheet_only = [...coveredRows.values()].flat().filter((p) => !p.used && !txns.some((t) =>
+    t.terminal_id === p.terminal_id && t.report_day === p.txn_day && Math.abs(t.amount - p.amount) < 0.005));
+  return { rows, sheet_only, basis };
+}
+
 export const MONTH_FLOOR = 20;
 const LOCK_KEY = 727001;   // pg_advisory_xact_lock key for card-payment writes
 
 /* Write one read: replace what is stored, or hold it. Returns the import
    row. Inside one transaction, under the advisory lock; the counts the guard
    compares are taken only once the lock is held. */
-export async function writeRead(db, parsed, { range = null, acceptShrink = false } = {}) {
-  const P = parsed.payments;
+export async function writeRead(db, parsed, { range = null, acceptShrink = false, bank = null } = {}) {
+  const merged = mergeBank(parsed.payments, bank);
+  const P = merged.rows;
   const skippedN = Object.values(parsed.skipped).reduce((a, n) => a + n, 0);
   const days = P.map((p) => p.txn_day).sort();
   const from = days[0] || null; const to = days[days.length - 1] || null;
@@ -203,10 +268,10 @@ export async function writeRead(db, parsed, { range = null, acceptShrink = false
   try {
     await client.query('BEGIN');
     await q('SELECT pg_advisory_xact_lock($1)', [LOCK_KEY]);
-    const [{ n: stored }] = await q(`SELECT count(*)::int AS n FROM card_payment WHERE source = 'network_sheet'`);
+    const [{ n: stored }] = await q(`SELECT count(*)::int AS n FROM card_payment WHERE source IN ('network_sheet', 'network_report')`);
     if (!acceptShrink && stored > 0) {
       const months = await q(`SELECT to_char(txn_day, 'YYYY-MM') AS m, count(*)::int AS n FROM card_payment
-                               WHERE source = 'network_sheet' GROUP BY 1 HAVING count(*) >= $1`, [MONTH_FLOOR]);
+                               WHERE source IN ('network_sheet', 'network_report') GROUP BY 1 HAVING count(*) >= $1`, [MONTH_FLOOR]);
       const fresh = {};
       for (const p of P) { const m = p.txn_day.slice(0, 7); fresh[m] = (fresh[m] || 0) + 1; }
       const short = months.filter((x) => (fresh[x.m] || 0) < x.n * KEEP_SHARE)
@@ -222,13 +287,17 @@ export async function writeRead(db, parsed, { range = null, acceptShrink = false
       return record(q0, 'held', held, stored);
     }
     const imp = await record(q, 'ok', null, stored);
-    await q(`DELETE FROM card_payment WHERE source = 'network_sheet'`);
-    await q(`INSERT INTO card_payment (import_id, row_no, txn_day, fleet_id, terminal_id, amount, emirates_id, id_label)
-             SELECT $1, * FROM unnest($2::int[], $3::date[], $4::text[], $5::text[], $6::numeric[], $7::text[], $8::text[])`,
+    await q(`DELETE FROM card_payment WHERE source IN ('network_sheet', 'network_report')`);
+    await q(`INSERT INTO card_payment (import_id, row_no, txn_day, fleet_id, terminal_id, amount, emirates_id, id_label,
+                                       source, bank_ref, id_basis)
+             SELECT $1, * FROM unnest($2::int[], $3::date[], $4::text[], $5::text[], $6::numeric[], $7::text[], $8::text[],
+                                      $9::text[], $10::text[], $11::text[])`,
     [imp.id, P.map((p) => p.row_no), P.map((p) => p.txn_day), P.map((p) => p.fleet_id), P.map((p) => p.terminal_id),
-      P.map((p) => p.amount), P.map((p) => p.emirates_id), P.map((p) => p.id_label)]);
+      P.map((p) => p.amount), P.map((p) => p.emirates_id), P.map((p) => p.id_label),
+      P.map((p) => p.source), P.map((p) => p.bank_ref), P.map((p) => p.id_basis)]);
     await client.query('COMMIT');
-    return imp;
+    return { ...imp, bank_rows: P.filter((p) => p.source === 'network_report').length, basis: merged.basis,
+      sheet_only: merged.sheet_only.length };
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     throw e;
@@ -258,10 +327,19 @@ export async function collect({ db, now = Date.now(), fetchImpl = fetch, log = d
     }
     await noteCredential(db, { ...cred, state: 'ok' }).catch(() => {});
     const parsed = parseSheet(values);
-    const imp = await writeRead(db, parsed, { range: via, acceptShrink });
+    /* The bank's emailed reports first (FIX-STATUS NIR): a failure there costs
+       only the bank's amounts — the sheet's are written as before. */
+    let bank = null; let mail = null;
+    try {
+      mail = await niReports.collect({ db, log, now });
+      bank = await niReports.bankForMerge(db);
+    } catch (e) { log.warn(SOURCE, 'bank reports not merged', { err: String(e.message || e).slice(0, 200) }); }
+    const imp = await writeRead(db, parsed, { range: via, acceptShrink, bank });
     await logRun({ source: SOURCE, fleet_id: null, mode: 'sheet', status: imp.status === 'ok' ? 'ok' : imp.status === 'held' ? 'partial' : 'error',
       rows_written: imp.status === 'ok' ? imp.rows_kept : 0, error: imp.why || null }, db);
-    log.info(SOURCE, 'read', { status: imp.status, kept: imp.rows_kept, skipped: imp.rows_skipped, from: imp.day_from, to: imp.day_to });
+    log.info(SOURCE, 'read', { status: imp.status, kept: imp.rows_kept, skipped: imp.rows_skipped, from: imp.day_from, to: imp.day_to,
+      ...(imp.bank_rows ? { bank_rows: imp.bank_rows, basis: imp.basis, sheet_only: imp.sheet_only } : {}),
+      ...(mail?.error ? { mail_error: mail.error.slice(0, 120) } : {}) });
     const fares = await faresAfterRead(db, now, log);
     return { status: imp.status, kept: imp.rows_kept, skipped: parsed.skipped, from: imp.day_from, to: imp.day_to, why: imp.why || null, fares };
   } catch (e) {

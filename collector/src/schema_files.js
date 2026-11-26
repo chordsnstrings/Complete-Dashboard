@@ -441,4 +441,7 @@ export const SCHEMA_FILES = [
      insight, a fare_only count on cash_fare_day for /api/ledger/exposure, and
      coverage_day for /api/coverage (src/coverage_rollup.js). */
   'schema_v131.sql',
+  /* Network International's emailed card-machine reports: ni_report,
+     ni_card_txn, and card_payment.bank_ref/id_basis (FIX-STATUS NIR). */
+  'schema_v132.sql',
 ];

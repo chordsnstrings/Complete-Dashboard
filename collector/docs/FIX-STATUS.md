@@ -7852,3 +7852,45 @@ ahead. Also green: `cabman` 23, `cabman_egari` 11, `feeds_cabman` 46, `tracker_f
 **LIVE since 8892b91 (PR #78), deployed 2026-11-26 07:24 UTC.** After the deploy, CABMAN polls normally: 52 rows a snapshot, 17 of 46 Ecosine and 1 of 6 Egari trackers counted as dormant (info), and no ERROR in the collector log. The check that matters is a night: zero clock-skew ERRORs between 21:50 and 05:05 UTC. A
 baseline for the night of 25–26 Nov could not be read, because DigitalOcean does not keep a superseded deployment's
 run log; the audit night's 109 stands.
+
+## NIR – card amounts from Network International's emailed reports, drivers from the sheet (2026-11-26)
+
+The operator gave the mailbox (credentials held in DigitalOcean, never here) and said: "let's do that. for POS terminal
+mapping use the sheet. For the amount use the [report]. Run the test." Before that, a read-only test from the
+DigitalOcean container found the first two reports and matched them to the sheet's 25 Nov one for one (COVERAGE
+"Network International's emailed POS reports").
+
+| id | what |
+|---|---|
+| NIR1 | **`src/sources/ni_reports.js`.** A read-only IMAP client (LOGIN, EXAMINE, UID SEARCH, UID FETCH BODY.PEEK[], LOGOUT; literals skipped whole), a minimal MIME parser (no library), the PDF read with `unpdf` (pdf.js, no dependencies, `npm audit` 0), `parseReport` (rows, span, merchant, fleet, grand totals; used only when it adds up), and `storeReport` (`ni_report` per merchant and span, a re-sent report replacing it; `ni_card_txn` keyed by the bank's reference). It runs inside the card-payments tick and is skipped until `NI_MAIL_HOST`, `NI_MAIL_USER` and `NI_MAIL_PASS` are set; a refused login is a credential state. |
+| NIR2 | **`mergeBank` in the sheet write** (`network_cards.js`): one transaction, as before. For every fleet-day a usable report covers, the bank's rows replace the sheet's, each with the sheet's driver for its terminal that day (by amount, then the terminal's driver, then its last known one marked inferred, else nobody). The bank's date is kept. Sheet rows the bank lacks are counted in the read's log, not kept. Every `card_payment` row carries `source`, `bank_ref` and `id_basis` (`sql/schema_v132.sql`). Downstream readers are unchanged: they read all of `card_payment`. |
+| NIR3 | **Settings:** `NI_MAIL_HOST` (env-only by the `_HOST` rule: the password is sent there), `NI_MAIL_PORT` (993), `NI_MAIL_USER`, `NI_MAIL_PASS` (secret). |
+
+**Tests:** `test/ni_reports.test.mjs` 32, on synthetic PDFs and messages built in the test:
+- the report and its totals check, the year rollover, unknown merchants and types;
+- MIME nesting, base64 and encoded filenames, and a PDF attached twice;
+- re-sent reports;
+- IMAP against a scripted server that splits replies every 7 bytes and puts the tags inside a body; read-only commands
+  only; known messages not fetched again; a refused login;
+- the merge's four rules, the bank's date, and sheet-only rows;
+- `card_payment` written with provenance, and a second read replacing rather than doubling.
+
+Also green: the 32 suites touching card payments, the cash texts and emails, settings and the schema list
+(`network_cards` 123, `settings_env_only` 13, which now pins `NI_MAIL_HOST`).
+
+**The test on real data** (the operator's "Run the test"), with nothing written to production: the two real emails,
+re-fetched read-only through the container console, went through the new reader into a local database, merged with the
+live sheet, and were written:
+
+| check | result |
+|---|---|
+| reports | both ok; 35 + 13 payments; gross and net equal each report's own GRAND TOTAL and NET PAYABLE |
+| bank rows vs the sheet's 25 Nov | 48 vs 48, AED 3,099.97 vs 3,099.97 |
+| how each found its driver | all 48 by the same terminal, day and amount; 0 sheet-only |
+| per-driver totals on the day | 29 drivers or labels, 0 differ |
+| the whole card table | 8,155 rows, AED 551,754.92, unchanged |
+
+The one change is the AED 23.95 payment the bank dates 24 Nov, which now sits on the 24th.
+
+**Not yet on production**, and dormant when deployed until the operator says to set the mailbox variables in
+DigitalOcean.

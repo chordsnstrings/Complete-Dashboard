@@ -70,6 +70,12 @@ export const SETTING_DEFAULTS = {
   NETWORK_SHEET_ID: '',
   NETWORK_SHEET_RANGE: 'A:J',
   NETWORK_CARDS_CRON: '33 * * * *',
+  /* Network International's emailed POS reports (src/sources/ni_reports.js,
+     FIX-STATUS NIR): read, read-only, inside the card-payments tick above. The
+     mailbox's address and password live in DigitalOcean (NI_MAIL_USER,
+     NI_MAIL_PASS — the password a secret); nothing is read until both are set. */
+  NI_MAIL_HOST: '',
+  NI_MAIL_PORT: '993',
   /* FLIGHTS from the OpenSky Network (src/sources/flights.js, 2026-11-16).
      Two hosts: the token comes from OpenSky's Keycloak realm (OAuth2 client
      credentials — Basic auth on the REST API was switched off by OpenSky on
@@ -431,6 +437,14 @@ export const SETTING_DEFS = [
     hint: 'Only with a service account key: the long id in the sheet\u2019s address. Without one, it is taken from the link.' },
   { key: 'NETWORK_SHEET_RANGE', group: 'Card machines (Network International)', label: 'Range to read', secret: false,
     hint: 'A:J reads the first tab. Name a tab to read another, e.g. Data!A:J.' },
+  { key: 'NI_MAIL_HOST', group: 'Card machines (Network International)', label: 'Emailed reports: mail server (IMAP)', secret: false,
+    hint: 'The server of the mailbox Network International\u2019s daily MERCHANT TRANSACTION ACTIVITY reports are forwarded to. The password is sent there, so it is set in DigitalOcean, not here. Read only: nothing is marked read, moved or deleted.' },
+  { key: 'NI_MAIL_PORT', group: 'Card machines (Network International)', label: 'Emailed reports: IMAP port (TLS)', secret: false,
+    hint: '993 by default.' },
+  { key: 'NI_MAIL_USER', group: 'Card machines (Network International)', label: 'Emailed reports: mailbox address', secret: false,
+    hint: 'The mailbox\u2019s login. With the password, the bank\u2019s amounts replace the sheet\u2019s on the days a report covers; the driver still comes from the sheet.' },
+  { key: 'NI_MAIL_PASS', group: 'Card machines (Network International)', label: 'Emailed reports: mailbox password', secret: true,
+    hint: 'Kept as a secret.' },
   { key: 'NETWORK_CARDS_CRON', group: 'Collector', label: 'Card payments schedule (cron)', secret: false,
     hint: 'Hourly at 33 past by default, so a day\u2019s card payments are in before the 05:00 cash text.' },
   /* FLIGHTS — the OpenSky Network (src/sources/flights.js). A free account's

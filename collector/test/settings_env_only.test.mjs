@@ -39,8 +39,11 @@ console.log('\n1. the rule');
      the token to the first, so both are destinations by the same rule —
      covered by the _URL suffix the day they arrived, nothing listed by hand.
      + SEARCHINFINITY_URL the same day (FIX-STATUS EVW2): the events tier sends
-     its SearchInfinity API key there. */
-  const want = ['AGENT_BASE_URL', 'HOTEL_BASE', 'HOTEL_EGARI_BASE', 'NTFY_URL', 'OPENSKY_API_URL', 'OPENSKY_TOKEN_URL',
+     its SearchInfinity API key there.
+     + NI_MAIL_HOST (2026-11-26, FIX-STATUS NIR): the emailed-reports reader
+     logs in there with the mailbox password — by the _HOST suffix, the day it
+     arrived. */
+  const want = ['AGENT_BASE_URL', 'HOTEL_BASE', 'HOTEL_EGARI_BASE', 'NI_MAIL_HOST', 'NTFY_URL', 'OPENSKY_API_URL', 'OPENSKY_TOKEN_URL',
     'REPORT_MODEL_BASE_URL', 'SEARCHINFINITY_URL', 'SMSALA_BASE', 'TESLA_TOKEN_HOST', 'UBER_ORGS_URL', 'UBER_TOKEN_URL', 'YOCHARGE_HOST'];
   check('the ten destinations of 2026-11-12, the three of 2026-11-16, and nothing else', [...ENV_ONLY_KEYS].sort().join() === want.join(),
     [...ENV_ONLY_KEYS].sort().join());

@@ -12644,3 +12644,59 @@ pages say the sheet has not been read. The worker also reads once three minutes 
   - **A card ID link moves the netted figures without a run**, so `card_id_link` is in the response cache's
     version key (`api/cache.js`).
 
+
+## Network International's emailed POS reports — measured 2026-11-26 (FIX-STATUS NIR)
+
+Network International emails each merchant account a **MERCHANT TRANSACTION ACTIVITY** PDF for the day before. It
+comes from NI Merchant HD (`nifax@network.ae`) to the accounts address at about 09:20 Dubai, and on 26 Nov it was
+forwarded at 12:05 to the mailbox the collector reads. The mailbox's address and password are DigitalOcean variables
+(`NI_MAIL_USER`, the secret `NI_MAIL_PASS`, env-only `NI_MAIL_HOST`), never the repository. There is one email per
+merchant: Ecosine is 200600866495, Egari is 200601523517.
+
+**What a report row carries:**
+
+| field | example |
+|---|---|
+| the bank's date | DD/MM, no year; the year is the report's, and a date after the report's span is the year before |
+| terminal | 10389535 |
+| masked card | `529782XXX5583` |
+| type | SALES; no other type seen yet |
+| acquirer reference (ACQ_REF_NBR) | **unique per transaction** |
+| auth code | 632203 |
+| amounts | transaction, MSF (the bank's fee), fee, VAT on the fee, net paid |
+| card class | E/I, E/D/C/CN |
+
+A report ends with its grand totals: count, value, commission, VAT, NET PAYABLE.
+
+**It does not carry** a driver or the time of day.
+
+**Measured on the first two reports (25 Nov):** Ecosine 35 payments (AED 2,130.65 gross, 2,067.79 net) and Egari 13
+(AED 969.32 / 938.20). That is 48 payments and AED 3,099.97: exactly the sheet's 25 Nov, one for one by terminal and
+amount. Each payment took its driver from the sheet's row for the same terminal, day and amount; no driver's total
+changed. One payment the bank dates 24 Nov came in the 25 Nov report, and the sheet files it under the 25th.
+
+**How it is used** (`src/sources/ni_reports.js`, `network_cards.js mergeBank`):
+- **Amounts:** the bank's, for every fleet-day a usable report covers.
+- **Drivers:** the sheet's, for the same terminal on the report's day. It tries the same amount first, then the
+  terminal's driver that day, then the terminal's last known driver (`terminal_last_known`, inferred), else nobody.
+- **Provenance:** every `card_payment` row says where it came from (`source`, `bank_ref`, `id_basis`).
+- **When a report is used at all:** only when every transaction row was read and they reproduce the report's count
+  and grand total to the fil, the merchant is a fleet, and every type is SALES. Otherwise it is stored with the reason
+  and the sheet's rows stay.
+
+**Read-only:** the mailbox is opened with EXAMINE and every fetch is a BODY.PEEK. Nothing is marked read, moved or
+deleted.
+
+### Traps this added to the list
+
+- **This sandbox cannot reach a mail server.** A direct connection to 993 is refused, and the agent proxy tunnels the
+  CONNECT but resets the TLS handshake. Test IMAP from the DigitalOcean collector container instead, through App
+  Platform's console:
+  - `GET /v2/apps/{app}/components/collector/exec` returns a `wss://` URL with a token;
+  - send `{"op":"stdin","data":…}` and read `{"op":"stdout",…}` frames;
+  - the websocket must be opened **without an Origin header** (websocket-client sends one by default and gets a bare
+    403; doctl's Go dialer sends none);
+  - the sandbox's proxy port changes between sessions, so read it from `HTTPS_PROXY`.
+- **An IMAP reply is complete at the line that starts with its tag**, and that line can be the first thing in the
+  buffer. A reader that only looks for "\r\n" + tag hangs on a short reply. Literals (`{n}\r\n` then n bytes) must be
+  skipped whole, or a message body containing the tag ends the read early.
