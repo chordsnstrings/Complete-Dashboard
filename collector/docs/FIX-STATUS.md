@@ -7847,7 +7847,7 @@ Tests: `test/cabman_skew.test.mjs` 11, through `pullLive` with the provider mock
 - plus `skewVerdict`'s thresholds and baseline directly.
 
 Revert-proven: the old code fails 10 of 11. It fires on the parked fleet and on two stale cars, and misses a clock
-ahead. Also green: `cabman` 23, `cabman_egari` 11, `feeds_cabman` 46, `tracker_feed_dark` 25.
+ahead. Also green: `cabman` 23, `cabman_egari` 11, `feeds_cabman` 46, `tracker_feed_dark` 25. `test/unauthorized_safety.test.mjs` read the old decile line from the source; its three checks now pin the new shape (judge new fixes, at least three and their median, the overall median in the message), 38 green, and fail on the old file.
 
 **Not yet on production.** The check that matters is a night: zero clock-skew ERRORs between 21:50 and 05:05 UTC. A
 baseline for the night of 25–26 Nov could not be read, because DigitalOcean does not keep a superseded deployment's
