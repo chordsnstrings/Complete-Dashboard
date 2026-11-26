@@ -7777,3 +7777,33 @@ Checked one at a time, all green:
   ledger import and the scheduler;
 - the API wiring, access and cache suites (`route_smoke` 60, `access_core` 211, `rls_gate` 28, `cache` 71, `mockapi` 10,
   `server_redaction` 64, `reachability` 19, `imports_resolve` 4, `run_all_flags` 38).
+
+## MEV – money_event rewrites only the pass's window (2026-11-26)
+
+The operator: "go ahead with 1 and 3". This is item 1, the roll-up's largest cost after DDT. `money_event` (the
+provenance record of every provider figure) was rebuilt **whole on every pass**: the quarter-hourly 14-day passes
+deleted and re-inserted ~531k rows on production each time (342k of them Uber fares). Each row computed the generated
+`person_key` regex fold and maintained five indexes, and every pass left ~531k dead rows for autovacuum. On production:
+188 s of a 14-day pass (15:11 UTC on 25 Nov), 98 s at boot, and the `trip_price` INSERT cancelled at the 120 s statement
+timeout five times on 25 Nov.
+
+| id | fix |
+|---|---|
+| MEV1 | **A narrow pass deletes and re-inserts only rows whose period ends inside its window.** Each source carries the column its `period_end` is copied from (`window`: `local_day`, `period_end`, `c.period_end`, the Dubai day of `event_at`, `day`), so `period_end >= since` on the table and `window >= since` on the source select the same rows. It is still one transaction with a savepoint per source, so a reader never meets a half-built table. |
+| MEV2 | **A full pass (boot, nightly) rebuilds everything, as before, with 600 s.** It uses `SET LOCAL statement_timeout` inside its transaction, so the pool's 120 s returns at COMMIT. |
+
+**Measured at production scale locally** (527,469 rows: 372k fares, 39.6k payouts, 63k components, 13.8k ledger, 13.3k
+imports):
+- a whole rebuild takes 15.5–19.5 s (JIT makes no difference); a 14-day pass now takes **1.1 s**, writing 25k rows;
+- after six kinds of change inside the window, the narrow pass's table is identical to a whole rebuild of the same data
+  (0/0 over 527,668 rows), and those changes moved 247 rows in and 48 out.
+
+**Stated limit, the same as every other roll-up here:** a narrow pass cannot see a figure that changed, moved or
+vanished entirely before its window. A fare re-priced a month later keeps its old figure until the full pass (02:40
+Dubai) picks it up.
+
+Tests: `test/money_event_window.test.mjs` 8, covering §1 narrow equals whole after changes, §2 the stated limit and the
+full pass that clears it, §3 the statements. Revert-proven: the old code fails 5. Also green: `rollup_money_atomic` 23,
+`money_events` 50, `rollup` 53, `arkiv_finance` 134, `identity_merge` 129, `statement` 49, `trip_routes` 47,
+`receipts_register` 28, `migrate` 34, `person_vs_account_counts` 64, `ledger_resolve_person` 26. **Not yet on
+production.**

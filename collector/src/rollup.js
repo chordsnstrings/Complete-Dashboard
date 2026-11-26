@@ -358,7 +358,7 @@ const MONEY_SOURCES = [
            price, coalesce(currency, 'AED'), external_id
       FROM trip_norm
      WHERE price IS NOT NULL AND is_booking AND local_day IS NOT NULL
-       AND has_fare` },
+       AND has_fare`, window: 'local_day' },
 
   /* What the platform says it PAID, at the grain it said it — Uber's weekly
      (and daily, where the breakdown serves one) netOutstanding, and Yango's
@@ -374,7 +374,7 @@ const MONEY_SOURCES = [
            CASE WHEN period_start = period_end THEN period_start END,
            earnings, coalesce(currency, 'AED'), ''
       FROM driver_performance
-     WHERE earnings IS NOT NULL` },
+     WHERE earnings IS NOT NULL`, window: 'period_end' },
 
   /* The named lines inside a payout, in the provider's own words. Two APIs
      write this table with two vocabularies — the GraphQL breakdown says
@@ -390,7 +390,7 @@ const MONEY_SOURCES = [
            CASE WHEN c.period_start = c.period_end THEN c.period_start END,
            c.amount, coalesce(c.currency, 'AED'), coalesce(c.parent, '')
       FROM driver_earnings_component c
-     WHERE c.amount IS NOT NULL` },
+     WHERE c.amount IS NOT NULL`, window: 'c.period_end' },
 
   /* Yango's park ledger — commissions, penalties, top-ups. Real money moving
      between the fleet and the platform, collected on every run since the
@@ -407,7 +407,7 @@ const MONEY_SOURCES = [
            (event_at AT TIME ZONE 'Asia/Dubai')::date,
            amount, coalesce(currency, 'AED'), external_id
       FROM ledger_entry
-     WHERE amount IS NOT NULL AND event_at IS NOT NULL` },
+     WHERE amount IS NOT NULL AND event_at IS NOT NULL`, window: "(event_at AT TIME ZONE 'Asia/Dubai')::date" },
 
   /* The operator's own statement import — the months the APIs no longer
      serve. Uber's earnings endpoint keeps roughly the last six, so before
@@ -423,8 +423,11 @@ const MONEY_SOURCES = [
            coalesce(driver_ext_id, ''), driver_name, NULL, day, day, day,
            net, coalesce(currency, 'AED'), name_key
       FROM driver_statement_day
-     WHERE source = 'ledger' AND net IS NOT NULL` },
+     WHERE source = 'ledger' AND net IS NOT NULL`, window: 'day' },
 ];
+/* Each source's `window` is the expression its rows' period_end is copied
+   from, so "period_end >= since" on money_event and "window >= since" on the
+   source select the same rows. */
 
 /* Rebuilt whole rather than merged. Every row is derived from a table this
    pass has just refreshed, so a partial write would leave the two disagreeing
@@ -527,19 +530,41 @@ const MONEY_SOURCES = [
    property that matters here — that no reader ever meets this table between
    the DELETE and the last INSERT — is a property of THIS function's statement
    sequence, and test/rollup_money_atomic.test.mjs asserts it by handing in a
-   recording handle. Nothing else calls it; refreshRollupsInner still does. */
-export async function refreshMoneyEvents(db = pool) {
+   recording handle. Nothing else calls it; refreshRollupsInner still does.
+
+   ONLY THE PASS'S WINDOW, ON A NARROW PASS (2026-11-26, MEV).
+   ─────────────────────────────────────────────────────────────────────────
+   Every pass — the quarter-hourly 14-day ones included — deleted and
+   re-inserted the whole table: ~531k rows on production (342k of them Uber
+   fares), each computing the generated person_key (a regex fold) and
+   maintaining five indexes, and leaving 531k dead rows for autovacuum every
+   fifteen minutes. On production that was 188 s of a 14-day pass, and the
+   trip_price INSERT was cancelled at the 120 s statement timeout five times
+   on 25 Nov. A narrow pass now deletes and re-inserts only the rows whose
+   period ends inside its window, each source selected by the column its
+   period_end is copied from (`window` above) — the same rows a whole rebuild
+   writes for those days, still in one transaction with a savepoint per
+   source, so a reader still never meets a half-built table. What a narrow
+   pass cannot see, as every other roll-up here: a figure whose period moved,
+   or that changed or vanished, entirely before the window. The full pass
+   (boot, nightly 02:40 Dubai) rebuilds everything, as before, and gets 600 s
+   on its transaction (SET LOCAL, so the pool's 120 s returns at COMMIT). */
+export async function refreshMoneyEvents(db = pool, { since = null } = {}) {
   const pooled = typeof db.connect === 'function';
   const client = pooled ? await db.connect() : db;
   try {
     await client.query('BEGIN');
     try {
-      await client.query('DELETE FROM money_event');
+      if (!since && pooled) await client.query(`SET LOCAL statement_timeout = ${FULL_PASS_TIMEOUT_MS}`);
+      if (since) await client.query('DELETE FROM money_event WHERE period_end >= $1::date', [since]);
+      else await client.query('DELETE FROM money_event');
       let n = 0;
       for (const s of MONEY_SOURCES) {
         await client.query('SAVEPOINT money_source');
         try {
-          const r = await client.query(s.sql);
+          const r = since
+            ? await client.query(`${s.sql}\n       AND ${s.window} >= $1::date`, [since])
+            : await client.query(s.sql);
           n += r.rowCount || 0;
           await client.query('RELEASE SAVEPOINT money_source');
         } catch (e) {
@@ -622,7 +647,7 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
      rollups, so it does not depend on this order — but running it here means
      a pass that fails halfway leaves the provenance record describing the
      same collection the totals above describe. */
-  out.push(await runOne(db, 'money_event', () => refreshMoneyEvents(db)));
+  out.push(await runOne(db, 'money_event', () => refreshMoneyEvents(db, { since })));
   /* Refresh the planner's statistics on the tables this just rewrote, and on
      trip itself. A generated column arrives with NO statistics — Postgres has
      never seen its distribution — so every plan touching person_key was being
