@@ -283,6 +283,44 @@ export async function cabmanRoster() {
    old rows. */
 export const passKey = (fleet) => `CABMAN_${String(fleet).toUpperCase()}_PASS`;
 
+/* Each plate's newest captured_at as of the last poll, per fleet — what makes a
+   fix "new". In memory: after a restart the first poll has no baseline and
+   judges nothing, which is the right answer for one poll. */
+const lastFix = new Map();
+
+/* The clock-skew verdict for one poll (see the long comment in pullLive).
+   Pure apart from updating `seen` with this poll's newest fix per plate.
+   Exported for test/cabman_skew.test.mjs. */
+export function skewVerdict(rows, now, seen, fleet = '') {
+  const DORMANT_MIN = 24 * 60;
+  const nowMs = Date.parse(now);
+  const lags = rows.map((r) => (nowMs - Date.parse(r.captured_at)) / 60000)
+    .filter(Number.isFinite).sort((a, b) => a - b);
+  const talking = lags.filter((m) => m < DORMANT_MIN);
+  const dormant = lags.length - talking.length;
+  const med = (a) => (a.length ? a[Math.floor(a.length / 2)] : 0);
+  const newest = new Map();
+  for (const r of rows) {
+    const t = Date.parse(r.captured_at);
+    if (!r.plate || !Number.isFinite(t)) continue;
+    if (!newest.has(r.plate) || t > newest.get(r.plate)) newest.set(r.plate, t);
+  }
+  const fresh = [];
+  for (const [plate, t] of newest) {
+    const key = `${fleet}|${plate}`;
+    const before = seen.get(key);
+    if (before != null && t > before) fresh.push((nowMs - t) / 60000);
+    if (before == null || t > before) seen.set(key, t);
+  }
+  fresh.sort((a, b) => a - b);
+  const newMedianMin = med(fresh);
+  const verdict = fresh.length < 3 ? 'no_evidence'
+    : newMedianMin > 20 ? 'behind'
+      : newMedianMin < -10 ? 'ahead' : 'ok';
+  return { verdict, newFixes: fresh.length, newMedianMin, medianMin: med(talking),
+    reporting: talking.length, dormant, lags };
+}
+
 export async function pullLive() {
   let total = 0;
   for (const f of config.cabman.fleets) {
@@ -427,56 +465,40 @@ export async function pullLive() {
 
     /* A fix that arrives claiming to be hours old is either a clock problem or
        a vehicle that has stopped reporting, and telling them apart is the whole
-       job of this check — because it was not doing it.
+       job of this check. Its history, kept because each step was right about
+       something:
 
-       The provider returns every vehicle it knows of on every cycle, including
-       trackers that went silent long ago: four of this fleet's have not
-       produced a fix since April 2024, and sixteen have been quiet over a
-       month. Their ancient timestamps sat in the median, dragged it past the
-       threshold, and this logged an ERROR every five minutes — pointing at a
-       timezone change that had not happened, on a channel meant for things
-       somebody must act on. The tell was in the number: the lag hovered around
-       forty-five minutes, and no timezone is forty-five minutes from Dubai.
+       1. The median of every listed vehicle's lag fired every five minutes:
+          trackers silent since April 2024 dragged it past the threshold. So
+          vehicles outside a day are left out and counted separately (below).
+       2. Still firing, 288 a day: these trackers report on movement, so a car
+          parked twenty minutes ago is twenty minutes stale and healthy. So the
+          test became the freshest decile: a clock error moves EVERY vehicle at
+          once, including the ones that just reported.
+       3. Still firing, every night (the audit of 2026-11-25: 109 ERRORs in
+          one night, all between 01:50 and 09:05 Dubai, on both fleets). When
+          nearly every car is parked, nobody "just reported": the median lag ran
+          187–409 minutes, the freshest decile 20–269, over as few as 5
+          reporting vehicles, so the decile was one car. Age cannot tell a wrong
+          clock from a parked fleet.
 
-       So the dormant trackers are excluded — anything outside a day — and
-       counted separately, because "sixteen vehicles have stopped reporting" is
-       worth knowing and is not an error in the collector.
-
-       That much was right and it was still firing. Measured on production:
-       median 24 minutes over 34 reporting vehicles, an ERROR every five
-       minutes, 288 a day. And the distribution says there is nothing wrong:
-       the FRESHEST fix is 1.2 minutes old.
-
-       Which is the whole discriminator, and the median is the wrong statistic
-       for it. These trackers report on movement, not on a timer, so a car
-       parked twenty minutes ago is twenty minutes stale and perfectly healthy
-       — half the fleet is parked at any moment, and that is what the median
-       measures. A clock or timezone error does something the median cannot
-       distinguish from that: it moves EVERY vehicle at once, including the
-       ones that just reported. An hour added to the provider's gmt field puts
-       the freshest fix at sixty-one minutes, not at one.
-
-       So the floor is the test. If the newest fix in the whole fleet is
-       stale, the feed is behind; if any vehicle reported a minute ago, no
-       clock is wrong however many cars are parked. The tenth percentile
-       rather than the bare minimum, so one freak-fresh row cannot silence a
-       real skew, and the median still travels in the message as context. */
-    const DORMANT_MIN = 24 * 60;
-    const lags = rows.map((r) => (Date.parse(now) - Date.parse(r.captured_at)) / 60000)
-      .filter(Number.isFinite).sort((a, b) => a - b);
-    const talking = lags.filter((m) => m < DORMANT_MIN);
-    const dormant = lags.length - talking.length;
-    const at = (p) => (talking.length ? talking[Math.min(talking.length - 1,
-      Math.floor(talking.length * p))] : 0);
-    const median = at(0.5);
-    const floor = at(0.1);
-    if (floor > 20) {
-      log.error(SRC, 'telemetry clock skew — even the freshest fix is behind the poll', {
-        freshest_decile_min: Math.round(floor), median_lag_min: Math.round(median),
-        reporting: talking.length, fleet: f.fleet,
+       What can is a NEW fix, one this poll returned that the last did not.
+       A healthy tracker's new fix is minutes old when it arrives; a clock or
+       timezone error makes it arrive an hour off (behind, or in the future);
+       a lagging feed makes it arrive late. A parked fleet sends none, which is
+       no evidence of anything, so it says nothing. skewVerdict() judges only
+       new fixes, and only when at least three plates sent one. */
+    const v = skewVerdict(rows, now, lastFix, f.fleet);
+    const { dormant, lags } = v;
+    if (v.verdict === 'behind' || v.verdict === 'ahead') {
+      log.error(SRC, v.verdict === 'behind'
+        ? 'telemetry clock skew — new fixes arrive already old'
+        : 'telemetry clock skew — new fixes are stamped in the future', {
+        new_fixes: v.newFixes, new_fix_median_lag_min: Math.round(v.newMedianMin),
+        median_lag_min: Math.round(v.medianMin), reporting: v.reporting, fleet: f.fleet,
         hint: 'a whole-hour offset means the provider changed the timezone of its gmt field; '
-          + 'minutes mean the feed itself is lagging. A high median with a low floor is not '
-          + 'skew — it is a fleet with cars parked, which is what a fleet looks like',
+          + 'minutes behind mean the feed itself is lagging. Only fixes new since the last poll '
+          + 'are judged, so a parked fleet cannot raise this',
       });
     }
     if (dormant) {

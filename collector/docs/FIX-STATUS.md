@@ -7821,3 +7821,34 @@ full pass that clears it, §3 the statements. Revert-proven: the old code fails 
 - The whole roll-up pass: 92–193 s, against 145–780 s the day before.
 - The boot's full pass was skipped ("another process holds the rollup lock": the outgoing worker still held it), so
   the first full `money_event` rebuild on this code is the nightly pass at 02:40 Dubai.
+
+## CSK – CABMAN's nightly false "clock skew" ERROR (2026-11-26)
+
+The operator: "go ahead with the CABMAN clock skew". The audit of 2026-11-25 found 109
+`[cabman] telemetry clock skew` ERRORs in one night, all between 21:50 and 05:05 UTC (01:50–09:05 Dubai), on both
+fleets, and none in the day. Every one had the same shape:
+- median lag 187–409 minutes;
+- freshest decile 20–269 minutes;
+- as few as 5 vehicles reporting, so the "decile" was one car.
+
+Nearly every car was parked. The alarm read "even the freshest fix is old" as a wrong clock, but at night nobody has
+just reported, so age cannot tell a wrong clock from a parked fleet. This was the alarm's third false-positive shape,
+after dormant trackers in the median (step 1) and a median read over a half-parked fleet (step 2); both are kept in the
+comment in `src/sources/cabman.js`.
+
+| id | fix |
+|---|---|
+| CSK1 | **The alarm judges only fixes new since the last poll** (`skewVerdict`, exported). Each plate's newest `captured_at` is remembered per fleet between polls, in memory: the first poll after a restart has no baseline and judges nothing. A healthy tracker's new fix is minutes old; a clock or timezone error makes it arrive an hour off; a lagging feed makes it arrive late; a parked fleet sends none, which is no evidence. ERROR when at least 3 plates sent a new fix and their median is **> 20 min behind** ("new fixes arrive already old") or **> 10 min ahead** ("stamped in the future", which the old alarm could not see at all). Vehicles silent over a day are still counted as dormant (the info line), not as lag. |
+
+Tests: `test/cabman_skew.test.mjs` 11, through `pullLive` with the provider mocked:
+- silent: a parked fleet with hours-old fixes repeated poll after poll; a healthy fleet; two stale new fixes (too few
+  to judge); the first poll after a restart;
+- ERROR on new fixes an hour behind, and on new fixes an hour ahead;
+- plus `skewVerdict`'s thresholds and baseline directly.
+
+Revert-proven: the old code fails 10 of 11. It fires on the parked fleet and on two stale cars, and misses a clock
+ahead. Also green: `cabman` 23, `cabman_egari` 11, `feeds_cabman` 46, `tracker_feed_dark` 25.
+
+**Not yet on production.** The check that matters is a night: zero clock-skew ERRORs between 21:50 and 05:05 UTC. A
+baseline for the night of 25–26 Nov could not be read, because DigitalOcean does not keep a superseded deployment's
+run log; the audit night's 109 stands.
