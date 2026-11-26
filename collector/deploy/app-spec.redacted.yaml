@@ -308,6 +308,21 @@ workers:
       - key: NETWORK_SHEET_LINK
         type: SECRET
         value: "<set in DigitalOcean>"
+      # Network International's emailed POS reports (FIX-STATUS NIR), switched
+      # on 2026-11-26 with the operator's go-ahead: the mailbox's IMAP server,
+      # its login (exactly the address the reports are sent To — the reader
+      # checks the signed To against it) and its password. Read-only: EXAMINE
+      # and BODY.PEEK only; only mail from accounts@arks.ae is read.
+      - key: NI_MAIL_HOST
+        value: "<set in DigitalOcean>"
+        scope: RUN_TIME
+      - key: NI_MAIL_USER
+        value: "<set in DigitalOcean>"
+        scope: RUN_TIME
+      - key: NI_MAIL_PASS
+        value: "<set in DigitalOcean>"
+        scope: RUN_TIME
+        type: SECRET
       # BytePlus SearchInfinity, the web search behind "Coming up in Dubai" (EVW2,
       # 2026-11-16): the collector alone searches.
       - key: SEARCHINFINITY_API_KEY

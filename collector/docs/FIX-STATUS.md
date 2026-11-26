@@ -7855,6 +7855,22 @@ run log; the audit night's 109 stands.
 
 ## NIR – card amounts from Network International's emailed reports, drivers from the sheet (2026-11-26)
 
+**State: written, tested, merged (PR #80 → eb96a60) and DEPLOYED DORMANT (2026-11-26 11:14 UTC). Proven on production
+read-only, not yet switched on.** `schema_v132` migrated on production. A read-only run inside the production
+collector container found:
+- the server's own DNS returns the filter's ARC keys;
+- both 25 Nov reports pass the full origin check (seal, To, single headers, DMARC) and parse as usable (35 / AED
+  2,130.65 and 13 / AED 969.32).
+
+The card sheet's hourly read on the new code (11:18 and 11:33 UTC) was ok: 8,155 rows as before, no bank rows while
+dormant, and the fares refreshed after it. **SWITCHED ON 2026-11-26 11:40 UTC** (the operator: "Switch on now"). First read at 11:43:
+- 2 reports used and 48 bank rows, all exact;
+- read-only in the production database: 2 usable reports, 2 `ok` messages, 25 Nov AED 3,099.97 from the bank;
+- the whole card table is AED 551,754.92 and 8,155 rows, unchanged;
+- the late payment is on the sheet's day, with the bank's date kept.
+
+**Proven on production.**
+
 The operator gave the mailbox (credentials held in DigitalOcean, never here) and said: "let's do that. for POS terminal
 mapping use the sheet. For the amount use the [report]. Run the test." Before that, a read-only test from the
 DigitalOcean container found the first two reports and matched them to the sheet's 25 Nov one for one (COVERAGE
