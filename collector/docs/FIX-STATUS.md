@@ -7849,6 +7849,6 @@ Tests: `test/cabman_skew.test.mjs` 11, through `pullLive` with the provider mock
 Revert-proven: the old code fails 10 of 11. It fires on the parked fleet and on two stale cars, and misses a clock
 ahead. Also green: `cabman` 23, `cabman_egari` 11, `feeds_cabman` 46, `tracker_feed_dark` 25. `test/unauthorized_safety.test.mjs` read the old decile line from the source; its three checks now pin the new shape (judge new fixes, at least three and their median, the overall median in the message), 38 green, and fail on the old file. `test/collector_invariants.test.mjs` did the same with two checks; they now pin talking-only medians and the new-fix rule, 132 green, and fail on the old file. Every suite that reads `cabman.js` is green.
 
-**Not yet on production.** The check that matters is a night: zero clock-skew ERRORs between 21:50 and 05:05 UTC. A
+**LIVE since 8892b91 (PR #78), deployed 2026-11-26 07:24 UTC.** After the deploy, CABMAN polls normally: 52 rows a snapshot, 17 of 46 Ecosine and 1 of 6 Egari trackers counted as dormant (info), and no ERROR in the collector log. The check that matters is a night: zero clock-skew ERRORs between 21:50 and 05:05 UTC. A
 baseline for the night of 25–26 Nov could not be read, because DigitalOcean does not keep a superseded deployment's
 run log; the audit night's 109 stands.
