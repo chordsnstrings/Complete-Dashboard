@@ -7757,3 +7757,23 @@ Measured on production with `/api/rollups`:
 Still open, and not part of this: `money_event trip_price` timed out five times under the audit's load, and takes
 16.5 s of a 14-day pass at this scale. `driver_day` never deletes a row it no longer produces,
 so a payout or statement removed upstream leaves its day behind until the row is overwritten.
+
+## DEP – the audit's 7 dependency advisories (2026-11-26)
+
+The operator: "go ahead with 1 and 3". This is item 3 of what was left after the audit of 2026-11-25 (1 critical,
+2 high, 4 moderate). Now `npm audit` reports **0 vulnerabilities**.
+
+| package | was | now | advisory | how |
+|---|---|---|---|---|
+| proxy-addr (via express) | 2.0.7 | 2.0.8 | critical: IP spoofing via IPv4-mapped IPv6 trust subnet | `npm audit fix` |
+| body-parser (via express) | 1.20.6 | 1.20.9 | high: DoS via trailing bytes after a compressed request | `npm audit fix` |
+| compression | 1.8.1 | 1.8.2 | high: DoS via memory leak on premature close | `npm audit fix` |
+| qs (via express, body-parser) | 6.15.3 | 6.16.2 | moderate ×2: DoS (isBuffer; stringify arrayFormat comma) | express 4.22.2 → 4.22.3 (`qs ~6.16.0`), inside `^4.19.2` |
+| csv-parse | 5.6.0 | 7.0.3 | moderate: prototype replacement via the `columns` path | `^7.0.3`. Every provider CSV here is parsed with `columns: true`, where a header named `__proto__` replaced the row's prototype. |
+| uuid (via node-cron) | 8.3.2 | 11.1.1 | moderate: buffer bounds in v3/v5/v6 | `overrides: { "node-cron": { "uuid": "^11.1.1" } }`. node-cron itself stays 3.0.3: its v4 is the only other fix, and changing how schedules parse is a trap this file already records (COVERAGE: '3-23/6'). node-cron uses only `uuid.v4()`, which uuid 11 still serves to CommonJS. |
+
+Checked one at a time, all green:
+- the 69 suites that exercise the four CSV readers (Uber reports, Uber payouts and payout orders, the card sheet), the
+  ledger import and the scheduler;
+- the API wiring, access and cache suites (`route_smoke` 60, `access_core` 211, `rls_gate` 28, `cache` 71, `mockapi` 10,
+  `server_redaction` 64, `reachability` 19, `imports_resolve` 4, `run_all_flags` 38).
