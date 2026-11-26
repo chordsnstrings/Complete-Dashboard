@@ -210,9 +210,13 @@ const sum = (xs) => Math.round(xs.reduce((a, p) => a + p.amount, 0) * 100) / 100
         exactly the amount of a sheet row kept that day on a terminal no report
         has carried (a mistyped terminal) is held, not written, so the same
         money is not counted twice (the third review).
-   A sheet row the bank did not take on day D is kept while the bank cannot yet
-   have it — while D+1, whose report carries D's late payments, is not covered
-   ('sheet_pending') — and dropped only after.
+   A sheet row the bank did not take on day D is dropped at once when it
+   exactly repeats a row the bank did take (a double entry); otherwise it is
+   kept while the bank cannot yet have it — while D+1, whose report carries
+   D's late payments, is not covered ('sheet_pending') — and dropped only
+   after. A payment written with nobody, of exactly the amount of a kept row
+   that day in the same fleet (a mistyped terminal, or a pending row), is held:
+   counted once.
    (Earlier drafts borrowed a terminal's driver from an earlier day, and gave
    an unlisted payment to the terminal's one driver that day; each named a
    driver for money the sheet never put against them.)
@@ -293,20 +297,34 @@ export function mergeBank(payments, bank) {
           : 'the sheet does not list this payment: every payment it lists on this terminal that day is matched to another' });
     }
   }
-  /* 4's exception: a mistyped terminal. A payment written with nobody, of
-     exactly the amount of a row kept that day on a terminal no report has
-     carried, in the same fleet, is held, so it is counted once (as the
-     sheet's, with its driver). */
-  const unbanked = rows.filter((r) => r.amount > 0 && !Object.prototype.hasOwnProperty.call(termFleet, r.terminal_id));
-  for (const { t, i } of use) {
-    const x = pick.get(i);
-    if (x?.how !== 'none' || (onDay.get(`${t.terminal_id}|${t.report_day}`) || []).length) continue;
-    const r = unbanked.find((u) => !u.paired && u.txn_day === t.report_day && u.fleet_id === t.fleet_id && Math.abs(u.amount - t.amount) < 0.005);
-    if (r) { r.paired = true; pick.set(i, { how: 'held' }); }
-  }
   /* 3: the held terminal-days keep their unmatched sheet rows, as the sheet's. */
   for (const k of heldDays) {
-    for (const p of onDay.get(k)) if (!p.used) { p.used = true; rows.push({ ...asSheet(p), id_basis: 'sheet_held', used: false }); }
+    for (const p of onDay.get(k)) if (!p.used) { p.used = true; p.kept = true; rows.push({ ...asSheet(p), id_basis: 'sheet_held', used: false }); }
+  }
+  /* The sheet's rows on a covered day that no bank transaction took. A row
+     that exactly repeats one the bank did take (the same terminal, day,
+     amount and driver) is a double entry: dropped now, before the day's text
+     (the final review: the team's 413 identical rows are what the bank tells
+     apart). Any other is kept while the bank cannot yet have shown it — D+1,
+     whose report carries D's late payments, not covered ('sheet_pending'). */
+  const nextDay = (d) => new Date(Date.parse(`${d}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
+  const who = (p) => (p.emirates_id ? `id:${p.emirates_id}` : `label:${p.id_label || ''}`);
+  const taken = new Set([...onDay.values()].flat().filter((p) => p.used && !p.kept).map((p) => `${p.terminal_id}|${p.txn_day}|${p.amount.toFixed(2)}|${who(p)}`));
+  const unmatched = [...onDay.values()].flat().filter((p) => !p.used);
+  const pending = unmatched.filter((p) => !covered.has(`${fleetOf(p)}|${nextDay(p.txn_day)}`)
+    && !taken.has(`${p.terminal_id}|${p.txn_day}|${p.amount.toFixed(2)}|${who(p)}`));
+  const pendingRows = pending.map((p) => ({ ...asSheet(p), id_basis: 'sheet_pending', used: false }));
+  rows.push(...pendingRows);
+  /* 4's exception: one payment, two rows. A payment written with nobody, of
+     exactly the amount of a row kept that day in the same fleet — on a
+     terminal no report has carried (a mistyped terminal), or pending — is
+     held, so it is counted once (as the sheet's, with its driver), whether or
+     not the sheet has other rows on the bank's terminal (the final review). */
+  const keptAlone = [...rows.filter((r) => r.amount > 0 && !Object.prototype.hasOwnProperty.call(termFleet, r.terminal_id)), ...pendingRows];
+  for (const { t, i } of use) {
+    if (pick.get(i)?.how !== 'none') continue;
+    const r = keptAlone.find((u) => !u.paired && u.txn_day === t.report_day && u.fleet_id === t.fleet_id && Math.abs(u.amount - t.amount) < 0.005);
+    if (r) { r.paired = true; pick.set(i, { how: 'held' }); }
   }
   const basis = {}; const bankRows = []; const held = [];
   for (const { t, i } of use) {
@@ -321,10 +339,6 @@ export function mergeBank(payments, bank) {
      is the record of what was paid, so they are not kept — they are returned,
      so the read can say how many the sheet has that the bank has not. A kept
      row a late bank payment matched gives way to it. */
-  const nextDay = (d) => new Date(Date.parse(`${d}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
-  const unmatched = [...onDay.values()].flat().filter((p) => !p.used);
-  const pending = unmatched.filter((p) => !covered.has(`${fleetOf(p)}|${nextDay(p.txn_day)}`));
-  for (const p of pending) rows.push({ ...asSheet(p), id_basis: 'sheet_pending', used: false });
   const sheet_only = unmatched.filter((p) => !pending.includes(p)).map(({ used, ...p }) => p);
   const out = [...rows.filter((r) => !r.used).map(({ used, paired, ...r }) => r), ...bankRows];
   return { rows: out, sheet_only, held, basis, covered: [...covered] };

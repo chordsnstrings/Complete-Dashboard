@@ -12688,10 +12688,16 @@ changed. One payment the bank dates 24 Nov came in the 25 Nov report, and the sh
      (`sheet_held`): writing the bank's payments with nobody would drop each driver's sheet row, and each would be
      texted for a card payment they did make;
   4. else nobody (`none`), with the reason on the row: nobody mapped to the terminal that day, or a payment the sheet
-     does not list. Nobody's credit changes. Exception: a payment of exactly the amount of a row kept that day on a
-     terminal no report has carried (a mistyped terminal) is held, so it is counted once.
-  - A sheet row the bank did not take on day D is kept (`sheet_pending`) while D+1, whose report carries D's late
-    payments, is not covered, and dropped only after.
+     does not list. Nobody's credit changes. Exception, one payment and two rows: a payment of exactly the amount of a
+     row kept that day in the same fleet (on a terminal no report has carried, i.e. a mistyped terminal, or a pending
+     row) is held, so it is counted once.
+  - A sheet row the bank did not take on day D:
+    - **dropped at once** when it exactly repeats a row the bank did take (the same terminal, day, amount and driver):
+      a double entry. The sheet has 413 identical rows that only the bank can tell apart;
+    - otherwise kept (`sheet_pending`) while D+1, whose report carries D's late payments, is not covered, and dropped
+      only after.
+
+    When a day's text is computed, D+1 is never covered yet, so this rule decides what the text sees.
 - **Day:** a bank row stays on the sheet's day (the day the cash texts and the allocation use); the bank's own date is
   kept as `bank_day`. Filing it under the bank's date left a driver's text a credit short.
 - **Fleet:** the merchant the terminal settles to, as the bank's reports show it; the sheet's Platform cell only for a

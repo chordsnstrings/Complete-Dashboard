@@ -450,6 +450,25 @@ check('a row the bank has not shown is kept while the next day — whose report 
   const h = (ref) => r3.rows.find((x) => x.bank_ref === ref);
   check('…both within the limit: the closer payment takes the row whatever the reference order (52 against 50, not 54)',
     h('H2').emirates_id === E1 && h('H1').emirates_id === null && h('H1').id_basis === 'none', JSON.stringify([h('H1'), h('H2')]));
+  /* The final review's cases: the day's text is computed before the next
+     day's report exists, so D+1 is never covered then. */
+  const E = '2026-12-05';
+  const r4 = mergeBank([sheetRow(41, E, 'ecosine', 'T12', 30, E1), sheetRow(42, E, 'ecosine', 'T12', 30, E1),
+    sheetRow(43, E, 'ecosine', 'T13', 20, E2), sheetRow(44, E, 'ecosine', 'T13', 25, E2), sheetRow(45, E, 'ecosine', 'T13X', 30, E2),
+    sheetRow(46, E, 'ecosine', 'T14', 35, E3)],
+  { covered: [{ fleet_id: 'ecosine', day: E }], terminalFleet: { T12: 'ecosine', T13: 'ecosine', T14: 'ecosine', T15: 'ecosine' },
+    txns: [bankTx('J1', E, 'T12', 30, E), bankTx('K1', E, 'T13', 20, E), bankTx('K2', E, 'T13', 25, E), bankTx('K3', E, 'T13', 30, E),
+      bankTx('L1', E, 'T15', 35, E)] });
+  const total = (rows) => Math.round(rows.reduce((a, x) => a + x.amount, 0) * 100) / 100;
+  check('a payment typed twice, the bank showing it once: the double entry is dropped before the day\'s text, not kept as pending',
+    r4.rows.filter((x) => x.terminal_id === 'T12').length === 1 && r4.sheet_only.some((x) => x.row_no === 42)
+      && !r4.rows.some((x) => x.id_basis === 'sheet_pending' && x.terminal_id === 'T12'), JSON.stringify(r4.rows.filter((x) => x.terminal_id === 'T12')));
+  check('a mistyped terminal beside the real one\'s other rows: the third payment is held, not written beside the kept row — 75, not 105',
+    !r4.rows.some((x) => x.bank_ref === 'K3') && total(r4.rows.filter((x) => ['T13', 'T13X'].includes(x.terminal_id))) === 75,
+    JSON.stringify(r4.rows.filter((x) => ['T13', 'T13X'].includes(x.terminal_id))));
+  check('a payment typed under the wrong (known) terminal: kept as pending, and the bank\'s payment with nobody beside it is held — counted once',
+    r4.rows.some((x) => x.row_no === 46 && x.id_basis === 'sheet_pending') && !r4.rows.some((x) => x.bank_ref === 'L1')
+      && r4.held.some((t) => t.bank_ref === 'L1'), JSON.stringify([r4.rows.filter((x) => x.terminal_id === 'T14'), r4.held.map((t) => t.bank_ref)]));
   const r2 = mergeBank(sh, bk([...tx, bankTx('G1', D, 'T9', 40, D1)]));
   check('…and when the next day\'s report does carry it, it is matched on its own day', r2.rows.find((x) => x.bank_ref === 'G1')?.txn_day === D
     && r2.rows.find((x) => x.bank_ref === 'G1').emirates_id === E1 && r2.sheet_only.length === 0);
