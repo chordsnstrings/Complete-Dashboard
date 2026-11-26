@@ -177,24 +177,25 @@ check('a journey ends on a run of empty fixes, not a single blink',
   const cab = cabRaw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
   check('the CABMAN gmt field is no longer stamped as Dubai time', !/\+04:00/.test(cab));
   check('a clock-skew alarm exists in the collector', /clock skew/i.test(cabRaw));
-  /* And it alarms on the FLOOR, not the median.
+  /* And it judges only fixes NEW since the last poll (2026-11-26, CSK).
      ─────────────────────────────────────────────────────────────────────
-     Measured on production: median 24 minutes over 34 reporting vehicles,
-     firing an ERROR every five minutes — 288 a day — while the freshest fix
-     in the fleet was 1.2 minutes old. These trackers report on movement, not
-     on a timer, so a car parked twenty minutes ago is twenty minutes stale
-     and perfectly healthy, and half a fleet is parked at any moment. That is
-     what the median measures. A clock error moves EVERY vehicle at once,
-     including the one that just reported: an hour on the provider's gmt field
-     puts the freshest fix at sixty-one minutes, not at one. */
-  check('and it tests the freshest fix, not the middle one',
-    /const floor = at\(0\.1\)/.test(cab) && /if \(floor > 20\)/.test(cab),
-    'a high median with a low floor is a fleet with cars parked, not a clock that is wrong');
-  check('a single freak-fresh row cannot silence a real skew',
-    /at\(0\.1\)/.test(cab) && !/Math\.min\(\.\.\.talking\)/.test(cab),
-    'the tenth percentile rather than the bare minimum');
-  check('and the median still travels in the message, as context',
-    /median_lag_min: Math\.round\(median\)/.test(cab));
+     The median of every fix fired 288 times a day over a half-parked fleet
+     (these trackers report on movement, so a parked car is as stale as its
+     parking). Its replacement, the freshest decile, then fired every night —
+     109 ERRORs on 24–25 Nov between 01:50 and 09:05 Dubai, when nearly every
+     car was parked and the "decile" of five reporting cars was one car. Age
+     cannot tell a wrong clock from a parked fleet. A new fix can: minutes old
+     when healthy, an hour off when the clock is wrong, absent when parked.
+     The behaviour is pinned in test/cabman_skew.test.mjs; these pin the
+     shape that keeps it. */
+  check('it judges the fixes new since the last poll, not every fix\'s age',
+    /skewVerdict\(rows, now, lastFix, f\.fleet\)/.test(cab) && /before != null && t > before/.test(cab)
+      && !/if \(floor > 20\)/.test(cab),
+    'age cannot tell a wrong clock from a parked fleet');
+  check('a single freak row cannot decide it: at least three new fixes, and their median',
+    /fresh\.length < 3/.test(cab) && /const newMedianMin = med\(fresh\)/.test(cab));
+  check('and the median of every reporting fix still travels in the message, as context',
+    /median_lag_min: Math\.round\(v\.medianMin\)/.test(cab));
   check('flag fields are coerced rather than double-negated',
     !/!!v\.state/.test(cab) && !/!!v\.SeatSensorValue/.test(cab));
 }

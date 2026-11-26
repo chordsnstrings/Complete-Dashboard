@@ -1116,6 +1116,11 @@ coordinate, id, plate or name. Results are as measured at 12:36 UTC on deploy `7
 
 ## Traps that have cost time more than once
 
+* **A tracker's age is not its clock** (2026-11-26, CSK). CABMAN reports on movement, so a parked car's last fix is
+  as old as its parking. Over a whole parked fleet at night every statistic of age (median, decile, minimum) is hours,
+  and three versions of the clock-skew alarm read that as skew. Only a fix NEW since the last poll says anything about
+  the clock: judge those, and say nothing when there are none.
+
 * **A roll-up rebuilt whole on every pass grows into its timeout** (2026-11-26, MEV). `money_event` deleted and
   re-inserted ~531k rows every quarter hour, regex-folding each row's `person_key` and leaving 531k dead rows. It grew
   past 120 s on production before anyone looked. A narrow pass must rewrite only its window: select the source rows by

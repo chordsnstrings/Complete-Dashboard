@@ -866,19 +866,20 @@ console.log('\na silent vehicle is not a broken clock');
   const cab = src('cabman.js');
   check('the statistic is taken over the vehicles still reporting',
     /const talking = lags\.filter\(\(m\) => m < DORMANT_MIN\)/.test(cab)
-    && /talking\[Math\.min\(talking\.length - 1,/.test(cab),
+    && /medianMin: med\(talking\)/.test(cab),
     'a dormant tracker still drags the median past the threshold');
-  /* And the threshold is on the FLOOR now, not the middle. Excluding the
-     dormant trackers was necessary and was not sufficient: measured on
-     production, median 24 minutes over 34 reporting vehicles, an ERROR every
-     five minutes, while the freshest fix in the fleet was 1.2 minutes old.
-     These trackers report on movement rather than on a timer, so a car parked
-     twenty minutes ago is twenty minutes stale and entirely healthy — and
-     half a fleet is parked at any moment. A clock error is the thing that
-     moves EVERY vehicle at once, the just-reported one included. */
-  check('and the alarm tests the freshest fix, which is what a clock error moves',
-    /const floor = at\(0\.1\)/.test(cab) && /if \(floor > 20\)/.test(cab),
-    'a high median over a low floor is a fleet with cars parked, not a clock that is wrong');
+  /* And the alarm judges only fixes NEW since the last poll (2026-11-26,
+     CSK). Excluding the dormant trackers was necessary and not sufficient:
+     the median of the rest fired 288 times a day over a half-parked fleet,
+     and its replacement — the freshest decile — fired every night (109 on
+     24–25 Nov, 01:50–09:05 Dubai), when nearly every car was parked and
+     nobody had just reported. Age cannot tell a wrong clock from a parked
+     fleet; a new fix can: minutes old when healthy, an hour off when the
+     clock is wrong, absent when parked. Behaviour: test/cabman_skew.test.mjs. */
+  check('and the alarm judges the fixes new since the last poll, which is what a clock error moves',
+    /skewVerdict\(rows, now, lastFix, f\.fleet\)/.test(cab) && /before != null && t > before/.test(cab)
+      && !/if \(floor > 20\)/.test(cab),
+    'every statistic of age reads a parked fleet as a broken clock');
   check('and dormant vehicles are counted, not counted AS a clock error',
     /vehicles listed but not reporting/.test(cab) && /log\.info\(SRC, 'vehicles listed/.test(cab),
     'silence is worth reporting and is not an error in the collector');
