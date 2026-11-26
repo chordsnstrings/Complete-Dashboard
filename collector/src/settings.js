@@ -76,10 +76,10 @@ export const SETTING_DEFAULTS = {
      NI_MAIL_PASS — the password a secret); nothing is read until both are set. */
   NI_MAIL_HOST: '',
   NI_MAIL_PORT: '993',
-  /* Who a report is believed from, and which merchants it may be for (the
-     review of 2026-11-26): the measured senders, the inbound filter that
-     vouches for them, and the two merchant numbers with their fleets. */
-  NI_MAIL_SENDERS: 'accounts@arks.ae,nifax@network.ae',
+  /* Which filter vouches for the sender, and which merchants a report may be
+     for (the review of 2026-11-26). The sender itself is one fixed address in
+     src/sources/ni_reports.js (SENDER), by the operator's ruling — not a
+     setting. */
   NI_MAIL_AUTHSERV: 'mailspamprotection.com',
   NI_MERCHANTS: '200600866495:ecosine,200601523517:egari',
   /* FLIGHTS from the OpenSky Network (src/sources/flights.js, 2026-11-16).
@@ -451,8 +451,6 @@ export const SETTING_DEFS = [
     hint: 'The mailbox\u2019s login. With the password, the bank\u2019s amounts replace the sheet\u2019s on the days a report covers; the driver still comes from the sheet.' },
   { key: 'NI_MAIL_PASS', group: 'Card machines (Network International)', label: 'Emailed reports: mailbox password', secret: true,
     hint: 'Kept as a secret.' },
-  { key: 'NI_MAIL_SENDERS', group: 'Card machines (Network International)', label: 'Emailed reports: allowed senders', secret: false,
-    hint: 'Comma-separated From addresses a report is read from. Anything else in the mailbox is recorded as rejected and never used.' },
   { key: 'NI_MAIL_AUTHSERV', group: 'Card machines (Network International)', label: 'Emailed reports: receiving server that vouches for senders', secret: false,
     hint: 'The id on the receiving filter’s Authentication-Results header. A report is read only when that server passed DMARC (or SPF) for the sender’s domain.' },
   { key: 'NI_MERCHANTS', group: 'Card machines (Network International)', label: 'Emailed reports: merchant numbers and fleets', secret: false,

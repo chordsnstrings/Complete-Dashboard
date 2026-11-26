@@ -34,7 +34,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { EventEmitter } from 'node:events';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { applySchema } from './schema.mjs';
-import { parseReport, pdfLines, parseMime, checkOrigin, merchantsOf, ingestMessage, imapSession, collect, bankForMerge,
+import { parseReport, pdfLines, parseMime, checkOrigin, merchantsOf, ingestMessage, imapSession, collect, bankForMerge, SENDER,
   splitMessage, canonHeader, canonBody, parseAuthResults } from '../src/sources/ni_reports.js';
 import { mergeBank, writeRead, parseSheet } from '../src/sources/network_cards.js';
 
@@ -175,6 +175,9 @@ check('an allowed sender, sealed by the receiving filter with a DMARC pass: read
 const two = await origin(arcSeal(arcSeal(unsealed([pdf]), { d: 'relay.other.test', s: 'sel1', key: otherKey.privateKey, aar: 'relay.other.test; spf=pass smtp.mailfrom=example.test' }), { i: 2 }));
 check('…the real shape, the filter\'s seal over an earlier relay\'s (i=2 over i=1): read', two.ok === true, JSON.stringify(two));
 const rej = async (label, raw, re, o) => { const r = await origin(raw, o); check(label, r.ok === false && re.test(r.why || ''), JSON.stringify(r)); };
+const nifax = await checkOrigin(unsealed([pdf], { from: 'NI Merchant HD <nifax@network.ae>' }), { authserv: 'filter.example.test', resolveTxt });
+check('ONE sender, by the operator\'s ruling: accounts@arks.ae, and even the bank\'s own address is not read', SENDER === 'accounts@arks.ae'
+  && nifax.ok === false && /nifax@network\.ae is not one of the allowed senders/.test(nifax.why), JSON.stringify(nifax));
 await rej('a sender not on the list: rejected, and says who', message([pdf], { from: 'Someone <billing@elsewhere.test>' }), /billing@elsewhere\.test is not one of the allowed senders/);
 await rej('a forged From the filter failed on DMARC: rejected', message([pdf], { seal: { aar: 'filter.example.test; spf=pass smtp.mailfrom=evil.test; dmarc=fail header.from=example.test' } }), /did not pass example\.test on DMARC/);
 await rej('a "dmarc=pass…header.from=" echoed inside another entry (a DKIM selector) is not a DMARC result: the real fail stands',
@@ -264,6 +267,8 @@ const run1 = await collect({ db, log: quiet, host: 'imap.example.test', user: 'u
   session: (o) => imapSession({ ...o, connect: fakeServer({ messages: { 7: tricky } }) }) });
 check('a reply split every 7 bytes, and a body holding "N4 OK", are read whole: the report is stored',
   run1.reports?.length === 1 && run1.reports[0].status === 'ok' && run1.reports[0].txns === 4, JSON.stringify(run1));
+check('the mailbox is asked for the one sender\'s messages only: other mail is never fetched',
+  sent.some((c) => /^UID SEARCH SINCE \S+ FROM "accounts@example\.test" SUBJECT "MERCHANT TRANSACTION ACTIVITY"$/.test(c)), JSON.stringify(sent.filter((c) => /SEARCH/.test(c))));
 check('…read-only: EXAMINE and BODY.PEEK, never SELECT, STORE, COPY, MOVE or EXPUNGE',
   sent.some((c) => /^EXAMINE/.test(c)) && sent.some((c) => /BODY\.PEEK\[\]/.test(c)) && !sent.some((c) => /^(SELECT|STORE|COPY|MOVE|EXPUNGE|UID (STORE|COPY|MOVE|EXPUNGE))/.test(c)), JSON.stringify(sent));
 sent.length = 0;

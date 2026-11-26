@@ -43,12 +43,17 @@ import { log as defaultLog } from '../log.js';
 
 export const SOURCE = 'ni_reports';
 const SUBJECT = 'MERCHANT TRANSACTION ACTIVITY';
-/* The senders, the receiving server and the merchant numbers, as measured on
-   the first reports (2026-11-26); each a setting (src/settings.js). */
-export const DEFAULT_SENDERS = 'accounts@arks.ae,nifax@network.ae';
+/* THE ONE SENDER (the operator, 2026-11-26: "you will only check emails from
+   THAT specific address. not any other address."). A constant, not a
+   setting, so it cannot be widened from the settings page; the mailbox search
+   asks the server for this sender's messages only (UID SEARCH FROM), and every
+   message fetched is still checked in full (checkOrigin), because the server's
+   FROM match is on the header text, which anyone can write. The receiving
+   filter and the merchant numbers, as measured on the first reports, are
+   settings (src/settings.js). */
+export const SENDER = 'accounts@arks.ae';
 export const DEFAULT_AUTHSERV = 'mailspamprotection.com';
 export const DEFAULT_MERCHANTS = '200600866495:ecosine,200601523517:egari';
-const splitList = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
 
 /* ── MIME: just what these messages need ──────────────────────────────────
    A forwarded report is multipart/mixed (the forward's text, possibly
@@ -127,7 +132,7 @@ export function parseMime(raw) {
 /* WHO SENT IT (the reviews of 2026-11-26). Anyone can email the mailbox, and
    a report's amounts change what drivers are asked for, so a message is read
    only when all of this holds:
-     1. exactly one From header, naming one address on NI_MAIL_SENDERS;
+     1. exactly one From header, naming SENDER and nothing else;
      2. the NEWEST ARC set (RFC 8617) is the receiving filter's (its d= under
         NI_MAIL_AUTHSERV) and VERIFIES against the key the filter publishes in
         DNS: its message signature covers From and the whole body (the PDF
@@ -312,7 +317,7 @@ export async function verifyArc({ fields, body }, { suffix, resolveTxt = default
   if (!under(aar.authserv)) return { ok: false, why: `the sealed verdict is not the receiving filter's (${aar.authserv || '?'})` };
   return { ok: true, aar, d: as.d };
 }
-export async function checkOrigin(raw, { senders = [], authserv = '', resolveTxt = defaultResolveTxt } = {}) {
+export async function checkOrigin(raw, { senders = [SENDER], authserv = '', resolveTxt = defaultResolveTxt } = {}) {
   const msg = splitMessage(raw);
   const from = fromAddress(msg.fields);
   if (!from.addr) return { ok: false, sender: null, why: from.why };
@@ -501,7 +506,7 @@ export async function storeReport(db, rep, meta = {}) {
    twice (the same bytes) is read once. Throws only on a failure worth
    retrying (the database); the caller records the outcome either way. */
 export async function ingestMessage(db, { raw, uid = null, uidvalidity = null }, {
-  log = defaultLog, senders = splitList(get('NI_MAIL_SENDERS', DEFAULT_SENDERS)),
+  log = defaultLog, senders = [SENDER],
   authserv = get('NI_MAIL_AUTHSERV', DEFAULT_AUTHSERV), merchants = merchantsOf(get('NI_MERCHANTS', DEFAULT_MERCHANTS)),
   resolveTxt = defaultResolveTxt } = {}) {
   const { headers, parts } = parseMime(raw);
@@ -637,7 +642,8 @@ export async function collect({ db, log = defaultLog, now = Date.now(), sinceDay
     }
     await noteCredential(db, { ...cred, state: 'ok' }).catch(() => {});
     const box = await s.examine('INBOX');
-    const uids = await s.uidSearch(`SINCE ${imapDate(new Date(now - sinceDays * 864e5))} SUBJECT "${SUBJECT}"`);
+    const from = (readOpts.senders || [SENDER])[0];
+    const uids = await s.uidSearch(`SINCE ${imapDate(new Date(now - sinceDays * 864e5))} FROM "${from}" SUBJECT "${SUBJECT}"`);
     /* Known: every message already recorded, except one that failed for a
        reason worth retrying, up to three attempts (ni_mail_message). */
     const known = new Set((await db.query(

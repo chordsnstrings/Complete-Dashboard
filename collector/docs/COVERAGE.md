@@ -12701,7 +12701,11 @@ changed. One payment the bank dates 24 Nov came in the 25 Nov report, and the sh
   SALES. Otherwise it is stored with the reason and the sheet's rows stay. An unusable copy never replaces a usable
   report already held.
 - **Who it is believed from:**
-  - exactly one From header, on `NI_MAIL_SENDERS`;
+  - exactly one From header, naming **accounts@arks.ae and no other address**. That is the operator's ruling of
+    2026-11-26: "you will only check emails from THAT specific address. not any other address." It is a constant in
+    the code (`SENDER`), not a setting, so the settings page cannot widen it. The mailbox search asks the server only
+    for that sender's messages (`UID SEARCH … FROM`), so other mail is never fetched. Each fetched message is still
+    checked in full, because the server's FROM match reads header text anyone can write;
   - the newest ARC set is the receiving filter's (`d=` under `NI_MAIL_AUTHSERV`), and both its message signature
     (covering From and the whole body, PDF included) and its seal **verify against the key the filter publishes in
     DNS**;
