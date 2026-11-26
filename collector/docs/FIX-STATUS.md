@@ -7862,7 +7862,9 @@ collector container found:
 - both 25 Nov reports pass the full origin check (seal, To, single headers, DMARC) and parse as usable (35 / AED
   2,130.65 and 13 / AED 969.32).
 
-It waits on the operator setting NI_MAIL_HOST, NI_MAIL_USER and NI_MAIL_PASS in DigitalOcean.
+The card sheet's hourly read on the new code (11:18 and 11:33 UTC) was ok: 8,155 rows as before, no bank rows while
+dormant, and the fares refreshed after it. It waits on the operator setting NI_MAIL_HOST, NI_MAIL_USER and
+NI_MAIL_PASS in DigitalOcean.
 
 The operator gave the mailbox (credentials held in DigitalOcean, never here) and said: "let's do that. for POS terminal
 mapping use the sheet. For the amount use the [report]. Run the test." Before that, a read-only test from the
