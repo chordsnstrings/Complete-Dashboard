@@ -1116,6 +1116,12 @@ coordinate, id, plate or name. Results are as measured at 12:36 UTC on deploy `7
 
 ## Traps that have cost time more than once
 
+* **A roll-up rebuilt whole on every pass grows into its timeout** (2026-11-26, MEV). `money_event` deleted and
+  re-inserted ~531k rows every quarter hour, regex-folding each row's `person_key` and leaving 531k dead rows. It grew
+  past 120 s on production before anyone looked. A narrow pass must rewrite only its window: select the source rows by
+  the column the table's period is copied from, and hold the narrow result to a whole rebuild of the same data before
+  believing it. Keep one transaction, so readers never see a half-built table.
+
 * **JIT and the identity register's CASE, and windows that read all of history on a 14-day pass** (2026-11-25, DDT).
   Any statement that folds people with `personKey()` carries a CASE of several hundred ids around two regexes. Postgres
   JIT compiles every branch of it: 7.6 s per run of the driver-day statement, more than half of a 14-day pass. Evaluated

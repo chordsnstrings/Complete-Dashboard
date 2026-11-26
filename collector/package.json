@@ -25,7 +25,7 @@
   },
   "dependencies": {
     "compression": "^1.8.1",
-    "csv-parse": "^5.5.6",
+    "csv-parse": "^7.0.3",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "node-cron": "^3.0.3",
@@ -34,5 +34,10 @@
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.5",
     "playwright": "^1.62.1"
+  },
+  "overrides": {
+    "node-cron": {
+      "uuid": "^11.1.1"
+    }
   }
 }
