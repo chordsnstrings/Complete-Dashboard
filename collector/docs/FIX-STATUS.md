@@ -7863,8 +7863,13 @@ collector container found:
   2,130.65 and 13 / AED 969.32).
 
 The card sheet's hourly read on the new code (11:18 and 11:33 UTC) was ok: 8,155 rows as before, no bank rows while
-dormant, and the fares refreshed after it. It waits on the operator setting NI_MAIL_HOST, NI_MAIL_USER and
-NI_MAIL_PASS in DigitalOcean.
+dormant, and the fares refreshed after it. **SWITCHED ON 2026-11-26 11:40 UTC** (the operator: "Switch on now"). First read at 11:43:
+- 2 reports used and 48 bank rows, all exact;
+- read-only in the production database: 2 usable reports, 2 `ok` messages, 25 Nov AED 3,099.97 from the bank;
+- the whole card table is AED 551,754.92 and 8,155 rows, unchanged;
+- the late payment is on the sheet's day, with the bank's date kept.
+
+**Proven on production.**
 
 The operator gave the mailbox (credentials held in DigitalOcean, never here) and said: "let's do that. for POS terminal
 mapping use the sheet. For the amount use the [report]. Run the test." Before that, a read-only test from the
