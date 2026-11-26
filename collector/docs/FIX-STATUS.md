@@ -7778,6 +7778,14 @@ Checked one at a time, all green:
 - the API wiring, access and cache suites (`route_smoke` 60, `access_core` 211, `rls_gate` 28, `cache` 71, `mockapi` 10,
   `server_redaction` 64, `reachability` 19, `imports_resolve` 4, `run_all_flags` 38).
 
+**LIVE since 2ede63e (PR #76), 2026-11-26 03:04 UTC; the image installs the same lockfile with `npm ci`.** On production
+after the deploy:
+- `/api/health` is ok, and responses are still compressed (gzip).
+- Uber's reports parsed on csv-parse 7: 1,897 and 849 trips, with no failed windows.
+- The card-payments sheet read ok at 03:33: 8,107 payments.
+- The warnings in the log after the deploy were all there before it: Uber `invalid_scope`, InfoTrack `GetAlertData`
+  400, Bolt `getCompanyEarnings` 404.
+
 ## MEV – money_event rewrites only the pass's window (2026-11-26)
 
 The operator: "go ahead with 1 and 3". This is item 1, the roll-up's largest cost after DDT. `money_event` (the
@@ -7805,5 +7813,11 @@ Dubai) picks it up.
 Tests: `test/money_event_window.test.mjs` 8, covering §1 narrow equals whole after changes, §2 the stated limit and the
 full pass that clears it, §3 the statements. Revert-proven: the old code fails 5. Also green: `rollup_money_atomic` 23,
 `money_events` 50, `rollup` 53, `arkiv_finance` 134, `identity_merge` 129, `statement` 49, `trip_routes` 47,
-`receipts_register` 28, `migrate` 34, `person_vs_account_counts` 64, `ledger_resolve_person` 26. **Not yet on
-production.**
+`receipts_register` 28, `migrate` 34, `person_vs_account_counts` 64, `ledger_resolve_person` 26.
+
+**LIVE since 2ede63e (PR #76), deployed 2026-11-26 03:04 UTC.** Measured on production with `/api/rollups`:
+- `money_event`: 21.7 s on a 14-day pass, rewriting 19,600 rows (188 s before). End-of-run passes take 7.1 s and 7.3 s,
+  rewriting about 9,500 rows.
+- The whole roll-up pass: 92–193 s, against 145–780 s the day before.
+- The boot's full pass was skipped ("another process holds the rollup lock": the outgoing worker still held it), so
+  the first full `money_event` rebuild on this code is the nightly pass at 02:40 Dubai.
